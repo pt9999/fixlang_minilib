@@ -1,0 +1,59 @@
+module Main;
+
+fibonacci_sequence : Iterator I64;
+
+fibonacci_sequence = Iterator::generate ((0, 1), |(a, b)|
+    let c = a + b;
+    some $ (c, (b, c))
+);
+
+print_fibs : I64 -> IO ();
+
+print_fibs = |count| (
+    let fibs = fibonacci_sequence.take (count);
+    fibs.loop_iter_m ((), |b, a| 
+        let _ = *(println (a.to_string));
+        continue_m $ ()
+    )
+);
+
+write_number: I64 -> IOHandle  -> IOResult ErrMsg ();
+write_number = |number, handle| (
+    write_string (handle, number.to_string + "\n")
+);
+
+write_fibs: I64 -> IOHandle  -> IOResult ErrMsg ();
+write_fibs = |count, handle| (
+    let fibs = fibonacci_sequence.take (count);
+    fibs.loop_iter_m ((), |b, a| 
+        let _ = *(println(a.to_string).lift);
+        let _ = *(write_number (a, handle));
+        continue_m $ ()
+    )
+);
+
+with_file_debug : Path -> String -> (IOHandle -> IOResult ErrMsg ()) -> IOResult ErrMsg ();
+with_file_debug = |path, mode, func| (
+    let _ = *(println ("Opening " + path.to_string).lift);
+    let _ = *(with_file (path, mode, func));
+    let _ = *(println ("Closing " + path.to_string).lift);
+    pure()
+);
+
+write_fibs_to_file: Path -> I64 -> IO ();
+write_fibs_to_file = |path, count| (
+    let ioresult = with_file_debug (path, "w", write_fibs (count));
+    let res = *(ioresult.to_io);
+    if res.is_err {
+        eprintln (res.as_err.to_string)
+    };
+    pure()
+);
+
+
+main : IO ();
+main = (
+    //print_fibs (10)
+    write_fibs_to_file(Path::parse("fib3.log").as_some, 10)
+);
+

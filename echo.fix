@@ -1,0 +1,36 @@
+module Main;
+
+flush : IOHandle -> IOResult ErrMsg ();
+flush = |handle| (
+    IOResult::from_result (
+        let res = CALL_C[I32 fflush(Ptr), handle.@_file_ptr];
+        if res < 0_I32 { 
+            Result::err $ ErrMsg { msg : "flush failed!: some error occurred in fflush." } 
+        };
+        Result::ok()
+    )
+);
+
+echo : IOResult ErrMsg ();
+echo = (
+    let _ = *write_string(stdout, "Echo ver 0.00\n");
+    loop_m ((), |_| 
+        let _ = *write_string(stdout, ">> ");
+        let _ = *flush(stdout);
+        let line = *read_line(IOHandle::stdin);
+        if (line == "") {
+            break_m $ ()
+        };
+        let _ = *write_string (IOHandle::stdout, line);
+        continue_m $ ()
+    )
+);
+
+main : IO ();
+main = (
+    let res = *echo.to_io;
+    if res.is_err {
+        eprintln (res.as_err.to_string)
+    };
+    pure()
+);

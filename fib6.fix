@@ -1,0 +1,82 @@
+module Main;
+import Debug;
+import Hash;
+import HashMap;
+
+type State s a = unbox struct { _data: s -> (a, s) };
+
+namespace State {
+    state: (s -> (a, s)) -> State s a;
+    state = |f| State { _data: f };
+
+    run_state: s -> State s a -> (a, s);
+    run_state = |s, ma| (ma.@_data) (s);
+
+    get: State s s;
+    get = state $ |s| (s, s);
+
+    put: s -> State s ();
+    put = |s| state $ |_| ((), s);
+}
+
+impl State s: Monad {
+    pure = |a| state $ |s| (a, s);
+    bind = |f, ma| state $ |s|
+        let (a, s1) = ma.run_state (s);
+        let mb = f(a);
+        mb.run_state (s1) 
+    ;
+}
+
+type Key = I64;
+type Value = I64;
+type Map = HashMap Key Value;
+type FuncM = Key -> State Map Value;
+
+fib_inner: FuncM -> FuncM;
+fib_inner = |loop| |n| (
+    if n == 0 {
+        pure(0)
+    } else if n == 1 {
+        pure(1)
+    } else {
+        let a = *loop(n-2);
+        let b = *loop(n-1);
+        pure(a + b)
+    }
+);
+
+memoize: (FuncM -> FuncM) -> Key -> State Map Value;
+memoize = |f| |n| (
+    let map = *get;
+    let opt = map.find(n);
+    if opt.is_some {
+        let value = opt.as_some;
+        pure(value)
+    };
+
+    let memoized_func = f $ memoize(f);
+    let value = *memoized_func(n);
+    // memoized_funcの呼び出しでmapが更新された可能性があるため、
+    // mapをもう一度取得する
+    let map = *get;
+    let map = map.insert(n, value);
+    let _ = *put(map);
+    pure(value)
+);
+
+fib_memo: Key -> Value;
+fib_memo = |n| (
+    let map = HashMap::empty(100);
+    let ma = memoize(fib_inner, n);
+    let (value, _) = ma.run_state(map);
+    value
+);
+
+main : IO ();
+main = (
+    //let ans = fib(45);
+    let ans = fib_memo(45);
+    //eval assert_eq(|_|"fib(30) is not 832040!", ans, 832040);
+    print $ ans.to_string
+);

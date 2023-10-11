@@ -1,0 +1,63 @@
+module Main;
+import Debug;
+import Hash;
+import HashMap;
+
+type Key = I64;
+type Value = I64;
+type Map = HashMap Key Value;
+type Func = Key -> Value;
+type Func2 = (Map, Key) -> (Map, Value);
+
+fib : Key -> Value;
+fib = |n| (
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n-1) + fib(n-2)
+    }
+);
+
+fib_inner: Func2 -> Func2;
+fib_inner = |loop| |(map, n)| (
+    if n == 0 {
+        (map, 0)
+    } else if n == 1 {
+        (map, 1)
+    } else {
+        let (map, a) = loop $ (map, n-2);
+        let (map, b) = loop $ (map, n-1);
+        (map, a + b)
+    }
+);
+
+memoize: (Func2 -> Func2) -> Func2;
+memoize = |f| |(map, n)| (
+    let opt = map.find(n);
+    if opt.is_some {
+        let value = opt.as_some;
+        (map, value)
+    };
+
+    let (map, value) = f (memoize(f), (map, n));
+    let map = map.insert(n, value);
+    (map, value)
+);
+
+fib_memo: Key -> Value;
+fib_memo = |n| (
+    let map = HashMap::empty(100);
+    let f = memoize(fib_inner);
+    let (map, value) = f $ (map, n);
+    value
+);
+
+main : IO ();
+main = (
+    //let ans = fib(45);
+    let ans = fib_memo(45);
+    //eval assert_eq(|_|"fib(30) is not 832040!", ans, 832040);
+    print $ ans.to_string
+);

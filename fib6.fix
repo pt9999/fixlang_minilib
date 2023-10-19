@@ -3,37 +3,75 @@ import Debug;
 import Hash;
 import HashMap;
 
+//-------------------------------------------------------
+// State Monad
+//-------------------------------------------------------
+
 type State s a = unbox struct { _data: s -> (a, s) };
 
 namespace State {
-    state: (s -> (a, s)) -> State s a;
-    state = |f| State { _data: f };
+    make_state_monad: (s -> (a, s)) -> State s a;
+    make_state_monad = |f| State { _data: f };
 
     run_state: s -> State s a -> (a, s);
     run_state = |s, ma| (ma.@_data) (s);
 
-    get: State s s;
-    get = state $ |s| (s, s);
+    get_state: State s s;
+    get_state = make_state_monad $ |s| (s, s);
 
-    put: s -> State s ();
-    put = |s| state $ |_| ((), s);
+    put_state: s -> State s ();
+    put_state = |s| make_state_monad $ |_| ((), s);
 }
 
 impl State s: Monad {
-    pure = |a| state $ |s| (a, s);
-    bind = |f, ma| state $ |s|
-        let (a, s1) = ma.run_state (s);
+    pure = |a| make_state_monad $ |s| (a, s);
+    bind = |f, ma| make_state_monad $ |s|
+        let (a, ss) = ma.run_state(s);
         let mb = f(a);
-        mb.run_state (s1) 
+        mb.run_state(ss) 
     ;
 }
 
+//-------------------------------------------------------
+// Memoize function
+//-------------------------------------------------------
+
+// A type of function which takes an argument (key) and returns a State monad of value
+// with a memo (hashmap).
+type MemoizableFunc k v = k -> State (HashMap k v) v;
+
+memoize: [k: HashKey] MemoizableFunc k v -> MemoizableFunc k v;
+memoize = |f| |key| (
+    // Get the current state which is `HashMap k v`.
+    let memo = *get_state;
+    let value_opt = memo.find(key);
+    if value_opt.is_some {
+        let value = value_opt.as_some;
+        pure(value)
+    };
+
+    let value = *f(key);
+
+    // Get the current state again, since the state might be changed by the function call above.
+    let memo = *get_state;
+    // Put key-value pair into memo, and save to the current state.
+    let memo = memo.insert(key, value);
+    let _ = *put_state(memo);
+    // Return value as monad
+    pure(value)
+);
+
+//-------------------------------------------------------
+// Fibonacci function (I64 -> I64)
+//-------------------------------------------------------
+
 type Key = I64;
 type Value = I64;
-type Map = HashMap Key Value;
-type FuncM = Key -> State Map Value;
 
-fib_inner: FuncM -> FuncM;
+// The recursive fibonacci function which will be memoized.
+// This function is defined which takes an argument (key) and returns
+// any monad of a return value.
+fib_inner: [m:Monad] (Key -> m Value) -> Key -> m Value;
 fib_inner = |loop| |n| (
     if n == 0 {
         pure(0)
@@ -46,37 +84,35 @@ fib_inner = |loop| |n| (
     }
 );
 
-memoize: (FuncM -> FuncM) -> Key -> State Map Value;
-memoize = |f| |n| (
-    let map = *get;
-    let opt = map.find(n);
-    if opt.is_some {
-        let value = opt.as_some;
-        pure(value)
-    };
-
-    let memoized_func = f $ memoize(f);
-    let value = *memoized_func(n);
-    // memoized_funcの呼び出しでmapが更新された可能性があるため、
-    // mapをもう一度取得する
-    let map = *get;
-    let map = map.insert(n, value);
-    let _ = *put(map);
-    pure(value)
-);
-
+// Memoized fibonacci function.
 fib_memo: Key -> Value;
 fib_memo = |n| (
-    let map = HashMap::empty(100);
-    let ma = memoize(fib_inner, n);
-    let (value, _) = ma.run_state(map);
+    let memo = HashMap::empty(n);
+    let f = fix $ memoize << fib_inner;
+    let ma = f(n);
+    let (value, _) = ma.run_state(memo);
     value
+);
+
+// Non-memoized fibonacci function.
+fib : Key -> Value;
+fib = |n| (
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n-1) + fib(n-2)
+    }
 );
 
 main : IO ();
 main = (
+    // Non-memoized fibonacci function call (running time is about 8.782 second).
     //let ans = fib(45);
+    // Memoized fibonacci function call (running time is about 0.001 second).
     let ans = fib_memo(45);
-    //eval assert_eq(|_|"fib(30) is not 832040!", ans, 832040);
+
+    eval assert_eq(|_|"fib(45) is not 1134903170!", ans, 1134903170);
     print $ ans.to_string
 );

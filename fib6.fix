@@ -40,9 +40,11 @@ impl State s: Monad {
 // with a memo (hashmap).
 type MemoizableFunc k v = k -> State (HashMap k v) v;
 
-memoize: [k: HashKey] MemoizableFunc k v -> MemoizableFunc k v;
+// Memoize function which takes a function (f) to be memoized, and takes an argument (key)
+// and returns a State monad of value.
+memoize: [k: HashKey] MemoizableFunc k v -> k -> State (HashMap k v) v;
 memoize = |f| |key| (
-    // Get the current state which is `HashMap k v`.
+    // Get current memo from the state monad.
     let memo = *get_state;
     let value_opt = memo.find(key);
     if value_opt.is_some {
@@ -50,14 +52,15 @@ memoize = |f| |key| (
         pure(value)
     };
 
+    // Call the function to be memoized.
     let value = *f(key);
 
-    // Get the current state again, since the state might be changed by the function call above.
+    // Get current memo agagin, since the memo might be updated by the function call above.
     let memo = *get_state;
     // Put key-value pair into memo, and save to the current state.
     let memo = memo.insert(key, value);
     let _ = *put_state(memo);
-    // Return value as monad
+    // Return value as a monad.
     pure(value)
 );
 
@@ -67,6 +70,18 @@ memoize = |f| |key| (
 
 type Key = I64;
 type Value = I64;
+
+// Non-memoized fibonacci function.
+fib : Key -> Value;
+fib = |n| (
+    if n == 0 {
+        0
+    } else if n == 1 {
+        1
+    } else {
+        fib(n-1) + fib(n-2)
+    }
+);
 
 // The recursive fibonacci function which will be memoized.
 // This function is defined which takes an argument (key) and returns
@@ -87,29 +102,21 @@ fib_inner = |loop| |n| (
 // Memoized fibonacci function.
 fib_memo: Key -> Value;
 fib_memo = |n| (
+    // Create a memo (hashmap).
     let memo = HashMap::empty(n);
+    // Create a recursive memoized function.
     let f = fix $ memoize << fib_inner;
+    // Call the function and extract the value from State monad.
     let ma = f(n);
     let (value, _) = ma.run_state(memo);
     value
 );
 
-// Non-memoized fibonacci function.
-fib : Key -> Value;
-fib = |n| (
-    if n == 0 {
-        0
-    } else if n == 1 {
-        1
-    } else {
-        fib(n-1) + fib(n-2)
-    }
-);
-
 main : IO ();
 main = (
     // Non-memoized fibonacci function call (running time is about 8.782 second).
-    //let ans = fib(45);
+    //   let ans = fib(45);
+
     // Memoized fibonacci function call (running time is about 0.001 second).
     let ans = fib_memo(45);
 

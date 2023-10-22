@@ -45,7 +45,7 @@ take_while = |(arr, itor), filter| (
 );
 
 impl Array U8: ToString {
-    to_string = |arr| String::from_c_str(arr.push_back(0_U8));
+    to_string = |arr| String::_unsafe_from_c_str(arr.push_back(0_U8));
 }
 
 impl Iterator U8: ToString {
@@ -61,7 +61,7 @@ parse_value = |itor| (
     // eval debug_println ("str=" + str+" itor="+itor.to_string);
     let res : Result ErrMsg I64 = from_string(str);
     if res.is_err {
-        err (ErrMsg::make (res.as_err.to_string + ": `" + str + "`"))
+        err (res.as_err.to_string + ": `" + str + "`")
     };
     let value : I64 = res.as_ok;
     ok((ex_value(value), itor))
@@ -133,7 +133,6 @@ evaluate = |expr| (
 calc: String -> String;
 calc = |line| (
     let res = parse_add_sub (line.get_bytes.to_iter);
-    //let res = err(ErrMsg::make("hoge")) : Result ErrMsg (Expr, Iterator U8);
     if res.is_err {
         "Error: " + res.as_err.to_string
     };
@@ -142,38 +141,33 @@ calc = |line| (
     value.to_string
 );
 
-flush : IOHandle -> IOResult ErrMsg ();
+flush : IOHandle -> IOFail ();
 flush = |handle| (
-    IOResult::from_result (
-        let res = CALL_C[I32 fflush(Ptr), handle.@_file_ptr];
-        if res < 0_I32 { 
-            Result::err $ ErrMsg { msg : "flush failed!: some error occurred in fflush." } 
-        };
-        Result::ok()
-    )
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 { 
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
 );
 
-main_loop : () -> IOResult ErrMsg ();
+main_loop : () -> IOFail ();
 main_loop = |_| (
     let _ = *write_string(stdout, "Calc ver 0.10\n");
     loop_m ((), |_| 
         let _ = *write_string(stdout, ">> ");
         let _ = *flush(stdout);
-        let line = *read_line(IOHandle::stdin);
+        let line = *read_line(IO::stdin);
         if (line == "") {
             break_m $ ()
         };
         let line = calc(line) + "\n";
-        let _ = *write_string (IOHandle::stdout, line);
+        let _ = *write_string (IO::stdout, line);
         continue_m $ ()
     )
 );
 
 main : IO ();
 main = (
-    let res = *main_loop().to_io;
-    if res.is_err {
-        eprintln (res.as_err.to_string)
-    };
-    pure()
+    let iofail = main_loop();
+    iofail.try(|errmsg| eprintln(errmsg))
 );

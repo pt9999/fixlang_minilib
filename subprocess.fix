@@ -1,0 +1,101 @@
+module Main;
+import Debug;
+
+type PID = I32;
+
+fork: () -> IOResult ErrMsg PID;
+fork = |_| (
+    IOResult::from_result $
+    let pid = CALL_C[I32 fork()];
+    if (pid == -1_I32) {
+        err $ ErrMsg { msg : "fork failed!" }
+    };
+    ok(pid)
+);
+
+// Borrow a pointer array from a string array, then borrow a pointer of the pointer array.
+// The pointer array will be NULL-terminated.
+borrow_string_array_ptr: (Ptr -> a) -> Array String -> a;
+borrow_string_array_ptr = |f, string_array| (
+    let n = string_array.get_size;
+    let inner = |loop, i, ptr_array| (
+        if (i >= n) {
+            let ptr_array = ptr_array.push_back!(nullptr);  // NULL-terminate
+            ptr_array.borrow_ptr(|ptr_array_ptr| f(ptr_array_ptr))
+        };
+        let str = string_array.@(i);
+        str.borrow_c_str(|ptr|
+            let ptr_array = ptr_array.push_back!(ptr);
+            loop(i + 1, ptr_array)
+        )
+    );
+
+    let ptr_array: Array Ptr = Array::empty(n);
+    (fix $ inner)(0, ptr_array)
+);
+
+execve: String -> Array String -> Array String -> IOResult ErrMsg ();
+execve = |cmd, args, envs| (
+    IOResult::from_result(
+        if (cmd == "") {
+            err $ ErrMsg { msg : "cmd is empty" }          
+        };
+        if (args.get_size == 0) {
+            err $ ErrMsg { msg : "args is empty" }  
+        };
+        cmd.borrow_c_str (|cmd_ptr|
+            args.borrow_string_array_ptr(|args_ptr|
+                envs.borrow_string_array_ptr(|envs_ptr|
+                    let ret = CALL_C[I32 execve(Ptr, Ptr, Ptr), cmd_ptr, args_ptr, envs_ptr];
+                    if (ret != 0_I32) {
+                        err $ ErrMsg { msg : "exec failed!" }
+                    };
+                    ok()
+        )))
+    )
+);
+
+waitpid: PID -> IOResult ErrMsg I32;
+waitpid = |pid| (
+    IOResult::from_result(
+        let wstatus : Array I32 = Array::empty(1);
+        let wstatus = wstatus.push_back(-1_I32);
+        let options = 0_I32;
+        wstatus.borrow_ptr(|wstatus_ptr|
+            let ret = CALL_C[I32 waitpid(I32, Ptr, I32), pid, wstatus_ptr, options];
+            if (ret == -1_I32) {
+                err $ ErrMsg { msg : "waitpid failed!" }
+            };
+            ok(wstatus.@(0))
+        )
+    )
+);
+
+run_command: String -> Array String -> Array String -> IOResult ErrMsg I32;
+run_command = |cmd, args, envs| (
+    let pid = *fork();
+    if (pid == 0_I32) {
+        let _ = *execve(cmd, args, envs);
+        // TODO: execve failed の場合はexitcode 1 で終了すべき
+        abort()
+    };
+    let status: I32 = *waitpid(pid);
+    IOResult::from_result $ ok(status)
+);
+
+
+main : IO ();
+main = (
+    //let args = ["/usr/bin/echo", "a", "b", "c"];
+    let args = ["/usr/bin/ls", "-l"];
+    let cmd = args.@(0);
+    let envs = [];
+    let res = *run_command(cmd, args, envs).to_io;
+    if (res.is_err) {
+        let ret = CALL_C[Ptr perror(I64), 0];
+        println (res.as_err.to_string)
+    };
+    let status = res.as_ok;
+    let _ = *println ("exitcode=" + status.to_string);
+    pure()
+);

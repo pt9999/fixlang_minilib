@@ -1,0 +1,201 @@
+module Main;
+
+import Character;
+import Debug;
+
+type Value = I64;
+
+// box を書かないと stack overflow になる
+type Expr = box union {
+    ex_value: Value,
+    ex_add: (Expr, Expr),
+    ex_sub: (Expr, Expr),
+    ex_mul: (Expr, Expr),
+    ex_div: (Expr, Expr)
+};
+
+read_while: IOHandle -> (U8 -> Bool) -> IOFail (Array U8);
+read_while = |input, filter| (
+    let arr = Array::empty(100);
+    loop_m(arr, |arr| (
+        let c = *get_char(input);
+        if (c == 0_U8 || not (filter(c))) {
+            eval *unget_char(input, c);
+            break_m $ arr
+        };
+        let arr = arr.push_back (c);
+        continue_m $ arr
+    ))
+);
+
+skip_whitespaces: IOHandle -> IOFail ();
+skip_whitespaces = |input| (
+    let _ = *read_while(input, |c| is_space(c) && c != '\n');
+    pure()
+);
+
+impl Array U8: ToString {
+    to_string = |arr| String::_unsafe_from_c_str(arr.push_back(0_U8));
+}
+
+impl Iterator U8: ToString {
+    to_string = |itor| itor.to_array.to_string;
+}
+
+
+parse_value: IOHandle -> IOFail Expr;
+parse_value = |input| (
+    eval *skip_whitespaces (input);
+    let arr = *read_while(input, is_digit);
+    let str = arr.to_string;
+    // eval debug_println ("str=" + str+" itor="+itor.to_string);
+    let res = from_string(str);
+    if res.is_err {
+        throw (res.as_err.to_string + ": `" + str + "`")
+    };
+    let value : I64 = res.as_ok;
+    pure(ex_value(value))
+);
+
+parse_mul_div: IOHandle -> IOFail Expr;
+parse_mul_div = |input| (
+    let expr = *parse_value(input);
+    eval *skip_whitespaces(input);
+    let op = *get_char(input);
+    if (op != '*' && op != '/') {
+        eval *unget_char(input, op);
+        pure(expr)
+    };
+    // これでは右結合になってしまう。。。
+    let expr2 = *parse_mul_div(input);
+    if (op == '*') {
+        pure(ex_mul((expr, expr2)))
+    } else {
+        pure(ex_div((expr, expr2)))
+    }
+);
+
+parse_add_sub: IOHandle -> IOFail Expr;
+parse_add_sub = |input| (
+    let expr = *parse_mul_div (input);
+    eval *skip_whitespaces(input);
+    let op = *get_char(input);
+    if (op != '+' && op != '-') {
+        eval *unget_char(input, op);
+        pure(expr)
+    };
+    // これでは右結合になってしまう。。。
+    let expr2 = *parse_add_sub(input);
+    if (op == '+') {
+        pure(ex_add((expr, expr2)))
+    } else {
+        pure(ex_sub((expr, expr2)))
+  }
+);
+
+evaluate: Expr -> Value;
+evaluate = |expr| (
+    if expr.is_ex_add {
+        let (a, b) = expr.as_ex_add;
+        evaluate(a) + evaluate(b)
+    };
+    if expr.is_ex_sub {
+        let (a, b) = expr.as_ex_sub;
+        evaluate(a) - evaluate(b)
+    };
+    if expr.is_ex_mul {
+        let (a, b) = expr.as_ex_mul;
+        evaluate(a) * evaluate(b)
+    };
+    if expr.is_ex_div {
+        let (a, b) = expr.as_ex_div;
+        evaluate(a) / evaluate(b)
+    };
+    expr.as_ex_value
+);
+
+//  Read next character from the input. Returns 0_U8 if EOF.
+get_char : IOHandle -> IOFail U8;
+get_char = |input| (
+    let res = CALL_C[I32 fgetc(Ptr), input._file_ptr];
+    if res < 0_I32 {    // EOF
+        pure(0_U8)
+    };
+    pure(res.to_U8)
+);
+
+//  Unread a character back to the input. when c == 0_U8, it does nothing.
+unget_char : IOHandle -> U8 -> IOFail ();
+unget_char = |input, c| (
+    if (c == 0_U8) {
+        pure()
+    };
+    let res = CALL_C[I32 ungetc(I32, Ptr), c.to_I32, input._file_ptr];
+    if res < 0_I32 {    // EOF
+        throw $ "ungetc failed"
+    };
+    pure()
+);
+
+//  Peek next character from the input, or 0_U8 if EOF.
+peek_char : IOHandle -> IOFail U8;
+peek_char = |input| (
+    let c = *get_char(input);
+    eval *unget_char(input, c);
+    pure(c)
+);
+
+flush : IOHandle -> IOFail ();
+flush = |handle| (
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 { 
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
+);
+
+process_line: IOHandle -> IOHandle -> IOFail Bool;
+process_line = |input, output| (
+    let _ = *write_string(output, ">> ");
+    let _ = *flush(output);
+    let c = *peek_char(input);
+    if (c == 0_U8) {
+        pure(true)  // EOF
+    };
+    let expr = *parse_add_sub (input);
+    let c = *get_char(input);
+    if (c != '\n') {
+        throw $ "extra text"
+    };
+
+    let value = evaluate(expr);
+    let _ = *write_string (output, value.to_string + "\n");
+    pure(false)
+);
+
+drop_until_newline_or_eof: IOHandle -> IO ();
+drop_until_newline_or_eof = |input| (
+    do {
+        let _ = *read_while(input, |c| c != 0_U8 && c != '\n');
+        let _ = *get_char(input);
+        pure()
+    }.try(|err| pure())
+);
+
+main : IO ();
+main = (
+    let _ = *println("Calc ver 0.11\n");
+    loop_m ((), |_| 
+        do {
+            let eof = *process_line(IO::stdin, IO::stdout);
+            if (eof) {
+                break_m $ ()
+            };
+            continue_m $ ()
+        }.try(|errmsg| 
+            eval *eprintln(errmsg);
+            eval *drop_until_newline_or_eof(IO::stdin);
+            continue_m $ ()
+        )
+    )
+);

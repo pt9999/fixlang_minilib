@@ -111,7 +111,7 @@ init_by_array64 = |init_key| (
     let Random { mt:mt, mti:mti } = random;
     let i = 1_U64;
     let j = 0_U64;
-    let k = (_NN>key_length ? _NN : key_length);
+    let k = if _NN > key_length { _NN } else { key_length };
     let (mt, mti, i, j, k) = loop(
         (mt, mti, i, j, k), |(mt, mti, i, j, k)| (
             if k <= 0 {
@@ -120,7 +120,7 @@ init_by_array64 = |init_key| (
             let mt = mt.set!(i, 
                 (mt.@(i) ^ ((mt.@(i-1) ^ (mt.@(i-1) >> 62)) * 3935559000370003845_U64))
                 + init_key.@(j) + j /* non linear */
-            )
+            );
             let i = i + 1;
             let j = j + 1;
             let (mt, i) = if (i>=_NN) { 
@@ -130,9 +130,9 @@ init_by_array64 = |init_key| (
             };
             let j = if (j>=key_length) { 0 } else { j };
             let k = k - 1;
-            continue $ (mt, mti, i, j, k);
+            continue $ (mt, mti, i, j, k)
         )
-    )
+    );
     let k = _NN-1;
     let (mt, mti, i, j, k) = loop(
         (mt, mti, i, j, k), |(mt, mti, i, j, k)| (
@@ -141,7 +141,7 @@ init_by_array64 = |init_key| (
             };
             let mt = mt.set!(i, 
                 (mt.@(i) ^ ((mt.@(i-1) ^ (mt.@(i-1) >> 62)) * 2862933555777941757_U64))
-                  - i; /* non linear */
+                  - i /* non linear */
             );
             let i = i + 1;
             let (mt, i) =  if (i>=_NN) { 
@@ -165,8 +165,6 @@ mag01 = [ 0_U64, _MATRIX_A ];
 /* generates a random number on [0, 2^64-1]-interval */
 genrand64_int64: Random -> (U64, Random);
 genrand64_int64 = |Random { mt:mt, mti:mti }| (
-    //int i;
-    //unsigned long long x;
     let (mt, mti) = if (mti < _NN) {
         (mt, mti)
     } else { 
@@ -174,32 +172,45 @@ genrand64_int64 = |Random { mt:mt, mti:mti }| (
 
         /* if init_genrand64() has not been called, */
         /* a default initial seed is used     */
-        if (mti == _NN+1) 
-            init_genrand64(5489ULL); 
-
-        for (i=0;i<_NN-_MM;i++) {
-            x = (mt[i]&_UM)|(mt[i+1]&_LM);
-            mt[i] = mt[i+_MM] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
-        }
+        let (mt, mti) = if (mti == _NN+1) {
+            let Random { mt:mt, mti:mti } = init_genrand64(5489_U64);
+            (mt, mti)
+        } else {
+            (mt, mti)
+        };
+        let (mt, mti) = loop(
+            (mt, mti, 0), |(mt, mti, i)|
+            if i >= _NN - _MM {
+                break $ (mt, mti)
+            };
+            let x = (mt.@(i) & _UM) | (mt.@(i+1) & _LM);
+            let mt = mt.set(i, mt.@(i+_MM) ^ (x>>1) ^ mag01.@(x&1_U64));
+            continue $ (mt, mti, i + 1)
+        );
+        let (mt, mti) = loop(
+            (mt, mti, _NN - _MM), |(mt, mti, i)|
+            continue $ (mt, mti, i + 1)
+        );
         for (;i<_NN-1;i++) {
             x = (mt[i]&_UM)|(mt[i+1]&_LM);
-            mt[i] = mt[i+(_MM-_NN)] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
+            mt[i] = mt[i+(_MM-_NN)] ^ (x>>1) ^ mag01.@(x&1_U64);
         }
         x = (mt[_NN-1]&_UM)|(mt[0]&_LM);
-        mt[_NN-1] = mt[_MM-1] ^ (x>>1) ^ mag01[(int)(x&1ULL)];
+        mt[_NN-1] = mt[_MM-1] ^ (x>>1) ^ mag01.@(x&1_U64);
 
         mti = 0;
         (mt, mti);
     }
   
-    x = mt[mti++];
+    let x = mt.@(mti);
+    let mti = mti + 1;
 
-    x ^= (x >> 29) & 0x5555555555555555ULL;
-    x ^= (x << 17) & 0x71D67FFFEDA60000ULL;
-    x ^= (x << 37) & 0xFFF7EEE000000000ULL;
-    x ^= (x >> 43);
+    let x = x ^ ((x >> 29) & 0x5555555555555555_U64);
+    let x = x ^ ((x << 17) & 0x71D67FFFEDA60000_U64);
+    let x = x ^ ((x << 37) & 0xFFF7EEE000000000_U64);
+    let x = x ^ ((x >> 43));
 
-    return x;
+    return (x, Random { mt:mt, mti:mti });
 }
 
 /* generates a random number on [0, 2^63-1]-interval */

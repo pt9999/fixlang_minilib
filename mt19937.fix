@@ -60,6 +60,7 @@
 */
 
 module Mt19937;
+//module Main;
 
 _NN: I64;
 _NN = 312;
@@ -77,7 +78,7 @@ _LM: U64;
 _LM = 0x7FFFFFFF_U64; /* Least significant 31 bits */
 
 type Random = box struct {
-    mt: Array I64,  /* The array for the state vector */
+    mt: Array U64,  /* The array for the state vector */
     mti: I64        /* mti==_NN+1 means mt[_NN] is not initialized */
 };
 /* The array for the state vector */
@@ -88,14 +89,14 @@ type Random = box struct {
 /* initializes mt[_NN] with a seed */
 init_genrand64: U64 -> Random;
 init_genrand64 = |seed| (
-    let mt = Array::fill(_NN, 0);
+    let mt = Array::fill(_NN, 0_U64);
     let mt = mt.set!(0, seed);
     loop((mt, 1), |(mt, mti)| 
         if mti >= _NN {
             break $ Random { mt: mt, mti: _NN }
         };
         let mt = mt.set!(mti, 
-            (6364136223846793005_U64 * (mt.@(mti-1) ^ (mt.@(mti-1) >> 62)) + mti)
+            (6364136223846793005_U64 * (mt.@(mti-1).bit_xor(mt.@(mti-1).shift_right(62_U64))) + mti.to_U64)
         );
         continue $ (mt, mti + 1)
     )
@@ -106,20 +107,21 @@ init_genrand64 = |seed| (
 /* key_length is its length */
 init_by_array64: Array U64 -> Random;
 init_by_array64 = |init_key| (
-    let key_length = init_key.get_size.to_U64;
+    let key_length = init_key.get_size.to_I64;
     let random = init_genrand64(19650218_U64);
     let Random { mt:mt, mti:mti } = random;
-    let i = 1_U64;
-    let j = 0_U64;
-    let k = if _NN > key_length { _NN } else { key_length };
-    let (mt, mti, i, j, k) = loop(
-        (mt, mti, i, j, k), |(mt, mti, i, j, k)| (
+    let i: I64 = 1;
+    let j: I64 = 0;
+    let k: I64 = if _NN > key_length { _NN } else { key_length };
+    let (mt, mti, (i, j, k)) = loop(
+        (mt, mti, (i, j, k)), |(mt, mti, (i, j, k))| (
             if k <= 0 {
-                break $ (mt, mti, i, j, k)
+                break $ (mt, mti, (i, j, k))
             };
             let mt = mt.set!(i, 
-                (mt.@(i) ^ ((mt.@(i-1) ^ (mt.@(i-1) >> 62)) * 3935559000370003845_U64))
-                + init_key.@(j) + j /* non linear */
+                (mt.@(i).bit_xor((mt.@(i-1).bit_xor(mt.@(i-1).shift_right(62_U64))) * 3935559000370003845_U64))
+                + init_key.@(j) 
+                + j.to_U64 /* non linear */
             );
             let i = i + 1;
             let j = j + 1;
@@ -130,18 +132,18 @@ init_by_array64 = |init_key| (
             };
             let j = if (j>=key_length) { 0 } else { j };
             let k = k - 1;
-            continue $ (mt, mti, i, j, k)
+            continue $ (mt, mti, (i, j, k))
         )
     );
     let k = _NN-1;
-    let (mt, mti, i, j, k) = loop(
-        (mt, mti, i, j, k), |(mt, mti, i, j, k)| (
+    let (mt, mti, (i, j, k)) = loop(
+        (mt, mti, (i, j, k)), |(mt, mti, (i, j, k))| (
             if k <= 0 {
-                break $ (mt, mti, i, j, k)
+                break $ (mt, mti, (i, j, k))
             };
             let mt = mt.set!(i, 
-                (mt.@(i) ^ ((mt.@(i-1) ^ (mt.@(i-1) >> 62)) * 2862933555777941757_U64))
-                  - i /* non linear */
+                (mt.@(i).bit_xor((mt.@(i-1).bit_xor(mt.@(i-1).shift_right(62_U64))) * 2862933555777941757_U64))
+                  - i.to_U64 /* non linear */
             );
             let i = i + 1;
             let (mt, i) =  if (i>=_NN) { 
@@ -150,11 +152,11 @@ init_by_array64 = |init_key| (
                 (mt, i)
             };
             let k = k - 1;
-            continue $ (mt, mti, i, j, k)
+            continue $ (mt, mti, (i, j, k))
         )
     );
     
-    let mt = mt.set!(0, 1_U64 << 63); /* MSB is 1; assuring non-zero initial array */ 
+    let mt = mt.set!(0, 1_U64.shift_left(63_U64)); /* MSB is 1; assuring non-zero initial array */ 
     Random { mt: mt, mti: mti }
 );
 
@@ -183,76 +185,99 @@ genrand64_int64 = |Random { mt:mt, mti:mti }| (
             if i >= _NN - _MM {
                 break $ (mt, mti)
             };
-            let x = (mt.@(i) & _UM) | (mt.@(i+1) & _LM);
-            let mt = mt.set(i, mt.@(i+_MM) ^ (x>>1) ^ mag01.@(x&1_U64));
+            let x = (mt.@(i).bit_and(_UM)).bit_or(mt.@(i+1).bit_and(_LM));
+            let mt = mt.set(i, 
+                mt.@(i+_MM)
+                .bit_xor(x.shift_right(1_U64))
+                .bit_xor(mag01.@(x.bit_and(1_U64).to_I64)));
             continue $ (mt, mti, i + 1)
         );
         let (mt, mti) = loop(
             (mt, mti, _NN - _MM), |(mt, mti, i)|
+            if i >= _NN - 1 {
+                break $ (mt, mti)
+            };
+            let x = (mt.@(i).bit_and(_UM)).bit_or(mt.@(i+1).bit_and(_LM));
+            let mt = mt.set(i, 
+                mt.@(i+(_MM-_NN))
+                .bit_xor(x.shift_right(1_U64))
+                .bit_xor(mag01.@(x.bit_and(1_U64).to_I64)));
             continue $ (mt, mti, i + 1)
         );
-        for (;i<_NN-1;i++) {
-            x = (mt[i]&_UM)|(mt[i+1]&_LM);
-            mt[i] = mt[i+(_MM-_NN)] ^ (x>>1) ^ mag01.@(x&1_U64);
-        }
-        x = (mt[_NN-1]&_UM)|(mt[0]&_LM);
-        mt[_NN-1] = mt[_MM-1] ^ (x>>1) ^ mag01.@(x&1_U64);
-
-        mti = 0;
-        (mt, mti);
-    }
+        let x = (mt.@(_NN-1).bit_and(_UM)).bit_or(mt.@(0).bit_and(_LM));
+        let mt = mt.set(_NN-1,
+            mt.@(_MM-1)
+            .bit_xor(x.shift_right(1_U64))
+            .bit_xor(mag01.@(x.bit_and(1_U64).to_I64)));
+        let mti = 0;
+        (mt, mti)
+    };
   
     let x = mt.@(mti);
     let mti = mti + 1;
 
-    let x = x ^ ((x >> 29) & 0x5555555555555555_U64);
-    let x = x ^ ((x << 17) & 0x71D67FFFEDA60000_U64);
-    let x = x ^ ((x << 37) & 0xFFF7EEE000000000_U64);
-    let x = x ^ ((x >> 43));
+    let x = x.bit_xor(x.shift_right(29_U64).bit_and(0x5555555555555555_U64));
+    let x = x.bit_xor(x.shift_left(17_U64).bit_and(0x71D67FFFEDA60000_U64));
+    let x = x.bit_xor(x.shift_left(37_U64).bit_and(0xFFF7EEE000000000_U64));
+    let x = x.bit_xor(x.shift_right(43_U64));
 
-    return (x, Random { mt:mt, mti:mti });
-}
+    (x, Random { mt:mt, mti:mti })
+);
 
 /* generates a random number on [0, 2^63-1]-interval */
-long long genrand64_int63(void)
-{
-    return (long long)(genrand64_int64() >> 1);
-}
+genrand64_int63: Random -> (I64, Random);
+genrand64_int63 = |random| (
+    let (x, random) = random.genrand64_int64;
+    (x.shift_right(1_U64).to_I64, random)
+);
 
 /* generates a random number on [0,1]-real-interval */
-double genrand64_real1(void)
-{
-    return (genrand64_int64() >> 11) * (1.0/9007199254740991.0);
-}
+genrand64_real1: Random -> (F64, Random);
+genrand64_real1 = |random| (
+    let (x, random) = random.genrand64_int64;
+    (x.shift_right(11_U64).to_F64 * (1.0/9007199254740991.0), random)
+);
 
 /* generates a random number on [0,1)-real-interval */
-double genrand64_real2(void)
-{
-    return (genrand64_int64() >> 11) * (1.0/9007199254740992.0);
-}
+genrand64_real2: Random -> (F64, Random);
+genrand64_real2 = |random| (
+    let (x, random) = random.genrand64_int64;
+    (x.shift_right(11_U64).to_F64 * (1.0/9007199254740992.0), random)
+);
 
 /* generates a random number on (0,1)-real-interval */
-double genrand64_real3(void)
-{
-    return ((genrand64_int64() >> 12) + 0.5) * (1.0/4503599627370496.0);
-}
+genrand64_real3: Random -> (F64, Random);
+genrand64_real3 = |random| (
+    let (x, random) = random.genrand64_int64;
+    ((x.shift_right(12_U64).to_F64 + 0.5) * (1.0/4503599627370496.0), random)
+);
 
-
-int main(void)
-{
-    int i;
-    unsigned long long init[4]={0x12345ULL, 0x23456ULL, 0x34567ULL, 0x45678ULL}, length=4;
-    init_by_array64(init, length);
-    printf("1000 outputs of genrand64_int64()\n");
-    for (i=0; i<1000; i++) {
-      printf("%20llu ", genrand64_int64());
-      if (i%5==4) printf("\n");
-    }
-    printf("\n1000 outputs of genrand64_real2()\n");
-    for (i=0; i<1000; i++) {
-      printf("%10.8f ", genrand64_real2());
-      if (i%5==4) printf("\n");
-    }
-    return 0;
-}
-
+main : IO ();
+main = (
+    let init = [0x12345_U64, 0x23456_U64, 0x34567_U64, 0x45678_U64];
+    let random = init_by_array64(init);
+    eval *println("1000 outputs of genrand64_int64()");
+    let random : Random = *loop_m (
+        (random, 0), |(random, i)|
+        if i >= 1000 {
+            break_m $ random
+        };
+        let (x, random) = genrand64_int64(random);
+        eval *print(x.to_string + " ");
+        eval *(if (i%5==4) { println("") } else { pure() });
+        continue_m $ (random, i + 1)
+    );
+    eval *println("");
+    eval *println("1000 outputs of genrand64_real2()");
+    let random : Random = *loop_m (
+        (random, 0), |(random, i)|
+        if i >= 1000 {
+            break_m $ random
+        };
+        let (x, random) = genrand64_real2(random);
+        eval *print (x.to_string + " ");
+        eval *(if (i%5==4) { println("") } else { pure() });
+        continue_m $ (random, i + 1)
+    );
+    pure()
+);

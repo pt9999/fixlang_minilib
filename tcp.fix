@@ -1,0 +1,151 @@
+module Main;
+import Debug;
+
+// from /usr/include/x86_64-linux-gnu/bits/
+_AF_INET: I64;
+_AF_INET = 2;
+
+_SOCK_STREAM: I64;
+_SOCK_STREAM = 1;
+
+/*
+type sockaddr_in = unbox struct {
+    sin_family: U16;    // host byte order
+    sin_port: U16;      // network byte order
+    sin_addr: U32;      // network byte order
+    padding1: U32;
+    padding2: U32;
+}
+*/
+
+// make IPv4 sockaddr
+make_sockaddr_in: Array U8 -> U16 -> Array U8;
+make_sockaddr_in = |addr, port| (
+    //eval debug_println("addr="+addr.to_iter.map(|x|x.to_string).join(",") + " port="+port.to_string);
+    let port_h: U8 = port.shift_right(8_U16).bit_and(255_U16).to_U8;
+    let port_l: U8 = port.bit_and(255_U16).to_U8;
+    eval debug_println ("port_h="+port_h.to_string+" port_l="+port_l.to_string);
+    let sockaddr_in = [
+        2_U8, 0_U8, // sin_family = _AF_INET, host byte order
+        port_h, port_l, // sin_port
+        addr.@(0), addr.@(1), addr.@(2), addr.@(3), // sin_addr
+        0_U8, 0_U8, 0_U8, 0_U8,
+        0_U8, 0_U8, 0_U8, 0_U8
+    ];
+    sockaddr_in
+);
+
+_socket: I64 -> I64 -> I64 -> I64;
+_socket = |domain, type, protocol| (
+    CALL_C[I32 socket(I32, I32, I32), domain.to_I32, type.to_I32, protocol.to_I32].to_I64
+);
+
+_bind: I64 -> Array U8 -> I64 -> I64;
+_bind = |sockfd, addr, addrlen| (
+    addr.borrow_ptr(|ptr| CALL_C[I32 bind(I32, Ptr, I32), sockfd.to_I32, ptr, addrlen.to_I32]).to_I64
+);
+
+_connect: I64 -> Array U8 -> I64 -> I64;
+_connect = |sockfd, addr, addrlen| (
+    eval debug_println("addr="+addr.to_iter.map(|x|x.to_string).join(","));
+    addr.borrow_ptr(|ptr| CALL_C[I32 connect(I32, Ptr, I32), sockfd.to_I32, ptr, addrlen.to_I32]).to_I64
+);
+
+_close: I64 -> I64;
+_close = |sockfd| (
+    CALL_C[I32 close(I32), sockfd.to_I32].to_I64
+);
+
+// Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
+// FIXME: <arpa/inet.h> の inet_addr()を使えばホスト名解決もできそう？
+parse_host: String -> IOFail (Array U8);
+parse_host = |host| (
+    let host_split = host.split(".").to_array;
+    if host_split.get_size != 4 {
+        throw $ "Invalid host format: " + host
+    }; 
+    let addr: Array U8 = Array::fill(4, 0_U8);
+    loop_m (
+        (addr, 0), |(addr, i)|
+        if i >= 4 {
+            break_m $ addr
+        };
+        let res: Result ErrMsg U8 = from_string(host_split.@(i));
+        if res.is_err {
+            throw $ "Invalid host format: " + host + ": " + res.as_err
+        };
+        let addr = addr.set(i, res.as_ok);
+        continue_m $ (addr, i + 1)
+    )
+);
+
+// Parse port string (eg. "8080" -> 8080_U16)
+parse_port: String -> IOFail U16;
+parse_port = |port| (
+    let res: Result ErrMsg U16 = from_string(port);
+    if res.is_err {
+        throw $ "Invalid port: " + port + ": " + res.as_err
+    };
+    pure $ res.as_ok
+);
+
+parse_host_port: String -> IOFail (Array U8, U16);
+parse_host_port = |host_port| (
+    let split = host_port.split(":").to_array;
+    if split.get_size <= 0 || split.get_size > 2 {
+        throw $ "Invalid host_port format: " + host_port
+    };
+    let host = split.@(0);
+    let port = if split.get_size == 2 { split.@(1) } else { "80" };
+    pure $ (*parse_host(host), *parse_port(port))
+);
+
+
+
+connect: String  -> IOFail IOHandle;
+connect = |host_port| (
+    let (addr, port) = *parse_host_port(host_port);
+    let sockaddr_in = make_sockaddr_in(addr, port);
+    let socketfd = _socket(_AF_INET, _SOCK_STREAM, 0);
+    if socketfd < 0 {
+        throw $ "creating socket failed"
+    };
+    let ret = _connect(socketfd, sockaddr_in, sockaddr_in.get_size);
+    if ret < 0 {
+        throw $ "connect failed"
+    };
+    let iohandle = "w+".borrow_c_str(|mode| CALL_C[Ptr fdopen(I32, Ptr), socketfd.to_I32, mode]);
+    if iohandle == nullptr {
+        throw $ "fdopen failed"
+    };
+    eval CALL_C[() setbuf(Ptr, Ptr), iohandle, nullptr];
+    pure $ IOHandle::from_file_ptr $ iohandle
+);
+
+http_fetch: String -> IOFail ();
+http_fetch = |host_port| (
+    let handle = *connect(host_port);
+    eval *write_string(handle, "GET /index.html HTTP/1.0\n");
+    eval *write_string(handle, "\n");
+    eval *loop_m(
+        (), |_| 
+        let line = *read_line(handle);
+        if line == "" {
+            break_m $ ()
+        };
+        eval *(println(line).lift);
+        continue_m $ ()
+    );
+    eval *(close_file(handle).lift);
+    pure()
+);
+
+main: IO ();
+main = (
+    let host_port = "127.0.0.1:8080";
+    let host_port = "183.79.248.124:80";
+
+    http_fetch(host_port).try (
+        |err| println(err)
+    )
+);

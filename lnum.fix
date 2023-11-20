@@ -41,7 +41,7 @@ impl LNum: FromString {
         let index = index.as_some;
         let m_str = s.get_sub(0, index);
         let e_str = s.get_sub(index + 1, s.get_size);
-        let m: Result ErrMsg F64 = m_str.from_string;
+        let m = m_str.from_string;
         if m.is_err {
             err $ m.as_err + ": m_str="+m_str
         };
@@ -49,7 +49,7 @@ impl LNum: FromString {
         if e.is_err {
             err $ e.as_err + ": e_str="+e_str
         };
-        ok $ num((m.as_ok, e.as_ok))
+        ok $ num $ (m.as_ok, e.as_ok)
     );
 }
 
@@ -62,8 +62,20 @@ impl LNum: ToString {
             trim_trailing_zeros_and_periods(m.to_string) + "E" + e.to_string
         }
     );
-
 }
+
+trim_trailing_zeros_and_periods: String -> String;
+trim_trailing_zeros_and_periods = |s| (
+    let a = s.get_bytes;
+    loop(
+        s.get_size - 1, |i|
+        if !(i >= 1 && (a.@(i) == '0' || a.@(i) == '.')) {
+            break $ s.get_sub(0, i + 1)
+        };
+        continue $ i - 1
+    )
+);
+
 
 namespace F64 {
     sign: F64 -> I64;
@@ -130,7 +142,7 @@ namespace LNum {
         };
         let (m1, e1) = n1.as_num;
         let (m2, e2) = n2.as_num;
-        let ec = compare((e1, e2));
+        let ec = compare $ (e1, e2);
         if ec == 0 {
             (m1 - m2).sign
         } else if ec > 0 {
@@ -157,8 +169,8 @@ namespace LNum {
             n
         };
         let m = sign_m.to_F64 * m / pow10(log10_m);
-        let e = add(e, num((log10_m, zero())));
-        num((m, e))
+        let e = add(e, num $ (log10_m, zero()));
+        num $ (m, e)
     );
 }
 
@@ -185,10 +197,10 @@ impl LNum: Add
         };
         let (m1, e1) = n1.as_num;
         let (m2, e2) = n2.as_num;
-        let ec = compare((e1, e2));
+        let ec = compare $ (e1, e2);
         if ec == 0 {
             // if exponents are same, add two mantissas, then canonicalize the result.
-            canon(num((m1 + m2, e1)))
+            canon << num $ (m1 + m2, e1)
         };
         // Exponents are not same, so we need to equalize.
         let (n1, n2) = if ec > 0 {
@@ -208,7 +220,7 @@ impl LNum: Add
         };
         let ed = ed.as_some;
         let m = m1 + m2 * pow10(-ed);
-        canon(num((m, e1)))
+        canon << num $ (m, e1)
     );
 }
 
@@ -234,21 +246,9 @@ impl LNum: Mul
 }
 
 
-trim_trailing_zeros_and_periods: String -> String;
-trim_trailing_zeros_and_periods = |s| (
-    let a = s.get_bytes;
-    loop(
-        s.get_size - 1, |i|
-        if !(i >= 1 && (a.@(i) == '0' || a.@(i) == '.')) {
-            break $ s.get_sub(0, i + 1)
-        };
-        continue $ i - 1
-    )
-);
-
 test_to_string: IOFail ();
 test_to_string = (
-    let n: LNum = num((1.0_F64, num((1.0_F64, zero()))));
+    let n: LNum = num $ (1.0_F64, num $ (1.0_F64, zero()));
     lift $ println ("n="+ n.to_string)
 );
 
@@ -271,17 +271,17 @@ test_to_F64_opt = (
 
 test_add: IOFail ();
 test_add = (
-    let n1: LNum = *(from_result $ "1E1E2E0".from_string);
-    let n2: LNum = *(from_result $ "-4E9.9E1E0".from_string);
-    let n = n1.add(n2);
+    let n1: IOFail LNum = from_result $ "1E1E2E0".from_string;
+    let n2: IOFail LNum = from_result $ "-4E9.9E1E0".from_string;
+    let n = *n1 + *n2;
     lift $ println("n="+ n.to_string)
 );
 
 test_mul: IOFail ();
 test_mul = (
-    let n1: LNum = *(from_result $ "1E1E2E0".from_string);
-    let n2: LNum = *(from_result $ "-4E1E3E0".from_string);
-    let n = n1.mul(n2);
+    let n1: IOFail LNum = from_result $ "1E1E2E0".from_string;
+    let n2: IOFail LNum = from_result $ "-4E1E3E0".from_string;
+    let n = *n1 * *n2;
     lift $ println("n="+ n.to_string)
 );
 

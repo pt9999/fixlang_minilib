@@ -59,22 +59,36 @@ impl LNum: ToString {
             "0"
         } else {
             let (m, e) = n.as_num;
-            trim_trailing_zeros_and_periods(m.to_string) + "E" + e.to_string
+            trim_fractional(m.to_string) + "E" + e.to_string
         }
     );
 }
 
-trim_trailing_zeros_and_periods: String -> String;
-trim_trailing_zeros_and_periods = |s| (
-    let a = s.get_bytes;
-    loop(
-        s.get_size - 1, |i|
-        if !(i >= 1 && (a.@(i) == '0' || a.@(i) == '.')) {
-            break $ s.get_sub(0, i + 1)
+namespace String {
+    // 小数点以下の末尾の0を切り詰める。切り詰めた結果、末尾が小数点の場合はそれも切り詰める。
+    trim_fractional: String -> String;
+    trim_fractional = |s| (
+        if s.find(".", 0).is_none {
+            s
         };
-        continue $ i - 1
-    )
-);
+        let a = s.get_bytes;
+        loop(
+            s.get_size - 1, |i|
+            if i < 1 {
+                break $ s.get_sub(0, i + 1)
+            };
+            if a.@(i) != '0' {
+                if a.@(i) == '.' {
+                    break $ s.get_sub(0, i)
+                } else {
+                    break $ s.get_sub(0, i + 1)
+                }
+            };
+            continue $ i - 1
+        )
+    );
+
+}
 
 
 namespace F64 {
@@ -129,6 +143,12 @@ namespace LNum {
     // Return -1 if n1 < n2, 0 if n1 == n2, 1 if n1 > n2.
     compare: (LNum, LNum) -> I64;
     compare = |(n1, n2)| (
+        _compare_canon $ (canon(n1), canon(n2))
+    );
+    _compare_canon: (LNum, LNum) -> I64;
+    _compare_canon = |(n1, n2)| (
+        eval assert(|_| "n1 is not canonicalized", n1.is_canon);
+        eval assert(|_| "n2 is not canonicalized", n2.is_canon);
         if n1.is_zero && n2.is_zero {
             0
         };
@@ -146,16 +166,27 @@ namespace LNum {
         if ec == 0 {
             (m1 - m2).sign
         } else if ec > 0 {
-            1 // m は正規化されているものとする
+            1
         } else {
             -1
         }
     );
 
+    is_canon: LNum -> Bool;
+    is_canon = |n| (
+        if n.is_zero {
+            true
+        };
+        let (m, e) = n.as_num;
+        if m <= -10.0 || m >= 10.0 || m == 0.0 {
+            false
+        };
+        e.is_canon
+    );
     // Canonicalize a large number.
     canon: LNum -> LNum;
     canon = |n| (
-        if n.is_zero {
+        if n.is_canon {
             n
         };
         let (m, e) = n.as_num;
@@ -165,12 +196,27 @@ namespace LNum {
         };
         let m: F64 = abs(m);
         let log10_m = floor(log10(m));
-        if log10_m == 0.0 {
-            n
-        };
         let m = sign_m.to_F64 * m / pow10(log10_m);
         let e = add(e, num $ (log10_m, zero()));
         num $ (m, e)
+    );
+}
+
+impl LNum: Eq
+{
+    eq = |n1, n2| (
+        let c = (compare $ (n1, n2));
+        c == 0
+    );
+}
+
+impl LNum: LessThan
+{
+    less_than = |n1, n2| (
+        let c = (compare $ (n1, n2));
+        //eval debug_println $ "n1=" + n1.to_string + " n2=" + n2.to_string + 
+        //    " c=" + c.to_string;
+        c < 0
     );
 }
 
@@ -285,13 +331,70 @@ test_mul = (
     lift $ println("n="+ n.to_string)
 );
 
+check_equal: [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+check_equal = |expression, actual, expected| (
+    let ok = if expected == actual { "[OK]" } else { "[NG]" };
+    let message = ok + " " + expression + " = " + 
+        actual.to_string + 
+        " (expected: " + expected.to_string + ")";
+    // format("{} = {}") << expression << actual のように書きたい。
+
+    lift $ println(message)
+);
+
+to_num: String -> IOFail LNum;
+to_num = |str| (
+    from_result $ str.from_string
+);
+
+to_num2: (String, String) -> IOFail (LNum, LNum);
+to_num2 = |(n1_str, n2_str)| (
+    let n1 = to_num (n1_str);
+    let n2 = to_num (n2_str);
+    pure $ (*n1, *n2)
+);
+test_compare: IOFail ();
+test_compare = (
+    let _ = *(lift $ println ("=== test_compare ==="));
+    let test = |n1_str, n2_str, expected| (
+        let expression = "compare(" + n1_str + "," + n2_str + ")";
+        let actual = compare $ *(to_num2 $ (n1_str, n2_str));
+        check_equal (expression, actual, expected)
+    );
+    let _ = *(test("1E1E0", "10E0", 0));
+    let _ = *(test("1E11E0", "9E10E0", 1));
+    let _ = *(test("99E99E99E0", "100E100E100E0", -1));
+    pure()    
+);
+
+test_less_than: IOFail ();
+test_less_than = (
+    let _ = *(lift $ println ("=== test_less_than ==="));
+    let test = |n1_str, n2_str, expected| (
+        let expression = "(" + n1_str + "<" + n2_str + ")";
+        let n1 = to_num $ n1_str;
+        let n2 = to_num $ n2_str;
+        let actual = *n1 < *n2;
+        check_equal (expression, actual, expected)
+    );
+    let _ = *(test("1E1E0", "10E0", false));
+    let _ = *(test("1E11E0", "9E10E0", false));
+    let _ = *(test("99E99E99E0", "100E100E100E0", true));
+    pure()    
+);
+
 main: IO ();
 main = (
     do {
+        let n = *(to_num $ "100E100E100E0");
+        eval *(lift $ println (n.to_string));
+        eval *(lift $ println (canon(n).to_string));        
         eval *test_to_string;
         eval *test_to_F64_opt;
         eval *test_add;
-        eval *test_mul;        
+        eval *test_mul;
+        eval *test_compare;
+        eval *test_less_than;
         pure()
     }.try(|err| println(err))
 );

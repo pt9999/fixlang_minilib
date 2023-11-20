@@ -1,0 +1,298 @@
+// Large Number, eg. 1E2E3E0
+/*
+- 10^10^100 のような数を扱えるようにする
+- 1E1E100 = 1E1E2E0 のように記述する
+- 巨大数は `{仮数部}E{指数部}`という形式とする。
+  - 上記の値は{仮数部}*10^{指数部}となる。
+  - 巨大数を正規化すると以下のようになる。
+    - 仮数部: -10.0 < m < 10.0 を満たす浮動小数点数m
+    - 指数部: 巨大数または0
+- 例
+  - 1     = 1E0
+  - 1E10  = 1E1E1E0
+  - 1E100 = 1E1E2E0
+  - 43.2E123 = 4.32E124 = 4.32E1.24E2E0
+- 巨大数どうしの和
+  - 指数部を大きい方に合わせる。
+  - 仮数部が0になるなら捨てる。(倍精度浮動小数点の精度)
+  - 仮数部を加算する。
+  - 正規化する。
+*/
+
+module Main;
+
+import Debug;
+import Math;
+
+type LNum = box union {
+    zero: (),           // 0
+    num: (F64, LNum)    // m * 10^e
+};
+
+impl LNum: FromString {
+    from_string = |s| (
+        if s == "0" {
+            ok $ zero()
+        };
+        let index: Option I64 = s.find("E", 0);
+        if index.is_none {
+            err $ "LNum format error: " + s
+        };
+        let index = index.as_some;
+        let m_str = s.get_sub(0, index);
+        let e_str = s.get_sub(index + 1, s.get_size);
+        let m: Result ErrMsg F64 = m_str.from_string;
+        if m.is_err {
+            err $ m.as_err + ": m_str="+m_str
+        };
+        let e: Result ErrMsg LNum = e_str.from_string;
+        if e.is_err {
+            err $ e.as_err + ": e_str="+e_str
+        };
+        ok $ num((m.as_ok, e.as_ok))
+    );
+}
+
+impl LNum: ToString {
+    to_string = |n| (
+        if n.is_zero {
+            "0"
+        } else {
+            let (m, e) = n.as_num;
+            trim_trailing_zeros_and_periods(m.to_string) + "E" + e.to_string
+        }
+    );
+
+}
+
+namespace F64 {
+    sign: F64 -> I64;
+    sign = |m| (
+        if (m < 0.0) {
+            -1
+        } else if (m > 0.0) {
+            1
+        } else {
+            eval assert(|_| "not a number: m="+ m.to_string, m == 0.0);
+            0
+        }
+    );
+
+    pow10: F64 -> F64;
+    pow10 = |e| (
+        10.0.pow(e)
+    );
+}
+
+namespace LNum {
+    to_F64_opt: LNum -> Option F64;
+    to_F64_opt = |n| (
+        if n.is_zero {
+          some(0.0)
+        };
+        let (m, e) = n.as_num;
+        let e = e.to_F64_opt;
+        if e.is_none {
+            none()
+        };
+        let e = e.as_some;
+        if e < -300.0 || 300.0 < e {
+            none()
+        };
+        let x = m * pow10(e);
+        some(x)
+    );
+
+    // Compute sign(+1/0/-1) of a large number.
+    sign: LNum -> I64;
+    sign = |n| (
+        if n.is_zero {
+            0
+        };
+        let (m, e) = n.as_num;
+        m.sign
+    );
+
+    // Compare two large numbers.
+    // Return -1 if n1 < n2, 0 if n1 == n2, 1 if n1 > n2.
+    compare: (LNum, LNum) -> I64;
+    compare = |(n1, n2)| (
+        if n1.is_zero && n2.is_zero {
+            0
+        };
+        if (n1.is_zero) {
+            let (m2, e2) = n2.as_num;
+            -m2.sign
+        };
+        if (n2.is_zero) {
+            let (m1, e1) = n1.as_num;
+            m1.sign
+        };
+        let (m1, e1) = n1.as_num;
+        let (m2, e2) = n2.as_num;
+        let ec = compare((e1, e2));
+        if ec == 0 {
+            (m1 - m2).sign
+        } else if ec > 0 {
+            1 // m は正規化されているものとする
+        } else {
+            -1
+        }
+    );
+
+    // Canonicalize a large number.
+    canon: LNum -> LNum;
+    canon = |n| (
+        if n.is_zero {
+            n
+        };
+        let (m, e) = n.as_num;
+        let sign_m = m.sign;
+        if sign_m == 0 {
+            zero()
+        };
+        let m: F64 = abs(m);
+        let log10_m = floor(log10(m));
+        if log10_m == 0.0 {
+            n
+        };
+        let m = sign_m.to_F64 * m / pow10(log10_m);
+        let e = add(e, num((log10_m, zero())));
+        num((m, e))
+    );
+}
+
+impl LNum: Neg
+{
+    neg = |n| (
+        if n.is_zero {
+            n
+        };
+        let (m, e) = n.as_num;
+        num((-m, e))
+    );
+}
+
+impl LNum: Add
+{
+    // Add two large numbers.
+    add = |n1, n2| (
+        if n1.is_zero {
+            n2
+        };
+        if n2.is_zero {
+            n1
+        };
+        let (m1, e1) = n1.as_num;
+        let (m2, e2) = n2.as_num;
+        let ec = compare((e1, e2));
+        if ec == 0 {
+            // if exponents are same, add two mantissas, then canonicalize the result.
+            canon(num((m1 + m2, e1)))
+        };
+        // Exponents are not same, so we need to equalize.
+        let (n1, n2) = if ec > 0 {
+            (n1, n2)
+        } else {
+            // swap n1 and n2, because we need e1 > e2.
+            (n2, n1)
+        };
+        let (m1, e1) = n1.as_num;
+        let (m2, e2) = n2.as_num;
+        let ed = add(e1, neg(e2)); // exponent diff (e1-e2)
+        //eval assert(ed.sign > 0);
+        let ed = ed.to_F64_opt;
+        if ed.is_none {
+            // e1 is too large than e2
+            n1
+        };
+        let ed = ed.as_some;
+        let m = m1 + m2 * pow10(-ed);
+        canon(num((m, e1)))
+    );
+}
+
+impl LNum: Mul
+{
+    mul = |n1, n2| (
+        if n1.is_zero {
+            zero()
+        };
+        if n2.is_zero {
+            zero()
+        };
+        let (m1, e1) = n1.as_num;
+        let (m2, e2) = n2.as_num;
+
+        // Multiply Two mantissas.
+        let m = m1 * m2;
+        // Add two exponents.
+        let e = add(e1, e2);
+        // Return a canonicalized result.
+        canon(num((m, e)))
+    );
+}
+
+
+trim_trailing_zeros_and_periods: String -> String;
+trim_trailing_zeros_and_periods = |s| (
+    let a = s.get_bytes;
+    loop(
+        s.get_size - 1, |i|
+        if !(i >= 1 && (a.@(i) == '0' || a.@(i) == '.')) {
+            break $ s.get_sub(0, i + 1)
+        };
+        continue $ i - 1
+    )
+);
+
+test_to_string: IOFail ();
+test_to_string = (
+    let n: LNum = num((1.0_F64, num((1.0_F64, zero()))));
+    lift $ println ("n="+ n.to_string)
+);
+
+test_to_F64_opt: IOFail ();
+test_to_F64_opt = (
+    let m: Result ErrMsg LNum = "1E2E2E0".from_string;
+    if m.is_err {
+        throw $ ("m: " + m.as_err)
+    };
+    let m = m.as_ok;
+    let _ = *(lift $ println("m=" + m.to_string));
+    let x = m.to_F64_opt;
+    if x.is_none {
+        throw $ ("m: to_F64_opt failed")
+    };
+    let x = x.as_some;
+    let _ = *(lift $ println("x=" + x.to_string_exp));
+    pure()
+);
+
+test_add: IOFail ();
+test_add = (
+    let n1: LNum = *(from_result $ "1E1E2E0".from_string);
+    let n2: LNum = *(from_result $ "-4E9.9E1E0".from_string);
+    let n = n1.add(n2);
+    lift $ println("n="+ n.to_string)
+);
+
+test_mul: IOFail ();
+test_mul = (
+    let n1: LNum = *(from_result $ "1E1E2E0".from_string);
+    let n2: LNum = *(from_result $ "-4E1E3E0".from_string);
+    let n = n1.mul(n2);
+    lift $ println("n="+ n.to_string)
+);
+
+main: IO ();
+main = (
+    do {
+        eval *test_to_string;
+        eval *test_to_F64_opt;
+        eval *test_add;
+        eval *test_mul;        
+        pure()
+    }.try(|err| println(err))
+);
+

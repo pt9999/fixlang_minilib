@@ -1,0 +1,109 @@
+module Json;
+
+import HashMap;
+//import SimpleParser;
+
+type Json = box union {
+    nul: (),
+    bool: Bool,
+    number: F64,
+    string: String,
+    object: HashMap String Json,
+    array:  Array Json
+};
+
+to_object: Array (String, Json) -> Json;
+to_object = |arr| (
+    let hashmap = arr.to_iter.fold(
+        HashMap::empty(arr.get_size),
+        |h, (k, v)| h.insert(k, v)
+    );
+    object $ hashmap
+);
+
+
+_indent_str: I64 -> String;
+_indent_str = |n| (
+    Array::fill(n, " ").to_iter.concat_iter
+);
+
+_encode_string: String -> String;
+_encode_string = |str| (
+    let input: Array U8 = str.get_bytes.pop_back;
+    let input_size = input.get_size;
+    let output: Array U8 = Array::empty(input_size * 2);
+    let _DOUBLEQUOTE = 34_U8; // '"'
+    let _BACKSLASH = 92_U8; // '\\'
+    let output = output.push_back(_DOUBLEQUOTE);
+    let output = loop (
+        (0, output), |(i, output)| 
+        if i >= input_size {
+            break $ output
+        };
+        let c = input.@(i);
+        let output = do {
+            if (c == _BACKSLASH) {
+                output.push_back(_BACKSLASH).push_back(_BACKSLASH)
+            };
+            if (c == _DOUBLEQUOTE) {
+                output.push_back(_BACKSLASH).push_back(_DOUBLEQUOTE)
+            };
+            // TODO: \n, \r etc.
+            output.push_back(c)
+        };
+        continue $ (i + 1, output)
+    );
+    let output = output.push_back(_DOUBLEQUOTE);
+    _unsafe_from_c_str(output.push_back(0_U8))
+);
+
+_encode_object: I64 -> HashMap String Json -> String;
+_encode_object = |indent, hashmap| (
+    let indent_str = _indent_str(indent);
+    let output = 
+        "{\n" +
+        hashmap.to_iter
+        .map(|(k, v)| indent_str + k._encode_string + ":" + v.encode(indent + 2))
+        .join(",\n") +
+        indent_str + "}\n";
+    output
+);
+
+_encode_array: I64 -> Array Json -> String;
+_encode_array = |indent, array| (
+    let indent_str = _indent_str(indent);
+    let output = 
+        "[\n" + indent_str + 
+        array.to_iter
+        .map(|a| a.encode(indent + 2))
+        .join(",\n" + indent_str) +
+        "]\n";
+    output
+);
+
+encode: I64 -> Json -> String;
+encode = |indent, json| (
+    if json.is_nul {
+        "null"
+    };
+    if json.is_bool {
+        if json.as_bool { "true" } else { "false" }
+    };
+    if json.is_number {
+        json.as_number.to_string
+    };
+    if json.is_string {
+        json.as_string._encode_string
+    };
+    if json.is_object {
+        json.as_object._encode_object(indent)
+    };
+    if json.is_array {
+        json.as_array._encode_array(indent)
+    };
+    "" // abort?
+);
+
+
+decode: String -> Result ErrMsg Json;
+decode = |str| err $ "";

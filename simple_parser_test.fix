@@ -1,0 +1,103 @@
+module Main;
+
+import Debug;
+import Character;
+
+import SimpleParser;
+
+type TestCase = IOFail ();
+
+run_tests: Array (TestCase) -> TestCase;
+run_tests = |tests|
+    tests.to_iter.fold_m((), |_, test| test);
+
+make_test: String -> IOFail () -> TestCase;
+make_test = |test_name, body| (
+    eval *(lift $ println ("=== " + test_name + " ==="));
+    do {
+        let _ = *body;
+        eval *(lift $ println ("[OK] " + test_name));
+        pure()
+    }.try(|err| 
+        eval *(println("error: " + err));
+        println("[NG] " + test_name)
+    ).lift
+);
+
+
+assert_true : String -> Bool -> IOFail ();
+assert_true = |msg, b| (
+    if !b {
+        let msg = "assert_true: " + msg;
+        throw $ msg
+    };
+    pure()
+);
+
+assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+assert_equal = |msg, lhs, rhs| (
+    if lhs != rhs {
+        let msg = "assert_equal: " + msg + ": lhs="+lhs.to_string+" rhs="+rhs.to_string;
+        throw $ msg
+    };
+    pure()
+);
+
+
+test_stream_readall: IOFail ();
+test_stream_readall = (
+    make_test("test_stream_readall") $
+    let str = "hello\nworld\n";
+    let s: Stream = *(from_result $ str.from_string);
+    let s = s.set_filename("hello.txt");
+    let (arr, s) = s.read_all;
+    let _ = *(assert_equal("filename", "hello.txt", s.@filename));
+    let result_str = String::_unsafe_from_c_str (arr.push_back(0_U8));
+    let _ = *(assert_equal("array", result_str, str));
+    let _ = *(assert_equal("line", 2, s.@line));
+    let _ = *(assert_equal("column", 0, s.@column));
+    pure()
+);
+
+test_stream_error: IOFail ();
+test_stream_error = (
+    make_test("test_stream_error") $
+    let str = "hello\nworld\n";
+    let s: Stream = *(from_result $ str.from_string);
+    let s = s.set_filename("hello.txt").set_line(1).set_column(2);
+    let res: Result ErrMsg () = s.error("errormsg");
+    let _ = *(assert_true("res is not err", res.is_err));
+    let errmsg = res.as_err;
+    let _ = *(assert_equal("errmsg", "hello.txt line 1, column 2: errormsg", errmsg));
+    pure()    
+);
+
+test_parser_cls_1: (String, String) -> IOFail ();
+test_parser_cls_1 = |(text, expected)| (
+    let testname = "test_parser_cls(" + text + "," + expected + ")";
+    make_test(testname) $
+    let p = Parser::cls(is_digit);
+    let (token, next) = *(from_result $ p.run_parser_str(text));
+    let _ = *(assert_equal("token", expected, token));
+    pure()
+);
+
+test_parser_cls: IOFail ();
+test_parser_cls = (
+    [
+        test_parser_cls_1 $ ("01234abc", "01234"),
+        test_parser_cls_1 $ ("abc0123", ""),
+        test_parser_cls_1 $ ("", "")
+    ].run_tests
+);
+
+main: IO ();
+main = (
+    [
+        test_stream_readall,
+        test_stream_error,
+        test_parser_cls
+    ]
+    .run_tests
+    .try(|err| println (err))
+);

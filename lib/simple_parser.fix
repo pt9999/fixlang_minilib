@@ -1,0 +1,152 @@
+// simple parser
+module SimpleParser;
+
+import Character;
+
+type Char = U8;
+
+_NEWLINE: Char;
+_NEWLINE = 10_U8;
+
+// unsafe
+impl Array Char: ToString {
+    to_string = |a| (
+        String::_unsafe_from_c_str (a.push_back(0_U8))
+    );
+}
+
+
+namespace Stream {
+    type Stream = box struct {
+        filename: String,
+        line: I64,
+        column: I64,
+        iter: Iterator Char
+    };
+
+    empty: Stream;
+    empty = Stream{
+        filename: "",
+        line: 0,
+        column: 0,
+        iter: Iterator::empty
+    };
+    
+    advance: Stream -> Option (Char, Stream);
+    advance = |s| (
+        let (c, next) = *(s.@iter.advance);
+        let s = s.set_iter(next);
+        let s = if c == _NEWLINE {
+            s.set_line(s.@line + 1).set_column(0)
+        } else {
+            s.set_column(s.@column + 1)
+        };
+        pure $ (c, s)
+    );
+
+    read_all: Stream -> (Array Char, Stream);
+    read_all = |s| (
+        let arr = Array::empty(100);
+        loop(
+            (arr, s), |(arr, s)|
+            let opt = s.advance;
+            if opt.is_none {
+                break $ (arr, s)
+            };
+            let (c, s) = opt.as_some;
+            let arr = arr.push_back(c);
+            continue $ (arr, s)
+        )
+    );
+
+    error: String -> Stream -> Result ErrMsg a;
+    error = |str, s| (
+        let msg = 
+            if s.@filename == "" { "" } else { s.@filename + " " } + 
+            "line " + s.@line.to_string +
+            ", column " + s.@column.to_string + 
+            ": ";
+        err $ msg + str
+    );
+}
+
+impl Stream: FromString {
+    from_string = |str| (
+        pure $ Stream::empty.set_iter(str.get_bytes.pop_back.to_iter)
+    );
+}
+
+
+type ParseResult a = Result ErrMsg (a, Stream);
+
+_EOF: ErrMsg;
+_EOF = "_EOF";
+
+
+namespace Parser {
+    type Parser a = Stream -> ParseResult a;
+
+    run_parser: Stream -> Parser a -> ParseResult a;
+    run_parser = |s, p| p(s);
+
+    run_parser_str: String -> Parser a -> ParseResult a;
+    run_parser_str = |str, p| 
+        let s: Stream = *(from_string(str));
+        p(s);
+}
+
+/*
+impl Parser a: Functor {
+    map = |f, p, s| (
+        let (c, s) = *(p(s));
+        pure $ (f(c), s)
+    );
+}
+*/
+
+namespace Parser {
+    unit: Parser ();
+    unit = |s| pure $ ((), s);
+
+    char: Parser Char;
+    char = |s| (
+        s.advance.map_or(
+            err $ _EOF,
+            |(c, next)| (c, next)
+        )
+    );
+
+    filter: (a -> Bool) -> Parser a -> Parser a;
+    filter = |f, p, s| (
+        let (c, next) = *(p(s));
+        if !f(c) {
+            _EOF
+        };
+        (c, next)
+    );
+
+    cls: (Char -> Bool) -> Parser String;
+    cls = |f, s| (
+        let arr: Array Char = Array::empty(100);
+        loop(
+            (arr, s), |(arr, s)|
+            let opt = s.advance;
+            if opt.is_none {
+                break $ ok $ (arr.to_string, s)
+            };
+            let (c, next) = opt.as_some;
+            if !f(c) {
+                break $ ok $ (arr.to_string, s)
+            };
+            let arr = arr.push_back(c);
+            continue $ (arr, next)
+        )
+    );
+
+    integer: Parser I64;
+    integer = (
+        let (digit, next) = *(cls(Character::is_digit));
+        let n = *from_string(digit);
+        ok $ (n, next)
+    );
+}

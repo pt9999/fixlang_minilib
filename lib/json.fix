@@ -21,6 +21,44 @@ to_object = |arr| (
     object $ hashmap
 );
 
+type EncodeParam = unbox struct {
+    space: String,
+    newline: String,
+    indent: String,
+    indent_incr: String
+};
+
+namespace EncodeParam {
+    empty: EncodeParam;
+    empty = EncodeParam {
+        space: "",
+        newline: "",
+        indent: "",
+        indent_incr: ""
+    };
+    
+    pretty_print: EncodeParam;
+    pretty_print = EncodeParam {
+        space: " ",
+        newline: "\n",
+        indent: "",
+        indent_incr: "  "
+    };
+
+    increment_indent: EncodeParam -> EncodeParam;
+    increment_indent = |param| (
+        param.set_indent(
+            param.@indent +
+            param.@indent_incr
+        )
+    );
+
+    _indent_str: I64 -> String;
+    _indent_str = |n| (
+        Array::fill(n, " ").to_iter.concat_iter
+    );
+
+}
 
 _encode_string: String -> String;
 _encode_string = |str| (
@@ -81,13 +119,8 @@ _string_less_than = |(str1, str2)| (
 );
 
 
-_indent_str: I64 -> String;
-_indent_str = |n| (
-    Array::fill(n, " ").to_iter.concat_iter
-);
-
-_encode_object: I64 -> HashMap String Json -> String;
-_encode_object = |indent, hashmap| (
+_encode_object: EncodeParam -> HashMap String Json -> String;
+_encode_object = |param, hashmap| (
     let array = hashmap.to_iter.to_array;
     let array = array.sort_by(
         |((k1,v1), (k2,v2))| _string_less_than $ (k1, k2));
@@ -95,7 +128,8 @@ _encode_object = |indent, hashmap| (
     if array_size == 0 {
         "{}"
     };
-    let output = "{\n";
+    let output = "{" + param.@newline;
+    let param_inner = param.increment_indent;
     let output = loop (
         (0, output), |(i, output)|
         if i >= array_size {
@@ -103,43 +137,49 @@ _encode_object = |indent, hashmap| (
         };
         let (k, v) = array.@(i);
         let output = output + 
-            _indent_str(indent + 2) + 
-            k._encode_string + ": " + 
-            v.encode(indent + 2) + 
-            if i < array_size - 1 { ",\n" } else { "\n" };
+            param_inner.@indent + 
+            k._encode_string + ":" + 
+            param_inner.@space + 
+            v._encode(param_inner) + 
+            if i < array_size - 1 { "," } else { "" } +
+            param.@newline;
         continue $ (i + 1, output)
     );
     let output = output +
-            _indent_str(indent) + "}";
+            param.@indent + 
+            "}";
     output
 );
 
-_encode_array: I64 -> Array Json -> String;
-_encode_array = |indent, array| (
+_encode_array: EncodeParam -> Array Json -> String;
+_encode_array = |param, array| (
     let array_size = array.get_size;
     if array_size == 0 {
         "[]"
     };
-    let indent_str = _indent_str(indent);
-    let output = "[\n";
+    let output = "[" + param.@newline;
+    let param_inner = param.increment_indent;
     let output = loop (
         (0, output), |(i, output)|
         if i >= array_size {
             break $ output
         };
+        let item = array.@(i);
         let output = output + 
-            _indent_str(indent + 2) + 
-            array.@(i).encode(indent + 2) + 
-            if i < array_size - 1 { ",\n" } else { "\n" };
+            param_inner.@indent + 
+            item._encode(param_inner) + 
+            if i < array_size - 1 { "," } else { "" } +
+            param_inner.@newline;
         continue $ (i + 1, output)
     );
     let output = output +
-            _indent_str(indent) + "]";
+            param.@indent + 
+            "]";
     output
 );
 
-encode: I64 -> Json -> String;
-encode = |indent, json| (
+_encode: EncodeParam -> Json -> String;
+_encode = |param, json| (
     if json.is_nul {
         "null"
     };
@@ -153,14 +193,23 @@ encode = |indent, json| (
         json.as_string._encode_string
     };
     if json.is_object {
-        json.as_object._encode_object(indent)
+        json.as_object._encode_object(param)
     };
     if json.is_array {
-        json.as_array._encode_array(indent)
+        json.as_array._encode_array(param)
     };
     "" // abort?
 );
 
+encode: Json -> String;
+encode = |json| (
+    _encode(EncodeParam::empty, json)
+);
+
+encode_pretty: Json -> String;
+encode_pretty = |json| (
+    _encode(EncodeParam::pretty_print, json)
+);
 
 decode: String -> Result ErrMsg Json;
 decode = |str| err $ "";

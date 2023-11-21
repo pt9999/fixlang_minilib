@@ -22,11 +22,6 @@ to_object = |arr| (
 );
 
 
-_indent_str: I64 -> String;
-_indent_str = |n| (
-    Array::fill(n, " ").to_iter.concat_iter
-);
-
 _encode_string: String -> String;
 _encode_string = |str| (
     let input: Array U8 = str.get_bytes.pop_back;
@@ -57,27 +52,89 @@ _encode_string = |str| (
     _unsafe_from_c_str(output.push_back(0_U8))
 );
 
+_string_less_than: (String, String) -> Bool;
+_string_less_than = |(str1, str2)| (
+    let a1 = str1.get_bytes;
+    let a2 = str2.get_bytes;
+    let n1 = a1.get_size;
+    let n2 = a2.get_size;
+    loop(0, |i|
+        if i >= n1 && i >= n2 {
+            break $ false
+        };
+        if i >= n1 {
+            break $ true
+        };
+        if i >= n2 {
+            break $ false
+        };
+        let c1 = a1.@(i);
+        let c2 = a2.@(i);
+        if c1 < c2 {
+            break $ true
+        };
+        if c1 > c2 {
+            break $ false
+        };
+        continue $ i + 1
+    )
+);
+
+
+_indent_str: I64 -> String;
+_indent_str = |n| (
+    Array::fill(n, " ").to_iter.concat_iter
+);
+
 _encode_object: I64 -> HashMap String Json -> String;
 _encode_object = |indent, hashmap| (
-    let indent_str = _indent_str(indent);
-    let output = 
-        "{\n" +
-        hashmap.to_iter
-        .map(|(k, v)| indent_str + k._encode_string + ":" + v.encode(indent + 2))
-        .join(",\n") +
-        indent_str + "}\n";
+    let array = hashmap.to_iter.to_array;
+    let array = array.sort_by(
+        |((k1,v1), (k2,v2))| _string_less_than $ (k1, k2));
+    let array_size = array.get_size;
+    if array_size == 0 {
+        "{}"
+    };
+    let output = "{\n";
+    let output = loop (
+        (0, output), |(i, output)|
+        if i >= array_size {
+            break $ output
+        };
+        let (k, v) = array.@(i);
+        let output = output + 
+            _indent_str(indent + 2) + 
+            k._encode_string + ": " + 
+            v.encode(indent + 2) + 
+            if i < array_size - 1 { ",\n" } else { "\n" };
+        continue $ (i + 1, output)
+    );
+    let output = output +
+            _indent_str(indent) + "}";
     output
 );
 
 _encode_array: I64 -> Array Json -> String;
 _encode_array = |indent, array| (
+    let array_size = array.get_size;
+    if array_size == 0 {
+        "[]"
+    };
     let indent_str = _indent_str(indent);
-    let output = 
-        "[\n" + indent_str + 
-        array.to_iter
-        .map(|a| a.encode(indent + 2))
-        .join(",\n" + indent_str) +
-        "]\n";
+    let output = "[\n";
+    let output = loop (
+        (0, output), |(i, output)|
+        if i >= array_size {
+            break $ output
+        };
+        let output = output + 
+            _indent_str(indent + 2) + 
+            array.@(i).encode(indent + 2) + 
+            if i < array_size - 1 { ",\n" } else { "\n" };
+        continue $ (i + 1, output)
+    );
+    let output = output +
+            _indent_str(indent) + "]";
     output
 );
 

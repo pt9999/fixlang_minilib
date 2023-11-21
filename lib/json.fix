@@ -119,16 +119,18 @@ _string_less_than = |(str1, str2)| (
 );
 
 
-_encode_object: EncodeParam -> HashMap String Json -> String;
-_encode_object = |param, hashmap| (
+_encode_object: EncodeParam -> Array String -> HashMap String Json -> Array String;
+_encode_object = |param, output, hashmap| (
     let array = hashmap.to_iter.to_array;
     let array = array.sort_by(
         |((k1,v1), (k2,v2))| _string_less_than $ (k1, k2));
     let array_size = array.get_size;
     if array_size == 0 {
-        "{}"
+        output.push_back ("{}")
     };
-    let output = "{" + param.@newline;
+    let output = output
+        .push_back("{")
+        .push_back(param.@newline);
     let param_inner = param.increment_indent;
     let output = loop (
         (0, output), |(i, output)|
@@ -136,28 +138,31 @@ _encode_object = |param, hashmap| (
             break $ output
         };
         let (k, v) = array.@(i);
-        let output = output + 
-            param_inner.@indent + 
-            k._encode_string + ":" + 
-            param_inner.@space + 
-            v._encode(param_inner) + 
-            if i < array_size - 1 { "," } else { "" } +
-            param.@newline;
+        let output = output
+            .push_back(param_inner.@indent)
+            .push_back(k._encode_string)
+            .push_back(":")
+            .push_back(param_inner.@space);
+        let output = v._encode(param_inner, output);
+        let output = if i < array_size - 1 { output.push_back (",") } else { output };
+        let output = output.push_back (param.@newline);
         continue $ (i + 1, output)
     );
-    let output = output +
-            param.@indent + 
-            "}";
+    let output = output
+            .push_back(param.@indent)
+            .push_back("}");
     output
 );
 
-_encode_array: EncodeParam -> Array Json -> String;
-_encode_array = |param, array| (
+_encode_array: EncodeParam -> Array String -> Array Json -> Array String;
+_encode_array = |param, output, array| (
     let array_size = array.get_size;
     if array_size == 0 {
-        "[]"
+        output.push_back("[]")
     };
-    let output = "[" + param.@newline;
+    let output = output
+        .push_back("[")
+        .push_back(param.@newline);
     let param_inner = param.increment_indent;
     let output = loop (
         (0, output), |(i, output)|
@@ -165,50 +170,58 @@ _encode_array = |param, array| (
             break $ output
         };
         let item = array.@(i);
-        let output = output + 
-            param_inner.@indent + 
-            item._encode(param_inner) + 
-            if i < array_size - 1 { "," } else { "" } +
-            param_inner.@newline;
+        let output = output
+            .push_back(param_inner.@indent);
+        let output = item._encode(param_inner, output);
+        let output = output
+            .push_back(if i < array_size - 1 { "," } else { "" })
+            .push_back(param_inner.@newline);
         continue $ (i + 1, output)
     );
-    let output = output +
-            param.@indent + 
-            "]";
+    let output = output
+            .push_back(param.@indent)
+            .push_back("]");
     output
 );
 
-_encode: EncodeParam -> Json -> String;
-_encode = |param, json| (
+_encode: EncodeParam -> Array String -> Json -> Array String;
+_encode = |param, output, json| (
     if json.is_nul {
-        "null"
+        output.push_back ("null")
     };
     if json.is_bool {
-        if json.as_bool { "true" } else { "false" }
+        output.push_back (if json.as_bool { "true" } else { "false" })
     };
     if json.is_number {
-        json.as_number.to_string
+        output.push_back (json.as_number.to_string)
     };
     if json.is_string {
-        json.as_string._encode_string
+        output.push_back (json.as_string._encode_string)
     };
     if json.is_object {
-        json.as_object._encode_object(param)
+        json.as_object._encode_object(param, output)
     };
     if json.is_array {
-        json.as_array._encode_array(param)
+        json.as_array._encode_array(param, output)
     };
-    "" // abort?
+    output // abort?
+);
+
+encode_with_param: EncodeParam -> Json -> String;
+encode_with_param = |param, json| (
+    let output = Array::empty(1000);
+    let output = _encode(param, output, json);
+    output.to_iter.concat_iter
 );
 
 encode: Json -> String;
 encode = |json| (
-    _encode(EncodeParam::empty, json)
+    encode_with_param(EncodeParam::empty, json)
 );
 
 encode_pretty: Json -> String;
 encode_pretty = |json| (
-    _encode(EncodeParam::pretty_print, json)
+    encode_with_param(EncodeParam::pretty_print, json)
 );
 
 decode: String -> Result ErrMsg Json;

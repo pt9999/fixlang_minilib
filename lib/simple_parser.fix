@@ -8,13 +8,12 @@ type Char = U8;
 _NEWLINE: Char;
 _NEWLINE = 10_U8;
 
-// unsafe
-impl Array Char: ToString {
-    to_string = |a| (
+namespace CharArray {
+    _unsafe_to_string: Array Char -> String;
+    _unsafe_to_string = |a| (
         String::_unsafe_from_c_str (a.push_back(0_U8))
     );
 }
-
 
 namespace Stream {
     type Stream = box struct {
@@ -79,8 +78,8 @@ impl Stream: FromString {
 
 type ParseResult a = Result ErrMsg (a, Stream);
 
-_EOF: ErrMsg;
-_EOF = "_EOF";
+_Fail: ErrMsg;
+_Fail = "Fail";
 
 
 namespace Parser {
@@ -111,7 +110,7 @@ namespace Parser {
     char: Parser Char;
     char = |s| (
         s.advance.map_or(
-            err $ _EOF,
+            err $ _Fail,
             |(c, next)| (c, next)
         )
     );
@@ -120,7 +119,7 @@ namespace Parser {
     filter = |f, p, s| (
         let (c, next) = *(p(s));
         if !f(c) {
-            _EOF
+            _Fail
         };
         (c, next)
     );
@@ -132,11 +131,11 @@ namespace Parser {
             (arr, s), |(arr, s)|
             let opt = s.advance;
             if opt.is_none {
-                break $ ok $ (arr.to_string, s)
+                break $ ok $ (arr._unsafe_to_string, s)
             };
             let (c, next) = opt.as_some;
             if !f(c) {
-                break $ ok $ (arr.to_string, s)
+                break $ ok $ (arr._unsafe_to_string, s)
             };
             let arr = arr.push_back(c);
             continue $ (arr, next)
@@ -144,9 +143,14 @@ namespace Parser {
     );
 
     integer: Parser I64;
-    integer = (
-        let (digit, next) = *(cls(Character::is_digit));
-        let n = *from_string(digit);
+    integer = |s| (
+        let (digit, next) = *(cls(Character::is_digit).run_parser(s));
+        if (digit.get_size == 0) {
+            err $ _Fail
+        };
+        let n = *(from_string(digit));
         ok $ (n, next)
     );
+
+    
 }

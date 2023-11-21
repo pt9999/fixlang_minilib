@@ -1,10 +1,26 @@
 module UnitTest;
 
-type TestCase = IOFail ();
+//  IOFail (ok_count, ng_count)
+type TestCase = IOFail (I64, I64);
+
+run_test_driver: Array TestCase -> IO ();
+run_test_driver = |tests| (
+    do {
+        let (ok, ng) = *(tests.run_tests);
+        let _ = *(lift $ println ("OK: " + ok.to_string + " NG: " + ng.to_string));
+        pure()
+    }.try(|err| println (err))
+);
 
 run_tests: Array (TestCase) -> TestCase;
-run_tests = |tests|
-    tests.to_iter.fold_m((), |_, test| test);
+run_tests = |tests| (
+    tests.to_iter.fold_m(
+        (0, 0), |(ok_total, ng_total), test|
+        let (ok, ng) = *test;
+        pure $ (ok_total + ok, ng_total + ng)
+    )
+);
+    
 
 make_test: String -> IOFail () -> TestCase;
 make_test = |test_name, body| (
@@ -12,10 +28,11 @@ make_test = |test_name, body| (
     do {
         let _ = *body;
         eval *(lift $ println ("[OK] " + test_name));
-        pure()
+        pure $ (1, 0)
     }.try(|err| 
         eval *(println("error: " + err));
-        println("[NG] " + test_name)
+        eval *(println("[NG] " + test_name));
+        pure $ (0, 1)
     ).lift
 );
 

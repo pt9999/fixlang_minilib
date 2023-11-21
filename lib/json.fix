@@ -4,7 +4,7 @@ import HashMap;
 //import SimpleParser;
 
 type Json = box union {
-    nul: (),
+    null: (),
     bool: Bool,
     number: F64,
     string: String,
@@ -60,13 +60,49 @@ namespace EncodeParam {
 
 }
 
+_DOUBLEQUOTE: U8;
+_DOUBLEQUOTE = 34_U8; // '\"'
+
+_BACKSLASH: U8;
+_BACKSLASH = 92_U8; // '\\'
+
+_ASCII_LOWER_U: U8;
+_ASCII_LOWER_U = 117_U8; // 'u'
+
+
+_escape_from: Array U8;
+_escape_from = "\"\\\u0008\u000c\n\r\t".get_bytes.pop_back;
+
+_escape_to: Array U8;
+_escape_to = "\"\\bfnrt".get_bytes.pop_back;
+
+_escape_table: Array U8;
+_escape_table = (
+    Iterator::count_up(0).take(256)
+    .map(|i| 
+        _escape_from.find_by(|x| x == i.to_U8)
+        .map_or(0_U8,
+            |pos| _escape_to.@(pos)
+        )
+    )
+    .to_array
+);
+
+_hex_table: Array U8;
+_hex_table = (
+    Iterator::count_up(0).take(16)
+    .map(|i|
+        if i < 10 { /* '0' = */ 48_U8 + i.to_U8 } 
+        else { /* 'a' = */ 97_U8 + (i - 10).to_U8 }
+    )
+    .to_array
+);
+
 _encode_string: String -> String;
 _encode_string = |str| (
     let input: Array U8 = str.get_bytes.pop_back;
     let input_size = input.get_size;
     let output: Array U8 = Array::empty(input_size * 2);
-    let _DOUBLEQUOTE = 34_U8; // '"'
-    let _BACKSLASH = 92_U8; // '\\'
     let output = output.push_back(_DOUBLEQUOTE);
     let output = loop (
         (0, output), |(i, output)| 
@@ -75,13 +111,17 @@ _encode_string = |str| (
         };
         let c = input.@(i);
         let output = do {
-            if (c == _BACKSLASH) {
-                output.push_back(_BACKSLASH).push_back(_BACKSLASH)
+            let escape_char = _escape_table.@(c.to_I64);
+            if escape_char != 0_U8 {
+                output.push_back(_BACKSLASH).push_back(escape_char)
             };
-            if (c == _DOUBLEQUOTE) {
-                output.push_back(_BACKSLASH).push_back(_DOUBLEQUOTE)
+            if c <= 31_U8 {
+                output.push_back(_BACKSLASH).push_back(_ASCII_LOWER_U)
+                .push_back(_hex_table.@(0))
+                .push_back(_hex_table.@(0))
+                .push_back(_hex_table.@(c.to_I64.shift_right(4)))
+                .push_back(_hex_table.@(c.to_I64.bit_and(15)))
             };
-            // TODO: \n, \r etc.
             output.push_back(c)
         };
         continue $ (i + 1, output)
@@ -186,7 +226,7 @@ _encode_array = |param, output, array| (
 
 _encode: EncodeParam -> Array String -> Json -> Array String;
 _encode = |param, output, json| (
-    if json.is_nul {
+    if json.is_null {
         output.push_back ("null")
     };
     if json.is_bool {

@@ -71,6 +71,7 @@ _parse_value = parser $ |s| (
         .or_else(_parse_string.map(string))
         .or_else(_parse_object.map(object))
         .or_else(_parse_array.map(array))
+        .or_else(_parse_number.map(number))
     );
     parser.run_parser(s)
 );
@@ -159,10 +160,51 @@ _parse_array = (
 
 _parse_number: Parser F64;
 _parse_number = (
-    let minus = match_str("-");
-    let plus = match_str("+");
-    let e = match_str("e").or_else(match_str("E"));
-    err $ "not-impl"
+    let match_decimal_point = match_str(".");
+    let match_digit = match_one_of_char("0123456789");
+    let match_digit1_9 = match_one_of_char("123456789");
+    let match_e = match_one_of_char("eE");
+    let match_minus = match_str("-");
+    let match_plus = match_str("+");
+    let match_zero = match_str("0");
+    let match_int = match_zero.or_else(
+        do {
+            let first = *match_digit1_9;
+            let rest = *(repeat(match_digit));
+            let array : Array String = [ first ].append(rest);
+            pure $ array.to_iter.concat_iter
+        }
+    );
+    let match_exp: Parser String = do {
+        let e = *match_e;
+        let sign = *(match_minus.or_else(match_plus).or_else(match_empty_str));
+        let digits: Array String = *(one_or_more(match_digit));
+        let digits: String = digits.to_iter.concat_iter;
+        pure $ e + sign + digits
+    };
+    let match_frac = do {
+        let decimal = *match_decimal_point;
+        let digits : Array String = *(repeat(match_digit));
+        let digits = digits.to_iter.concat_iter;
+        pure $ decimal + digits
+    };
+    let match_number = do {
+        let minus = *(match_minus.or_else(match_empty_str));
+        let int = *(match_int);
+        let frac = *(match_frac.or_else(match_empty_str));
+        let exp = *(match_exp.or_else(match_empty_str));
+        pure $ minus + int + frac + exp
+    };
+
+    do {
+        let number_str = *match_number;
+        //eval debug_println ("number_str="+number_str);
+        let res: Result ErrMsg F64 = from_string(number_str);
+        if res.is_err {
+            error_parser(res.as_err)
+        };
+        pure $ res.as_ok
+    }
 );
 
 //=============================================================
@@ -177,7 +219,6 @@ _match_unquoted_str = (
     one_or_more(_match_unquoted_char).map(|array| array._unsafe_to_string)
 );
 
-
 _unhex: U8 -> U8;
 _unhex = |c| (
     if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { c - 48_U8 };
@@ -191,7 +232,6 @@ _match_quoted_str = (
     let match_escaped: Parser String = (
         any_char
         .map(|c| _unescape_table.@(c.to_I64))
-        //.map(|c| eval debug_println("c="+c.to_string); c)
         .filter(|c| c != 0_U8)
         .map(|c| [ c ]._unsafe_to_string)
     );

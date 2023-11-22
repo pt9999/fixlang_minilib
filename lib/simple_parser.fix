@@ -213,6 +213,16 @@ namespace Parser {
         };
         s.error(msg)
     );
+    
+    error_parser: String -> Parser a;
+    error_parser = |msg| parser $ |s| (
+        s.error(msg)
+    );
+
+    not_match: Parser a;
+    not_match = parser $ |s| (
+        err $ _NotMatch
+    );
 
     // Repeat matches as many as possible.
     repeat: Parser a -> Parser (Array a);
@@ -271,10 +281,16 @@ namespace Parser {
     );
 
     // Matches a character which is included in `str`.
-    match_one_of_char: String -> Parser Char;
-    match_one_of_char = |str| (
-        any_char.filter(|c| str.find(c).is_some)
-    );
+    match_one_of_char: String -> Parser String;
+    match_one_of_char = |str| do {
+        let c = *any_char;
+        let opt = str.find_byte(c);
+        if opt.is_none {
+            not_match
+        };
+        let i = opt.as_some;
+        pure $ str.get_sub(i, i + 1)
+    };
 
     // Matches a string specified by `str`.
     match_str: String -> Parser String;
@@ -290,6 +306,10 @@ namespace Parser {
         );
         parser.map(|_| str)
     );
+
+    // matches zero-length string.
+    match_empty_str : Parser String;
+    match_empty_str = unit.map(|_| "");
 
     // Matches a zero-or-more-length string. Each character should satisfy the specified condition.
     class: (Char -> Bool) -> Parser String;

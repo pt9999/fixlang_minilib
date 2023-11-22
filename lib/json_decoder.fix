@@ -67,10 +67,10 @@ _parse_value = parser $ |s| (
     // Make a lazy parser, so that we can avoid stack overflow.
     let parser = (
         _parse_null.map(null)
-        .or_else(_parse_bool.map(bool))
-        .or_else(_parse_string.map(string))
-        .or_else(_parse_object.map(object))
-        .or_else(_parse_array.map(array))
+        .or_else(_parse_bool.debug("_parse_bool").map(bool))
+        .or_else(_parse_string.debug("_parse_string").map(string))
+        .or_else(_parse_object.debug("_parse_object").map(object))
+        .or_else(_parse_array.debug("_parse_array").map(array))
     );
     parser.run_parser(s)
 );
@@ -91,31 +91,37 @@ _parse_bool = (
 
 _parse_object: Parser (HashMap String Json);
 _parse_object = (
-    let member : Parser (String, Json) = 
-        _parse_string
-        .then(keep_left, _name_separator.or_error("Missing ':'"))
-        .then(keep_both, _parse_value);
-    let sep_member : Parser (String, Json) =
-        _value_separator
-        .then(keep_right, member);
-
+    let member : Parser (String, Json) = (
+        let k = *_parse_string;
+        let _ = *(_name_separator.or_error("Missing ':'"));
+        let v = *_parse_value;
+        pure $ (k, v)
+    );
+    let sep_member : Parser (String, Json) = (
+        let _ = *_value_separator;
+        member
+    );
     let to_hashmap: Array (String, Json) -> HashMap String Json =
         |kvs| kvs.to_iter.fold(
             HashMap::empty(100),
             |h, (k, v)| h.insert(k, v)
         );
-    let body = (
-        member
-        .then(|(kv, kvs)| [kv].append(kvs), 
-            repeat(sep_member))
-        .map(to_hashmap)
-        .or_else(unit.map(|_| HashMap::empty(0)))
+    let body : Parser (HashMap String Json) = (
+        let first = *(member.debug("first"));
+        let rest = *(repeat(sep_member));
+        pure $ [ first ].append(rest).to_hashmap
     );
+    let body = body.or_else(
+        unit.map(|_| HashMap::empty(0))
+    ).debug("body");
 
-    _begin_object /* .debug_parser(|_| "_begin_object") */
-    .then(keep_right, body)
-    .then(keep_left, 
-        _end_object.or_error("Missing '}'"))
+    let begin_object = _begin_object.debug("begin_object");
+    let end_object = _end_object.or_error("Missing '}'").debug("end_object");
+
+    let _ = *begin_object;
+    let hashmap = *body;
+    let _ = *end_object;
+    pure $ hashmap
 );
 
 //=============================================================

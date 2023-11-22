@@ -11,7 +11,7 @@ _NEWLINE: Char;
 _NEWLINE = 10_U8;
 
 namespace Stream {
-    type Stream = box struct {
+    type Stream = unbox struct {
         filename: String,
         line: I64,
         column: I64,
@@ -96,16 +96,6 @@ type Parser a = unbox struct { _parser: Stream -> ParseResult a };
 parser: (Stream -> ParseResult a) -> Parser a;
 parser = |f| Parser { _parser: f };
 
-impl Parser: Monad {
-    pure = |a| |s| ok $ (a, s);
-    bind = |f, pa| |s| (
-        let (a, s) = *(pa.run_parser(s));
-        let pb = f(a);
-        pb.run_parser(s)
-    );
-}
-
-
 namespace Parser {
     run_parser: Stream -> Parser a -> ParseResult a;
     run_parser = |s, p| p.@_parser $ s;
@@ -114,14 +104,25 @@ namespace Parser {
     run_parser_str = |str, p| 
         let s: Stream = *(from_string(str));
         p.run_parser(s);
+}
 
-    // Transform the result value.
-    map: (a -> b) -> Parser a -> Parser b;
+impl Parser: Functor {
     map = |f, p| parser $ |s| (
-            let (c, s) = *(p.run_parser(s));
-            pure $ (f(c), s)
+        let (c, s) = *(p.run_parser(s));
+        pure $ (f(c), s)
     );  
+}
 
+impl Parser: Monad {
+    pure = |a| parser $ |s| ok $ (a, s);
+    bind = |f, pa| parser $ |s| (
+        let (a, s) = *(pa.run_parser(s));
+        let pb = f(a);
+        pb.run_parser(s)
+    );
+}
+
+namespace Parser {
     map_result: (a -> Result ErrMsg b) -> Parser a -> Parser b;
     map_result = |f, p| parser $ |s| (
             let (a, s) = *(p.run_parser(s));
@@ -132,18 +133,15 @@ namespace Parser {
             ok $ (res.as_ok, s)
     );  
 
-    bind: (a -> Parser b) -> Parser a -> Parser b;
-    bind = |f, pa| parser $ |s| (
-        let (a, s) = *(pa.run_parser(s));
-        let pb = f(a);
-        pb.run_parser(s)
-    );
-
     debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
     debug_parser = |msg, p| parser $ |s| (
         let res = p.run_parser(s);
         eval debug_println(msg(res));
         res
+    );
+    debug: [a: ToString] String -> Parser a -> Parser a;
+    debug = |msg| (
+        debug_parser $ |res| msg + ": res=" + res.to_string
     );
 
     // Match zero-length string.

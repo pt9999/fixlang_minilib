@@ -125,7 +125,7 @@ _parse_object: Parser (HashMap String Json);
 _parse_object = (
     let member : Parser (String, Json) = 
         _parse_string
-        .then(keep_left, _name_separator)
+        .then(keep_left, _name_separator.or_error("Missing ':'"))
         .then(keep_both, _decode_json);
     let sep_member : Parser (String, Json) =
         _value_separator
@@ -146,34 +146,21 @@ _parse_object = (
 
     _begin_object.debug_parser(|_| "_begin_object")
     .then(keep_right, body)
-    .then(keep_left, _end_object)
+    .then(keep_left, 
+        _end_object.or_error("Missing '}'"))
 );
 
-_parse_object2: Parser (HashMap String Json);
-_parse_object2 = (
-    /*
-    let member : Parser (String, Json) = 
-        _parse_string
-        .then(keep_left, _name_separator)
-        .then(keep_both, _decode_json);
-    let sep_member : Parser (String, Json) =
-        _value_separator
-        .then(keep_right, member);
-    */
-
-    _begin_object.debug_parser(|_| "_begin_object")
-    .map(|_| HashMap::empty(0))
-);
 
 _decode_json: Parser Json;
-_decode_json = (
-    if (false) {
-        _parse_object2.map(|hash| object(hash))
-    };
-    _parse_null.map(|_| null())
-    .or_else(_parse_bool.map(|b| bool(b)))
-    .or_else(_parse_string.map(|str| string(str)))
-    .or_else(_parse_object.map(|hash| object(hash)))
+_decode_json = |s| (
+    // Make a lazy parser, so that we can avoid stack overflow.
+    let parser = (
+        _parse_null.map(|_| null())
+        .or_else(_parse_bool.map(|b| bool(b)))
+        .or_else(_parse_string.map(|str| string(str)))
+        .or_else(_parse_object.map(|hash| object(hash)))
+    );
+    parser.run_parser(s)
 );
 
 decode: String -> Result ErrMsg Json;

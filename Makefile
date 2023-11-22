@@ -11,8 +11,12 @@ test: test_parser test_json
 test_parser:
 	fix run -f simple_parser_test.fix lib/simple_parser.fix lib/unit_test.fix
 
+JSON_TEST_SOURCE := json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
+
 test_json:
-	fix run -f json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
+	fix run -f $(JSON_TEST_SOURCE)
+#	gdb --args fix run -f $(JSON_TEST_SOURCE)
 	
 build_json:
-	fix build -f json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
+	fix build -f $(JSON_TEST_SOURCE)
+

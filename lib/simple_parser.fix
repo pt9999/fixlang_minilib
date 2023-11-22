@@ -116,9 +116,16 @@ impl Parser: Functor {
 impl Parser: Monad {
     pure = |a| parser $ |s| ok $ (a, s);
     bind = |f, pa| parser $ |s| (
-        let (a, s) = *(pa.run_parser(s));
+        eval debug_println("bind 1");
+        let res = (pa.run_parser(s));
+        eval debug_println("bind 2 " + if res.is_err { res.as_err } else { "ok" });
+        let (a, s) = *res;
+        eval debug_println("bind 3");
         let pb = f(a);
-        pb.run_parser(s)
+        eval debug_println("bind 4");
+        let res = pb.run_parser(s);
+        eval debug_println("bind 5");
+        res
     );
 }
 
@@ -140,13 +147,24 @@ namespace Parser {
         res
     );
     debug: [a: ToString] String -> Parser a -> Parser a;
+    debug = |msg, p| parser $ |s| (
+        eval debug_println(msg + ": begin");
+        let res = p.run_parser(s);
+        eval debug_println(msg + ": end res=" + res.to_string);
+        res
+    );
+    /*
     debug = |msg| (
         debug_parser $ |res| msg + ": res=" + res.to_string
     );
+    */
 
     // Match zero-length string.
     unit: Parser ();
     unit = parser $ |s| pure $ ((), s);
+
+    forget: Parser a -> Parser ();
+    forget = |p| p.map(|_| ());
 
     keep_left: (a, b) -> a;
     keep_left = |(a,b)| a;
@@ -249,11 +267,11 @@ namespace Parser {
     );
 
     // Matches a character specified by `chr`.
-    match_char: Char -> Parser ();
+    match_char: Char -> Parser Char;
     match_char = |chr| parser $ |s| (
         s.advance.map_or(
             err $ _NotMatch,
-            |(c, next)| if c != chr { err $ _NotMatch } else { pure $ ((), next) }
+            |(c, next)| if c != chr { err $ _NotMatch } else { pure $ (c, next) }
         )
     );
 
@@ -264,15 +282,18 @@ namespace Parser {
     );
 
     // Matches a string specified by `str`.
-    match_str: String -> Parser ();
+    match_str: String -> Parser String;
     match_str = |str| (
         if str.get_size == 1 { // Optimization
-            match_char(str.get_first_byte.as_some)
+            let c = *(match_char(str.get_first_byte.as_some));
+            pure $ [ c ]._unsafe_to_string
         };
-        str.get_bytes.pop_back.to_iter.fold(
+        let parser: Parser () = str.get_bytes.pop_back.to_iter.fold(
             unit,
-            |p, c| p.then(|(a,b)| (), match_char(c))
-        )
+            |p, c|
+            p.then(keep_left, match_char(c))
+        );
+        parser.map(|_| str)
     );
 
     // Matches a zero-or-more-length string. Each character should satisfy the specified condition.

@@ -35,7 +35,7 @@ _begin_array: Parser String;
 _begin_array = _wrap_whitespaces(match_str("["));
 
 _begin_object: Parser String;
-_begin_object = _wrap_whitespaces(match_str("{").debug("{"));
+_begin_object = _wrap_whitespaces(match_str("{"));
 
 _end_array: Parser String;
 _end_array = _wrap_whitespaces(match_str("]"));
@@ -50,7 +50,7 @@ _value_separator: Parser String;
 _value_separator = _wrap_whitespaces(match_str(","));
 
 _ws: Parser ();
-_ws = class_whitespace.debug("ws").map(|str| ());
+_ws = class_whitespace.map(|str| ());
 
 _wrap_whitespaces: Parser a -> Parser a;
 _wrap_whitespaces = |p| (
@@ -67,10 +67,10 @@ _parse_value = parser $ |s| (
     // Make a lazy parser, so that we can avoid stack overflow.
     let parser = (
         _parse_null.map(null)
-        .or_else(_parse_bool.debug("_parse_bool").map(bool))
-        .or_else(_parse_string.debug("_parse_string").map(string))
-        .or_else(_parse_object.debug("_parse_obje1ct").map(object))
-        .or_else(_parse_array.debug("_parse_array").map(array))
+        .or_else(_parse_bool.map(bool))
+        .or_else(_parse_string.map(string))
+        .or_else(_parse_object.map(object))
+        .or_else(_parse_array.map(array))
     );
     parser.run_parser(s)
 );
@@ -109,16 +109,16 @@ _parse_object = (
             |h, (k, v)| h.insert(k, v)
         );
     let body : Parser (HashMap String Json) = do {
-        let first = *(member.debug("first"));
+        let first = *(member);
         let rest = *(repeat(sep_member));
         pure $ [ first ].append(rest).to_hashmap
     };
     let body = body.or_else(
         unit.map(|_| HashMap::empty(0))
-    ).debug("body");
+    );
 
-    let begin_object = _begin_object.debug("begin_object");
-    let end_object = _end_object.or_error("Missing '}'").debug("end_object");
+    let begin_object = _begin_object;
+    let end_object = _end_object.or_error("Missing '}'");
 
     do {
         let _ = *begin_object;
@@ -126,45 +126,7 @@ _parse_object = (
         let _ = *end_object;
         pure $ hashmap
     }
-).debug("parse_obj");
-
-_parse_object1: Parser (HashMap String Json);
-_parse_object1 = (
-    let member : Parser (String, Json) = do {
-        let k = *_parse_string.debug("k");
-        let _ = *(_name_separator.or_error("Missing ':'"));
-        let v = *_parse_value;
-        pure $ (k, v)
-    };
-    let sep_member : Parser (String, Json) = do {
-        let _ = *_value_separator.debug("vs");
-        member
-    };
-    let member = match_str("member").map(|k| (k, null())).or_error("err");
-    let sep_member = match_str(",member").map(|k| (k, null()));
-    let to_hashmap: Array (String, Json) -> HashMap String Json =
-        |kvs| kvs.to_iter.fold(
-            HashMap::empty(100),
-            |h, (k, v)| h.insert(k, v)
-        );
-    let body : Parser (HashMap String Json) = do {
-        let first = *(member.debug("fir1st"));
-        let rest = *(repeat(sep_member));
-        pure $ [ first ].append(rest).to_hashmap
-    };
-    let body : Parser (HashMap String Json) = body.or_else(
-        unit.map(|_| HashMap::empty(0))
-    ).debug("body");
-
-    let begin_object = _begin_object.debug("begin_object");
-    let end_object = _end_object.or_error("Missing '}'").debug("end_object");
-    do {
-        let _ = *begin_object;
-        //let hashmap = *body;
-        let _ = *end_object;
-        pure $ HashMap::empty(0)
-    }
-).debug("parse_obj1");
+);
 
 //=============================================================
 // 5. Arrays
@@ -186,7 +148,7 @@ _parse_array = (
     .then(keep_right, body)
     .then(keep_left, 
         _end_array.or_error("Missing ']'"))
-).debug("parse_arr");
+);
 
 //=============================================================
 // 6. Numbers

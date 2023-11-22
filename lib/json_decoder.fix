@@ -1,13 +1,14 @@
 module JsonDecoder;
 
 import Debug;
+import HashMap;
 
 import Json;
 import SimpleParser;
 import StringEx;
 
 _ws: Parser ();
-_ws = class_space.map(|str| ());
+_ws = class_whitespace.map(|str| ());
 
 _wrap_whitespaces: Parser a -> Parser a;
 _wrap_whitespaces = |p| (
@@ -120,18 +121,65 @@ _parse_string = (
     )
 );
 
-/*
-_decode_json_obj: Parser Json;
-_decode_json_obj = (
-)
-*/
+_parse_object: Parser (HashMap String Json);
+_parse_object = (
+    let member : Parser (String, Json) = 
+        _parse_string
+        .then(keep_left, _name_separator)
+        .then(keep_both, _decode_json);
+    let sep_member : Parser (String, Json) =
+        _value_separator
+        .then(keep_right, member);
+
+    let to_hashmap: Array (String, Json) -> HashMap String Json =
+        |kvs| kvs.to_iter.fold(
+            HashMap::empty(100),
+            |h, (k, v)| h.insert(k, v)
+        );
+    let body = (
+        member
+        .then(|(kv, kvs)| [kv].append(kvs), 
+            repeat(sep_member))
+        .map(to_hashmap)
+        .or_else(unit.map(|_| HashMap::empty(0)))
+    );
+
+    _begin_object.debug_parser(|_| "_begin_object")
+    .then(keep_right, body)
+    .then(keep_left, _end_object)
+);
+
+_parse_object2: Parser (HashMap String Json);
+_parse_object2 = (
+    /*
+    let member : Parser (String, Json) = 
+        _parse_string
+        .then(keep_left, _name_separator)
+        .then(keep_both, _decode_json);
+    let sep_member : Parser (String, Json) =
+        _value_separator
+        .then(keep_right, member);
+    */
+
+    _begin_object.debug_parser(|_| "_begin_object")
+    .map(|_| HashMap::empty(0))
+);
 
 _decode_json: Parser Json;
 _decode_json = (
+    if (false) {
+        _parse_object2.map(|hash| object(hash))
+    };
     _parse_null.map(|_| null())
     .or_else(_parse_bool.map(|b| bool(b)))
     .or_else(_parse_string.map(|str| string(str)))
+    .or_else(_parse_object.map(|hash| object(hash)))
 );
 
 decode: String -> Result ErrMsg Json;
-decode = |str| err $ "";
+decode = |str| (
+    let p = _wrap_whitespaces(_decode_json)
+        .then(keep_left, match_end_of_stream);
+    let (json, next) = *(p.run_parser_str(str));
+    pure $ json
+);

@@ -91,36 +91,56 @@ _NotMatch: ErrMsg;
 _NotMatch = "NotMatch";
 
 
-type Parser a = Stream -> ParseResult a;
+type Parser a = unbox struct { _parser: Stream -> ParseResult a };
+
+parser: (Stream -> ParseResult a) -> Parser a;
+parser = |f| Parser { _parser: f };
+
+impl Parser: Monad {
+    pure = |a| |s| ok $ (a, s);
+    bind = |f, pa| |s| (
+        let (a, s) = *(pa.run_parser(s));
+        let pb = f(a);
+        pb.run_parser(s)
+    );
+}
+
 
 namespace Parser {
     run_parser: Stream -> Parser a -> ParseResult a;
-    run_parser = |s, p| p(s);
+    run_parser = |s, p| p.@_parser $ s;
 
     run_parser_str: String -> Parser a -> ParseResult a;
     run_parser_str = |str, p| 
         let s: Stream = *(from_string(str));
-        p(s);
+        p.run_parser(s);
 
     // Transform the result value.
     map: (a -> b) -> Parser a -> Parser b;
-    map = |f, p| |s| (
-        let (c, s) = *(p.run_parser(s));
-        pure $ (f(c), s)
-    );
+    map = |f, p| parser $ |s| (
+            let (c, s) = *(p.run_parser(s));
+            pure $ (f(c), s)
+    );  
 
-    bind_parser: (a -> Result ErrMsg b) -> Parser a -> Parser b;
-    bind_parser = |f, p| |s| (
-        let (c, s) = *(p.run_parser(s));
-        let fc = f(c);
-        if fc.is_err {
-            err $ fc.as_err
-        };
-        pure $ (fc.as_ok, s)
+    map_result: (a -> Result ErrMsg b) -> Parser a -> Parser b;
+    map_result = |f, p| parser $ |s| (
+            let (a, s) = *(p.run_parser(s));
+            let res = f(a);
+            if res.is_err {
+                err $ res.as_err
+            };
+            ok $ (res.as_ok, s)
+    );  
+
+    bind: (a -> Parser b) -> Parser a -> Parser b;
+    bind = |f, pa| parser $ |s| (
+        let (a, s) = *(pa.run_parser(s));
+        let pb = f(a);
+        pb.run_parser(s)
     );
 
     debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
-    debug_parser = |msg, p| |s| (
+    debug_parser = |msg, p| parser $ |s| (
         let res = p.run_parser(s);
         eval debug_println(msg(res));
         res
@@ -128,7 +148,7 @@ namespace Parser {
 
     // Match zero-length string.
     unit: Parser ();
-    unit = |s| pure $ ((), s);
+    unit = parser $ |s| pure $ ((), s);
 
     keep_left: (a, b) -> a;
     keep_left = |(a,b)| a;
@@ -144,7 +164,7 @@ namespace Parser {
 
     // Combine two parsers. The result value is transformed by specified function.
     then: ((a, b) -> c) -> Parser b -> Parser a -> Parser c;
-    then = |keep, pb, pa| |s| (
+    then = |keep, pb, pa| parser $ |s| (
         let (a, s) = *(pa.run_parser(s));
         let (b, s) = *(pb.run_parser(s));
         pure $ (keep((a, b)), s)
@@ -152,8 +172,8 @@ namespace Parser {
 
     // If the specified condition are not met, returns _NotMatch.
     filter: (a -> Bool) -> Parser a -> Parser a;
-    filter = |f, p, s| (
-        let (c, next) = *(p(s));
+    filter = |f, p| parser $ |s| (
+        let (c, next) = *(p.run_parser(s));
         if !f(c) {
             err $ _NotMatch
         };
@@ -163,7 +183,7 @@ namespace Parser {
     // if first parser (pa1) did not match (ie. not a syntax error), 
     // try second parser (pa2).
     or_else: Parser a -> Parser a -> Parser a;
-    or_else = |pa2, pa1| |s| (
+    or_else = |pa2, pa1| parser $ |s| (
         let res = pa1.run_parser(s);
         if res.is_ok {
             pure $ res.as_ok
@@ -175,7 +195,7 @@ namespace Parser {
     );
 
     or_error: String -> Parser a -> Parser a;
-    or_error = |msg, p| |s| (
+    or_error = |msg, p| parser $ |s| (
         let res = p.run_parser(s);
         if res.is_ok {
             pure $ res.as_ok
@@ -185,7 +205,7 @@ namespace Parser {
 
     // Repeat matches as many as possible.
     repeat: Parser a -> Parser (Array a);
-    repeat = |p| |s| (
+    repeat = |p| parser $ |s| (
         let array = Array::empty(100);
         loop(
             (array, s), |(array, s)|
@@ -214,7 +234,7 @@ namespace Parser {
 
     // Match zero-length string at the end of stream.
     match_end_of_stream: Parser ();
-    match_end_of_stream = |s| (
+    match_end_of_stream = parser $ |s| (
         if s.advance.is_some {
             s.error("End of stream expected")
         };
@@ -223,7 +243,7 @@ namespace Parser {
 
     // Matches a character of any kind.
     any_char: Parser Char;
-    any_char = |s| (
+    any_char = parser $ |s| (
         s.advance.map_or(
             err $ _NotMatch,
             |(c, next)| pure $ (c, next)
@@ -232,7 +252,7 @@ namespace Parser {
 
     // Matches a character specified by `chr`.
     match_char: Char -> Parser ();
-    match_char = |chr| |s| (
+    match_char = |chr| parser $ |s| (
         s.advance.map_or(
             err $ _NotMatch,
             |(c, next)| if c != chr { err $ _NotMatch } else { pure $ ((), next) }
@@ -274,22 +294,11 @@ namespace Parser {
     class_digit = class(Character::is_digit);
 
     integer: Parser I64;
-    integer = |s| (
-        let (digit, next) = *(class_digit.run_parser(s));
-        if (digit.get_size == 0) {
-            err $ _NotMatch
-        };
-        let n = *(from_string(digit));
-        ok $ (n, next)
+    integer = (
+        class_digit
+        .filter(|str| str.get_size > 0)
+        .map_result(|str| from_string(str))
     );
+    
 }
 
-/*
-impl Parser: Monad {
-    pure = |a| |s| ok $ (a, s);
-    bind = |f, p| |s| (
-        let (a, s) = *(p.run_parser(s));
-        ok $ (f(a), s)
-    );
-}
-*/

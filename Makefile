@@ -13,3 +13,6 @@ test_parser:
 
 test_json:
 	fix run -f json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/unit_test.fix
+	
+build_json:
+	fix build -f json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/unit_test.fix

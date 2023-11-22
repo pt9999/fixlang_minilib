@@ -3,37 +3,39 @@ module UnitTest;
 import Debug;
 
 //  IOFail (ok_count, ng_count)
-type TestCase = IOFail (I64, I64);
+type TestCase = Lazy (IOFail (I64, I64));
 
 run_test_driver: Array TestCase -> IO ();
 run_test_driver = |tests| (
     do {
-        let (ok, ng) = *(tests.run_tests);
-        let _ = *(lift $ println ("OK: " + ok.to_string + " NG: " + ng.to_string));
+        let _ = *(lift $ eprintln ("Starting Test Driver"));
+        let test: TestCase = tests.run_tests;
+        let (ok, ng) = *(test());
+        let _ = *(lift $ eprintln ("OK: " + ok.to_string + " NG: " + ng.to_string));
         pure()
-    }.try(|err| println ("FATAL ERROR: " + err))
+    }.try(|err| eprintln ("FATAL ERROR: " + err))
 );
 
 run_tests: Array (TestCase) -> TestCase;
-run_tests = |tests| (
+run_tests = |tests, _| (
     tests.to_iter.fold_m(
         (0, 0), |(ok_total, ng_total), test|
-        let (ok, ng) = *test;
+        let (ok, ng) = *(test());
         pure $ (ok_total + ok, ng_total + ng)
     )
 );
     
 
-make_test: String -> IOFail () -> TestCase;
-make_test = |test_name, body| (
-    eval *(lift $ println ("=== " + test_name + " ==="));
+make_test: String -> Lazy (IOFail ()) -> TestCase;
+make_test = |test_name, body, _| (
+    eval *(lift $ eprintln ("=== " + test_name + " ==="));
     do {
-        let _ = *body;
-        eval *(lift $ println ("[OK] " + test_name));
+        let _ = *(body());
+        eval *(lift $ eprintln ("[OK] " + test_name));
         pure $ (1, 0)
     }.try(|err| 
-        eval *(println("error: " + err));
-        eval *(println("[NG] " + test_name));
+        eval *(eprintln("error: " + err));
+        eval *(eprintln("[NG] " + test_name));
         pure $ (0, 1)
     ).lift
 );

@@ -27,7 +27,7 @@ _match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH)
 
 _match_unquoted_str: Parser String;
 _match_unquoted_str = (
-    repeat(_match_unquoted_char).map_parser(|array| array._unsafe_to_string)
+    one_or_more(_match_unquoted_char).map_parser(|array| array._unsafe_to_string)
 );
 
 
@@ -45,6 +45,7 @@ _match_quoted_str = (
     let match_escaped: Parser String = (
         any_char
         .map_parser(|c| _unescape_table.@(c.to_I64))
+        //.map_parser(|c| eval debug_println("c="+c.to_string); c)
         .filter(|c| c != 0_U8)
         .map_parser(|c| [ c ]._unsafe_to_string)
     );
@@ -65,7 +66,9 @@ _match_quoted_str = (
         .map_parser(|(_, h4)| encode_utf8(h4))        
     );
 
-    match_backslash.then(
+    match_backslash
+    //.debug_parser(|res| "backslash="+ res.to_string)
+    .then(
         match_escaped
         .or_else(match_u_hex4)
     ).map_parser(|(_, str)| str)
@@ -73,9 +76,13 @@ _match_quoted_str = (
 
 _match_str_inner: Parser String;
 _match_str_inner = (
-    repeat(_match_unquoted_str.or_else(_match_quoted_str)).map_parser(
+    repeat(
+        _match_quoted_str
+        .or_else(_match_unquoted_str) // 1文字以上にマッチ
+    ).map_parser(
         |array| array.to_iter.concat_iter
     )
+    .or_else(unit.map_parser(|_| ""))
 );
 
 _parse_string: Parser String;

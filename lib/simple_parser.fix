@@ -1,6 +1,7 @@
 // simple parser
 module SimpleParser;
 
+import Debug;
 import Character;
 
 type Char = U8;
@@ -20,6 +21,7 @@ namespace Stream {
         filename: String,
         line: I64,
         column: I64,
+        position: I64,
         iter: Iterator Char
     };
 
@@ -28,18 +30,21 @@ namespace Stream {
         filename: "",
         line: 0,
         column: 0,
+        position: 0,
         iter: Iterator::empty
     };
     
     advance: Stream -> Option (Char, Stream);
     advance = |s| (
         let (c, next) = *(s.@iter.advance);
+        //eval debug_eprintln("advance: c="+c.to_string);
         let s = s.set_iter(next);
         let s = if c == _NEWLINE {
             s.set_line(s.@line + 1).set_column(0)
         } else {
             s.set_column(s.@column + 1)
         };
+        let s = s.set_position(s.@position + 1);
         pure $ (c, s)
     );
 
@@ -78,6 +83,20 @@ impl Stream: FromString {
 
 type ParseResult a = Result ErrMsg (a, Stream);
 
+impl [a: ToString] ParseResult a: ToString {
+    to_string = |res| (
+        if res.is_err {
+            "err(" + res.as_err + ")"
+        };
+        let (c, s) = res.as_ok;
+        "(" + c.to_string + ", pos=" + s.@position.to_string + ")"
+    );
+}
+
+impl (): ToString {
+    to_string = |_| "()";
+}
+
 _Fail: ErrMsg;
 _Fail = "Fail";
 
@@ -110,8 +129,12 @@ bind_parser = |f, p| |s| (
     pure $ (fc.as_ok, s)
 );
 
-
-
+debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
+debug_parser = |msg, p| |s| (
+    let res = p.run_parser(s);
+    eval debug_println(msg(res));
+    res
+);
 
 namespace Parser {
     unit: Parser ();
@@ -141,14 +164,29 @@ namespace Parser {
         let array = Array::empty(100);
         loop(
             (array, s), |(array, s)|
+            let pos = (s.@line, s.@column);
+            //eval debug_eprintln("s.@column="+s.@column.to_string);
             let res = p.run_parser(s);
             if res.is_err {
                 break $ pure $ (array, s)
             };
             let (a, s) = res.as_ok;
+            let pos2 = (s.@line, s.@column);
+            if pos == pos2 {
+                // avoid infinite loop (foolproof)
+                break $ pure $ (array, s)
+            };
             let array = array.push_back(a);
             continue $ (array, s)
         )
+    );
+
+    zero_or_more: Parser a -> Parser (Array a);
+    zero_or_more = repeat;
+
+    one_or_more: Parser a -> Parser (Array a);
+    one_or_more = |p| (
+        repeat(p).filter(|array| array.get_size >= 1)
     );
 
     any_char: Parser Char;

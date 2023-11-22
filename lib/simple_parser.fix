@@ -112,6 +112,7 @@ namespace Parser {
         let s: Stream = *(from_string(str));
         p(s);
 
+    // Transform the parse result value.
     map: (a -> b) -> Parser a -> Parser b;
     map = |f, p| |s| (
         let (c, s) = *(p.run_parser(s));
@@ -138,6 +139,7 @@ namespace Parser {
         res
     );
 
+    // Match zero-length string.
     unit: Parser ();
     unit = |s| pure $ ((), s);
 
@@ -149,6 +151,9 @@ namespace Parser {
 
     keep_both: (a, b) -> (a, b);
     keep_both = |(a,b)| (a,b);
+
+    drop_both: (a, b) -> ();
+    drop_both = |(a,b)| ();
 
     then: ((a, b) -> c) -> Parser b -> Parser a -> Parser c;
     then = |keep, pb, pa| |s| (
@@ -206,6 +211,7 @@ namespace Parser {
         repeat(p).filter(|array| array.get_size >= 1)
     );
 
+    // Matches a character of any kind.
     any_char: Parser Char;
     any_char = |s| (
         s.advance.map_or(
@@ -214,22 +220,28 @@ namespace Parser {
         )
     );
 
-    match_char: U8 -> Parser ();
-    match_char = |ex| |s| (
+    // Matches a character specified by `chr`, or fail.
+    match_char: Char -> Parser ();
+    match_char = |chr| |s| (
         s.advance.map_or(
             err $ _Fail,
-            |(c, next)| if c != ex { err $ _Fail } else { pure $ ((), next) }
+            |(c, next)| if c != chr { err $ _Fail } else { pure $ ((), next) }
         )
     );
 
+    // Matches a string specified by `str`, or fail.
     match_str: String -> Parser ();
     match_str = |str| (
+        if str.get_size == 1 { // Optimization
+            match_char(str.get_first_byte.as_some)
+        };
         str.get_bytes.pop_back.to_iter.fold(
             unit,
             |p, c| p.then(|(a,b)| (), match_char(c))
         )
     );
 
+    // Fail if specified condition does not met.
     filter: (a -> Bool) -> Parser a -> Parser a;
     filter = |f, p, s| (
         let (c, next) = *(p(s));

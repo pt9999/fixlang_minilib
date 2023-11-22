@@ -4,9 +4,34 @@ import Debug;
 
 import Json;
 import SimpleParser;
+import StringEx;
 
 _ws: Parser ();
 _ws = class_space.map(|str| ());
+
+_wrap_whitespaces: Parser a -> Parser a;
+_wrap_whitespaces = |p| (
+    _ws.then(keep_right, p)
+    .then(keep_left, _ws)
+);
+
+_begin_array: Parser ();
+_begin_array = _wrap_whitespaces(match_str("["));
+
+_begin_object: Parser ();
+_begin_object = _wrap_whitespaces(match_str("{"));
+
+_end_array: Parser ();
+_end_array = _wrap_whitespaces(match_str("]"));
+
+_end_object: Parser ();
+_end_object = _wrap_whitespaces(match_str("}"));
+
+_name_separator: Parser ();
+_name_separator = _wrap_whitespaces(match_str(":"));
+
+_value_separator: Parser ();
+_value_separator = _wrap_whitespaces(match_str(","));
 
 _parse_null: Parser ();
 _parse_null = match_str("null");
@@ -17,9 +42,6 @@ _parse_bool = (
     let parse_false = match_str("false").map(|_| false);
     parse_true.or_else(parse_false)
 );
-
-_match_doublequote: Parser ();
-_match_doublequote = match_char(_DOUBLEQUOTE);
 
 _match_unquoted_char: Parser U8;
 _match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH);
@@ -40,7 +62,6 @@ _unhex = |c| (
 
 _match_quoted_str: Parser String;
 _match_quoted_str = (
-    let match_backslash: Parser () = match_char(_BACKSLASH);
     let match_escaped: Parser String = (
         any_char
         .map(|c| _unescape_table.@(c.to_I64))
@@ -69,7 +90,7 @@ _match_quoted_str = (
         .map(encode_utf8)        
     );
 
-    match_backslash
+    match_char(_BACKSLASH)
     //.debug_parser(|res| "backslash="+ res.to_string)
     .then(
         keep_right,
@@ -91,12 +112,25 @@ _match_str_inner = (
 
 _parse_string: Parser String;
 _parse_string = (
-    _match_doublequote
+    match_char(_DOUBLEQUOTE)
     .then(keep_right, _match_str_inner)
     .then(keep_left, 
-        _match_doublequote
+        match_char(_DOUBLEQUOTE)
         .or_error("The double quote at the end of the string is missing.")
     )
+);
+
+/*
+_decode_json_obj: Parser Json;
+_decode_json_obj = (
+)
+*/
+
+_decode_json: Parser Json;
+_decode_json = (
+    _parse_null.map(|_| null())
+    .or_else(_parse_bool.map(|b| bool(b)))
+    .or_else(_parse_string.map(|str| string(str)))
 );
 
 decode: String -> Result ErrMsg Json;

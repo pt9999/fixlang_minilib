@@ -101,9 +101,9 @@ _Fail: ErrMsg;
 _Fail = "Fail";
 
 
-namespace Parser {
-    type Parser a = Stream -> ParseResult a;
+type Parser a = Stream -> ParseResult a;
 
+namespace Parser {
     run_parser: Stream -> Parser a -> ParseResult a;
     run_parser = |s, p| p(s);
 
@@ -111,40 +111,50 @@ namespace Parser {
     run_parser_str = |str, p| 
         let s: Stream = *(from_string(str));
         p(s);
-}
 
-map_parser: (a -> b) -> Parser a -> Parser b;
-map_parser = |f, p| |s| (
-    let (c, s) = *(p.run_parser(s));
-    pure $ (f(c), s)
-);
+    map: (a -> b) -> Parser a -> Parser b;
+    map = |f, p| |s| (
+        let (c, s) = *(p.run_parser(s));
+        pure $ (f(c), s)
+    );
 
-bind_parser: (a -> Result ErrMsg b) -> Parser a -> Parser b;
-bind_parser = |f, p| |s| (
-    let (c, s) = *(p.run_parser(s));
-    let fc = f(c);
-    if fc.is_err {
-        err $ fc.as_err
-    };
-    pure $ (fc.as_ok, s)
-);
+    map_parser: (a -> b) -> Parser a -> Parser b;
+    map_parser = map;
 
-debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
-debug_parser = |msg, p| |s| (
-    let res = p.run_parser(s);
-    eval debug_println(msg(res));
-    res
-);
+    bind_parser: (a -> Result ErrMsg b) -> Parser a -> Parser b;
+    bind_parser = |f, p| |s| (
+        let (c, s) = *(p.run_parser(s));
+        let fc = f(c);
+        if fc.is_err {
+            err $ fc.as_err
+        };
+        pure $ (fc.as_ok, s)
+    );
 
-namespace Parser {
+    debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
+    debug_parser = |msg, p| |s| (
+        let res = p.run_parser(s);
+        eval debug_println(msg(res));
+        res
+    );
+
     unit: Parser ();
     unit = |s| pure $ ((), s);
 
-    then: Parser b -> Parser a -> Parser (a, b);
-    then = |pb, pa| |s| (
+    keep_left: (a, b) -> a;
+    keep_left = |(a,b)| a;
+
+    keep_right: (a, b) -> b;
+    keep_right = |(a,b)| b;
+
+    keep_both: (a, b) -> (a, b);
+    keep_both = |(a,b)| (a,b);
+
+    then: ((a, b) -> c) -> Parser b -> Parser a -> Parser c;
+    then = |keep, pb, pa| |s| (
         let (a, s) = *(pa.run_parser(s));
         let (b, s) = *(pb.run_parser(s));
-        pure $ ((a, b), s)
+        pure $ (keep((a, b)), s)
     );
 
     or_else: Parser a -> Parser a -> Parser a;
@@ -156,24 +166,31 @@ namespace Parser {
         pa2.run_parser(s)
     );
 
+    or_error: String -> Parser a -> Parser a;
+    or_error = |msg, p| |s| (
+        let res = p.run_parser(s);
+        if res.is_ok {
+            pure $ res.as_ok
+        };
+        s.error(msg)
+    );
+
     forget: Parser a -> Parser ();
-    forget = |p| p.map_parser(|_| ());
+    forget = |p| p.map(|_| ());
 
     repeat: Parser a -> Parser (Array a);
     repeat = |p| |s| (
         let array = Array::empty(100);
         loop(
             (array, s), |(array, s)|
-            let pos = (s.@line, s.@column);
-            //eval debug_eprintln("s.@column="+s.@column.to_string);
+            let old_position = s.@position;
             let res = p.run_parser(s);
             if res.is_err {
                 break $ pure $ (array, s)
             };
             let (a, s) = res.as_ok;
-            let pos2 = (s.@line, s.@column);
-            if pos == pos2 {
-                // avoid infinite loop (foolproof)
+            if s.@position == old_position {
+                // Avoid infinite loop. (fool-proof)
                 break $ pure $ (array, s)
             };
             let array = array.push_back(a);
@@ -209,7 +226,7 @@ namespace Parser {
     match_str = |str| (
         str.get_bytes.pop_back.to_iter.fold(
             unit,
-            |p, c| p.then(match_char(c)).forget
+            |p, c| p.then(|(a,b)| (), match_char(c))
         )
     );
 
@@ -259,3 +276,13 @@ namespace Parser {
         ok $ (n, next)
     );
 }
+
+/*
+impl Parser: Monad {
+    pure = |a| |s| ok $ (a, s);
+    bind = |f, p| |s| (
+        let (a, s) = *(p.run_parser(s));
+        ok $ (f(a), s)
+    );
+}
+*/

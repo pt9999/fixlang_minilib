@@ -5,17 +5,16 @@ import Debug;
 import Json;
 import SimpleParser;
 
-
 _ws: Parser ();
-_ws = class_space.map_parser(|str| ());
+_ws = class_space.map(|str| ());
 
 _parse_null: Parser ();
 _parse_null = match_str("null");
 
 _parse_bool: Parser Bool;
 _parse_bool = (
-    let parse_true = match_str("true").map_parser(|_| true);
-    let parse_false = match_str("false").map_parser(|_| false);
+    let parse_true = match_str("true").map(|_| true);
+    let parse_false = match_str("false").map(|_| false);
     parse_true.or_else(parse_false)
 );
 
@@ -27,7 +26,7 @@ _match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH)
 
 _match_unquoted_str: Parser String;
 _match_unquoted_str = (
-    one_or_more(_match_unquoted_char).map_parser(|array| array._unsafe_to_string)
+    one_or_more(_match_unquoted_char).map(|array| array._unsafe_to_string)
 );
 
 
@@ -44,14 +43,18 @@ _match_quoted_str = (
     let match_backslash: Parser () = match_char(_BACKSLASH);
     let match_escaped: Parser String = (
         any_char
-        .map_parser(|c| _unescape_table.@(c.to_I64))
-        //.map_parser(|c| eval debug_println("c="+c.to_string); c)
+        .map(|c| _unescape_table.@(c.to_I64))
+        //.map(|c| eval debug_println("c="+c.to_string); c)
         .filter(|c| c != 0_U8)
-        .map_parser(|c| [ c ]._unsafe_to_string)
+        .map(|c| [ c ]._unsafe_to_string)
     );
     let match_hex: Parser U8 = any_char.bind_parser(|c| c._unhex);
-    let match_hex4: Parser U16 = match_hex.then(match_hex).then(match_hex).then(match_hex)
-        .map_parser( |(((a,b),c),d)| 
+    let match_hex4: Parser U16 = 
+        match_hex
+        .then(keep_both, match_hex)
+        .then(keep_both, match_hex)
+        .then(keep_both, match_hex)
+        .map( |(((a,b),c),d)| 
             let a = a.to_U16.shift_left(12_U16);
             let b = b.to_U16.shift_left(8_U16);
             let c = c.to_U16.shift_left(4_U16);
@@ -62,16 +65,17 @@ _match_quoted_str = (
         [ ch.to_U8 ]._unsafe_to_string;
     let match_u_hex4: Parser String = (
         match_char(_ASCII_LOWER_U)
-        .then(match_hex4)
-        .map_parser(|(_, h4)| encode_utf8(h4))        
+        .then(keep_right, match_hex4)
+        .map(encode_utf8)        
     );
 
     match_backslash
     //.debug_parser(|res| "backslash="+ res.to_string)
     .then(
+        keep_right,
         match_escaped
         .or_else(match_u_hex4)
-    ).map_parser(|(_, str)| str)
+    )
 );
 
 _match_str_inner: Parser String;
@@ -79,19 +83,20 @@ _match_str_inner = (
     repeat(
         _match_quoted_str
         .or_else(_match_unquoted_str) // 1文字以上にマッチ
-    ).map_parser(
+    ).map(
         |array| array.to_iter.concat_iter
     )
-    .or_else(unit.map_parser(|_| ""))
+    .or_else(unit.map(|_| ""))
 );
 
 _parse_string: Parser String;
 _parse_string = (
     _match_doublequote
-    .then(_match_str_inner)
-    .map_parser(|(_,str)| str)
-    .then(_match_doublequote)
-    .map_parser(|(str,_)| str)
+    .then(keep_right, _match_str_inner)
+    .then(keep_left, 
+        _match_doublequote
+        .or_error("The double quote at the end of the string is missing.")
+    )
 );
 
 decode: String -> Result ErrMsg Json;

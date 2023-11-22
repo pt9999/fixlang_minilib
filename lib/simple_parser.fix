@@ -109,9 +109,6 @@ namespace Parser {
         pure $ (f(c), s)
     );
 
-    map_parser: (a -> b) -> Parser a -> Parser b;
-    map_parser = map;
-
     bind_parser: (a -> Result ErrMsg b) -> Parser a -> Parser b;
     bind_parser = |f, p| |s| (
         let (c, s) = *(p.run_parser(s));
@@ -242,6 +239,12 @@ namespace Parser {
         )
     );
 
+    // Matches a character which is included in `str`.
+    match_one_of_char: String -> Parser Char;
+    match_one_of_char = |str| (
+        any_char.filter(|c| str.find(c).is_some)
+    );
+
     // Matches a string specified by `str`.
     match_str: String -> Parser ();
     match_str = |str| (
@@ -256,21 +259,9 @@ namespace Parser {
 
     // Matches a zero-or-more-length string. Each character should satisfy the specified condition.
     class: (Char -> Bool) -> Parser String;
-    class = |f, s| (
-        let arr: Array Char = Array::empty(100);
-        loop(
-            (arr, s), |(arr, s)|
-            let opt = s.advance;
-            if opt.is_none {
-                break $ ok $ (arr._unsafe_to_string, s)
-            };
-            let (c, next) = opt.as_some;
-            if !f(c) {
-                break $ ok $ (arr._unsafe_to_string, s)
-            };
-            let arr = arr.push_back(c);
-            continue $ (arr, next)
-        )
+    class = |f| (
+        repeat(any_char.filter(f))
+        .map(|array| array._unsafe_to_string)
     );
 
     class_whitespace: Parser String;

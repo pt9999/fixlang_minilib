@@ -1,13 +1,13 @@
 // JSON decoder
 module JsonDecoder;
 
+import Character;
 import Debug;
 import HashMap;
 
 import Json;
 import SimpleParser;
 import StringEx;
-
 
 decode: String -> Result ErrMsg Json;
 decode = |str| (
@@ -17,7 +17,15 @@ decode = |str| (
     pure $ json
 );
 
-// see: RFC 8259 (https://datatracker.ietf.org/doc/html/rfc8259)
+//=============================================================
+// 1. Introduction
+//=============================================================
+
+// The definitions below are private, so users of this module do not
+// need to worry about them.
+//
+// JSON file format is specified by RFC 8259.
+// see: https://datatracker.ietf.org/doc/html/rfc8259
 
 //=============================================================
 // 2. JSON Grammer
@@ -78,7 +86,7 @@ _parse_bool = (
 );
 
 //=============================================================
-// 3. Objects
+// 4. Objects
 //=============================================================
 
 _parse_object: Parser (HashMap String Json);
@@ -111,7 +119,7 @@ _parse_object = (
 );
 
 //=============================================================
-// 3. Arrays
+// 5. Arrays
 //=============================================================
 
 _parse_array: Parser (Array Json);
@@ -133,6 +141,18 @@ _parse_array = (
 );
 
 //=============================================================
+// 6. Numbers
+//=============================================================
+
+_parse_number: Parser F64;
+_parse_number = (
+    let minus = match_str("-");
+    let plus = match_str("+");
+    let e = match_str("e").or_else(match_str("E"));
+    err $ "not-impl"
+);
+
+//=============================================================
 // 7. Strings
 //=============================================================
 
@@ -145,12 +165,12 @@ _match_unquoted_str = (
 );
 
 
-_unhex: U8 -> Result ErrMsg U8;
+_unhex: U8 -> U8;
 _unhex = |c| (
-    if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { ok $ c - 48_U8 };
-    if /* 'A' = */ 65_U8 <= c && c <= /* 'F' = */ 70_U8 { ok $ c - 65_U8 + 10_U8 };
-    if /* 'a' = */ 97_U8 <= c && c <= /* 'f' = */ 102_U8 { ok $ c - 97_U8 + 10_U8 };
-    err $ _NotMatch
+    if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { c - 48_U8 };
+    if /* 'A' = */ 65_U8 <= c && c <= /* 'F' = */ 70_U8 { c - 65_U8 + 10_U8 };
+    if /* 'a' = */ 97_U8 <= c && c <= /* 'f' = */ 102_U8 { c - 97_U8 + 10_U8 };
+    0_U8 // FIXME abort?
 );
 
 _match_quoted_str: Parser String;
@@ -162,7 +182,7 @@ _match_quoted_str = (
         .filter(|c| c != 0_U8)
         .map(|c| [ c ]._unsafe_to_string)
     );
-    let match_hex: Parser U8 = any_char.bind_parser(|c| c._unhex);
+    let match_hex: Parser U8 = any_char.filter(is_xdigit).map(_unhex);
     let match_hex4: Parser U16 = 
         match_hex
         .then(keep_both, match_hex)

@@ -8,8 +8,10 @@ clean:
 
 test: test_parser test_json
 
+PARSER_TEST_SOURCE := simple_parser_test.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
+
 test_parser:
-	fix run -f simple_parser_test.fix lib/simple_parser.fix lib/unit_test.fix
+	fix run -f $(PARSER_TEST_SOURCE)
 
 JSON_TEST_SOURCE := json_test.fix lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
 

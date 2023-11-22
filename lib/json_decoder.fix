@@ -1,0 +1,91 @@
+module JsonDecoder;
+
+import Debug;
+
+import Json;
+import SimpleParser;
+
+
+_ws: Parser ();
+_ws = class_space.map_parser(|str| ());
+
+_parse_null: Parser ();
+_parse_null = match_str("null");
+
+_parse_bool: Parser Bool;
+_parse_bool = (
+    let parse_true = match_str("true").map_parser(|_| true);
+    let parse_false = match_str("false").map_parser(|_| false);
+    parse_true.or_else(parse_false)
+);
+
+_match_doublequote: Parser ();
+_match_doublequote = match_char(_DOUBLEQUOTE);
+
+_match_unquoted_char: Parser U8;
+_match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH);
+
+_match_unquoted_str: Parser String;
+_match_unquoted_str = (
+    repeat(_match_unquoted_char).map_parser(|array| array._unsafe_to_string)
+);
+
+
+_unhex: U8 -> Result ErrMsg U8;
+_unhex = |c| (
+    if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { ok $ c - 48_U8 };
+    if /* 'A' = */ 65_U8 <= c && c <= /* 'F' = */ 70_U8 { ok $ c - 65_U8 + 10_U8 };
+    if /* 'a' = */ 97_U8 <= c && c <= /* 'f' = */ 102_U8 { ok $ c - 97_U8 + 10_U8 };
+    err $ _Fail
+);
+
+_match_quoted_str: Parser String;
+_match_quoted_str = (
+    let match_backslash: Parser () = match_char(_BACKSLASH);
+    let match_escaped: Parser String = (
+        any_char
+        .map_parser(|c| _unescape_table.@(c.to_I64))
+        .filter(|c| c != 0_U8)
+        .map_parser(|c| [ c ]._unsafe_to_string)
+    );
+    let match_hex: Parser U8 = any_char.bind_parser(|c| c._unhex);
+    let match_hex4: Parser U16 = match_hex.then(match_hex).then(match_hex).then(match_hex)
+        .map_parser( |(((a,b),c),d)| 
+            let a = a.to_U16.shift_left(12_U16);
+            let b = b.to_U16.shift_left(8_U16);
+            let c = c.to_U16.shift_left(4_U16);
+            let d = d.to_U16.shift_left(0_U16);
+            a.bit_or(b).bit_or(c).bit_or(d));
+    let encode_utf8: U16 -> String = |ch|
+        // FIXME not implemented yet
+        [ ch.to_U8 ]._unsafe_to_string;
+    let match_u_hex4: Parser String = (
+        match_char(_ASCII_LOWER_U)
+        .then(match_hex4)
+        .map_parser(|(_, h4)| encode_utf8(h4))        
+    );
+
+    match_backslash.then(
+        match_escaped
+        .or_else(match_u_hex4)
+    ).map_parser(|(_, str)| str)
+);
+
+_match_str_inner: Parser String;
+_match_str_inner = (
+    repeat(_match_unquoted_str.or_else(_match_quoted_str)).map_parser(
+        |array| array.to_iter.concat_iter
+    )
+);
+
+_parse_string: Parser String;
+_parse_string = (
+    _match_doublequote
+    .then(_match_str_inner)
+    .map_parser(|(_,str)| str)
+    .then(_match_doublequote)
+    .map_parser(|(str,_)| str)
+);
+
+decode: String -> Result ErrMsg Json;
+decode = |str| err $ "";

@@ -1,8 +1,35 @@
 module Main;
 
-import UnitTest;
-import Json;
 import HashMap;
+
+import UnitTest;
+import SimpleParser;
+import Json;
+import JsonDecoder;
+
+test_eq_1: (Json, Json, Bool) -> TestCase;
+test_eq_1 = |(j1, j2, b)| (
+    make_test("test_eq (" + j1.to_string + "," + j2.to_string + "," + b.to_string + ")") $
+    let _ = *(assert_equal("eq", j1 == j2, b));
+    pure()
+);
+
+test_eq: TestCase;
+test_eq = (
+    let json1 = [("null", null()), ("true", bool(true)), ("false", bool(false))].to_object;
+    let json2 = [("true", bool(true)), ("false", bool(false)), ("null", null())].to_object;
+    let json3 = [("true", bool(true)), ("false", bool(true)), ("null", null())].to_object;
+    [
+        test_eq_1 $ (null(), null(), true),
+        test_eq_1 $ (null(), bool(true), false),
+        test_eq_1 $ (bool(true), bool(true), true),
+        test_eq_1 $ (bool(true), bool(false), false),
+        test_eq_1 $ (json1, json2, true),
+        test_eq_1 $ (json2, json3, false)
+
+    ]
+    .run_tests
+);
 
 test_encode_ok: (Json, String) -> TestCase;
 test_encode_ok = |(json, expected)| (
@@ -14,14 +41,8 @@ test_encode_ok = |(json, expected)| (
     pure()
 );
 
-main: IO ();
-main = (
-    if (false) {
-        Iterator::count_up(0).take(256)
-        .map(|i| (i.to_U8, _escape_table.@(i)))
-        .filter(|(k,v)| v != 0_U8)
-        .fold_m((), |_, (k,v)| println (k.to_string + " = " + v.to_string))
-    };
+test_encode: TestCase;
+test_encode = (
     let obj = [("null", null()), ("true", bool(true)), ("false", bool(false))].to_object;
     let obj2 = [("num", number(1.2)), ("str", string("abc")), ("obj", obj)].to_object;
     [
@@ -35,6 +56,39 @@ main = (
         test_encode_ok $ (array([number(1.2), string("hoge")]), "[1.200000,\"hoge\"]"),
         test_encode_ok $ (obj, "{\"false\":false,\"null\":null,\"true\":true}"),
         test_encode_ok $ (obj2, "{\"num\":1.200000,\"obj\":{\"false\":false,\"null\":null,\"true\":true},\"str\":\"abc\"}")
+    ]
+    .run_tests
+);
+
+test_parser: TestCase;
+test_parser = (
+    make_test("test_parser") $
+    let _ = *(assert_true("null", _parse_null.run_parser_str("null012").is_ok));
+    let _ = *(assert_true("true", let res = _parse_bool.run_parser_str("true012"); 
+            res.is_ok && let (b, s) = res.as_ok; b == true));
+    let _ = *(assert_true("false", let res = _parse_bool.run_parser_str("false012");
+            res.is_ok && let (b, s) = res.as_ok; b == false));
+    let _ = *(assert_true("nonbool", _parse_bool.run_parser_str("null012").is_err));
+    pure()
+);
+
+test_parse_string: TestCase;
+test_parse_string = (
+    make_test("test_parse_string") $
+    let res = _parse_string.run_parser_str("\"ab\\\\\\\"de\"");
+    let _ = *(assert_true("ok", res.is_ok));
+    let (str, next) = res.as_ok;
+    let _ = *(assert_equal("eq", str, "ab\\\"de"));
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        //test_eq,
+        //test_encode,
+        //test_parser,
+        test_parse_string
     ]
     .run_test_driver
 );

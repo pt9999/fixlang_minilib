@@ -94,24 +94,84 @@ namespace Parser {
         p(s);
 }
 
-/*
-impl Parser a: Functor {
-    map = |f, p, s| (
-        let (c, s) = *(p(s));
-        pure $ (f(c), s)
-    );
-}
-*/
+map_parser: (a -> b) -> Parser a -> Parser b;
+map_parser = |f, p| |s| (
+    let (c, s) = *(p.run_parser(s));
+    pure $ (f(c), s)
+);
+
+bind_parser: (a -> Result ErrMsg b) -> Parser a -> Parser b;
+bind_parser = |f, p| |s| (
+    let (c, s) = *(p.run_parser(s));
+    let fc = f(c);
+    if fc.is_err {
+        err $ fc.as_err
+    };
+    pure $ (fc.as_ok, s)
+);
+
+
+
 
 namespace Parser {
     unit: Parser ();
     unit = |s| pure $ ((), s);
 
-    char: Parser Char;
-    char = |s| (
+    then: Parser b -> Parser a -> Parser (a, b);
+    then = |pb, pa| |s| (
+        let (a, s) = *(pa.run_parser(s));
+        let (b, s) = *(pb.run_parser(s));
+        pure $ ((a, b), s)
+    );
+
+    or_else: Parser a -> Parser a -> Parser a;
+    or_else = |pa2, pa1| |s| (
+        let res = pa1.run_parser(s);
+        if res.is_ok {
+            pure $ res.as_ok
+        };
+        pa2.run_parser(s)
+    );
+
+    forget: Parser a -> Parser ();
+    forget = |p| p.map_parser(|_| ());
+
+    repeat: Parser a -> Parser (Array a);
+    repeat = |p| |s| (
+        let array = Array::empty(100);
+        loop(
+            (array, s), |(array, s)|
+            let res = p.run_parser(s);
+            if res.is_err {
+                break $ pure $ (array, s)
+            };
+            let (a, s) = res.as_ok;
+            let array = array.push_back(a);
+            continue $ (array, s)
+        )
+    );
+
+    any_char: Parser Char;
+    any_char = |s| (
         s.advance.map_or(
             err $ _Fail,
-            |(c, next)| (c, next)
+            |(c, next)| pure $ (c, next)
+        )
+    );
+
+    match_char: U8 -> Parser ();
+    match_char = |ex| |s| (
+        s.advance.map_or(
+            err $ _Fail,
+            |(c, next)| if c != ex { err $ _Fail } else { pure $ ((), next) }
+        )
+    );
+
+    match_str: String -> Parser ();
+    match_str = |str| (
+        str.get_bytes.pop_back.to_iter.fold(
+            unit,
+            |p, c| p.then(match_char(c)).forget
         )
     );
 
@@ -119,13 +179,13 @@ namespace Parser {
     filter = |f, p, s| (
         let (c, next) = *(p(s));
         if !f(c) {
-            _Fail
+            err $ _Fail
         };
-        (c, next)
+        pure $ (c, next)
     );
 
-    cls: (Char -> Bool) -> Parser String;
-    cls = |f, s| (
+    class: (Char -> Bool) -> Parser String;
+    class = |f, s| (
         let arr: Array Char = Array::empty(100);
         loop(
             (arr, s), |(arr, s)|
@@ -142,15 +202,22 @@ namespace Parser {
         )
     );
 
+    class_whitespace: Parser String;
+    class_whitespace = class(Character::is_space);
+    
+    class_lower: Parser String;
+    class_lower = class(Character::is_lower);
+
+    class_digit: Parser String;
+    class_digit = class(Character::is_digit);
+
     integer: Parser I64;
     integer = |s| (
-        let (digit, next) = *(cls(Character::is_digit).run_parser(s));
+        let (digit, next) = *(class_digit.run_parser(s));
         if (digit.get_size == 0) {
             err $ _Fail
         };
         let n = *(from_string(digit));
         ok $ (n, next)
     );
-
-    
 }

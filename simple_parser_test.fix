@@ -34,22 +34,72 @@ test_stream_error = (
     pure()    
 );
 
-test_parser_cls_1: (String, String) -> TestCase;
-test_parser_cls_1 = |(text, expected)| (
-    let testname = "test_parser_cls(" + text + "," + expected + ")";
+test_parser_repeat_ok: (String, String) -> TestCase;
+test_parser_repeat_ok = |(text, expected)| (
+    let testname = "test_parser_repeat_ok(" + text + "," + expected + ")";
     make_test(testname) $
-    let p = Parser::cls(is_digit);
+    let p = Parser::repeat(Parser::any_char.filter(|c| !c.is_space));
+    let (array, next) = *(from_result $ p.run_parser_str(text));
+    let actual = array._unsafe_to_string;
+    let _ = *(assert_equal("expect", expected, actual));
+    pure()
+);
+
+test_parser_repeat: TestCase;
+test_parser_repeat = (
+    [
+        test_parser_repeat_ok $ ("abc def", "abc"),
+        test_parser_repeat_ok $ ("a1b2 c3", "a1b2"),
+        test_parser_repeat_ok $ (" ab", "")
+    ]
+    .run_tests
+);
+
+test_parser_match_str_ok: (String, String) -> TestCase;
+test_parser_match_str_ok = |(text, match)| (
+    let testname = "test_parser_match_str_ok(" + text + "," + match + ")";
+    make_test(testname) $
+    let p = Parser::match_str(match);
+    let (_, next) = *(from_result $ p.run_parser_str(text));
+    let _ = *(assert_equal("column", next.@column, match.get_size));
+    pure()
+);
+
+test_parser_match_str_err: (String, String) -> TestCase;
+test_parser_match_str_err = |(text, match)| (
+    let testname = "test_parser_match_str_err(" + text + "," + match + ")";
+    make_test(testname) $
+    let p = Parser::match_str(match);
+    let res = p.run_parser_str(text);
+    let _ = *(assert_true("err", res.is_err));
+    pure()
+);
+
+test_parser_match_str: TestCase;
+test_parser_match_str = (
+    [
+        test_parser_match_str_ok $ ("null123", "null"),
+        test_parser_match_str_ok $ ("false123", "false"),
+        test_parser_match_str_err $ ("nulxl123", "null")
+    ]
+    .run_tests
+);
+
+test_parser_class_ok: (Parser String, String, String) -> TestCase;
+test_parser_class_ok = |(p, text, expected)| (
+    let testname = "test_parser_class_ok(" + text + "," + expected + ")";
+    make_test(testname) $
     let (token, next) = *(from_result $ p.run_parser_str(text));
     let _ = *(assert_equal("token", expected, token));
     pure()
 );
 
-test_parser_cls: TestCase;
-test_parser_cls = (
+test_parser_class: TestCase;
+test_parser_class = (
     [
-        test_parser_cls_1 $ ("01234abc", "01234"),
-        test_parser_cls_1 $ ("abc0123", ""),
-        test_parser_cls_1 $ ("", "")
+        test_parser_class_ok $ (class_digit, "01234abc", "01234"),
+        test_parser_class_ok $ (class_digit, "abc0123", ""),
+        test_parser_class_ok $ (class_lower, "abc0123", "abc")
     ].run_tests
 );
 
@@ -88,7 +138,9 @@ main = (
     [
         test_stream_readall,
         test_stream_error,
-        test_parser_cls,
+        test_parser_repeat,
+        test_parser_match_str,
+        test_parser_class,
         test_parser_integer
     ]
     .run_test_driver

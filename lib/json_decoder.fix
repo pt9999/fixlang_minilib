@@ -1,3 +1,4 @@
+// JSON decoder
 module JsonDecoder;
 
 import Debug;
@@ -7,14 +8,20 @@ import Json;
 import SimpleParser;
 import StringEx;
 
-_ws: Parser ();
-_ws = class_whitespace.map(|str| ());
 
-_wrap_whitespaces: Parser a -> Parser a;
-_wrap_whitespaces = |p| (
-    _ws.then(keep_right, p)
-    .then(keep_left, _ws)
+decode: String -> Result ErrMsg Json;
+decode = |str| (
+    let p = _wrap_whitespaces(_parse_value)
+        .then(keep_left, match_end_of_stream);
+    let (json, next) = *(p.run_parser_str(str));
+    pure $ json
 );
+
+// see: RFC 8259 (https://datatracker.ietf.org/doc/html/rfc8259)
+
+//=============================================================
+// 2. JSON Grammer
+//=============================================================
 
 _begin_array: Parser ();
 _begin_array = _wrap_whitespaces(match_str("["));
@@ -34,6 +41,32 @@ _name_separator = _wrap_whitespaces(match_str(":"));
 _value_separator: Parser ();
 _value_separator = _wrap_whitespaces(match_str(","));
 
+_ws: Parser ();
+_ws = class_whitespace.map(|str| ());
+
+_wrap_whitespaces: Parser a -> Parser a;
+_wrap_whitespaces = |p| (
+    _ws.then(keep_right, p)
+    .then(keep_left, _ws)
+);
+
+//=============================================================
+// 3. Values
+//=============================================================
+
+_parse_value: Parser Json;
+_parse_value = |s| (
+    // Make a lazy parser, so that we can avoid stack overflow.
+    let parser = (
+        _parse_null.map(null)
+        .or_else(_parse_bool.map(bool))
+        .or_else(_parse_string.map(string))
+        .or_else(_parse_object.map(object))
+        .or_else(_parse_array.map(array))
+    );
+    parser.run_parser(s)
+);
+
 _parse_null: Parser ();
 _parse_null = match_str("null");
 
@@ -43,6 +76,65 @@ _parse_bool = (
     let parse_false = match_str("false").map(|_| false);
     parse_true.or_else(parse_false)
 );
+
+//=============================================================
+// 3. Objects
+//=============================================================
+
+_parse_object: Parser (HashMap String Json);
+_parse_object = (
+    let member : Parser (String, Json) = 
+        _parse_string
+        .then(keep_left, _name_separator.or_error("Missing ':'"))
+        .then(keep_both, _parse_value);
+    let sep_member : Parser (String, Json) =
+        _value_separator
+        .then(keep_right, member);
+
+    let to_hashmap: Array (String, Json) -> HashMap String Json =
+        |kvs| kvs.to_iter.fold(
+            HashMap::empty(100),
+            |h, (k, v)| h.insert(k, v)
+        );
+    let body = (
+        member
+        .then(|(kv, kvs)| [kv].append(kvs), 
+            repeat(sep_member))
+        .map(to_hashmap)
+        .or_else(unit.map(|_| HashMap::empty(0)))
+    );
+
+    _begin_object /* .debug_parser(|_| "_begin_object") */
+    .then(keep_right, body)
+    .then(keep_left, 
+        _end_object.or_error("Missing '}'"))
+);
+
+//=============================================================
+// 3. Arrays
+//=============================================================
+
+_parse_array: Parser (Array Json);
+_parse_array = (
+    let sep_value : Parser Json =
+        _value_separator
+        .then(keep_right, _parse_value);
+    let body = (
+        _parse_value
+        .then(|(v, vs)| [v].append(vs), 
+            repeat(sep_value))
+        .or_else(unit.map(|_| Array::empty(0)))
+    );
+
+    _begin_array /* .debug_parser(|_| "_begin_array") */
+    .then(keep_right, body)
+    .then(keep_left, 
+        _end_array.or_error("Missing ']'"))
+);
+
+//=============================================================
+// 7. Strings
+//=============================================================
 
 _match_unquoted_char: Parser U8;
 _match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH);
@@ -58,7 +150,7 @@ _unhex = |c| (
     if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { ok $ c - 48_U8 };
     if /* 'A' = */ 65_U8 <= c && c <= /* 'F' = */ 70_U8 { ok $ c - 65_U8 + 10_U8 };
     if /* 'a' = */ 97_U8 <= c && c <= /* 'f' = */ 102_U8 { ok $ c - 97_U8 + 10_U8 };
-    err $ _Fail
+    err $ _NotMatch
 );
 
 _match_quoted_str: Parser String;
@@ -119,54 +211,4 @@ _parse_string = (
         match_char(_DOUBLEQUOTE)
         .or_error("The double quote at the end of the string is missing.")
     )
-);
-
-_parse_object: Parser (HashMap String Json);
-_parse_object = (
-    let member : Parser (String, Json) = 
-        _parse_string
-        .then(keep_left, _name_separator.or_error("Missing ':'"))
-        .then(keep_both, _decode_json);
-    let sep_member : Parser (String, Json) =
-        _value_separator
-        .then(keep_right, member);
-
-    let to_hashmap: Array (String, Json) -> HashMap String Json =
-        |kvs| kvs.to_iter.fold(
-            HashMap::empty(100),
-            |h, (k, v)| h.insert(k, v)
-        );
-    let body = (
-        member
-        .then(|(kv, kvs)| [kv].append(kvs), 
-            repeat(sep_member))
-        .map(to_hashmap)
-        .or_else(unit.map(|_| HashMap::empty(0)))
-    );
-
-    _begin_object.debug_parser(|_| "_begin_object")
-    .then(keep_right, body)
-    .then(keep_left, 
-        _end_object.or_error("Missing '}'"))
-);
-
-
-_decode_json: Parser Json;
-_decode_json = |s| (
-    // Make a lazy parser, so that we can avoid stack overflow.
-    let parser = (
-        _parse_null.map(|_| null())
-        .or_else(_parse_bool.map(|b| bool(b)))
-        .or_else(_parse_string.map(|str| string(str)))
-        .or_else(_parse_object.map(|hash| object(hash)))
-    );
-    parser.run_parser(s)
-);
-
-decode: String -> Result ErrMsg Json;
-decode = |str| (
-    let p = _wrap_whitespaces(_decode_json)
-        .then(keep_left, match_end_of_stream);
-    let (json, next) = *(p.run_parser_str(str));
-    pure $ json
 );

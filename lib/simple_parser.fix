@@ -3,18 +3,12 @@ module SimpleParser;
 
 import Debug;
 import Character;
+import StringEx;
 
 type Char = U8;
 
 _NEWLINE: Char;
 _NEWLINE = 10_U8;
-
-namespace CharArray {
-    _unsafe_to_string: Array Char -> String;
-    _unsafe_to_string = |a| (
-        String::_unsafe_from_c_str (a.push_back(0_U8))
-    );
-}
 
 namespace Stream {
     type Stream = box struct {
@@ -93,8 +87,8 @@ impl [a: ToString] ParseResult a: ToString {
     );
 }
 
-_Fail: ErrMsg;
-_Fail = "Fail";
+_NotMatch: ErrMsg;
+_NotMatch = "NotMatch";
 
 
 type Parser a = Stream -> ParseResult a;
@@ -108,7 +102,7 @@ namespace Parser {
         let s: Stream = *(from_string(str));
         p(s);
 
-    // Transform the parse result value.
+    // Transform the result value.
     map: (a -> b) -> Parser a -> Parser b;
     map = |f, p| |s| (
         let (c, s) = *(p.run_parser(s));
@@ -151,6 +145,7 @@ namespace Parser {
     drop_both: (a, b) -> ();
     drop_both = |(a,b)| ();
 
+    // Combine two parsers. The result value is transformed by specified function.
     then: ((a, b) -> c) -> Parser b -> Parser a -> Parser c;
     then = |keep, pb, pa| |s| (
         let (a, s) = *(pa.run_parser(s));
@@ -158,11 +153,26 @@ namespace Parser {
         pure $ (keep((a, b)), s)
     );
 
+    // If the specified condition are not met, returns _NotMatch.
+    filter: (a -> Bool) -> Parser a -> Parser a;
+    filter = |f, p, s| (
+        let (c, next) = *(p(s));
+        if !f(c) {
+            err $ _NotMatch
+        };
+        pure $ (c, next)
+    );
+
+    // if first parser (pa1) did not match (ie. not a syntax error), 
+    // try second parser (pa2).
     or_else: Parser a -> Parser a -> Parser a;
     or_else = |pa2, pa1| |s| (
         let res = pa1.run_parser(s);
         if res.is_ok {
             pure $ res.as_ok
+        };
+        if res.as_err != _NotMatch {
+            err $ res.as_err
         };
         pa2.run_parser(s)
     );
@@ -176,9 +186,7 @@ namespace Parser {
         s.error(msg)
     );
 
-    forget: Parser a -> Parser ();
-    forget = |p| p.map(|_| ());
-
+    // Repeat matches as many as possible.
     repeat: Parser a -> Parser (Array a);
     repeat = |p| |s| (
         let array = Array::empty(100);
@@ -220,21 +228,21 @@ namespace Parser {
     any_char: Parser Char;
     any_char = |s| (
         s.advance.map_or(
-            err $ _Fail,
+            err $ _NotMatch,
             |(c, next)| pure $ (c, next)
         )
     );
 
-    // Matches a character specified by `chr`, or fail.
+    // Matches a character specified by `chr`.
     match_char: Char -> Parser ();
     match_char = |chr| |s| (
         s.advance.map_or(
-            err $ _Fail,
-            |(c, next)| if c != chr { err $ _Fail } else { pure $ ((), next) }
+            err $ _NotMatch,
+            |(c, next)| if c != chr { err $ _NotMatch } else { pure $ ((), next) }
         )
     );
 
-    // Matches a string specified by `str`, or fail.
+    // Matches a string specified by `str`.
     match_str: String -> Parser ();
     match_str = |str| (
         if str.get_size == 1 { // Optimization
@@ -246,16 +254,7 @@ namespace Parser {
         )
     );
 
-    // Fail if specified condition does not met.
-    filter: (a -> Bool) -> Parser a -> Parser a;
-    filter = |f, p, s| (
-        let (c, next) = *(p(s));
-        if !f(c) {
-            err $ _Fail
-        };
-        pure $ (c, next)
-    );
-
+    // Matches a zero-or-more-length string. Each character should satisfy the specified condition.
     class: (Char -> Bool) -> Parser String;
     class = |f, s| (
         let arr: Array Char = Array::empty(100);
@@ -287,7 +286,7 @@ namespace Parser {
     integer = |s| (
         let (digit, next) = *(class_digit.run_parser(s));
         if (digit.get_size == 0) {
-            err $ _Fail
+            err $ _NotMatch
         };
         let n = *(from_string(digit));
         ok $ (n, next)

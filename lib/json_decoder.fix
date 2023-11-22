@@ -134,20 +134,23 @@ _parse_object = (
 
 _parse_array: Parser (Array Json);
 _parse_array = (
-    let sep_value : Parser Json =
-        _value_separator
-        .then(keep_right, _parse_value);
-    let body = (
+    let sep_value : Parser Json = do {
+        let _ = *_value_separator;
         _parse_value
-        .then(|(v, vs)| [v].append(vs), 
-            repeat(sep_value))
-        .or_else(unit.map(|_| Array::empty(0)))
-    );
+    };
+    let body : Parser (Array Json) = do {
+        let first = *_parse_value;
+        let rest = *(repeat(sep_value));
+        pure $ [ first ].append(rest)
+    };
+    let body = body.or_else(unit.map(|_| Array::empty(0)));
 
-    _begin_array /* .debug_parser(|_| "_begin_array") */
-    .then(keep_right, body)
-    .then(keep_left, 
-        _end_array.or_error("Missing ']'"))
+    do {
+        let _ = *_begin_array;
+        let values = *body;
+        let _ = *(_end_array.or_error("Missing ']'"));
+        pure $ values
+    }
 );
 
 //=============================================================
@@ -193,52 +196,50 @@ _match_quoted_str = (
         .map(|c| [ c ]._unsafe_to_string)
     );
     let match_hex: Parser U8 = any_char.filter(is_xdigit).map(_unhex);
-    let match_hex4: Parser U16 = 
-        match_hex
-        .then(keep_both, match_hex)
-        .then(keep_both, match_hex)
-        .then(keep_both, match_hex)
-        .map( |(((a,b),c),d)| 
-            let a = a.to_U16.shift_left(12_U16);
-            let b = b.to_U16.shift_left(8_U16);
-            let c = c.to_U16.shift_left(4_U16);
-            let d = d.to_U16.shift_left(0_U16);
-            a.bit_or(b).bit_or(c).bit_or(d));
+    let match_hex4: Parser U16 = do {
+        let a = (*match_hex).to_U16.shift_left(12_U16);
+        let b = (*match_hex).to_U16.shift_left(8_U16);
+        let c = (*match_hex).to_U16.shift_left(4_U16);
+        let d = (*match_hex).to_U16.shift_left(0_U16);
+        let codepoint : U16 = a.bit_or(b).bit_or(c).bit_or(d);
+        pure $ codepoint
+    };
+            
     let encode_utf8: U16 -> String = |ch|
-        // FIXME not implemented yet
+        // FIXME only 0..255 is supported currently
         [ ch.to_U8 ]._unsafe_to_string;
-    let match_u_hex4: Parser String = (
-        match_char(_ASCII_LOWER_U)
-        .then(keep_right, match_hex4)
-        .map(encode_utf8)        
-    );
+    let match_u_hex4: Parser String = do {
+        let _ = *(match_char(_ASCII_LOWER_U));
+        let codepoint = *match_hex4;
+        pure $ encode_utf8(codepoint)
+    };
 
-    match_char(_BACKSLASH)
-    //.debug_parser(|res| "backslash="+ res.to_string)
-    .then(
-        keep_right,
-        match_escaped
-        .or_else(match_u_hex4)
-    )
+    do {
+        let _ = *(match_char(_BACKSLASH));
+        let str = *(match_escaped.or_else(match_u_hex4));
+        pure $ str
+    }
 );
 
 _match_str_inner: Parser String;
-_match_str_inner = (
+_match_str_inner = do {
     repeat(
         _match_quoted_str
-        .or_else(_match_unquoted_str) // 1文字以上にマッチ
+        .or_else(_match_unquoted_str) // match one or more characters
     ).map(
         |array| array.to_iter.concat_iter
     )
     .or_else(unit.map(|_| ""))
-);
+};
 
 _parse_string: Parser String;
-_parse_string = (
-    match_char(_DOUBLEQUOTE)
-    .then(keep_right, _match_str_inner)
-    .then(keep_left, 
+_parse_string = do {
+    let _ = *(match_char(_DOUBLEQUOTE));
+    let str = *_match_str_inner;
+    let _ = *(
         match_char(_DOUBLEQUOTE)
         .or_error("The double quote at the end of the string is missing.")
-    )
-);
+    );
+    pure $ str
+};
+

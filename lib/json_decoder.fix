@@ -36,22 +36,22 @@ _json_text = do {
     pure $ json
 };
 
-_begin_array: Parser String;
+_begin_array: Parser ();
 _begin_array = _wrap_whitespaces(match_str("["));
 
-_begin_object: Parser String;
+_begin_object: Parser ();
 _begin_object = _wrap_whitespaces(match_str("{"));
 
-_end_array: Parser String;
+_end_array: Parser ();
 _end_array = _wrap_whitespaces(match_str("]"));
 
-_end_object: Parser String;
+_end_object: Parser ();
 _end_object = _wrap_whitespaces(match_str("}"));
 
-_name_separator: Parser String;
+_name_separator: Parser ();
 _name_separator = _wrap_whitespaces(match_str(":"));
 
-_value_separator: Parser String;
+_value_separator: Parser ();
 _value_separator = _wrap_whitespaces(match_str(","));
 
 _ws: Parser ();
@@ -167,50 +167,51 @@ _parse_array = (
 
 _parse_number: Parser F64;
 _parse_number = (
-    // TODO: Parser () に置き換える
+    let _CHAR_0 = "0".get_bytes.@(0);
+    let _CHAR_1 = "1".get_bytes.@(0);
+    let _CHAR_9 = "9".get_bytes.@(0);
+    let _CHAR_e = "e".get_bytes.@(0);
+    let _CHAR_E = "E".get_bytes.@(0);
     let match_decimal_point = match_str(".");
-    let match_digit = match_one_of_char("0123456789");
-    let match_digit1_9 = match_one_of_char("123456789");
-    let match_e = match_one_of_char("eE");
+    let match_digit = match_any_char.filter(|c| _CHAR_0 <= c && c <= _CHAR_9);
+    let match_digit1_9 = match_any_char.filter(|c| _CHAR_1 <= c && c <= _CHAR_9);
+    let match_e = match_any_char.filter(|c| c == _CHAR_e || c == _CHAR_E);
     let match_minus = match_str("-");
     let match_plus = match_str("+");
     let match_zero = match_str("0");
     let match_int = match_zero.or_else(
         do {
-            let first = *match_digit1_9;
-            let rest = *(repeat(match_digit));
-            let array : Array String = [ first ].append(rest);
-            pure $ array.to_iter.concat_iter
+            let _ = *match_digit1_9;
+            let _ = *(repeat(match_digit));
+            pure $ ()
         }
     );
-    let match_exp: Parser String = do {
-        let e = *match_e;
-        let sign = *(match_minus.or_else(match_plus).or_else(match_empty_str));
-        let digits: Array String = *(one_or_more(match_digit));
-        let digits: String = digits.to_iter.concat_iter;
-        pure $ e + sign + digits
+    let match_exp = do {
+        let _ = *match_e;
+        let _ = *(match_minus.or_else(match_plus).or_else(unit));
+        let _ = *(one_or_more(match_digit));
+        pure $ ()
     };
     let match_frac = do {
-        let decimal = *match_decimal_point;
-        let digits : Array String = *(repeat(match_digit));
-        let digits = digits.to_iter.concat_iter;
-        pure $ decimal + digits
+        let _ = *match_decimal_point;
+        let _ = *(repeat(match_digit));
+        pure $ ()
     };
     let match_number = do {
-        let minus = *(match_minus.or_else(match_empty_str));
-        let int = *(match_int);
-        let frac = *(match_frac.or_else(match_empty_str));
-        let exp = *(match_exp.or_else(match_empty_str));
-        pure $ minus + int + frac + exp
+        let _ = *(match_minus.or_else(unit));
+        let _ = *(match_int);
+        let _ = *(match_frac.or_else(unit));
+        let _ = *(match_exp.or_else(unit));
+        pure $ ()
     };
 
     do {
-        let s_begin = *get_stream;
-        let number_str = *match_number;
-        let s_end = *get_stream;
-        let byte_count = s_end.@position - s_begin.@position;
-        let number_str_2 = s_begin.@iter.take(byte_count).from_iter._unsafe_to_string;
-        eval assert_eq(|_| "number string are not equal", number_str, number_str_2);
+        let stream_begin = *get_stream;
+        let _ = *match_number;
+        let stream_end = *get_stream;
+        let byte_count = stream_end.@position - stream_begin.@position;
+        eval assert(|_| "number byte count is negative", byte_count >= 0);
+        let number_str = stream_begin.@iter.take(byte_count).from_iter._unsafe_to_string;
         //eval debug_println ("number_str="+number_str);
         let res: Result ErrMsg F64 = from_string(number_str);
         if res.is_err {

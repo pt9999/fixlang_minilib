@@ -145,7 +145,7 @@ namespace Parser {
 
     // Match zero-length string.
     unit: Parser ();
-    unit = pure();
+    unit = pure $ ();
 
     get_stream: Parser Stream;
     get_stream = parser $ |s| ok $ (s, s);
@@ -266,11 +266,11 @@ namespace Parser {
     );
 
     // Matches a character specified by `chr`.
-    match_char: Char -> Parser Char;
+    match_char: Char -> Parser ();
     match_char = |chr| parser $ |s| (
         s.advance.map_or(
             err $ _NotMatch,
-            |(c, next)| if c != chr { err $ _NotMatch } else { pure $ (c, next) }
+            |(c, next)| if c != chr { err $ _NotMatch } else { pure $ ((), next) }
         )
     );
 
@@ -287,21 +287,19 @@ namespace Parser {
     };
 
     // Matches a string specified by `str`.
-    match_str: String -> Parser String;
+    match_str: String -> Parser ();
     match_str = |str| (
         if str.get_size == 1 { // Optimization
-            let c = *(match_char(str.get_first_byte.as_some));
-            pure $ [ c ]._unsafe_to_string
+            match_char(str.get_first_byte.as_some)
         };
-        let parser: Parser () = str.get_bytes.pop_back.to_iter.fold(
+        str.get_bytes.pop_back.to_iter.fold(
             unit,
             |p, c| do {
                 let _ = *p;
                 let _ = *match_char(c);
                 pure $ ()
             }
-        );
-        parser.map(|_| str)
+        )
     );
 
     // matches zero-length string.

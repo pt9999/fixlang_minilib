@@ -11,9 +11,7 @@ import StringEx;
 
 decode: String -> Result ErrMsg Json;
 decode = |str| (
-    let p = _wrap_whitespaces(_parse_value)
-        .then(keep_left, match_end_of_stream);
-    let (json, next) = *(p.run_parser_str(str));
+    let (json, next) = *(_json_text.run_parser_str(str));
     pure $ json
 );
 
@@ -30,6 +28,13 @@ decode = |str| (
 //=============================================================
 // 2. JSON Grammer
 //=============================================================
+
+_json_text: Parser Json;
+_json_text = do {
+    let json = *(_wrap_whitespaces(_parse_value));
+    let _ = *match_end_of_stream;
+    pure $ json
+};
 
 _begin_array: Parser String;
 _begin_array = _wrap_whitespaces(match_str("["));
@@ -53,10 +58,12 @@ _ws: Parser ();
 _ws = class_whitespace.map(|str| ());
 
 _wrap_whitespaces: Parser a -> Parser a;
-_wrap_whitespaces = |p| (
-    _ws.then(keep_right, p)
-    .then(keep_left, _ws)
-);
+_wrap_whitespaces = |p| do {
+    let _ = *_ws;
+    let value = *p;
+    let _ = *_ws;
+    pure $ value
+};
 
 //=============================================================
 // 3. Values
@@ -160,6 +167,7 @@ _parse_array = (
 
 _parse_number: Parser F64;
 _parse_number = (
+    // TODO: Parser () に置き換える
     let match_decimal_point = match_str(".");
     let match_digit = match_one_of_char("0123456789");
     let match_digit1_9 = match_one_of_char("123456789");
@@ -197,7 +205,12 @@ _parse_number = (
     };
 
     do {
+        let s_begin = *get_stream;
         let number_str = *match_number;
+        let s_end = *get_stream;
+        let byte_count = s_end.@position - s_begin.@position;
+        let number_str_2 = s_begin.@iter.take(byte_count).from_iter._unsafe_to_string;
+        eval assert_eq(|_| "number string are not equal", number_str, number_str_2);
         //eval debug_println ("number_str="+number_str);
         let res: Result ErrMsg F64 = from_string(number_str);
         if res.is_err {
@@ -212,7 +225,7 @@ _parse_number = (
 //=============================================================
 
 _match_unquoted_char: Parser U8;
-_match_unquoted_char = any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH);
+_match_unquoted_char = match_any_char.filter(|c| c != _DOUBLEQUOTE && c != _BACKSLASH);
 
 _match_unquoted_str: Parser String;
 _match_unquoted_str = (
@@ -230,12 +243,12 @@ _unhex = |c| (
 _match_quoted_str: Parser String;
 _match_quoted_str = (
     let match_escaped: Parser String = (
-        any_char
+        match_any_char
         .map(|c| _unescape_table.@(c.to_I64))
         .filter(|c| c != 0_U8)
         .map(|c| [ c ]._unsafe_to_string)
     );
-    let match_hex: Parser U8 = any_char.filter(is_xdigit).map(_unhex);
+    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map(_unhex);
     let match_hex4: Parser U16 = do {
         let a = (*match_hex).to_U16.shift_left(12_U16);
         let b = (*match_hex).to_U16.shift_left(8_U16);

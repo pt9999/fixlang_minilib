@@ -135,12 +135,6 @@ namespace Parser {
             ok $ (res.as_ok, s)
     );  
 
-    debug_parser: (ParseResult a -> String) -> Parser a -> Parser a;
-    debug_parser = |msg, p| parser $ |s| (
-        let res = p.run_parser(s);
-        eval debug_println(msg(res));
-        res
-    );
     debug: [a: ToString] String -> Parser a -> Parser a;
     debug = |msg, p| parser $ |s| (
         eval debug_println(msg + ": begin");
@@ -148,19 +142,18 @@ namespace Parser {
         eval debug_println(msg + ": end res=" + res.to_string);
         res
     );
-    /*
-    debug = |msg| (
-        debug_parser $ |res| msg + ": res=" + res.to_string
-    );
-    */
 
     // Match zero-length string.
     unit: Parser ();
-    unit = parser $ |s| pure $ ((), s);
+    unit = pure();
+
+    get_stream: Parser Stream;
+    get_stream = parser $ |s| ok $ (s, s);
 
     forget: Parser a -> Parser ();
     forget = |p| p.map(|_| ());
 
+    /*
     keep_left: (a, b) -> a;
     keep_left = |(a,b)| a;
 
@@ -175,11 +168,12 @@ namespace Parser {
 
     // Combine two parsers. The result value is transformed by specified function.
     then: ((a, b) -> c) -> Parser b -> Parser a -> Parser c;
-    then = |keep, pb, pa| parser $ |s| (
+    then = |transform, pb, pa| parser $ |s| (
         let (a, s) = *(pa.run_parser(s));
         let (b, s) = *(pb.run_parser(s));
-        pure $ (keep((a, b)), s)
+        pure $ (transform((a, b)), s)
     );
+    */
 
     // If the specified condition are not met, returns _NotMatch.
     filter: (a -> Bool) -> Parser a -> Parser a;
@@ -263,8 +257,8 @@ namespace Parser {
     );
 
     // Matches a character of any kind.
-    any_char: Parser Char;
-    any_char = parser $ |s| (
+    match_any_char: Parser Char;
+    match_any_char = parser $ |s| (
         s.advance.map_or(
             err $ _NotMatch,
             |(c, next)| pure $ (c, next)
@@ -283,7 +277,7 @@ namespace Parser {
     // Matches a character which is included in `str`.
     match_one_of_char: String -> Parser String;
     match_one_of_char = |str| do {
-        let c = *any_char;
+        let c = *match_any_char;
         let opt = str.find_byte(c);
         if opt.is_none {
             not_match
@@ -301,8 +295,11 @@ namespace Parser {
         };
         let parser: Parser () = str.get_bytes.pop_back.to_iter.fold(
             unit,
-            |p, c|
-            p.then(keep_left, match_char(c))
+            |p, c| do {
+                let _ = *p;
+                let _ = *match_char(c);
+                pure $ ()
+            }
         );
         parser.map(|_| str)
     );
@@ -314,7 +311,7 @@ namespace Parser {
     // Matches a zero-or-more-length string. Each character should satisfy the specified condition.
     class: (Char -> Bool) -> Parser String;
     class = |f| (
-        repeat(any_char.filter(f))
+        repeat(match_any_char.filter(f))
         .map(|array| array._unsafe_to_string)
     );
 

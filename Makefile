@@ -8,6 +8,9 @@ clean:
 
 test: test_parser test_json
 
+test_ordered_map:
+	fix run -f ordered_map_test.fix lib/ordered_map.fix lib/string_ex.fix lib/unit_test.fix
+
 PARSER_TEST_SOURCE := simple_parser_test.fix lib/simple_parser.fix lib/string_ex.fix lib/unit_test.fix
 
 test_parser:

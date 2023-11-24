@@ -1,0 +1,58 @@
+module OrderedMap;
+
+import Hash;
+import HashMap;
+
+type OrderedMap k v = unbox struct {
+    map: HashMap k (I64, v),
+    serial: I64
+};
+
+namespace OrderedMap {
+    contains_key: [k : HashKey] k -> OrderedMap k v -> Bool;
+    contains_key = |k, self| self.@map.contains_key(k);
+    
+    empty: I64 -> OrderedMap k v;
+    empty = |max_size| (
+        OrderedMap { 
+            map: HashMap::empty(max_size), 
+            serial: 0 
+        }
+    );
+
+    erase: [k : HashKey] k -> OrderedMap k v -> OrderedMap k v;
+    erase = |k, self| self.mod_map(|m| m.erase(k));
+
+    find: [k : HashKey] k -> OrderedMap k v -> Option v;
+    find = |k, self| self.@map.find(k).map(|(s,v)| v);
+
+    find_or: [k : HashKey] k -> v -> OrderedMap k v -> v;
+    find_or = |key, def, self| self.find(key).as_some_or(def);
+
+    get_capacity: OrderedMap k v -> I64;
+    get_capacity = |self| self.@map.get_capacity;
+
+    get_size: OrderedMap k v -> I64;
+    get_size = |self| self.@map.get_size;
+
+    insert: [k : HashKey] k -> v -> OrderedMap k v -> OrderedMap k v;
+    insert = |k, v, self| (
+        let s = self.@serial;
+        self.mod_map(|m| m.insert(k, (s, v)))
+        .mod_serial(|s| s + 1)
+    );
+
+    reserve : [k : HashKey] I64 -> OrderedMap k v -> OrderedMap k v;
+    reserve = |max_size, self| self.mod_map(|m| m.reserve(max_size));
+
+    to_iter : OrderedMap k v -> Iterator (k, v);
+    to_iter = |self| (
+        let array = self.@map.to_iter.to_array;
+        let array = array.sort_by(|(e1, e2)|
+            let (k1,(s1,v1)) = e1;
+            let (k2,(s2,v2)) = e2;
+            s1 < s2
+        );
+        array.to_iter.map(|(k, (s,v))| (k, v))
+    );
+}

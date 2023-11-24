@@ -1,24 +1,26 @@
 module Json;
 
 import Debug;
-import HashMap;
+
+import StringEx;
+import OrderedMap;
 
 type Json = box union {
     null: (),
     bool: Bool,
     number: F64,
     string: String,
-    object: HashMap String Json,
+    object: OrderedMap String Json,
     array:  Array Json
 };
 
 to_object: Array (String, Json) -> Json;
 to_object = |arr| (
-    let hashmap = arr.to_iter.fold(
-        HashMap::empty(arr.get_size),
+    let map = arr.to_iter.fold(
+        OrderedMap::empty(arr.get_size),
         |h, (k, v)| h.insert(k, v)
     );
-    object $ hashmap
+    object $ map
 );
 
 impl Json: Eq {
@@ -37,9 +39,7 @@ impl Json: Eq {
             j1.as_string == j2.as_string
         };
         if j1.is_object && j2.is_object {
-            let a1 = j1.as_object.to_iter.to_array._sort_by_key;
-            let a2 = j2.as_object.to_iter.to_array._sort_by_key;
-            a1 == a2
+            j1.as_object == j2.as_object
         };
         if j1.is_array && j2.is_array {
             j1.as_array == j2.as_array
@@ -47,40 +47,6 @@ impl Json: Eq {
         false
     );
 }
-
-_sort_by_key: Array (String, a) -> Array (String, a);
-_sort_by_key = |array| (
-    array.sort_by(
-        |((k1,v1), (k2,v2))| _string_less_than $ (k1, k2))
-);
-
-_string_less_than: (String, String) -> Bool;
-_string_less_than = |(str1, str2)| (
-    let a1 = str1.get_bytes;
-    let a2 = str2.get_bytes;
-    let n1 = a1.get_size;
-    let n2 = a2.get_size;
-    loop(0, |i|
-        if i >= n1 && i >= n2 {
-            break $ false
-        };
-        if i >= n1 {
-            break $ true
-        };
-        if i >= n2 {
-            break $ false
-        };
-        let c1 = a1.@(i);
-        let c2 = a2.@(i);
-        if c1 < c2 {
-            break $ true
-        };
-        if c1 > c2 {
-            break $ false
-        };
-        continue $ i + 1
-    )
-);
 
 _DOUBLEQUOTE: U8;
 _DOUBLEQUOTE = 34_U8; // '\"'

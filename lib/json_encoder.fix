@@ -1,13 +1,17 @@
 module JsonEncoder;
 
+import Debug;
+
 import Json;
+import StringEx;
 import OrderedMap;
 
 type EncodeParam = unbox struct {
     space: String,
     newline: String,
     indent: String,
-    indent_incr: String
+    indent_incr: String,
+    number_prec: U8
 };
 
 namespace EncodeParam {
@@ -16,7 +20,8 @@ namespace EncodeParam {
         space: "",
         newline: "",
         indent: "",
-        indent_incr: ""
+        indent_incr: "",
+        number_prec: 6_U8
     };
     
     pretty_print: EncodeParam;
@@ -24,7 +29,8 @@ namespace EncodeParam {
         space: " ",
         newline: "\n",
         indent: "",
-        indent_incr: "  "
+        indent_incr: "  ",
+        number_prec: 6_U8
     };
 
     increment_indent: EncodeParam -> EncodeParam;
@@ -35,6 +41,31 @@ namespace EncodeParam {
         )
     );
 }
+
+_encode_number: EncodeParam -> F64 -> String;
+_encode_number = |param, num| (
+    let s = num.to_string_precision(param.@number_prec);
+    if s.find(".", 0).is_none {
+        s
+    };
+    // Trim trailing zeros of fractional number.
+    let a = s.get_bytes;
+    loop(
+        s.get_size - 1, |i|
+        if i < 1 {
+            break $ s.substring(0, i + 1)
+        };
+        if a.@(i) != '0' {
+            if a.@(i) == '.' {
+                // Trim the trailing decimal point.
+                break $ s.substring(0, i)
+            } else {
+                break $ s.substring(0, i + 1)
+            }
+        };
+        continue $ i - 1
+    )
+);
 
 _encode_string: String -> String;
 _encode_string = |str| (
@@ -141,7 +172,7 @@ _encode = |param, output, json| (
         output.push_back (if json.as_bool { "true" } else { "false" })
     };
     if json.is_number {
-        output.push_back (json.as_number.to_string)
+        output.push_back (json.as_number._encode_number(param))
     };
     if json.is_string {
         output.push_back (json.as_string._encode_string)

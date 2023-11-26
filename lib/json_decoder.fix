@@ -84,7 +84,7 @@ _parse_value = parser $ |s| (
 );
 
 _parse_null: Parser ();
-_parse_null = match_str("null").forget;
+_parse_null = match_str("null").map(|_| ());
 
 _parse_bool: Parser Bool;
 _parse_bool = (
@@ -245,12 +245,12 @@ _unescape_table = (
     .to_array
 );
 
-_unhex: U8 -> U8;
-_unhex = |c| (
-    if /* '0' = */ 48_U8 <= c && c <= /* '9' = */ 57_U8 { c - 48_U8 };
-    if /* 'A' = */ 65_U8 <= c && c <= /* 'F' = */ 70_U8 { c - 65_U8 + 10_U8 };
-    if /* 'a' = */ 97_U8 <= c && c <= /* 'f' = */ 102_U8 { c - 97_U8 + 10_U8 };
-    0_U8 // FIXME abort?
+_decode_hex_char: U8 -> U8;
+_decode_hex_char = |c| (
+    if '0' <= c && c <= '9' { c - '0' };
+    if 'A' <= c && c <= 'F' { c - 'A' + 10_U8 };
+    if 'a' <= c && c <= 'f' { c - 'a' + 10_U8 };
+    0_U8
 );
 
 _match_quoted_str: Parser String;
@@ -261,7 +261,7 @@ _match_quoted_str = (
         .filter(|c| c != 0_U8)
         .map(|c| [ c ]._unsafe_to_string)
     );
-    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map(_unhex);
+    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map(_decode_hex_char);
     let match_hex4: Parser U16 = do {
         let a = (*match_hex).to_U16.shift_left(12_U16);
         let b = (*match_hex).to_U16.shift_left(8_U16);

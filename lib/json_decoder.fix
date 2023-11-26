@@ -254,38 +254,46 @@ _decode_hex_char = |c| (
     0_U8
 );
 
-_match_quoted_str: Parser String;
-_match_quoted_str = (
-    let match_escaped: Parser String = (
+// Parse a quoted character. ("\n", "\uD83D" etc.)
+// NOTE: Escape sequences of the form "\uXXXX" can only represent 
+// the range U+0000 to U+FFFF. Characters in the range U+10000 to U+10FFFF
+// become surrogate pairs and are split like "\uD83D\uDE38".
+// Therefore, we first interpret these strings as UTF16. Later convert it 
+// to UTF32 and join the surrogate pair, then convert it to UTF8.
+_match_quoted_char_u16: Parser U16;
+_match_quoted_char_u16 = (
+    let match_escaped: Parser U16 = (
         match_any_char
         .map(|c| _unescape_table.@(c.to_I64))
         .filter(|c| c != 0_U8)
-        .map(|c| [ c ]._unsafe_to_string)
+        .map(|c| c.to_U16)
     );
     let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map(_decode_hex_char);
-    let match_hex4: Parser U16 = do {
+    let match_u_hex4: Parser U16 = do {
+        let _ = *(match_char('u'));
         let a = (*match_hex).to_U16.shift_left(12_U16);
         let b = (*match_hex).to_U16.shift_left(8_U16);
         let c = (*match_hex).to_U16.shift_left(4_U16);
         let d = (*match_hex).to_U16.shift_left(0_U16);
-        let codepoint : U16 = a.bit_or(b).bit_or(c).bit_or(d);
-        pure $ codepoint
-    };
-
-    let match_u_hex4: Parser String = do {
-        let _ = *(match_char('u'));
-        let code_point : U16 = *match_hex4;
-        // FIXME: Currently each surrogate pair (surrogate halves) are encoded indivisually into UTF-8.
-        let str = Array::empty(5).encode_code_point_to_utf8(code_point.to_U32)._unsafe_to_string;
-        pure $ str
+        let u16 : U16 = a.bit_or(b).bit_or(c).bit_or(d);
+        pure $ u16
     };
 
     do {
         let _ = *(match_char('\\'));
-        let str = *(match_escaped.or_else(match_u_hex4));
-        pure $ str
+        let u16 = *(match_escaped.or_else(match_u_hex4));
+        pure $ u16
     }
 );
+
+_match_quoted_str: Parser String;
+_match_quoted_str = do {
+    let a16: Array U16 = *(one_or_more(_match_quoted_char_u16));
+    // compose surrogate pairs
+    let a32: Array U32 = utf16_to_utf32(a16, Array::empty(a16.get_size));
+    let a8: Array U8 = utf32_to_utf8(a32, Array::empty(a32.get_size * 4));
+    pure $ a8._unsafe_to_string
+};
 
 _match_str_inner: Parser String;
 _match_str_inner = do {

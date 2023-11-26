@@ -147,6 +147,31 @@ test_utf8_to_utf32 = (
     ].run_tests
 );
 
+test_utf32_to_utf8_ok: (Array U32, Array U8) -> TestCase;
+test_utf32_to_utf8_ok = |(a32, a8)| (
+    let testname = "test_utf32_to_utf8_ok (" + a8.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = utf32_to_utf8(a32, Array::empty(0));
+    let _ = *(assert_equal("eq", a8, actual));
+    pure()
+);
+
+test_utf32_to_utf8: TestCase;
+test_utf32_to_utf8 = (
+    [
+        test_utf32_to_utf8_ok $ ([], []),
+        test_utf32_to_utf8_ok $ ([0_U32, 127_U32], [0_U8, 127_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x0080 = */128_U32], [/* 0b11000010 = */ 194_U8, /* 0b10000000 = */ 128_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x04E4 = */1252_U32], [/* 0b11010011 = */ 211_U8, /* 0b10100100 = */ 164_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x07FF = */2047_U32], [/* 0b11011111 = */ 223_U8, /* 0b10111111 = */ 191_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x0800 = */2048_U32], [/* 0b11100000 = */ 224_U8, /* 0b10100000 = */ 160_U8, /* 0b10000000 = */ 128_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0xFFFF = */65535_U32], [/* 0b11101111 = */ 239_U8, /* 0b10111111 = */ 191_U8, /* 0b101111 = */ 191_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x10000 = */65536_U32], [/* 0b11110000 = */ 240_U8, /* 0b10010000 = */ 144_U8, /* 0b10000000 = */ 128_U8, /* 0b10000000 = */ 128_U8]),
+        test_utf32_to_utf8_ok $ ([/* 0x10FFFF = */1114111_U32], [/* 0b11110100 = */ 244_U8, /* 0b10001111 = */ 143_U8, /* 0b10111111 = */ 191_U8, /* 0b10111111 = */ 191_U8]),
+        TestCase::empty
+    ].run_tests
+);
+
 test_utf16_to_utf32_ok: (Array U16, Array U32) -> TestCase;
 test_utf16_to_utf32_ok = |(a16, a32)| (
     let testname = "test_utf16_to_utf32_ok (" + a32.to_string + ")";
@@ -191,6 +216,28 @@ test_utf32_to_utf16 = (
     ].run_tests
 );
 
+test_utf8_enc_dec_ok: String -> TestCase;
+test_utf8_enc_dec_ok = |str| (
+    let testname = "test_utf8_enc_dec_ok (" + str + ")";
+    make_test(testname) $ |_|
+    let a8 = str.get_bytes.pop_back;
+    let a32 = utf8_to_utf32(a8, Array::empty(0));
+    let a16 = utf32_to_utf16(a32, Array::empty(0));
+    let a32 = utf16_to_utf32(a16, Array::empty(0));
+    let a8 = utf32_to_utf8(a32, Array::empty(0));
+    let actual = a8._unsafe_to_string;
+    let _ = *(assert_equal("eq", str, actual));
+    pure()
+);
+
+test_utf8_enc_dec: TestCase;
+test_utf8_enc_dec = (
+    [
+        test_utf8_enc_dec_ok $ "aAあいう😊😀",
+        TestCase::empty
+    ].run_tests
+);
+
 main: IO ();
 main = (
     [
@@ -200,9 +247,10 @@ main = (
         test_substring,
         test_string_less_than,
         test_utf8_to_utf32,
+        test_utf32_to_utf8,
         test_utf16_to_utf32,
         test_utf32_to_utf16,
-        // TODO: unicode test
+        test_utf8_enc_dec,
         TestCase::empty
     ]
     .run_test_driver

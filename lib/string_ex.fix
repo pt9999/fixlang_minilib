@@ -3,6 +3,10 @@ module StringEx;
 import Debug;
 import HashMap;
 
+//---------------------------------
+// ToString for various types
+//---------------------------------
+
 impl (): ToString {
     to_string = |_| "()";
 }
@@ -40,6 +44,10 @@ impl [a: ToString] Array a: ToString {
     );
 }
 
+//---------------------------------
+// String utility functions
+//---------------------------------
+
 _unsafe_to_string: Array U8 -> String;
 _unsafe_to_string = |a| (
     String::_unsafe_from_c_str (a.push_back(0_U8))
@@ -61,11 +69,13 @@ find_byte = |c, str| (
     )
 );
 
+// Return the substring in [s,e).
+// if [s, e) is out of range, the range is narrowed.
 substring: I64 -> I64 -> String -> String;
 substring = |s, e, str| (
     let size = str.get_size;
-    let s = if s < 0 { 0 } else { s };
-    let e = if e >= size { size } else { e };
+    let s = (if s < 0 { 0 }; if s >= size { size }; s);
+    let e = (if e < s { s }; if e >= size { size }; e);
     if s == 0 && e == size { str };
     str.get_sub(s, e)
 );
@@ -99,6 +109,14 @@ string_less_than = |(str1, str2)| (
     )
 );
 
+impl String: LessThan {
+    less_than = |str1,str2| string_less_than $ (str1, str2);
+}
+
+//---------------------------------
+// Unicode
+//---------------------------------
+
 // Encode a unicode code point to UTF-8
 encode_code_point_to_utf8: U32 -> Array U8 -> Array U8;
 encode_code_point_to_utf8 = |code_point, buf| (
@@ -128,3 +146,43 @@ encode_code_point_to_utf8 = |code_point, buf| (
     eval assert(|_| "code_point out of range: " + code_point.to_string, false);
     buf
 );
+
+utf16_to_utf32: Array U16 -> Array U32 -> Array U32;
+utf16_to_utf32 = |input, output| (
+    loop(
+        (output, 0, 0_U16), |(output, i, surrogate_1st)|
+        if i >= input.get_size {
+            break $output
+        };
+        let u16 = input.@(i);
+        if (/* 0xDC00 = */ 56320_U16 <= u16 && u16 <= 57343_U16 /* = 0xDFFF */) {
+            if surrogate_1st == 0_U16 {
+                // Decode error: add the replacement character ('�')
+                let output = output.push_back(/* 0xFFFD = */ 65533_U16);
+                continue $ (output, i + 1, 0_U16)
+            };
+            let surrogate_2nd = u16;
+            let w = surrogate_1st.shift_right(6_U16).bit_and(15_U16).to_U32;
+            let y = surrogate_1st.bit_and(63_U16).to_U32;
+            let x = surrogate_2nd.bit_and(/* 0x03FF= */ 1023_U16).to_U32;
+            let u32 = (w+1).shift_left(16_U32)
+                    .bit_or(y.shift_left(10_U32))
+                    .bit_or(x);
+            let output = output.push_back(u32);
+            continue $ (output, i + 1, 0_U16)
+        };
+        let output = if surrogate_1st != 0_U16 {
+            // Decode error: add the replacement character ('�')
+            output.push_back(/* 0xFFFD = */ 65533_U16)
+        } else { 
+            output 
+        };
+        if (/* 0xD800 = */ 55296_U16 <= u16 && u16 <= 56319_U16 /* = 0xDBFF */) {
+            let surrogate_1st = u16;
+            continue $ (output, i + 1, surrogate_1st)
+        };
+        let output = output.push_back(u16.to_u32);
+        continue $ (output, i + 1, 0_U16)
+    )
+);
+

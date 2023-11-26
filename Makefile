@@ -6,7 +6,10 @@ all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out fix
 clean:
 	rm -f *.out
 
-test: test_parser test_ordered_map test_json 
+test: test_string_ex test_ordered_map test_parser test_json 
+
+test_string_ex:
+	fix run -f string_ex_test.fix lib/string_ex.fix lib/unit_test.fix
 
 test_ordered_map:
 	fix run -f ordered_map_test.fix lib/ordered_map.fix lib/string_ex.fix lib/unit_test.fix

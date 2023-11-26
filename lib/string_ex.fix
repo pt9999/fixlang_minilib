@@ -147,6 +147,18 @@ encode_code_point_to_utf8 = |code_point, buf| (
     buf
 );
 
+utf32_to_utf8: Array U32 -> Array U8 -> Array U8;
+utf32_to_utf8 = |input, output| (
+    loop(
+        (output, 0), |(output, i)|
+        if i >= input.get_size {
+            break $ output
+        };
+        let output = encode_code_point_to_utf8(input.@(i), output);
+        loop $ (output, i + 1)
+    )
+);
+
 utf16_to_utf32: Array U16 -> Array U32 -> Array U32;
 utf16_to_utf32 = |input, output| (
     loop(
@@ -158,14 +170,14 @@ utf16_to_utf32 = |input, output| (
         if (/* 0xDC00 = */ 56320_U16 <= u16 && u16 <= 57343_U16 /* = 0xDFFF */) {
             if surrogate_1st == 0_U16 {
                 // Decode error: add the replacement character ('�')
-                let output = output.push_back(/* 0xFFFD = */ 65533_U16);
+                let output = output.push_back(/* 0xFFFD = */ 65533_U32);
                 continue $ (output, i + 1, 0_U16)
             };
             let surrogate_2nd = u16;
             let w = surrogate_1st.shift_right(6_U16).bit_and(15_U16).to_U32;
             let y = surrogate_1st.bit_and(63_U16).to_U32;
             let x = surrogate_2nd.bit_and(/* 0x03FF= */ 1023_U16).to_U32;
-            let u32 = (w+1).shift_left(16_U32)
+            let u32 = (w + 1_U32).shift_left(16_U32)
                     .bit_or(y.shift_left(10_U32))
                     .bit_or(x);
             let output = output.push_back(u32);
@@ -173,7 +185,7 @@ utf16_to_utf32 = |input, output| (
         };
         let output = if surrogate_1st != 0_U16 {
             // Decode error: add the replacement character ('�')
-            output.push_back(/* 0xFFFD = */ 65533_U16)
+            output.push_back(/* 0xFFFD = */ 65533_U32)
         } else { 
             output 
         };
@@ -181,8 +193,38 @@ utf16_to_utf32 = |input, output| (
             let surrogate_1st = u16;
             continue $ (output, i + 1, surrogate_1st)
         };
-        let output = output.push_back(u16.to_u32);
+        let output = output.push_back(u16.to_U32);
         continue $ (output, i + 1, 0_U16)
     )
 );
 
+utf32_to_utf16: Array U32 -> Array U16 -> Array U16;
+utf32_to_utf16 = |input, output| (
+    loop(
+        (output, 0), |(output, i)|
+        if i >= input.get_size {
+            break $ output
+        };
+        let u32 = input.@(i);
+        if u32 <= 65535_U32 {    // U+0000 .. U+FFFF
+            let output = output.push_back(u32.to_U16);
+            continue $ (output, i + 1)
+        };
+        if u32 <= 1114111_U32 {  // U+10000 .. U+10FFFF
+            let u = u32.shift_right(16_U32).to_U16;
+            let y = u32.shift_right(10_U32).bit_and(63_U32).to_U16;
+            let x = u32.bit_and(1023_U32).to_U16;
+            let output = output.push_back( // surrogate 1st
+                /* 0xD800 = */ 55296_U16
+                .bit_or((u-1_U16).shift_left(6_U16))
+                .bit_or(y));
+            let output = output.push_back(  // surrogate 2nd
+                /* 0xDC00 = */ 56320_U16
+                .bit_or(x));
+            continue $ (output, i + 1)
+        };
+        // code point is out of range: add the replacement character ('�')
+        let output = output.push_back(/* 0xFFFD = */ 65533_U16);
+        continue $ (output, i + 1)
+    )
+);

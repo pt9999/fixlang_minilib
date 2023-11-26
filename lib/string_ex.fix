@@ -117,9 +117,59 @@ impl String: LessThan {
 // Unicode
 //---------------------------------
 
+
+utf8_to_utf32: Array U8 -> Array U32 -> Array U32;
+utf8_to_utf32 = |input, output| (
+    loop(
+        (output, 0, 0, 0_U32), |(output, i, n, u32)|
+        if i >= input.get_size {
+            // FIXME: add replacement character if n != 0
+            break $ output
+        };
+        let u8 = input.@(i);
+        //eval debug_eprintln("u8=" + u8.to_string + " n="+n.to_string+ " u32="+u32.to_string);
+        if u8.bit_and(128_U8) == 0_U8 { // 0xxxxxxx
+            let output = output.push_back(u8.to_U32);
+            continue $ (output, i + 1, 0, 0_U32)
+        };
+        if u8.bit_and(64_U8) == 0_U8 {  // 10xxxxxx, Byte2 .. Byte4
+            // FIXME: add replacement character if n == 0
+            let u32 = u32.shift_left(6_U32).bit_or(u8.bit_and(63_U8).to_U32);
+            if n <= 1 {
+                let output = output.push_back(u32);
+                continue $ (output, i + 1, 0, 0_U32)
+            };
+            continue $ (output, i + 1, n - 1, u32)
+        };
+        if u8.bit_and(32_U8) == 0_U8 {  // 110xxxxx, Byte 1 of 2-byte char
+            let u32 = u8.bit_and(31_U8).to_U32;
+            continue $ (output, i + 1, 1, u32)
+        };
+        if u8.bit_and(16_U8) == 0_U8 {  // 1110xxxx, Byte 1 of 3-byte char
+            let u32 = u8.bit_and(15_U8).to_U32;
+            continue $ (output, i + 1, 2, u32)
+        };
+        if u8.bit_and(8_U8) == 0_U8 {  // 11110xxx, Byte 1 of 4-byte char
+            let u32 = u8.bit_and(7_U8).to_U32;
+            continue $ (output, i + 1, 3, u32)
+        };
+        // 11111xxx, invalid code
+        continue $ (output, i + 1, 0, 0_U32)
+    )
+);
+
 // Encode a unicode code point to UTF-8
 encode_code_point_to_utf8: U32 -> Array U8 -> Array U8;
 encode_code_point_to_utf8 = |code_point, buf| (
+    let code_point = (
+        if 0_U32 <= code_point && code_point <= /* U+10FFFF =*/ 1114111_U32 {
+            code_point
+        } else { 
+            // code point out of range: replace to the replacement character ('�')
+            /* 0xFFFD = */ 65533_U32
+        }
+    );
+
     if code_point <= 127_U32 {    // U+0000 .. U+007F
         buf
         .push_back(code_point.to_U8)
@@ -141,9 +191,8 @@ encode_code_point_to_utf8 = |code_point, buf| (
         .push_back(128_U8.bit_or(code_point.shift_right(12_U32).bit_and(63_U32).to_U8))
         .push_back(128_U8.bit_or(code_point.shift_right(6_U32).bit_and(63_U32).to_U8))
         .push_back(128_U8.bit_or(code_point.bit_and(63_U32).to_U8))
-
     };
-    eval assert(|_| "code_point out of range: " + code_point.to_string, false);
+    // not reach here
     buf
 );
 
@@ -164,7 +213,7 @@ utf16_to_utf32 = |input, output| (
     loop(
         (output, 0, 0_U16), |(output, i, surrogate_1st)|
         if i >= input.get_size {
-            break $output
+            break $ output
         };
         let u16 = input.@(i);
         if (/* 0xDC00 = */ 56320_U16 <= u16 && u16 <= 57343_U16 /* = 0xDFFF */) {

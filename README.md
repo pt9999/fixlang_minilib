@@ -14,7 +14,7 @@ This library is still under construction.
 
 ## How to use
 
-To build the example code, type `make example`.
+To build the example code, type `make examples`.
 
 To run the test code, type `make test`. It has been tested in the following environment.
 

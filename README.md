@@ -13,8 +13,12 @@ This is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 ## Directory structure
 
 ```
+/_sandbox   ... Experimental source code. (Not included in the library itself)
 /examples   ... Example programs using the library
 /lib        ... Library
-/sandbox    ... Experimental source code. (Not included in the library itself)
 /tests      ... Library tests
 ```
+
+## Library Reference
+
+See [Reference.md](./Reference.md).

@@ -34,4 +34,11 @@ run_json_cat:
 build_json_cat:
 	fix build -f json_cat.fix $(JSON_LIB_SOURCE) -o json_cat.out
 
+publish:
+	cp -p lib/*.fix ../fixlang_json/lib/
+	cp -p *_test.fix ../fixlang_json/tests/
+	cp -p json_cat.fix ../fixlang_json/examples/
+	cp -p README.md ../fixlang_json/
+
+
 

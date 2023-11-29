@@ -1,10 +1,22 @@
 
-# Library Reference
+# minilib Reference
 
 NOTE: This file is under construction.
 
+## Table of contents
+
+- [Table of contents](#table-of-contents)
+- [json.fix](#jsonfix)
+- [json_decode.fix](#json_decodefix)
+- [json_encode.fix](#json_encodefix)
+- [ordered_map.fix](#ordered_mapfix)
+- [simple_parser.fix](#simple_parserfix)
+- [string_ex.fix](#string_exfix)
+- [unit_test.fix](#unit_testfix)
+
 ## json.fix
-#### Json
+
+### Json
 A structure representing a JSON value.
 ```
 type Json = box union {
@@ -16,18 +28,28 @@ type Json = box union {
     array:  Array Json
 };
 ```
+
+#### to_object: Array (String, Json) -> Json;
+Converts an array of keys and values ​​to a JSON object.
+
 #### `impl Json: Eq`
 
 ## json_decode.fix
+
 #### decode: String -> Result ErrMsg Json;
 Parses JSON text and returns a JSON value.
 
 ## json_encode.fix
+#### `impl Json: ToString`
+
 #### encode: Json -> String;
-Encode JSON and convert it to a string.
+Encodes JSON and converts it to a string.
 
 #### encode_pretty: Json -> String;
-Encode JSON and convert it to a string. (pretty-printing)
+Encodes JSON and converts it to a string. (pretty-printing)
+
+#### encode_with_param: EncodeParam -> Json -> String;
+Encodes JSON and converts it to a string using the specified parameter.
 
 ## ordered_map.fix
 #### OrderedMap
@@ -41,9 +63,9 @@ type OrderedMap k v = unbox struct {
 ```
 
 ## simple_parser.fix
+
 ### Stream
-A character iterator that stores the file name, line number, column number, 
-and offset from the beginning of the file.
+A character iterator that stores the file name, line number, column number, and offset from the beginning of the file.
 
 ```
 type Stream = unbox struct {
@@ -155,3 +177,95 @@ Matches a string specified by the argument.  If not, an _NotMatch error is raise
 #### match_empty_str : Parser String;
 
 Matches a zero-length string.
+
+## string_ex.fix
+
+#### `impl (): ToString`
+
+#### `impl [a : ToString, b : ToString, c : ToString] (a, b, c) : ToString`
+
+#### `impl [a : ToString, b : ToString, c : ToString, d : ToString] (a, b, c, d) : ToString`
+
+#### `impl [a: ToString] Option a: ToString`
+
+#### `impl [k: ToString, v: ToString] HashMap k v : ToString`
+
+#### `impl [a: ToString] Array a: ToString`
+
+#### _unsafe_to_string: Array U8 -> String;
+
+Convert a byte array to a string. Specifically, it calls `String::_unsafe_to_string()` after appending a null character to the end of the byte array.
+
+#### find_byte: U8 -> String -> Option I64;
+
+Searches for the specified byte from the beginning of a string. If found, returns the index of that byte.
+
+#### substring: I64 -> I64 -> String -> String;
+
+Returns a substring extracted from a specified range from a string. If the specified range exceeds the string, it will be truncated to fit within the string.
+
+#### string_less_than: (String, String) -> Bool;
+
+Compares two strings. Returns True if and only if the first string is less than the second string.
+
+#### `impl String: LessThan`
+
+#### utf8_to_utf32: Array U8 -> Array U32 -> Array U32;
+
+Convert UTF8 string to UTF32 string. Please specify the output destination buffer. (Same below)
+
+#### utf32_to_utf8: Array U32 -> Array U8 -> Array U8;
+
+Convert UTF32 string to UTF8 string.
+
+#### utf16_to_utf32: Array U16 -> Array U32 -> Array U32;
+
+Convert UTF16 string to UTF32 string.
+
+#### utf32_to_utf16: Array U32 -> Array U16 -> Array U16;
+
+Convert UTF32 string to UTF16 string.
+
+## unit_test.fix
+
+#### _TEST_VERBOSE: Bool;
+
+If _TEST_VERBOSE is false, only failed testcases will be reported.
+
+### TestCase
+
+TestCase is a type that counts the number of successful and failed tests.
+
+```
+type TestCase = Lazy (IOFail (I64, I64));
+```
+
+#### empty: TestCase;
+
+A test case where the number of successes and number of failures are both equal to 0.
+Can be used as a placeholder at the end of an array of test cases.
+
+#### run_test_driver: Array TestCase -> IO ();
+
+Executes all test cases and prints the results (number of passes and number of failures).
+Exit with exitcode=1 if any test failed or any error occured, exitcode=0 otherwise.
+
+#### run_tests: Array (TestCase) -> TestCase;
+
+Executes all test cases and treat the results as one test case.
+
+#### make_test: String -> Lazy (IOFail ()) -> TestCase;
+
+Creates a named test case from a lazy `IOFail ()`.
+
+#### assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+
+Verifies that two values ​​are equal. If the values ​​are different, the test will fail with the specified message.
+
+#### assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+
+Verifies that two values ​​are equal. If the values ​​are different, the test will fail with the specified message.
+
+#### assert_not_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+
+Verifies that two values ​​are not equal. If the values ​​are equal, the test will fail with the specified message.

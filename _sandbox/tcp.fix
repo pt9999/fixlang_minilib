@@ -1,5 +1,9 @@
+// WARNING: This module only supports x86_64-linux-gnu.
+// WARNING: IPv6 is not supported yet.
+
 module Main;
 import Debug;
+import AsyncTask;
 
 // from /usr/include/x86_64-linux-gnu/bits/
 _AF_INET: I64;
@@ -18,13 +22,16 @@ type sockaddr_in = unbox struct {
 }
 */
 
+_sockaddr_in_size: I64;
+_sockaddr_in_size = 16;
+
 // make IPv4 sockaddr
 make_sockaddr_in: Array U8 -> U16 -> Array U8;
 make_sockaddr_in = |addr, port| (
     //eval debug_println("addr="+addr.to_iter.map(|x|x.to_string).join(",") + " port="+port.to_string);
     let port_h: U8 = port.shift_right(8_U16).bit_and(255_U16).to_U8;
     let port_l: U8 = port.bit_and(255_U16).to_U8;
-    eval debug_println ("port_h="+port_h.to_string+" port_l="+port_l.to_string);
+    //eval debug_println ("port_h="+port_h.to_string+" port_l="+port_l.to_string);
     let sockaddr_in = [
         2_U8, 0_U8, // sin_family = _AF_INET, host byte order
         port_h, port_l, // sin_port
@@ -33,6 +40,15 @@ make_sockaddr_in = |addr, port| (
         0_U8, 0_U8, 0_U8, 0_U8
     ];
     sockaddr_in
+);
+
+sockaddr_in_to_string: Array U8 -> String;
+sockaddr_in_to_string = |sockaddr| (
+    let sa = sockaddr;
+    let port = sa.@(2).to_U16.shift_left(8_U16).bit_or(sa.@(3).to_U16).to_string;
+    let addr = sa.@(4).to_string + "." + sa.@(5).to_string + "." + 
+        sa.@(6).to_string + "." + sa.@(7).to_string;
+    addr + ":" + port
 );
 
 _socket: I64 -> I64 -> I64 -> I64;
@@ -45,6 +61,30 @@ _bind = |sockfd, addr, addrlen| (
     addr.borrow_ptr(|ptr| CALL_C[I32 bind(I32, Ptr, I32), sockfd.to_I32, ptr, addrlen.to_I32]).to_I64
 );
 
+_listen: I64 -> I64 -> I64;
+_listen = |sockfd, backlog| (
+    CALL_C[I32 listen(I32, I32), sockfd.to_I32, backlog.to_I32].to_I64
+);
+
+_accept: I64 -> (I64, Array U8);
+_accept = |sockfd| (
+    let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
+    let addrlen: Array U32 = Array::fill(1, 0_U32);
+    let addrlen = addrlen.set(0, addr.get_size.to_U32);
+    let fd = addr.borrow_ptr(|p_addr|
+        addrlen.borrow_ptr(|p_addrlen|
+            CALL_C[I32 accept(I32, Ptr, Ptr), sockfd.to_I32, p_addr, p_addrlen].to_I64
+        )
+    );
+    let addr = (
+        if fd == -1 { addr };
+        let len = addrlen.@(0).to_I64;
+        if len == addr.get_size { addr };
+        addr.get_sub(0, len)
+    );
+    (fd, addr)
+);
+
 _connect: I64 -> Array U8 -> I64 -> I64;
 _connect = |sockfd, addr, addrlen| (
     eval debug_println("addr="+addr.to_iter.map(|x|x.to_string).join(","));
@@ -54,6 +94,11 @@ _connect = |sockfd, addr, addrlen| (
 _close: I64 -> I64;
 _close = |sockfd| (
     CALL_C[I32 close(I32), sockfd.to_I32].to_I64
+);
+
+_usleep: I64 -> I64;
+_usleep = |usec| (
+    CALL_C[I32 usleep(I32), usec.to_I32].to_I64
 );
 
 // Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
@@ -125,9 +170,49 @@ parse_host_port = |host_port| (
 );
 
 
+listen: String -> I64 -> IOFail I64;
+listen = |server_host_port, backlog| (
+    let _ = *(pure());
+    let (addr, port) = *parse_host_port(server_host_port);
+    let sockaddr_in = make_sockaddr_in(addr, port);
+    let socketfd = _socket(_AF_INET, _SOCK_STREAM, 0);
+    if socketfd < 0 {
+        throw $ "creating socket failed"
+    };
+    let ret = _bind(socketfd, sockaddr_in, sockaddr_in.get_size);
+    if ret == -1 {
+        let _ = _close(socketfd);
+        throw $ "bind failed"
+    };
+    let ret = _listen(socketfd, backlog);
+    if ret == -1 {
+        let _ = _close(socketfd);
+        throw $ "listen failed"
+    };
+    let _ = *(lift $ println ("listening on " + server_host_port));
+    pure $ socketfd
+);
+
+accept: I64 -> IOFail (IOHandle, String);
+accept = |sockfd| (
+    let (fd, addr) = _accept(sockfd);
+    if fd == -1 {
+        throw $ "accept failed"
+    };
+    let addr = sockaddr_in_to_string (addr);
+    let fp = "w+".borrow_c_str(|mode| CALL_C[Ptr fdopen(I32, Ptr), fd.to_I32, mode]);
+    if fp == nullptr {
+        throw $ "fdopen failed"
+    };
+    eval CALL_C[() setbuf(Ptr, Ptr), fp, nullptr];
+    let iohandle = IOHandle::from_file_ptr $ fp;
+    pure $ (iohandle, addr)
+);
+
 
 connect: String  -> IOFail IOHandle;
 connect = |host_port| (
+    let _ = *(pure());
     let (addr, port) = *parse_host_port(host_port);
     let sockaddr_in = make_sockaddr_in(addr, port);
     let socketfd = _socket(_AF_INET, _SOCK_STREAM, 0);
@@ -138,12 +223,12 @@ connect = |host_port| (
     if ret < 0 {
         throw $ "connect failed"
     };
-    let iohandle = "w+".borrow_c_str(|mode| CALL_C[Ptr fdopen(I32, Ptr), socketfd.to_I32, mode]);
-    if iohandle == nullptr {
+    let fp = "w+".borrow_c_str(|mode| CALL_C[Ptr fdopen(I32, Ptr), socketfd.to_I32, mode]);
+    if fp == nullptr {
         throw $ "fdopen failed"
     };
-    eval CALL_C[() setbuf(Ptr, Ptr), iohandle, nullptr];
-    pure $ IOHandle::from_file_ptr $ iohandle
+    eval CALL_C[() setbuf(Ptr, Ptr), fp, nullptr];
+    pure $ IOHandle::from_file_ptr $ fp
 );
 
 http_fetch: String -> IOFail ();
@@ -164,8 +249,8 @@ http_fetch = |host_port| (
     pure()
 );
 
-main: IO ();
-main = (
+client_test: IO ();
+client_test = (
     let host_port = "127.0.0.1:8080";
     let host_port = "183.79.248.124:80";
     //let host_port = "www.yahoo.co.jp:80";
@@ -174,3 +259,52 @@ main = (
         |err| println(err)
     )
 );
+
+_unsafe_perform_iofail: a -> IOFail a -> a;
+_unsafe_perform_iofail = |default, iofail| (
+    iofail.try(|e| 
+        let _ = *(eprintln("error: " + e));
+        pure $ default
+    )
+    ._unsafe_perform
+);
+
+echo: IOHandle -> IOFail ();
+echo = |iohandle| (
+    loop_m(
+        (), |_|
+        let _ = *(lift $ println ("read_line start"));
+        let line = *(read_line(iohandle));
+        let _ = *(lift $ println ("read_line end"));
+        if line == "" {
+            break_m $ ()
+        };
+        let _ = *(lift $ println("> " + line));
+        eval _usleep(1000);
+        continue_m $ ()
+    )
+);
+
+server_test: IO ();
+server_test = (
+    do {
+        let server_host_port = "127.0.0.1:2525";
+        let sockfd = *(listen(server_host_port, 10));
+        loop_m(
+            (), |_|
+            let (handle, addr) = *(accept(sockfd));
+            let _ = *(lift $ println ("accepting " + addr));
+            let task = AsyncTask::make(|_|
+                echo(handle)._unsafe_perform_iofail
+            );
+            eval _usleep(5000);
+            let out = task.get;
+            continue_m $ ()
+        )
+    }
+    .try(|err| eprintln (err))
+);
+
+main: IO ();
+//main = client_test;
+main = server_test;

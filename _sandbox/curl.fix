@@ -1,24 +1,34 @@
-// SIGSEGVが起きる。どうもうまくいかない。
+// 実行方法: fix run -d curl -f curl.fix
+// SIGSEGVが起きる。libcurl4-openssl-dev を使っているため？
+
 module Main;
 
 type Curl = unbox struct { _ptr: Ptr };
 
-curl_easy_init : () -> IOFail Curl;
-curl_easy_init = |_| (
-    IOResult::from_result (
-        let res = CALL_C[Ptr curl_easy_init(I32), 0_I32];
-        if res == nullptr { 
-            Result::err $ ErrMsg { msg : "curl_easy_init failed!" } 
-        };
-        Result::ok(Curl { _ptr: res })
-    )
+curl_easy_init : I64 -> IOFail ();
+curl_easy_init = |arg| (
+    let _ = *(lift $ eprintln("before call"));
+    let res = (
+        if arg == 0 { // argが0のときだけ実行する
+            CALL_C[Ptr curl_easy_init()]
+        } else {
+            nullptr
+        }
+    );
+    let _ = *(lift $ eprintln("after call"));
+    if res == nullptr { 
+        throw $ "curl_easy_init failed!"
+    };
+    let curl = Curl { _ptr: res };
+    pure()
 );
 
 main : IO ();
 main = (
-    let res = *curl_easy_init().to_io;
-    if res.is_err {
-        eprintln (res.as_err.to_string)
-    };
-    pure()
+    let _ = *(eprintln("program start"));
+    do {
+        let _ = *(curl_easy_init(999));
+        pure()
+    }
+    .try (|err| eprintln (err))
 );

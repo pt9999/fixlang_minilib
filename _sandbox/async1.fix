@@ -1,0 +1,133 @@
+module Main;
+
+import Subprocess;
+import AsyncTask;
+
+impl ExitStatus : ToString { 
+    to_string = |s| (
+        if s.is_exit { "exit(" + s.as_exit.to_string + ")" };
+        if s.is_signaled { "signaled(" + s.as_signaled.to_string + ")" };
+        if s.is_wait_failed { "wait_failed()" };
+        ""
+    );
+}
+
+is_success: ExitStatus -> Bool;
+is_success = |s| (
+    s.is_exit && s.as_exit == 0_U8
+);
+
+run_command: Array String -> IOFail String;
+run_command = |argv| (
+    let ((output, error), exit_status) = *(Subprocess::run_string (argv.@(0), argv, ""));
+    let _ = *(
+        if error != "" { lift $ eprintln(error) } else { pure() }
+    );
+    if !exit_status.is_success {
+        throw $ "exit_status = " + exit_status.to_string
+    };
+    pure $ output
+);
+
+find_files: () -> IOFail (Array String);
+find_files = |_| (
+    let argv = [
+        "/usr/bin/find", ".", "-name", ".fixlang", "-prune", "-o", 
+        "-name", "*.fix", "-print"
+    ];
+    let output = *(run_command (argv));
+    let files = output.split("\n").filter(|s| s != "").to_array;
+    pure $ files
+);
+
+with_input_from_file: Path -> (IOHandle -> IOFail a) -> IOFail a;
+with_input_from_file = |file_path, f| (
+    let file_handle = *(open_file(file_path, "rt"));
+    let res = *(lift $ to_result $ f (file_handle));
+    let _ = *(lift $ close_file(file_handle));
+    if res.is_err {
+        throw $ res.as_err
+    };
+    pure $ res.as_ok
+);
+
+_unsafe_perform_iofail: a -> IOFail a -> a;
+_unsafe_perform_iofail = |default, iofail| (
+    iofail.try(|e| 
+        let _ = *(eprintln("error: " + e));
+        pure $ default
+    )
+    ._unsafe_perform
+);
+
+namespace FileInfo {
+    type FileInfo = unbox struct {
+        path: Path,
+        line_count: I64
+    };
+
+    empty: FileInfo;
+    empty = FileInfo {
+        path: Path::parse("").as_some,
+        line_count: 0
+    };
+
+}
+
+impl FileInfo : ToString {
+    to_string = |info| info.@path.to_string + ": " + info.@line_count.to_string;
+}
+
+count_line: Path -> FileInfo;
+count_line = |path| (
+    let iof: IOFail FileInfo = with_input_from_file (path, |file_handle|
+        let line_count = *(loop_lines(
+            file_handle, 0, |count, line| continue $ (count + 1)
+        ));
+        pure $ FileInfo { path: path, line_count: line_count }
+    );
+    iof._unsafe_perform_iofail(FileInfo::empty)
+);
+
+foreach_m : [m : Monad] (a -> m ()) -> Iterator a -> m ();
+foreach_m = |f,itor| itor.fold_m((), |_, a| f(a));
+
+print_file_infos: Array FileInfo -> IO ();
+print_file_infos = |infos| (
+    let _ = *(infos.to_iter.foreach_m(
+        |info| println (info.to_string)
+    ));
+    let total_count = infos.to_iter.fold(0, |total, info| total + info.@line_count);
+    let _ = *(println ("Total: " + total_count.to_string));
+    pure()
+);
+
+count_lines_async: Array String -> IOFail ();
+count_lines_async = |files| (
+    let paths: Array Path = files.map(|name| Path::parse(name).as_some);
+    let tasks: Array (Task FileInfo) = paths.map(|path| AsyncTask::make(|_| count_line(path)));
+    let infos: Array FileInfo = tasks.map(|t| t.get);
+    lift $ print_file_infos(infos)
+);
+
+count_lines_sync: Array String -> IOFail ();
+count_lines_sync = |files| (
+    let paths: Array Path = files.map(|name| Path::parse(name).as_some);
+    let infos: Array FileInfo = paths.map(|path| count_line(path));
+    lift $ print_file_infos(infos)
+);
+
+main: IO ();
+main = (
+    if false {
+        let info = count_line(Path::parse("a.fix").as_some);
+        println(info.to_string)
+    };
+    do {
+        let files = *(find_files());
+        //let _ = *(lift $ println(files.to_iter.map(|f| "file: "+f+"\n").join("")));
+        let _ = *(count_lines_async(files));
+        //let _ = *(count_lines_sync(files));
+        pure ()
+    }.try(|err| eprintln (err))
+);

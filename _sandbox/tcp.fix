@@ -5,265 +5,473 @@ module Main;
 import Debug;
 //import AsyncTask;
 
-// from /usr/include/x86_64-linux-gnu/bits/
-_AF_INET: I64;
-_AF_INET = 2;
-
-_SOCK_STREAM: I64;
-_SOCK_STREAM = 1;
-
-/*
-type sockaddr_in = unbox struct {
-    sin_family: U16;    // host byte order
-    sin_port: U16;      // network byte order
-    sin_addr: U32;      // network byte order
-    padding1: U32;
-    padding2: U32;
-}
-*/
-
-_sockaddr_in_size: I64;
-_sockaddr_in_size = 16;
-
-// make IPv4 sockaddr
-make_sockaddr_in: Array U8 -> U16 -> Array U8;
-make_sockaddr_in = |addr, port| (
-    //eval debug_eprintln("addr="+addr.to_iter.map(|x|x.to_string).join(",") + " port="+port.to_string);
-    let port_h: U8 = port.shift_right(8_U16).bit_and(255_U16).to_U8;
-    let port_l: U8 = port.bit_and(255_U16).to_U8;
-    //eval debug_eprintln ("port_h="+port_h.to_string+" port_l="+port_l.to_string);
-    let sockaddr_in = [
-        2_U8, 0_U8, // sin_family = _AF_INET, host byte order
-        port_h, port_l, // sin_port
-        addr.@(0), addr.@(1), addr.@(2), addr.@(3), // sin_addr
-        0_U8, 0_U8, 0_U8, 0_U8,
-        0_U8, 0_U8, 0_U8, 0_U8
-    ];
-    sockaddr_in
+get_sub_ex: I64 -> I64 -> Array a -> Array a;
+get_sub_ex = |s, e, array| (
+    let s = max(0, s);
+    let e = max(s, min(array.get_size, e));
+    if s == 0 && e == array.get_size {
+        array
+    };
+    array.get_sub(s,e)
 );
 
-sockaddr_in_to_string: Array U8 -> String;
-sockaddr_in_to_string = |sockaddr| (
-    let sa = sockaddr;
-    let port = sa.@(2).to_U16.shift_left(8_U16).bit_or(sa.@(3).to_U16).to_string;
-    let addr = sa.@(4).to_string + "." + sa.@(5).to_string + "." + 
-        sa.@(6).to_string + "." + sa.@(7).to_string;
-    addr + ":" + port
+_perror: String -> ();
+_perror = |str| (
+    str.borrow_c_str(|ptr|
+        CALL_C[() perror(Ptr), ptr]
+    )
 );
 
-_socket: I64 -> I64 -> I64 -> I64;
-_socket = |domain, type, protocol| (
-    CALL_C[I32 socket(I32, I32, I32), domain.to_I32, type.to_I32, protocol.to_I32].to_I64
-);
 
-_bind: I64 -> Array U8 -> I64 -> I64;
-_bind = |sockfd, addr, addrlen| (
-    addr.borrow_ptr(|ptr| CALL_C[I32 bind(I32, Ptr, U32), sockfd.to_I32, ptr, addrlen.to_U32]).to_I64
-);
+type IpAddress = unbox struct {
+    addr: Array U8
+};
 
-_listen: I64 -> I64 -> I64;
-_listen = |sockfd, backlog| (
-    CALL_C[I32 listen(I32, I32), sockfd.to_I32, backlog.to_I32].to_I64
-);
-
-_accept: I64 -> (I64, Array U8);
-_accept = |sockfd| (
-    let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
-    let addrlen: Array U32 = Array::fill(1, 0_U32);
-    let addrlen = addrlen.set(0, addr.get_size.to_U32);
-    let fd = addr.borrow_ptr(|p_addr|
-        addrlen.borrow_ptr(|p_addrlen|
-            CALL_C[I32 accept(I32, Ptr, Ptr), sockfd.to_I32, p_addr, p_addrlen].to_I64
+impl IpAddress: FromString {
+    // Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
+    // FIXME: <arpa/inet.h> の inet_addr()を使えばホスト名解決もできそう？
+    from_string = |host| (
+        let host_split = host.split(".").to_array;
+        if host_split.get_size != 4 {
+            err $ "Invalid host format: " + host
+        }; 
+        let addr: Array U8 = Array::fill(4, 0_U8);
+        loop_m (
+            (addr, 0), |(addr, i)|
+            if i >= 4 {
+                break_m $ IpAddress { addr: addr }
+            };
+            let res: Result ErrMsg U8 = from_string(host_split.@(i));
+            if res.is_err {
+                err $ "Invalid host format: " + host + ": " + res.as_err
+            };
+            let addr = addr.set(i, res.as_ok);
+            continue_m $ (addr, i + 1)
         )
     );
-    eval debug_eprintln ("fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
-    let addr = (
-        if fd == -1 { addr };
-        let len = addrlen.@(0).to_I64;
-        if len == addr.get_size { addr };
-        addr.get_sub(0, len)
+}
+
+impl IpAddress: ToString {
+    to_string = |ipaddress| (
+        let addr = ipaddress.@addr;
+        addr.@(0).to_string + "." + addr.@(1).to_string + "." + 
+        addr.@(2).to_string + "." + addr.@(3).to_string
     );
-    (fd, addr)
-);
+}
 
-_connect: I64 -> Array U8 -> I64 -> I64;
-_connect = |sockfd, addr, addrlen| (
-    eval debug_eprintln("addr="+addr.to_iter.map(|x|x.to_string).join(","));
-    addr.borrow_ptr(|ptr| CALL_C[I32 connect(I32, Ptr, U32), sockfd.to_I32, ptr, addrlen.to_U32]).to_I64
-);
+namespace IpAddress {
+    /*
+    // FIXME: IPv6 is not supported
+    resolve_host: String -> IOFail (Array U8);
+    resolve_host = |host| (
+        let hostent: Array U8 = Array::fill(256, 0_U8);    
+        let buf: Array U8 = Array::fill(1024, 0_U8);
+        let bufsize = buf.get_size;
+        let result: Array Ptr = Array::fill(1, nullptr);
+        let herrorno: Array I32 = Array::fill(1, 0_I32);
+        let res = host.borrow_c_str(|host_ptr| 
+            CALL_C[Ptr gethostbyname(Ptr), host_ptr]
+        );
+        if res == nullptr {
+            throw $ "Resolving host failed: " + host
+        };
+        let addr: Array U8 = Array::fill(4, 0_U8);
+        let addr = addr.set(0, a.shift_right(24).bit_and(255).to_U8);
+        let addr = addr.set(1, a.shift_right(16).bit_and(255).to_U8);
+        let addr = addr.set(2, a.shift_right(8).bit_and(255).to_U8);
+        let addr = addr.set(3, a.shift_right(0).bit_and(255).to_U8);
+        pure $ addr
+    );
+    */
+}
 
-_send: I64 -> Array U8 -> I64 -> I64;
-_send = |sockfd, buf, flags| (
-    buf.borrow_ptr(|p_buf| CALL_C[I64 send(I32, Ptr, U64, I32), sockfd.to_I32, p_buf, buf.get_size.to_U64, flags.to_I32])
-);
+type Port = unbox struct { port: U16 };
 
-_recv: I64 -> I64 -> I64 -> (I64, Array U8);
-_recv = |sockfd, bufsize, flags| (
-    let buf = Array::fill(bufsize, 0_U8);
-    let len = buf.borrow_ptr(|p_buf| CALL_C[I64 recv(I32, Ptr, U64, I32), sockfd.to_I32, p_buf, buf.get_size.to_U64, flags.to_I32]);
-    (len, buf)
-);
+impl Port: FromString
+{
+    // Parse port string (eg. "8080" -> 8080_U16)
+    from_string = |port_str| (
+        let res: Result ErrMsg U16 = from_string(port_str);
+        if res.is_err {
+            err $ "Invalid port: " + port_str + ": " + res.as_err
+        };
+        ok $ Port { port: res.as_ok }
+    );
+}
 
-_close: I64 -> I64;
-_close = |sockfd| (
-    CALL_C[I32 close(I32), sockfd.to_I32].to_I64
-);
+impl Port: ToString
+{
+    to_string = |port| port.@port.to_string;
+}
+
+namespace SocketAddress {
+    /*
+    type sockaddr_in = unbox struct {
+        sin_family: U16;    // host byte order
+        sin_port: U16;      // network byte order
+        sin_addr: U32;      // network byte order
+        padding1: U32;
+        padding2: U32;
+    }
+    */
+    _sockaddr_in_size: I64;
+    _sockaddr_in_size = 16;
+
+    type SocketAddress = unbox struct {
+        sockaddr_in: Array U8
+    };
+
+    _unsafe_from_array: Array U8 -> SocketAddress;
+    _unsafe_from_array = |array| (
+        SocketAddress { sockaddr_in: array }
+    );
+
+    make: IpAddress -> Port -> SocketAddress;
+    make = |ipaddress, port| (
+        eval debug_eprintln("ipaddress="+ipaddress.to_string + " port="+port.to_string);
+        let addr = ipaddress.@addr;
+        let port = port.@port;
+        let port_h: U8 = port.shift_right(8_U16).bit_and(255_U16).to_U8;
+        let port_l: U8 = port.bit_and(255_U16).to_U8;
+        //eval debug_eprintln ("port_h="+port_h.to_string+" port_l="+port_l.to_string);
+        let sockaddr_in = [
+            2_U8, 0_U8, // sin_family = _AF_INET, host byte order
+            port_h, port_l, // sin_port
+            addr.@(0), addr.@(1), addr.@(2), addr.@(3), // sin_addr
+            0_U8, 0_U8, 0_U8, 0_U8,
+            0_U8, 0_U8, 0_U8, 0_U8
+        ];
+        SocketAddress { sockaddr_in: sockaddr_in }
+    );
+}
+
+impl SocketAddress : FromString {
+    from_string = |host_port| (
+        let split = host_port.split(":").to_array;
+        if split.get_size <= 0 || split.get_size > 2 {
+            err $ "Invalid host_port format: " + host_port
+        };
+        let host = split.@(0);
+        let port = if split.get_size == 2 { split.@(1) } else { "80" }; // default HTTP
+        let ipaddress: IpAddress = *(from_string(host));
+        let port: Port = *(from_string(port));
+        ok $ SocketAddress::make(ipaddress, port)
+    );
+}
+impl SocketAddress : ToString {
+    to_string = |socket_address| (
+        let sa = socket_address.@sockaddr_in;
+        let port = sa.@(2).to_U16.shift_left(8_U16).bit_or(sa.@(3).to_U16).to_string;
+        let addr = sa.@(4).to_string + "." + sa.@(5).to_string + "." + 
+            sa.@(6).to_string + "." + sa.@(7).to_string;
+        addr + ":" + port
+    );
+}
+
+type Socket = unbox struct {
+    data: Destructor I32
+};
+
+impl Socket: ToString {
+    to_string = |socket| (
+        socket.@data.borrow (|fd| "Socket{fd:" + fd.to_string + "}")
+    );        
+}
+
+namespace Socket {
+    // from /usr/include/x86_64-linux-gnu/bits/
+    _AF_INET: I32;
+    _AF_INET = 2_I32;
+
+    _SOCK_STREAM: I32;
+    _SOCK_STREAM = 1_I32;
+
+    make_tcp_socket: () -> IOFail Socket;
+    make_tcp_socket = |_| (
+        let sockfd = CALL_C[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
+        if sockfd < 0_I32 {
+            eval _perror("socket");
+            throw $ "creating socket failed"
+        };
+        let data = Destructor::make(sockfd, |sockfd|
+            eval debug_eprintln ("closing sockfd: " + sockfd.to_string);
+            eval CALL_C[I32 close(I32), sockfd];
+            ()
+        );
+        pure $ Socket { data: data }
+    );
+
+    bind: SocketAddress -> Socket -> IOFail ();
+    bind = |socket_address, socket| (
+        let addr = socket_address.@sockaddr_in;
+        let ret = socket.@data.borrow (|fd|
+            addr.borrow_ptr(|p_addr| 
+                CALL_C[I32 bind(I32, Ptr, U32), fd, p_addr, addr.get_size.to_U32]
+            )
+        );
+        if ret == -1_I32 {
+            eval _perror("bind");
+            throw $ "bind failed"
+        };
+        pure $ ()
+    );
+
+    listen: I64 -> Socket -> IOFail ();
+    listen = |backlog, socket| (
+        let ret = socket.@data.borrow (|fd|
+            CALL_C[I32 listen(I32, I32), fd, backlog.to_I32]
+        );
+        if ret == -1_I32 {
+            eval _perror("listen");
+            throw $ "listen failed"
+        };
+        pure $ ()
+    );
+
+
+    accept: Socket -> IOFail (Socket, SocketAddress);
+    accept = |socket| (
+        let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
+        let addrlen: Array U32 = Array::fill(1, 0_U32);
+        let addrlen = addrlen.set(0, addr.get_size.to_U32);
+        let fd = socket.@data.borrow(|sockfd|
+            addr.borrow_ptr(|p_addr|
+                addrlen.borrow_ptr(|p_addrlen|
+                    CALL_C[I32 accept(I32, Ptr, Ptr), sockfd, p_addr, p_addrlen]
+                )
+            )
+        );
+        if fd == -1_I32 {
+            eval _perror("accept");
+            throw $ "accept failed"
+        };
+        eval debug_eprintln ("accepted fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
+        let remote_address : SocketAddress = (
+            let len = addrlen.@(0).to_I64;
+            let addr = addr.get_sub_ex(0, len);
+            SocketAddress::_unsafe_from_array(addr)
+        );
+        let accepted_socket : Socket = (
+            Socket {
+                data: Destructor::make(fd, |fd|
+                    eval debug_eprintln ("closing sockfd: " + fd.to_string);
+                    eval CALL_C[I32 close(I32), fd];
+                    ()
+                )
+            }
+        );
+        pure $ (accepted_socket, remote_address)
+    );
+
+    connect: SocketAddress -> Socket -> IOFail ();
+    connect = |remote_address, socket| (
+        let addr = remote_address.@sockaddr_in;
+        let addrlen = addr.get_size;
+        let ret = socket.@data.borrow(|fd|
+            addr.borrow_ptr(|p_addr| 
+                CALL_C[I32 connect(I32, Ptr, U32), fd.to_I32, p_addr, addrlen.to_U32]
+            )
+        );
+        if ret == -1_I32 {
+            eval _perror("connect");
+            throw $ "connect failed"
+        };
+        pure $ ()
+    );
+
+    send: Array U8 -> Socket -> IOFail I64;
+    send = |bytes, socket| (
+        let size_to_send = bytes.get_size.to_U64;
+        let flags = 0_I32;
+        let size = socket.@data.borrow(|fd|
+            bytes.borrow_ptr(|p_bytes| 
+                CALL_C[I64 send(I32, Ptr, U64, I32), fd, p_bytes, size_to_send, flags]
+            )
+        );
+        if size == -1 {
+            eval _perror("send");
+            throw $ "send failed"
+        };
+        pure $ size
+    );
+
+    recv: I64 -> Socket -> IOFail (Array U8);
+    recv = |size_to_recv, socket| (
+        let bytes = Array::fill(size_to_recv, 0_U8);
+        let flags = 0_I32;
+        let size = socket.@data.borrow(|fd|
+            bytes.borrow_ptr(|p_bytes| 
+                CALL_C[I64 recv(I32, Ptr, U64, I32), fd, p_bytes, size_to_recv.to_U64, flags]
+            )
+        );
+        if size == -1 {
+            eval _perror("recv");
+            throw $ "recv failed"
+        };
+        let bytes =  bytes.get_sub_ex(0, size);
+        pure $ bytes
+    );
+}
+
+type BufferedSocket = unbox struct {
+    socket: Socket,
+    write_buf: Array U8,
+    read_buf: Array U8,
+    eof: Bool
+};
+
+namespace BufferedSocket {
+    _BUFSIZE: I64;
+    _BUFSIZE = 1024;
+
+    make: Socket -> BufferedSocket;
+    make = |socket| (
+        BufferedSocket {
+            socket: socket,
+            write_buf: Array::empty(_BUFSIZE),
+            read_buf: Array::empty(_BUFSIZE),
+            eof: false
+        }
+    );
+
+    write_str: String -> BufferedSocket -> IOFail BufferedSocket;
+    write_str = |str, bufsock| (
+        let bytes = str.get_bytes.pop_back;
+        let bufsock = bufsock.mod_write_buf(|buf| buf.append(bytes));
+        if bufsock.@write_buf.get_size < _BUFSIZE {
+            pure $ bufsock
+        };
+        bufsock.flush
+    );
+
+    flush: BufferedSocket -> IOFail BufferedSocket;
+    flush = |bufsock| (
+        loop_m(
+            bufsock, |bufsock|
+            let bytes = bufsock.@write_buf;
+            let size_to_write = bytes.get_size;
+            if size_to_write <= 0 {
+                break_m $ bufsock
+            };
+            let socket = bufsock.@socket;
+            let size = *socket.send(bytes);
+            eval debug_eprintln("size="+size.to_string+ " to="+size_to_write.to_string);
+            let bytes = bytes.get_sub_ex(size, size_to_write);
+            let bufsock = bufsock.set_write_buf(bytes);
+            continue_m $ bufsock
+        )
+    );
+
+    read_line: BufferedSocket -> IOFail (String, BufferedSocket);
+    read_line = |bufsock| (
+        loop_m(
+            bufsock, |bufsock|
+            let read_buf = bufsock.@read_buf;
+            if bufsock.@eof {
+                let line: String = read_buf.push_back(0_U8)._unsafe_from_c_str;
+                let bufsock = bufsock.set_read_buf(Array::empty(1));
+                break_m $ (line, bufsock)
+            };
+            let index = read_buf.find_by(|b| b == '\n');
+            if index.is_some {
+                let index = index.as_some;
+                let line = read_buf.get_sub_ex(0, index + 1);
+                let line: String = line.push_back(0_U8)._unsafe_from_c_str;
+                let read_buf = read_buf.get_sub_ex(index + 1, read_buf.get_size);
+                let bufsock = bufsock.set_read_buf(read_buf);
+                break_m $ (line, bufsock)
+            };
+            let socket = bufsock.@socket;
+            let bytes = *socket.recv(_BUFSIZE);
+            let bufsock = bufsock
+                .set_read_buf(read_buf.append(bytes))
+                .set_eof(bytes.get_size == 0);
+            continue_m $ bufsock
+        )
+    );
+}
 
 _usleep: I64 -> I64;
 _usleep = |usec| (
     CALL_C[I32 usleep(U32), usec.to_U32].to_I64
 );
 
-// Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
-// FIXME: <arpa/inet.h> の inet_addr()を使えばホスト名解決もできそう？
-parse_host: String -> IOFail (Array U8);
-parse_host = |host| (
-    let host_split = host.split(".").to_array;
-    if host_split.get_size != 4 {
-        throw $ "Invalid host format: " + host
-    }; 
-    let addr: Array U8 = Array::fill(4, 0_U8);
-    loop_m (
-        (addr, 0), |(addr, i)|
-        if i >= 4 {
-            break_m $ addr
-        };
-        let res: Result ErrMsg U8 = from_string(host_split.@(i));
-        if res.is_err {
-            throw $ "Invalid host format: " + host + ": " + res.as_err
-        };
-        let addr = addr.set(i, res.as_ok);
-        continue_m $ (addr, i + 1)
-    )
+
+connect_to_tcp_server: String  -> IOFail BufferedSocket;
+connect_to_tcp_server = |host_port| (
+    let socket_address: SocketAddress = *(from_result $ from_string $ host_port);
+    let socket = *(Socket::make_tcp_socket());
+    let _ = *(socket.connect(socket_address));
+    pure $ BufferedSocket::make(socket)
 );
 
-/*
-// FIXME: IPv6 is not supported
-resolve_host: String -> IOFail (Array U8);
-resolve_host = |host| (
-    let hostent: Array U8 = Array::fill(256, 0_U8);    
-    let buf: Array U8 = Array::fill(1024, 0_U8);
-    let bufsize = buf.get_size;
-    let result: Array Ptr = Array::fill(1, nullptr);
-    let herrorno: Array I32 = Array::fill(1, 0_I32);
-    let res = host.borrow_c_str(|host_ptr| 
-        CALL_C[Ptr gethostbyname(Ptr), host_ptr]
-    );
-    if res == nullptr {
-        throw $ "Resolving host failed: " + host
-    };
-    let addr: Array U8 = Array::fill(4, 0_U8);
-    let addr = addr.set(0, a.shift_right(24).bit_and(255).to_U8);
-    let addr = addr.set(1, a.shift_right(16).bit_and(255).to_U8);
-    let addr = addr.set(2, a.shift_right(8).bit_and(255).to_U8);
-    let addr = addr.set(3, a.shift_right(0).bit_and(255).to_U8);
-    pure $ addr
-);
-*/
-
-// Parse port string (eg. "8080" -> 8080_U16)
-parse_port: String -> IOFail U16;
-parse_port = |port| (
-    let res: Result ErrMsg U16 = from_string(port);
-    if res.is_err {
-        throw $ "Invalid port: " + port + ": " + res.as_err
-    };
-    pure $ res.as_ok
-);
-
-parse_host_port: String -> IOFail (Array U8, U16);
-parse_host_port = |host_port| (
-    let split = host_port.split(":").to_array;
-    if split.get_size <= 0 || split.get_size > 2 {
-        throw $ "Invalid host_port format: " + host_port
-    };
-    let host = split.@(0);
-    let port = if split.get_size == 2 { split.@(1) } else { "80" };
-    pure $ (*parse_host(host), *parse_port(port))
-);
-
-
-listen: String -> I64 -> IOFail I64;
-listen = |server_host_port, backlog| (
-    let _ = *(pure());
-    let (addr, port) = *parse_host_port(server_host_port);
-    let sockaddr_in = make_sockaddr_in(addr, port);
-    let socketfd = _socket(_AF_INET, _SOCK_STREAM, 0);
-    if socketfd < 0 {
-        throw $ "creating socket failed"
-    };
-    let ret = _bind(socketfd, sockaddr_in, sockaddr_in.get_size);
-    if ret == -1 {
-        let _ = _close(socketfd);
-        throw $ "bind failed"
-    };
-    let ret = _listen(socketfd, backlog);
-    if ret == -1 {
-        let _ = _close(socketfd);
-        throw $ "listen failed"
-    };
-    let _ = *(lift $ eprintln ("listening on " + server_host_port));
-    pure $ socketfd
-);
-
-accept: I64 -> IOFail (I64, String);
-accept = |sockfd| (
-    let (fd, addr) = _accept(sockfd);
-    if fd == -1 {
-        throw $ "accept failed"
-    };
-    let addr = sockaddr_in_to_string (addr);
-    pure $ (fd, addr)
-);
-
-
-connect: String  -> IOFail IOHandle;
-connect = |host_port| (
-    let _ = *(pure());
-    let (addr, port) = *parse_host_port(host_port);
-    let sockaddr_in = make_sockaddr_in(addr, port);
-    let socketfd = _socket(_AF_INET, _SOCK_STREAM, 0);
-    if socketfd < 0 {
-        throw $ "creating socket failed"
-    };
-    let ret = _connect(socketfd, sockaddr_in, sockaddr_in.get_size);
-    if ret < 0 {
-        throw $ "connect failed"
-    };
-    let fp = "w+".borrow_c_str(|mode| CALL_C[Ptr fdopen(I32, Ptr), socketfd.to_I32, mode]);
-    if fp == nullptr {
-        throw $ "fdopen failed"
-    };
-    eval CALL_C[() setbuf(Ptr, Ptr), fp, nullptr];
-    pure $ IOHandle::from_file_ptr $ fp
-);
 
 http_fetch: String -> IOFail ();
 http_fetch = |host_port| (
-    let handle = *connect(host_port);
-    eval *write_string(handle, "GET /index.html HTTP/1.0\n");
-    eval *write_string(handle, "\n");
-    eval *loop_m(
-        (), |_| 
-        let line = *read_line(handle);
+    let bufsock = *connect_to_tcp_server(host_port);
+    let bufsock = *bufsock.write_str("GET /index.html HTTP/1.0\n\n");
+    let bufsock = *bufsock.flush;
+    loop_m(
+        bufsock, |bufsock| 
+        let (line, bufsock) = *(bufsock.read_line);
         if line == "" {
             break_m $ ()
         };
-        eval *(eprintln(line).lift);
-        continue_m $ ()
-    );
-    eval *(close_file(handle).lift);
-    pure()
+        eval *(lift $ eprint(line));
+        continue_m $ bufsock
+    )
 );
 
 client_test: IO ();
 client_test = (
     let host_port = "127.0.0.1:8080";
-    let host_port = "183.79.248.124:80";
+    //let host_port = "183.79.217.124:80";
     //let host_port = "www.yahoo.co.jp:80";
 
     http_fetch(host_port).try (
-        |err| eprintln(err)
+        |err| eprintln("ERROR: " + err)
+    )
+);
+
+listen_tcp_server: String -> I64 -> IOFail Socket;
+listen_tcp_server = |server_host_port, backlog| (
+    let socket_address: SocketAddress = *(from_result $ from_string (server_host_port));
+    let socket: Socket = *(Socket::make_tcp_socket());
+    let _ = *(socket.bind(socket_address));
+    let _ = *(socket.listen(backlog));
+    let _ = *(lift $ eprintln ("listening on " + server_host_port));
+    pure $ socket
+);
+
+dummy: I64 -> IOFail ();
+dummy = |fd| (
+    let _ = *(lift $ eprintln ("dummy start: fd=" + fd.to_string));
+    pure()
+);
+
+echo: Socket -> IOFail ();
+echo = |socket| (
+    let _ = *(lift $ eprintln ("echo start: socket=" + socket.to_string));
+    let bufsock = BufferedSocket::make(socket);
+    let bufsock = *(bufsock.write_str("> "));
+    let bufsock = *(bufsock.flush);
+    loop_m(
+        bufsock, |bufsock|
+        let _ = *(lift $ eprintln ("recv start"));
+        let (line, bufsock) = *(bufsock.read_line);
+        eval _usleep(1000);
+        let _ = *(lift $ eprintln ("read_line end: size=" + line.get_size.to_string));
+        if line.get_size == 0 {
+            let _ = *(lift $ eprintln ("echo end"));
+            break_m $ ()
+        };
+        let _ = *(lift $ eprint("> " + line));
+        let _ = *(lift $ eprintln ("send start"));
+        let bufsock = *(bufsock.write_str(line));
+        let bufsock = *(bufsock.write_str("> "));
+        let bufsock = *(bufsock.flush);
+        let _ = *(lift $ eprintln ("send end"));
+        continue_m $ bufsock
     )
 );
 
@@ -276,78 +484,28 @@ _unsafe_perform_iofail = |default, iofail| (
     ._unsafe_perform
 );
 
-recv: I64 -> I64 -> IOFail (Array U8);
-recv = |fd, bufsize| (
-    let (len, buf) = _recv(fd, bufsize, 0);
-    if len == -1 { 
-        throw $ "_recv failed"
-    };
-    let buf = if len == buf.get_size { buf } else { buf.get_sub(0, len) };
-    pure $ buf
-);
-
-
-dummy: I64 -> IOFail ();
-dummy = |fd| (
-    let _ = *(lift $ eprintln ("dummy start: fd=" + fd.to_string));
-    pure()
-);
-
-echo: I64 -> IOFail ();
-echo = |fd| (
-    let _ = *(lift $ eprintln ("echo start: fd=" + fd.to_string));
-    loop_m(
-        "", |str|
-        let _ = *(lift $ eprintln ("recv start"));
-        let buf = *recv(fd, 1024);
-        eval _usleep(1000);
-        let _ = *(lift $ eprintln ("recv end: buf.size=" + buf.get_size.to_string));
-        if buf.get_size == 0 {
-            let _ = *(lift $ eprintln ("echo end"));
-            break_m $ ()
-        };
-        let str = str + buf.push_back(0_U8)._unsafe_from_c_str;
-        let str = *(loop_m(
-            str, |str|
-            let pos = str.find("\n", 0);
-            if pos.is_none {
-                break_m $ str
-            };
-            let pos = pos.as_some;
-            let line = str.get_sub(0, pos);
-            let response = "> " + line + "\n";
-            let str = str.get_sub(pos + 1, str.get_size);
-            let _ = *(lift $ eprint(response));
-            let _ = *(lift $ eprintln ("send start"));
-            let ret = _send(fd, response.get_bytes.pop_back, 0);
-            let _ = *(lift $ eprintln ("send end"));
-            continue_m $ str
-        ));
-        continue_m $ str
-    )
-);
-
 server_test: IO ();
 server_test = (
     do {
+        let _ = *(lift $ eprintln ("server start"));
         let server_host_port = "127.0.0.1:2525";
-        let sockfd = *(listen(server_host_port, 10));
+        let socket = *(listen_tcp_server(server_host_port, 10));
         loop_m(
             (), |_|
-            let (fd, addr) = *(accept(sockfd));
-            let _ = *(lift $ eprintln ("accepting " + addr));
-            let _ = *(echo (fd));
-            /*
-            let task = AsyncTask::make(|_|
-                let ret: () = dummy(fd)._unsafe_perform_iofail();
-                ret
-            );
-            let _ = *(lift $ eprintln ("sleeping"));
-            eval _usleep(10 * 1000 * 1000);
-            let _ = *(lift $ eprintln ("waiting"));
-            let out = task.get;
-            let _ = *(lift $ eprintln ("waiting done"));
-            */
+            let (accepted_socket, addr) = *(socket.accept);
+            let _ = *(lift $ eprintln ("accepting " + addr.to_string));
+            let _ = *(echo (accepted_socket));
+
+            //let task = AsyncTask::make(|_|
+            //    let ret: () = dummy(fd)._unsafe_perform_iofail();
+            //    ret
+            //);
+            //let _ = *(lift $ eprintln ("sleeping"));
+            //eval _usleep(10 * 1000 * 1000);
+            //let _ = *(lift $ eprintln ("waiting"));
+            //let out = task.get;
+            //let _ = *(lift $ eprintln ("waiting done"));
+
             continue_m $ ()
         )
     }

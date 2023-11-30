@@ -3,7 +3,7 @@
 
 module Main;
 import Debug;
-import AsyncTask;
+//import AsyncTask;
 
 // from /usr/include/x86_64-linux-gnu/bits/
 _AF_INET: I64;
@@ -58,7 +58,7 @@ _socket = |domain, type, protocol| (
 
 _bind: I64 -> Array U8 -> I64 -> I64;
 _bind = |sockfd, addr, addrlen| (
-    addr.borrow_ptr(|ptr| CALL_C[I32 bind(I32, Ptr, I32), sockfd.to_I32, ptr, addrlen.to_I32]).to_I64
+    addr.borrow_ptr(|ptr| CALL_C[I32 bind(I32, Ptr, U32), sockfd.to_I32, ptr, addrlen.to_U32]).to_I64
 );
 
 _listen: I64 -> I64 -> I64;
@@ -76,6 +76,7 @@ _accept = |sockfd| (
             CALL_C[I32 accept(I32, Ptr, Ptr), sockfd.to_I32, p_addr, p_addrlen].to_I64
         )
     );
+    eval debug_eprintln ("fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
     let addr = (
         if fd == -1 { addr };
         let len = addrlen.@(0).to_I64;
@@ -88,7 +89,7 @@ _accept = |sockfd| (
 _connect: I64 -> Array U8 -> I64 -> I64;
 _connect = |sockfd, addr, addrlen| (
     eval debug_eprintln("addr="+addr.to_iter.map(|x|x.to_string).join(","));
-    addr.borrow_ptr(|ptr| CALL_C[I32 connect(I32, Ptr, I32), sockfd.to_I32, ptr, addrlen.to_I32]).to_I64
+    addr.borrow_ptr(|ptr| CALL_C[I32 connect(I32, Ptr, U32), sockfd.to_I32, ptr, addrlen.to_U32]).to_I64
 );
 
 _send: I64 -> Array U8 -> I64 -> I64;
@@ -110,7 +111,7 @@ _close = |sockfd| (
 
 _usleep: I64 -> I64;
 _usleep = |usec| (
-    CALL_C[I32 usleep(I32), usec.to_I32].to_I64
+    CALL_C[I32 usleep(U32), usec.to_U32].to_I64
 );
 
 // Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
@@ -302,6 +303,7 @@ echo = |fd| (
         eval _usleep(1000);
         let _ = *(lift $ eprintln ("recv end: buf.size=" + buf.get_size.to_string));
         if buf.get_size == 0 {
+            let _ = *(lift $ eprintln ("echo end"));
             break_m $ ()
         };
         let str = str + buf.push_back(0_U8)._unsafe_from_c_str;
@@ -313,8 +315,12 @@ echo = |fd| (
             };
             let pos = pos.as_some;
             let line = str.get_sub(0, pos);
+            let response = "> " + line + "\n";
             let str = str.get_sub(pos + 1, str.get_size);
-            let _ = *(lift $ eprintln("> " + line));
+            let _ = *(lift $ eprint(response));
+            let _ = *(lift $ eprintln ("send start"));
+            let ret = _send(fd, response.get_bytes.pop_back, 0);
+            let _ = *(lift $ eprintln ("send end"));
             continue_m $ str
         ));
         continue_m $ str
@@ -330,7 +336,8 @@ server_test = (
             (), |_|
             let (fd, addr) = *(accept(sockfd));
             let _ = *(lift $ eprintln ("accepting " + addr));
-            //let _ = *(echo (fd));
+            let _ = *(echo (fd));
+            /*
             let task = AsyncTask::make(|_|
                 let ret: () = dummy(fd)._unsafe_perform_iofail();
                 ret
@@ -340,6 +347,7 @@ server_test = (
             let _ = *(lift $ eprintln ("waiting"));
             let out = task.get;
             let _ = *(lift $ eprintln ("waiting done"));
+            */
             continue_m $ ()
         )
     }

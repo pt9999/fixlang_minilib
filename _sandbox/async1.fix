@@ -51,15 +51,6 @@ with_input_from_file = |file_path, f| (
     pure $ res.as_ok
 );
 
-_unsafe_perform_iofail: a -> IOFail a -> a;
-_unsafe_perform_iofail = |default, iofail| (
-    iofail.try(|e| 
-        let _ = *(eprintln("error: " + e));
-        pure $ default
-    )
-    ._unsafe_perform
-);
-
 namespace FileInfo {
     type FileInfo = unbox struct {
         path: Path,
@@ -78,15 +69,21 @@ impl FileInfo : ToString {
     to_string = |info| info.@path.to_string + ": " + info.@line_count.to_string;
 }
 
-count_line: Path -> FileInfo;
+count_line: Path -> IO FileInfo;
 count_line = |path| (
-    let iof: IOFail FileInfo = with_input_from_file (path, |file_handle|
+    eval path.to_string.borrow_c_str(|ptr|
+        CALL_C[() perror(Ptr), ptr]
+    );
+    with_input_from_file (path, |file_handle|
         let line_count = *(loop_lines(
             file_handle, 0, |count, line| continue $ (count + 1)
         ));
         pure $ FileInfo { path: path, line_count: line_count }
-    );
-    iof._unsafe_perform_iofail(FileInfo::empty)
+    )
+    .try(|e| 
+        let _ = *(eprintln("error: " + e));
+        pure $ FileInfo::empty
+    )
 );
 
 foreach_m : [m : Monad] (a -> m ()) -> Iterator a -> m ();
@@ -102,25 +99,33 @@ print_file_infos = |infos| (
     pure()
 );
 
+collect: [m: Monad] Array (m a) -> m (Array a);
+collect = |m_array| (
+    m_array.to_iter.fold_m(
+        Array::empty(m_array.get_size), |array, m_elem|
+        pure $ array.push_back(*m_elem)
+    )
+);
+
 count_lines_async: Array String -> IOFail ();
 count_lines_async = |files| (
     let paths: Array Path = files.map(|name| Path::parse(name).as_some);
-    let tasks: Array (Task FileInfo) = paths.map(|path| AsyncTask::make(|_| count_line(path)));
-    let infos: Array FileInfo = tasks.map(|t| t.get);
+    let tasks: Array (IOTask FileInfo) = paths.map(|path| AsyncIOTask::make(count_line(path)));
+    let infos: Array FileInfo = *(lift $ tasks.map(|task| task.get).collect);
     lift $ print_file_infos(infos)
 );
 
 count_lines_sync: Array String -> IOFail ();
 count_lines_sync = |files| (
     let paths: Array Path = files.map(|name| Path::parse(name).as_some);
-    let infos: Array FileInfo = paths.map(|path| count_line(path));
+    let infos: Array FileInfo = *(lift $ paths.map(|path| count_line(path)).collect);
     lift $ print_file_infos(infos)
 );
 
 main: IO ();
 main = (
     if false {
-        let info = count_line(Path::parse("a.fix").as_some);
+        let info = *count_line(Path::parse("a.fix").as_some);
         println(info.to_string)
     };
     do {

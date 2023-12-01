@@ -29,7 +29,6 @@ type IpAddress = unbox struct {
 
 impl IpAddress: FromString {
     // Parse host string (eg. "127.0.0.1" -> [127_U8, 0_U8, 0_U8, 1_U8])
-    // FIXME: <arpa/inet.h> の inet_addr()を使えばホスト名解決もできそう？
     from_string = |host| (
         let host_split = host.split(".").to_array;
         if host_split.get_size != 4 {
@@ -59,30 +58,109 @@ impl IpAddress: ToString {
     );
 }
 
-namespace IpAddress {
-    /*
-    // FIXME: IPv6 is not supported
-    resolve_host: String -> IOFail (Array U8);
-    resolve_host = |host| (
-        let hostent: Array U8 = Array::fill(256, 0_U8);    
-        let buf: Array U8 = Array::fill(1024, 0_U8);
-        let bufsize = buf.get_size;
-        let result: Array Ptr = Array::fill(1, nullptr);
-        let herrorno: Array I32 = Array::fill(1, 0_I32);
-        let res = host.borrow_c_str(|host_ptr| 
-            CALL_C[Ptr gethostbyname(Ptr), host_ptr]
+type HostEnt = unbox struct {
+    data: Array U8,
+    buf: Array U8
+};
+
+namespace HostEnt {
+    _hostent_size: I64;
+    _hostent_size = 32;
+
+    _get_I32: Ptr -> I64 -> I32;
+    _get_I32 = |ptr, offset| (
+        let a_i32 = Array::fill(1, 0_I32);
+        eval a_i32.borrow_ptr(|p_i32|
+            CALL_C[() memcpy(Ptr,Ptr,U64), p_i32, ptr.add_offset(offset), 4_U64]
         );
-        if res == nullptr {
-            throw $ "Resolving host failed: " + host
-        };
-        let addr: Array U8 = Array::fill(4, 0_U8);
-        let addr = addr.set(0, a.shift_right(24).bit_and(255).to_U8);
-        let addr = addr.set(1, a.shift_right(16).bit_and(255).to_U8);
-        let addr = addr.set(2, a.shift_right(8).bit_and(255).to_U8);
-        let addr = addr.set(3, a.shift_right(0).bit_and(255).to_U8);
-        pure $ addr
+        a_i32.@(0)
     );
-    */
+
+    _get_Ptr: Ptr -> I64 -> Ptr;
+    _get_Ptr = |ptr, offset| (
+        let a_ptr = Array::fill(1, nullptr);
+        eval a_ptr.borrow_ptr(|p_ptr|
+            CALL_C[() memcpy(Ptr,Ptr,U64), p_ptr, ptr.add_offset(offset), 8_U64]
+        );
+        a_ptr.@(0)
+    );
+
+    _gethostbyname_r: String -> Result ErrMsg HostEnt;
+    _gethostbyname_r = |host| (
+        let ret: Array U8 = Array::fill(_hostent_size, 0_U8);    
+        let buf: Array U8 = Array::fill(1024, 0_U8);
+        let buflen = buf.get_size.to_U64;
+        let result: Array Ptr = Array::fill(1, nullptr);
+        let h_errornop: Array I32 = Array::fill(1, 0_I32);
+        let res = host.borrow_c_str(|p_host| 
+            ret.borrow_ptr(|p_ret|
+                buf.borrow_ptr(|p_buf|
+                    result.borrow_ptr(|p_result|
+                        h_errornop.borrow_ptr(|p_h_errornop|
+                            CALL_C[I32 gethostbyname_r(Ptr,Ptr,Ptr,U64,Ptr,Ptr),
+                                p_host, p_ret, p_buf, buflen, p_result, p_h_errornop]
+                        )
+                    )
+                )
+            )
+        );
+        if res != 0_I32 {
+            eval _perror("gethostbyname_r");
+            err $ "gethostbyname_r failed: " + host
+        };
+        let hostent: Ptr = result.@(0);
+        if hostent == nullptr {
+            err $ "gethostbyname_r failed (hostent == nullptr): " + host
+        };
+        // hostent and ret._get_ptr should be same pointer
+        //eval ret.borrow_ptr(|p_ret|
+        //    assert (hostent == p_ret)     // Ptr does not implement Eq
+        //);
+        ok $ HostEnt { data: ret, buf: buf }
+    );
+
+    get_h_length: HostEnt -> I64;
+    get_h_length = |hostent| (
+        hostent.@data.borrow_ptr(|p_hostent|
+            _get_I32(p_hostent, 20).to_I64
+        )
+    );
+
+    get_h_addr: I64 -> HostEnt -> IpAddress;
+    get_h_addr = |index, hostent| (
+        let h_addr_list: Ptr = (                    // char**
+            hostent.@data.borrow_ptr(|p_hostent|
+                _get_Ptr(p_hostent, 24)
+            )
+        );
+        let h_addr: Ptr = (                         // char*
+            _get_Ptr(h_addr_list, 8 * index)
+        );
+
+        let addr = Array::fill(4, 0_U8);
+        eval addr.borrow_ptr(|p_addr|
+            CALL_C[() memcpy(Ptr,Ptr,U64), p_addr, h_addr, 4_U64]
+        );
+        IpAddress { addr: addr }
+    );
+}
+
+namespace IpAddress {
+    resolve_host: String -> Result ErrMsg IpAddress;   // IOFail にするべき？
+    resolve_host = |host| (
+        // 最初に xxx.xxx.xxx.xxx 形式で解釈する
+        let res: Result ErrMsg IpAddress = from_string(host);
+        if res.is_ok {
+            res
+        };
+        let hostent = *_gethostbyname_r(host);
+        let h_length = hostent.get_h_length;
+        if h_length < 1 {
+            err $ "resolve_host: h_length < 1: " + host
+        };
+        let ipaddress = hostent.get_h_addr(0);
+        pure $ ipaddress
+    );
 }
 
 type Port = unbox struct { port: U16 };
@@ -105,15 +183,6 @@ impl Port: ToString
 }
 
 namespace SocketAddress {
-    /*
-    type sockaddr_in = unbox struct {
-        sin_family: U16;    // host byte order
-        sin_port: U16;      // network byte order
-        sin_addr: U32;      // network byte order
-        padding1: U32;
-        padding2: U32;
-    }
-    */
     _sockaddr_in_size: I64;
     _sockaddr_in_size = 16;
 
@@ -153,8 +222,9 @@ impl SocketAddress : FromString {
         };
         let host = split.@(0);
         let port = if split.get_size == 2 { split.@(1) } else { "80" }; // default HTTP
-        let ipaddress: IpAddress = *(from_string(host));
-        let port: Port = *(from_string(port));
+        //let ipaddress: IpAddress = *from_string(host);
+        let ipaddress: IpAddress = *resolve_host(host);
+        let port: Port = *from_string(port);
         ok $ SocketAddress::make(ipaddress, port)
     );
 }
@@ -425,6 +495,7 @@ http_fetch = |host_port| (
 client_test: IO ();
 client_test = (
     let host_port = "127.0.0.1:8080";
+    let host_port = "localhost:8080";
     //let host_port = "183.79.217.124:80";
     //let host_port = "www.yahoo.co.jp:80";
 
@@ -506,5 +577,5 @@ server_test = (
 );
 
 main: IO ();
-//main = client_test;
-main = server_test;
+main = client_test;
+//main = server_test;

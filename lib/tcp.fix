@@ -1,9 +1,9 @@
 // WARNING: This module only supports x86_64-linux-gnu.
 // WARNING: IPv6 is not supported yet.
 
-module Main;
+module Tcp;
+
 import Debug;
-import AsyncTask;
 
 get_sub_ex: I64 -> I64 -> Array a -> Array a;
 get_sub_ex = |s, e, array| (
@@ -67,6 +67,7 @@ namespace HostEnt {
     _hostent_size: I64;
     _hostent_size = 32;
 
+    // Extract an I32 value, ie. *(u32_t*)(ptr + offset)
     _get_I32: Ptr -> I64 -> I32;
     _get_I32 = |ptr, offset| (
         let a_i32 = Array::fill(1, 0_I32);
@@ -76,6 +77,7 @@ namespace HostEnt {
         a_i32.@(0)
     );
 
+    // Extract an Ptr value, ie. *(void**)(ptr + offset)
     _get_Ptr: Ptr -> I64 -> Ptr;
     _get_Ptr = |ptr, offset| (
         let a_ptr = Array::fill(1, nullptr);
@@ -85,6 +87,8 @@ namespace HostEnt {
         a_ptr.@(0)
     );
 
+    // FIXME: Because _gethostbyname_r involves an access to name server, 
+    // The return type should be `IOFail HostEnt`.
     _gethostbyname_r: String -> Result ErrMsg HostEnt;
     _gethostbyname_r = |host| (
         let ret: Array U8 = Array::fill(_hostent_size, 0_U8);    
@@ -112,13 +116,14 @@ namespace HostEnt {
         if hostent == nullptr {
             err $ "gethostbyname_r failed (hostent == nullptr): " + host
         };
-        // hostent and ret._get_ptr should be same pointer
+        // hostent and ret._get_ptr should be same pointer, but Ptr does not implement Eq.
         //eval ret.borrow_ptr(|p_ret|
-        //    assert (hostent == p_ret)     // Ptr does not implement Eq
+        //    assert (hostent == p_ret)
         //);
         ok $ HostEnt { data: ret, buf: buf }
     );
 
+    // get `h_length` field of the hostent.
     get_h_length: HostEnt -> I64;
     get_h_length = |hostent| (
         hostent.@data.borrow_ptr(|p_hostent|
@@ -126,6 +131,7 @@ namespace HostEnt {
         )
     );
 
+    // get `h_addr_list[index]` field of the hostent.
     get_h_addr: I64 -> HostEnt -> IpAddress;
     get_h_addr = |index, hostent| (
         let h_addr_list: Ptr = (                    // char**
@@ -146,7 +152,8 @@ namespace HostEnt {
 }
 
 namespace IpAddress {
-    resolve_host: String -> Result ErrMsg IpAddress;   // IOFail にするべき？
+    // Resolve a hostname such as "127.0.0.1" or "www.example.com".
+    resolve_host: String -> Result ErrMsg IpAddress;
     resolve_host = |host| (
         // 最初に xxx.xxx.xxx.xxx 形式で解釈する
         let res: Result ErrMsg IpAddress = from_string(host);
@@ -197,7 +204,7 @@ namespace SocketAddress {
 
     make: IpAddress -> Port -> SocketAddress;
     make = |ipaddress, port| (
-        eval debug_eprintln("ipaddress="+ipaddress.to_string + " port="+port.to_string);
+        //eval debug_eprintln("ipaddress="+ipaddress.to_string + " port="+port.to_string);
         let addr = ipaddress.@addr;
         let port = port.@port;
         let port_h: U8 = port.shift_right(8_U16).bit_and(255_U16).to_U8;
@@ -264,7 +271,7 @@ namespace Socket {
             throw $ "creating socket failed"
         };
         let data = Destructor::make(sockfd, |sockfd|
-            eval debug_eprintln ("closing sockfd: " + sockfd.to_string);
+            //eval debug_eprintln ("closing sockfd: " + sockfd.to_string);
             eval CALL_C[I32 close(I32), sockfd];
             ()
         );
@@ -298,7 +305,6 @@ namespace Socket {
         pure $ ()
     );
 
-
     accept: Socket -> IOFail (Socket, SocketAddress);
     accept = |socket| (
         let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
@@ -315,7 +321,7 @@ namespace Socket {
             eval _perror("accept");
             throw $ "accept failed"
         };
-        eval debug_eprintln ("accepted fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
+        //eval debug_eprintln ("accepted fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
         let remote_address : SocketAddress = (
             let len = addrlen.@(0).to_I64;
             let addr = addr.get_sub_ex(0, len);
@@ -324,7 +330,7 @@ namespace Socket {
         let accepted_socket : Socket = (
             Socket {
                 data: Destructor::make(fd, |fd|
-                    eval debug_eprintln ("closing sockfd: " + fd.to_string);
+                    //eval debug_eprintln ("closing sockfd: " + fd.to_string);
                     eval CALL_C[I32 close(I32), fd];
                     ()
                 )
@@ -425,7 +431,7 @@ namespace BufferedSocket {
             };
             let socket = bufsock.@socket;
             let size = *socket.send(bytes);
-            eval debug_eprintln("size="+size.to_string+ " to="+size_to_write.to_string);
+            //eval debug_eprintln("size="+size.to_string+ " to="+size_to_write.to_string);
             let bytes = bytes.get_sub_ex(size, size_to_write);
             let bufsock = bufsock.set_write_buf(bytes);
             continue_m $ bufsock
@@ -461,47 +467,12 @@ namespace BufferedSocket {
     );
 }
 
-_usleep: I64 -> I64;
-_usleep = |usec| (
-    CALL_C[I32 usleep(U32), usec.to_U32].to_I64
-);
-
-
-connect_to_tcp_server: String  -> IOFail BufferedSocket;
+connect_to_tcp_server: String  -> IOFail Socket;
 connect_to_tcp_server = |host_port| (
     let socket_address: SocketAddress = *(from_result $ from_string $ host_port);
     let socket = *(Socket::make_tcp_socket());
     let _ = *(socket.connect(socket_address));
-    pure $ BufferedSocket::make(socket)
-);
-
-
-http_fetch: String -> IOFail ();
-http_fetch = |host_port| (
-    let bufsock = *connect_to_tcp_server(host_port);
-    let bufsock = *bufsock.write_str("GET /index.html HTTP/1.0\n\n");
-    let bufsock = *bufsock.flush;
-    loop_m(
-        bufsock, |bufsock| 
-        let (line, bufsock) = *(bufsock.read_line);
-        if line == "" {
-            break_m $ ()
-        };
-        eval *(lift $ eprint(line));
-        continue_m $ bufsock
-    )
-);
-
-client_test: IO ();
-client_test = (
-    let host_port = "127.0.0.1:8080";
-    let host_port = "localhost:8080";
-    //let host_port = "183.79.217.124:80";
-    //let host_port = "www.yahoo.co.jp:80";
-
-    http_fetch(host_port).try (
-        |err| eprintln("ERROR: " + err)
-    )
+    pure $ socket
 );
 
 listen_tcp_server: String -> I64 -> IOFail Socket;
@@ -510,72 +481,5 @@ listen_tcp_server = |server_host_port, backlog| (
     let socket: Socket = *(Socket::make_tcp_socket());
     let _ = *(socket.bind(socket_address));
     let _ = *(socket.listen(backlog));
-    let _ = *(lift $ eprintln ("listening on " + server_host_port));
     pure $ socket
 );
-
-dummy: I64 -> IOFail ();
-dummy = |fd| (
-    let _ = *(lift $ eprintln ("dummy start: fd=" + fd.to_string));
-    pure()
-);
-
-echo: Socket -> IOFail ();
-echo = |socket| (
-    let _ = *(lift $ eprintln ("echo start: socket=" + socket.to_string));
-    let bufsock = BufferedSocket::make(socket);
-    let bufsock = *(bufsock.write_str("> "));
-    let bufsock = *(bufsock.flush);
-    loop_m(
-        bufsock, |bufsock|
-        let _ = *(lift $ eprintln ("recv start"));
-        let (line, bufsock) = *(bufsock.read_line);
-        eval _usleep(1000);
-        let _ = *(lift $ eprintln ("read_line end: size=" + line.get_size.to_string));
-        if line.get_size == 0 {
-            let _ = *(lift $ eprintln ("echo end"));
-            break_m $ ()
-        };
-        let _ = *(lift $ eprint("> " + line));
-        let _ = *(lift $ eprintln ("send start"));
-        let bufsock = *(bufsock.write_str(line));
-        let bufsock = *(bufsock.write_str("> "));
-        let bufsock = *(bufsock.flush);
-        let _ = *(lift $ eprintln ("send end"));
-        continue_m $ bufsock
-    )
-);
-
-server_test: IO ();
-server_test = (
-    do {
-        let _ = *(lift $ eprintln ("server start"));
-        let server_host_port = "127.0.0.1:2525";
-        let socket = *(listen_tcp_server(server_host_port, 10));
-        loop_m(
-            Array::empty(0), |tasks|
-            let _ = *(lift $ eprintln ("accept begin"));
-            let (accepted_socket, addr) = *(socket.accept);
-            let _ = *(lift $ eprintln ("accept end: addr=" + addr.to_string));
-            //let _ = *echo(accepted_socket);
-            if false {
-                let _ = *echo(accepted_socket);
-                continue_m $ tasks
-            } else {
-                let _ = *(lift $ eprintln ("creating task"));
-                let task = AsyncIOTask::make(
-                    echo(accepted_socket)
-                    .try(|err| eprintln("error: " + err))
-                );
-                let _ = *(lift $ eprintln ("creating task done"));
-                let tasks = tasks.push_back(task);
-                continue_m $ tasks
-            }
-        )
-    }
-    .try(|err| eprintln (err))
-);
-
-main: IO ();
-main = client_test;
-//main = server_test;

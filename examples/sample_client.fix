@@ -1,0 +1,35 @@
+module Main;
+
+import Debug;
+
+import Tcp;
+
+http_fetch: String -> String -> IOFail ();
+http_fetch = |host_port, path| (
+    let socket = *connect_to_tcp_server(host_port);
+    let bufsock = BufferedSocket::make(socket);
+    let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
+    let bufsock = *bufsock.flush;
+    loop_m(
+        bufsock, |bufsock| 
+        let (line, bufsock) = *(bufsock.read_line);
+        if line == "" {
+            break_m $ ()
+        };
+        eval *(lift $ eprint(line));
+        continue_m $ bufsock
+    )
+);
+
+main: IO ();
+main = (
+    let host_port = "127.0.0.1:8080";
+    let host_port = "localhost:8080";
+    //let host_port = "183.79.217.124:80";
+    //let host_port = "www.yahoo.co.jp:80";
+
+    http_fetch(host_port, "/index.html")
+    .try (
+        |err| eprintln("ERROR: " + err)
+    )
+);

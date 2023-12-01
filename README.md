@@ -10,6 +10,7 @@ This library is still under construction.
 - Simple parsers
 - Ordered maps
 - String utility, UTF8/UTF16/UTF32 conversion
+- TCP/IP Socket
 - Unit testing
 
 ## How to use

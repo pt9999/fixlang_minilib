@@ -1,0 +1,261 @@
+// Command line argument parser.  (partial port of `clap` crate)
+// https://docs.rs/clap/3.2.0/clap/index.html
+
+module Main;
+
+import StringEx;
+
+//----------------------------------------------
+//  ArgAction
+//----------------------------------------------
+namespace ArgAction {
+    type ArgAction = unbox union {
+        set: (),
+        append: (),
+        help: (),
+        version: ()
+    };
+}
+
+//----------------------------------------------
+//  Arg
+//----------------------------------------------
+type Arg = unbox struct {
+    id: String,
+    short: U8,
+    long: String,
+    required: Bool,
+    takes_value: Bool,
+    default_value: String,
+    value_name: String,
+    help: String,
+    action: ArgAction
+};
+
+namespace Arg {
+    new: String -> Arg;
+    new = |id| (
+        Arg {
+            id: id,
+            short: 0_U8,
+            long: "",
+            required: false,
+            takes_value: false,
+            default_value: "",
+            value_name: "VALUE",
+            help: "",
+            action: ArgAction::set()
+        }
+    );
+
+    // short(), long() .. please use set_short(), set_long() etc.
+
+    is_positional: Arg -> Bool;
+    is_positional = |arg| (
+        arg.@short == 0_U8 && arg.@long == ""
+    );
+}
+
+// ---------------------------------
+//  Command
+// ---------------------------------
+type Command = unbox struct {
+    name: String,
+    bin_name: String,
+    display_name: String,
+    version: String,
+    author: String,
+    about: String,
+    args: Array Arg,
+    help_template: HelpTemplate
+};
+
+type App = Command;
+
+namespace Command {
+    new: String -> Command;
+    new = |name| (
+        Command {
+            name: name,
+            bin_name: name,
+            display_name: name,
+            version: "",
+            author: "",
+            about: "",
+            args: _default_args,
+            help_template: HelpTemplate::default
+        }
+    );
+    
+    // about(), version() .. please use set_about(), set_version() etc.
+
+    arg: Arg -> Command -> Command;
+    arg = |arg, command| (
+        command.mod_args(|args| args.push_back(arg))
+    );
+
+    print_help: Command -> IO ();
+    print_help = |command| (
+        let help = command.@help_template.format(command);
+        print(help + ".")
+    );
+
+    _default_args: Array Arg;
+    _default_args = (
+        Array::empty(100)
+        .push_back(Arg::new("help")
+            .set_short('h').set_long("help")
+            .set_help("Print help information")
+            .set_action(ArgAction::help())
+        )
+        .push_back(Arg::new("version")
+            .set_short('V').set_long("version")
+            .set_help("Print version information")
+            .set_action(ArgAction::version())
+        )
+    );
+}
+
+// ---------------------------------
+//  HelpTemplate
+// ---------------------------------
+
+type HelpTemplate = unbox struct { 
+    data: String 
+};
+namespace HelpTemplate {
+    new: String -> HelpTemplate;
+    new = |str| HelpTemplate { data: str };
+
+    default: HelpTemplate;
+    default = HelpTemplate { 
+        data: (
+            "{name} {version}\n" +
+            "{author-with-newline}" +
+            "{about-with-newline}" +
+            "\n" + 
+            "{usage}\n" +
+            "{all-args}\n"
+        )
+    };
+
+
+    format: Command -> HelpTemplate -> String;
+    format = |command, help_template| (
+        let help = help_template.@data;
+        let help = help.replace_all("{name}", command.@display_name);
+        let help = help.replace_all("{version}", command.@version);
+        let help = help.replace_all("{author-with-newline}", 
+            if command.@author == "" { "" } else { command.@author + "\n" }
+        );
+        let help = help.replace_all("{about-with-newline}", 
+            if command.@about == "" { "" } else { command.@about + "\n" }
+        );
+        let help = help.replace_all("{usage}", 
+            help_template._format_usage(command)
+        );
+        let help = help.replace_all("{all-args}", 
+            help_template._format_all_args(command)
+        );
+        help
+    );
+
+    _format_usage: Command -> HelpTemplate -> String;
+    _format_usage = |command, help_template| (
+        let args = command.@args.to_iter.filter(|arg| arg.is_positional).to_array;
+        let options = command.@args.to_iter.filter(|arg| !arg.is_positional).to_array;
+        let usage = "USAGE:\n";
+        let usage = usage + (
+            "    " + command.@bin_name + "[EXE]"
+        );
+        let usage = usage + (
+
+            if args.get_size == 0 { "" } else {
+                let display = |arg| if arg.@required { 
+                    "<" + arg.@id + ">"
+                } else {
+                    "[" + arg.@id + "]"
+                };
+                args.to_iter.map(|arg| " " + arg.display).concat_iter
+            }
+        );
+        let usage = usage + (
+            if options.get_size == 0 { "" } else { " [OPTIONS]" }
+        );
+        usage + "\n"
+    );
+
+    _format_all_args: Command -> HelpTemplate -> String;
+    _format_all_args = |command, help_template| (
+        let args = command.@args.to_iter.filter(|arg| arg.is_positional).to_array;
+        let options = command.@args.to_iter.filter(|arg| !arg.is_positional).to_array;
+
+        let args_text = if args.get_size == 0 { "" } else {
+            "ARGS:\n" +
+            args.to_iter.map(_format_arg).concat_iter
+        };
+        let options_text = if options.get_size == 0 { "" } else {
+            "OPTIONS:\n" +
+            options.to_iter.map(_format_option).concat_iter
+        };
+        args_text + options_text
+    );
+
+    _format_arg: Arg -> String;
+    _format_arg = |arg| (
+        let line = "    ";
+        let line = line + (
+            "<" + arg.@id + ">"
+        );
+        let line = if line.get_size >= 15 { line } else {
+            line + Array::fill(15 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + arg.@help;
+        line + "\n"
+    );
+
+    _format_option: Arg -> String;
+    _format_option = |arg| (
+        let line = "    ";
+        let line = line + (
+            if arg.@short == 0_U8 { "    " } else {
+                let short = Array::empty(2).push_back(arg.@short)._unsafe_to_string;
+                "-" + short + (
+                    if arg.@long == "" { "  " } else { ", " }
+                )
+            }
+        );
+        let line = line + (
+            if arg.@long == "" { " " } else {
+                "--" + arg.@long + " "
+            }
+        );
+        let line = line + (
+            if !arg.@takes_value { "" } else {
+                "<" + arg.@value_name + ">"
+            }
+        );
+        let line = if line.get_size >= 32 { line } else {
+            line + Array::fill(32 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + arg.@help;
+        line + "\n"
+    );
+}
+
+// ---------------------------------
+
+
+main: IO ();
+main = (
+    let command = (
+        Command::new("nice-tool")
+        .set_display_name("MyNiceTool")
+        .set_version("0.0.1")
+        .set_about("A nice tool")
+        .arg(Arg::new("count").set_short('n').set_long("count").set_help("How many times to iterate"))
+        .arg(Arg::new("output").set_short('o').set_long("output").set_help("An output file"))
+        .arg(Arg::new("FILE").set_help("An input file"))
+    );
+    command.print_help
+);

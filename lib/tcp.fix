@@ -15,9 +15,9 @@ get_sub_ex = |s, e, array| (
     array.get_sub(s,e)
 );
 
-_perror: String -> ();
+_perror: String -> IO ();
 _perror = |str| (
-    str.borrow_c_str(|ptr|
+    pure $ str.borrow_c_str(|ptr|
         CALL_C[() perror(Ptr), ptr]
     )
 );
@@ -87,9 +87,7 @@ namespace HostEnt {
         a_ptr.@(0)
     );
 
-    // FIXME: Because _gethostbyname_r involves an access to name server, 
-    // The return type should be `IOFail HostEnt`.
-    _gethostbyname_r: String -> Result ErrMsg HostEnt;
+    _gethostbyname_r: String -> IOFail HostEnt;
     _gethostbyname_r = |host| (
         let ret: Array U8 = Array::fill(_hostent_size, 0_U8);    
         let buf: Array U8 = Array::fill(1024, 0_U8);
@@ -109,18 +107,18 @@ namespace HostEnt {
             )
         );
         if res != 0_I32 {
-            eval _perror("gethostbyname_r");
-            err $ "gethostbyname_r failed: " + host
+            let _ = *_perror("gethostbyname_r").lift;
+            throw $ "gethostbyname_r failed: " + host
         };
         let hostent: Ptr = result.@(0);
         if hostent == nullptr {
-            err $ "gethostbyname_r failed (hostent == nullptr): " + host
+            throw $ "gethostbyname_r failed (hostent == nullptr): " + host
         };
         // hostent and ret._get_ptr should be same pointer, but Ptr does not implement Eq.
         //eval ret.borrow_ptr(|p_ret|
         //    assert (hostent == p_ret)
         //);
-        ok $ HostEnt { data: ret, buf: buf }
+        pure $ HostEnt { data: ret, buf: buf }
     );
 
     // get `h_length` field of the hostent.
@@ -153,17 +151,17 @@ namespace HostEnt {
 
 namespace IpAddress {
     // Resolve a hostname such as "127.0.0.1" or "www.example.com".
-    resolve_host: String -> Result ErrMsg IpAddress;
-    resolve_host = |host| (
+    resolve: String -> IOFail IpAddress;
+    resolve = |host| (
         // 最初に xxx.xxx.xxx.xxx 形式で解釈する
         let res: Result ErrMsg IpAddress = from_string(host);
         if res.is_ok {
-            res
+            res.from_result
         };
         let hostent = *_gethostbyname_r(host);
         let h_length = hostent.get_h_length;
         if h_length < 1 {
-            err $ "resolve_host: h_length < 1: " + host
+            throw $ "resolve_host: h_length < 1: " + host
         };
         let ipaddress = hostent.get_h_addr(0);
         pure $ ipaddress
@@ -219,22 +217,21 @@ namespace SocketAddress {
         ];
         SocketAddress { sockaddr_in: sockaddr_in }
     );
-}
 
-impl SocketAddress : FromString {
-    from_string = |host_port| (
+    resolve: String -> IOFail SocketAddress;
+    resolve = |host_port| (
         let split = host_port.split(":").to_array;
         if split.get_size <= 0 || split.get_size > 2 {
-            err $ "Invalid host_port format: " + host_port
+            throw $ "Invalid host_port format: " + host_port
         };
         let host = split.@(0);
         let port = if split.get_size == 2 { split.@(1) } else { "80" }; // default HTTP
-        //let ipaddress: IpAddress = *from_string(host);
-        let ipaddress: IpAddress = *resolve_host(host);
-        let port: Port = *from_string(port);
-        ok $ SocketAddress::make(ipaddress, port)
+        let ipaddress: IpAddress = *IpAddress::resolve(host);
+        let port: Port = *from_string(port).from_result;
+        pure $ SocketAddress::make(ipaddress, port)
     );
 }
+
 impl SocketAddress : ToString {
     to_string = |socket_address| (
         let sa = socket_address.@sockaddr_in;
@@ -267,7 +264,7 @@ namespace Socket {
     make_tcp_socket = |_| (
         let sockfd = CALL_C[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
         if sockfd < 0_I32 {
-            eval _perror("socket");
+            let _ = *_perror("socket").lift;
             throw $ "creating socket failed"
         };
         let data = Destructor::make(sockfd, |sockfd|
@@ -287,7 +284,7 @@ namespace Socket {
             )
         );
         if ret == -1_I32 {
-            eval _perror("bind");
+            let _ = *_perror("bind").lift;
             throw $ "bind failed"
         };
         pure $ ()
@@ -299,7 +296,7 @@ namespace Socket {
             CALL_C[I32 listen(I32, I32), fd, backlog.to_I32]
         );
         if ret == -1_I32 {
-            eval _perror("listen");
+            let _ = *_perror("listen").lift;
             throw $ "listen failed"
         };
         pure $ ()
@@ -318,7 +315,7 @@ namespace Socket {
             )
         );
         if fd == -1_I32 {
-            eval _perror("accept");
+            let _ = *_perror("accept").lift;
             throw $ "accept failed"
         };
         //eval debug_eprintln ("accepted fd="+fd.to_string+" addrlen="+addrlen.@(0).to_string);
@@ -349,7 +346,7 @@ namespace Socket {
             )
         );
         if ret == -1_I32 {
-            eval _perror("connect");
+            let _ = *_perror("connect").lift;
             throw $ "connect failed"
         };
         pure $ ()
@@ -365,7 +362,7 @@ namespace Socket {
             )
         );
         if size == -1 {
-            eval _perror("send");
+            let _ = *_perror("send").lift;
             throw $ "send failed"
         };
         pure $ size
@@ -381,7 +378,7 @@ namespace Socket {
             )
         );
         if size == -1 {
-            eval _perror("recv");
+            let _ = *_perror("recv").lift;
             throw $ "recv failed"
         };
         let bytes =  bytes.get_sub_ex(0, size);
@@ -469,17 +466,17 @@ namespace BufferedSocket {
 
 connect_to_tcp_server: String  -> IOFail Socket;
 connect_to_tcp_server = |host_port| (
-    let socket_address: SocketAddress = *(from_result $ from_string $ host_port);
-    let socket = *(Socket::make_tcp_socket());
-    let _ = *(socket.connect(socket_address));
+    let socket_address: SocketAddress = *SocketAddress::resolve(host_port);
+    let socket = *Socket::make_tcp_socket();
+    let _ = *socket.connect(socket_address);
     pure $ socket
 );
 
 listen_tcp_server: String -> I64 -> IOFail Socket;
 listen_tcp_server = |server_host_port, backlog| (
-    let socket_address: SocketAddress = *(from_result $ from_string (server_host_port));
-    let socket: Socket = *(Socket::make_tcp_socket());
-    let _ = *(socket.bind(socket_address));
-    let _ = *(socket.listen(backlog));
+    let socket_address: SocketAddress = *SocketAddress::resolve(server_host_port);
+    let socket: Socket = *Socket::make_tcp_socket();
+    let _ = *socket.bind(socket_address);
+    let _ = *socket.listen(backlog);
     pure $ socket
 );

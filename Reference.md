@@ -291,7 +291,7 @@ type IpAddress = unbox struct {
 
 #### `impl IpAddress: ToString`
 
-#### resolve_host: String -> Result ErrMsg IpAddress;
+#### resolve: String -> IOFail IpAddress;
 
 Resolves a hostname such as "127.0.0.1" or "www.example.com".
 
@@ -318,7 +318,17 @@ type SocketAddress = unbox struct {
 
 #### make: IpAddress -> Port -> SocketAddress;
 
-#### `impl SocketAddress: FromString`
+Creates a `SocketAddress` from an ip address and a port.
+
+#### resolve: String -> IOFail SocketAddress;
+
+Splits the first argument into a host name and a port number, then resolves the host
+name to an ip address, then creates a `SocketAddress` from the ip address and
+the port number.
+
+The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`),
+or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
+If the port number is omitted, the default port number is 80.
 
 #### `impl SocketAddress: ToString`
 
@@ -405,14 +415,14 @@ When the connection is closed, the return value may or may not contain a newline
 ### connect_to_tcp_server: String  -> IOFail Socket;
 
 Connects to a remote TCP server as a client.
-The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`), or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eq. `8080`).
+The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`), or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
 If the port number is omitted, the default port number is 80.
 
 ### listen_tcp_server: String -> I64 -> IOFail Socket;
 
 Listens at the specified address as a server.
 
-The first argument is `{host}:{port}`, where `{host}` is an IP Address (typically, `127.0.0.1`), or a FQDN host name (typically, `localhost`), and `{port}` is a port number (eq. `8080`).
+The first argument is `{host}:{port}`, where `{host}` is an IP Address (typically, `127.0.0.1`), or a FQDN host name (typically, `localhost`), and `{port}` is a port number (eg. `8080`).
 If the port number is omitted, the default port number is 80.
 
 The second argument (`backlog`) is the maximum length to which the queue of pending connections for the socket may grow.

@@ -54,7 +54,7 @@ Encodes JSON and converts it to a string using the specified parameter.
 
 ## ordered_map.fix
 #### OrderedMap
-Similar to HashMap, but `to_iter()`` returns entries in the same order as they were inserted.
+Similar to HashMap, but `to_iter()` returns entries in the same order as they were inserted.
 
 ```
 type OrderedMap k v = unbox struct {
@@ -126,15 +126,15 @@ Outputs diagnostic information for parser debugging.
 #### filter: (a -> Bool) -> Parser a -> Parser a;
 
 Checks whether the parsed result of the specified Parser satisfies the specified conditions.
-Raises a _NotMatch error if the specified condition is not met.
+Raises a `_NotMatch` error if the specified condition is not met.
 
 #### or_else: Parser a -> Parser a -> Parser a;
 
-If the first Parser raises a _NotMatch error, tries the second Parser.
+If the first Parser raises a `_NotMatch` error, tries the second Parser.
 
 #### or_error: String -> Parser a -> Parser a;
 
-If the Parser reports any error (including _NotMatch), raises the specified string as an error.
+If the Parser reports any error (including `_NotMatch`), raises the specified string as an error.
 
 #### error_parser: String -> Parser a;
 
@@ -142,7 +142,7 @@ Raises the specified string as an error.
 
 #### not_match: Parser a;
 
-Raises a _NotMatch error.
+Raises a `_NotMatch` error.
 
 #### repeat: Parser a -> Parser (Array a);
 
@@ -154,7 +154,7 @@ Synonym for `repeat`.
 
 #### one_or_more: Parser a -> Parser (Array a);
 
-Same as `zero_or_more`, but raises a _NotMatch error if the array length is zero.
+Same as `zero_or_more`, but raises a `_NotMatch` error if the array length is zero.
 
 #### match_end_of_stream: Parser ();
 
@@ -162,19 +162,27 @@ Matches zero-length string at the end of stream.
 
 #### match_any_char: Parser Char;
 
-Matches any single character. The parsed result is the single matching character.
+Matches any single character.
+The parsed result is a single matched character.
+If the match fails (eg. the end of stream), a `_NotMatch` error is raised.
 
 #### match_char: Char -> Parser ();
 
-Matches a single character specified by the argument. If not, a _NotMatch error is raised.
+Matches a single character specified by the argument.
+The parsed result is nothing.
+If the match fails, a `_NotMatch` error is raised.
 
 #### match_one_of_char: String -> Parser String;
 
-Matches a character which is included in the specified string. If not, a _NotMatch error is raised.
+Matches a character which is included in the specified string.
+The parsed result is a string consisting of the single matched character.
+If the match fails, a `_NotMatch` error is raised.
 
 #### match_str: String -> Parser ();
 
-Matches a string specified by the argument.  If not, a _NotMatch error is raised.
+Matches a string specified by the argument.
+The parsed result is nothing.
+If the match fails, a `_NotMatch` error is raised.
 
 #### match_empty_str : Parser String;
 

@@ -264,9 +264,9 @@ Executes all test cases and treat the results as one test case.
 
 Creates a named test case from a lazy `IOFail ()`.
 
-#### assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+#### assert_true : String -> Bool -> IOFail ();
 
-Verifies that two values ​​are equal. If the values ​​are different, the test will fail with the specified message.
+Verifies that the boolean value is true. If the boolean value is false, the test will fail with the specified message.
 
 #### assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
 

@@ -285,6 +285,11 @@ Verifies that two values ​​are equal. If the values ​​are different, the
 Verifies that two values ​​are not equal. If the values ​​are equal, the test will fail with the specified message.
 
 ## tcp.fix
+
+WARNING: This module only supports x86_64-linux-gnu.
+
+WARNING: IPv6 is not supported yet.
+
 ### IpAddress
 This type represents IPv4 ip address,
 eg. 127.0.0.1, 192.168.0.1 etc.

@@ -10,7 +10,7 @@ This library is still under construction.
 - Simple parsers
 - Ordered maps
 - String utility, UTF8/UTF16/UTF32 conversion
-- TCP/IP Socket
+- TCP/IP Socket (x86_64-linux-gnu and IPv4 only)
 - Unit testing
 
 ## How to use

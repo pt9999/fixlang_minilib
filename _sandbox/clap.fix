@@ -10,8 +10,10 @@ import StringEx;
 //----------------------------------------------
 namespace ArgAction {
     type ArgAction = unbox union {
-        set: (),
-        append: (),
+        set: (),        // set next argument to the single value
+        append: (),     // append next argument to the values
+        set_true: (),   // set "true" as the single value
+        set_false: (),  // set "false" as the single value
         help: (),
         version: ()
     };
@@ -25,8 +27,9 @@ type Arg = unbox struct {
     short: U8,
     long: String,
     required: Bool,
-    takes_value: Bool,
-    default_value: String,
+    //takes_value: Bool,
+    //multiple_values: Bool,
+    default_value: Option String,
     value_name: String,
     help: String,
     action: ArgAction
@@ -40,11 +43,12 @@ namespace Arg {
             short: 0_U8,
             long: "",
             required: false,
-            takes_value: false,
-            default_value: "",
+            //takes_value: false,
+            //multiple_values: false,
+            default_value: none,
             value_name: "VALUE",
             help: "",
-            action: ArgAction::set()
+            action: ArgAction::set_true()
         }
     );
 
@@ -53,6 +57,22 @@ namespace Arg {
     is_positional: Arg -> Bool;
     is_positional = |arg| (
         arg.@short == 0_U8 && arg.@long == ""
+    );
+}
+
+impl Arg: ToString {
+    to_string = |arg| (
+        if arg.@short != 0_U8 {
+            Array::empty(3).push_back('-').push_back(arg.@short)._unsafe_to_string
+        };
+        if arg.@long != "" {
+            "--" + arg.@long
+        };
+        if arg.@required { 
+            "<" + arg.@id + ">"
+        } else {
+            "[" + arg.@id + "]"
+        }
     );
 }
 
@@ -67,7 +87,8 @@ type Command = unbox struct {
     author: String,
     about: String,
     args: Array Arg,
-    help_template: HelpTemplate
+    help_template: HelpTemplate,
+    version_template: HelpTemplate
 };
 
 type App = Command;
@@ -83,7 +104,8 @@ namespace Command {
             author: "",
             about: "",
             args: _default_args,
-            help_template: HelpTemplate::default
+            help_template: HelpTemplate::default_help,
+            version_template: HelpTemplate::default_version
         }
     );
     
@@ -94,10 +116,14 @@ namespace Command {
         command.mod_args(|args| args.push_back(arg))
     );
 
-    print_help: Command -> IO ();
-    print_help = |command| (
-        let help = command.@help_template.format(command);
-        print(help + ".")
+    render_help: Command -> String;
+    render_help = |command| (
+        command.@help_template.format(command)
+    );
+
+    render_version: Command -> String;
+    render_version = |command| (
+        command.@version_template.format(command)
     );
 
     _default_args: Array Arg;
@@ -114,6 +140,217 @@ namespace Command {
             .set_action(ArgAction::version())
         )
     );
+
+    get_matches: Command -> IOFail ArgMatches;
+    get_matches = |command| (
+        let raw_args = *IO::get_args;
+        command.get_matches_from(raw_args).from_result
+    );
+
+    get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
+    get_matches_from = |raw_args, command| (
+        err $ "Not impl yet"
+    );
+}
+
+// ---------------------------------
+//  ArgParser
+// ---------------------------------
+namespace ArgParser
+{
+    type ArgExpect = unbox union {
+        expect_arg: Arg,
+        expect_value: Arg,
+    };
+    
+    type ArgParser = unbox struct {
+        command: Command,
+        args: Array Arg,
+        matches: ArgMatches,
+        raw_args: Array String,
+        current_index: I64,
+        expects: Array ArgExpect
+    };
+
+    make: Array String -> Command -> ArgParser;
+    make = |raw_args, command| (
+        ArgParser {
+            command: command,
+            args: command.@args,
+            matches: ArgMatches::empty,
+            raw_args: raw_args,
+            current_index: 1,
+            expects: command.@args.map(|arg| expect_arg(arg))
+        }
+    );
+
+    _parse_args : ArgParser -> Result ErrMsg ArgParser;
+    _parse_args = |parser| (
+        loop_m(
+            parser, |parser|
+            if parser.@current_index >= parser.@raw_args.get_size {
+                break_m $ parser
+            };
+            let expects = parser.@expects;
+            let raw_arg = raw_args.@(parser.@current_index);
+            if expect.is_any_arg {
+                continue_m $ *parser._expect_any_arg()
+            };
+            if expect.is_arg_value {
+                continue_m $ *parser._expect_arg_value()
+            };
+            if expect.is_arg_value {
+                continue_m $ *parser._parse_arg()
+            }
+            let arg = parser.@command._find_arg(raw_arg);
+            if expect.is_any_arg && arg.is_some {
+
+            }
+            continue_m $ (matches, allow_options, index + 1)
+        )
+    );
+    
+    _find_arg: String -> Array ArgExpect -> Option Arg;
+    _find_arg = |raw_arg, expects| (
+        expects.to_iter.filter(|expect| 
+            expect.is_expect_arg &&
+            expect.as_expect_arg.to_string == raw_arg)
+        .get_first
+    );
+
+    _find_arg_value: String -> Array ArgExpect -> Option Arg;
+    _find_arg_value = |raw_arg, expects| (
+        expects.to_iter.filter(|expect| 
+            expect.is_expect_value &&
+            expect.as_expect_value.to_string == raw_arg)
+        .get_first
+    );
+
+    /*
+    _get_sub_ex: I64 -> I64 -> String -> String;
+    _get_sub_ex = |s, e, str| (
+        let size = str.get_size;
+        let s = max(0, s);
+        let e = max(s, min(size, e));
+        if s == 0 && e == size { str };
+        str.get_sub(s,e)
+    )
+    */
+
+    _process_arg: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _process_arg = |arg, parser| (
+        let parser = parser.mut_current_index(|i| i + 1);
+        let action = parser.@action;
+        if action.is_help {
+            err $ parser.@command.render_help
+        };
+        if action.is_version {
+            err $ parser.@command.render_version
+        };
+        if action.is_set_true || action.is_set_false {
+            let b = action.is_set_true;
+            let values = Array::empty(1).push_back(b.to_string);
+            let parser = parser.mut_matches(|matches|
+                matches.set_values(args.@id, values)
+            );
+            ok $ parser
+        };
+        if action.is_set || action.is_append {
+            parser._process_value(arg)
+        };
+        eval assert(|_| "unknown action: arg="+arg.to_string, false);
+        err $ "error"
+    );
+
+    _process_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _process_value = |arg, parser| (
+        if parser.@current_index >= parser.@raw_args.get_size {
+            err $ "The argument '" + arg.to_string + "' requires a value but none was supplied"
+        };
+        let value = parser.@raw_args.@(parser.current_index);
+        let parser = parser.mut_current_index(|i| i + 1);
+        let parser = parser.mut_matches(|matches|
+            matches.mut_values(args.@id, |values|
+                if arg.@action.is_set {
+                    Array::empty(1).push_back(value)
+                };
+                if arg.@action.is_append {
+                    values.push_back(value)
+                };
+                eval assert(|_| "arg.@action is not set nor append", false);
+                values
+            )
+        );
+        ok $ parser
+    );
+
+    _check_required_args_present: ArgMatches -> Command -> Result ErrMsg ();
+    _check_required_args_present = |matches, command| (
+        let missing_args: Array Arg = command.@args.to_iter
+            .filter(|arg| arg.@required)
+            .filter(|arg| !matches.@map.contains_key(arg.@id))
+            .to_array;
+        if missing_args.get_size == 0 {
+            ok()
+        };
+        err $ "The following required arguments were not provided:\n" +
+        missing_args.map(|arg| "    " + arg.to_string + "\n")
+        .to_iter.concat_iter
+    );
+
+    _set_default_if_not_present: ArgMatches -> Command -> ArgMatches;
+    _set_default_if_not_present = |matches, command| (
+        command.@args.fold(
+            matches,
+            |matches, arg|
+            if arg.default_value.is_none {
+                matches
+            };
+            if matches.@map.contains_key(arg.@id) {
+                matches
+            };
+            let values = Array::empty(1).push_back(arg.default_value.as_some);
+            matches.mod_map(|map|
+                map.insert(arg.@id, values)
+            )
+        )
+    );
+}
+
+// ---------------------------------
+//  ArgMatches
+// ---------------------------------
+
+type ArgMatches = unbox struct {
+    map: HashMap String (Array String)
+};
+
+namespace ArgMatches {
+    empty: ArgMatches;
+    empty = ArgMatches { map: HashMap::empty(0) };
+
+    get_many: String -> ArgMatches -> Option (Array String);
+    get_many = |id, matches| (
+        matches.@map.find(id)
+    );
+    get_one: String -> ArgMatches -> Option String;
+    get_one = |id, matches| (
+        let array = *matches.get_many(id);
+        if array.get_size == 0 { none };
+        some(array.@(0))
+    );
+
+    mut_many: String -> (Array String -> Array String) -> ArgMatches -> ArgMatches;
+    mut_many = |id, f, matches| (
+        let values = matches.@map.find(id).or(Array::empty(0));
+        let values = f(values);
+        matches.mut_map(|map| map.insert(id, values))
+    );
+
+    set_many: String -> Array String -> ArgMatches -> ArgMatches;
+    set_many = |id, values, matches| (
+        matches.mut_many(id, |_| values)
+    );
 }
 
 // ---------------------------------
@@ -127,8 +364,8 @@ namespace HelpTemplate {
     new: String -> HelpTemplate;
     new = |str| HelpTemplate { data: str };
 
-    default: HelpTemplate;
-    default = HelpTemplate { 
+    default_help: HelpTemplate;
+    default_help = HelpTemplate { 
         data: (
             "{name} {version}\n" +
             "{author-with-newline}" +
@@ -139,6 +376,12 @@ namespace HelpTemplate {
         )
     };
 
+    default_version: HelpTemplate;
+    default_version = HelpTemplate {
+        data: (
+            "{name} {version}\n";
+        )
+    };
 
     format: Command -> HelpTemplate -> String;
     format = |command, help_template| (
@@ -169,14 +412,8 @@ namespace HelpTemplate {
             "    " + command.@bin_name + "[EXE]"
         );
         let usage = usage + (
-
             if args.get_size == 0 { "" } else {
-                let display = |arg| if arg.@required { 
-                    "<" + arg.@id + ">"
-                } else {
-                    "[" + arg.@id + "]"
-                };
-                args.to_iter.map(|arg| " " + arg.display).concat_iter
+                args.to_iter.map(|arg| " " + arg.to_string).concat_iter
             }
         );
         let usage = usage + (
@@ -203,10 +440,7 @@ namespace HelpTemplate {
 
     _format_arg: Arg -> String;
     _format_arg = |arg| (
-        let line = "    ";
-        let line = line + (
-            "<" + arg.@id + ">"
-        );
+        let line = "    " + arg.to_string;
         let line = if line.get_size >= 15 { line } else {
             line + Array::fill(15 - line.get_size, ' ')._unsafe_to_string
         };
@@ -219,8 +453,7 @@ namespace HelpTemplate {
         let line = "    ";
         let line = line + (
             if arg.@short == 0_U8 { "    " } else {
-                let short = Array::empty(2).push_back(arg.@short)._unsafe_to_string;
-                "-" + short + (
+                arg.to_string + (
                     if arg.@long == "" { "  " } else { ", " }
                 )
             }

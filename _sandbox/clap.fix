@@ -55,45 +55,79 @@ namespace Arg {
         }
     );
 
-    // short(), long() .. please use set_short(), set_long() etc.
     short: U8 -> Arg -> Arg;
     short = set_short;
 
     long: String -> Arg -> Arg;
     long = set_long;
 
-    required: Bool -> Arg -> Arg;
-    required = set_required;
+    required: Arg -> Arg;
+    required = set_required(true);
 
-    takes_value: Bool -> Arg -> Arg;
-    takes_value = |b, arg| (
-        arg.set_takes_value(b).set_action(ArgAction::set())
+    takes_value: Arg -> Arg;
+    takes_value = |arg| (
+        arg.set_takes_value(true).set_action(ArgAction::set())
     );
+    takes_multiple_values: Arg -> Arg;
+    takes_multiple_values = |arg| (
+        arg.set_takes_value(true).set_multiple_values(true).set_action(ArgAction::append())
+    );
+    
+    default_value: String -> Arg -> Arg;
+    default_value = |str| set_default_value(some(str));
+
+    value_name: String -> Arg -> Arg;
+    value_name = set_value_name;
 
     help: String -> Arg -> Arg;
     help = set_help;
 
-
-
-    is_positional: Arg -> Bool;
-    is_positional = |arg| (
+    _is_positional: Arg -> Bool;
+    _is_positional = |arg| (
         arg.@short == 0_U8 && arg.@long == ""
+    );
+
+    _short_to_string: Arg -> String;
+    _short_to_string = |arg| (
+        Array::empty(3).push_back('-').push_back(arg.@short)._unsafe_to_string
+    );
+
+    _long_to_string: Arg -> String;
+    _long_to_string = |arg| (
+        "--" + arg.@long
+    );
+
+    _positional_to_string: Arg -> String;
+    _positional_to_string = |arg| (
+        let multi = if arg.@multiple_values { "..." } else { "" };
+        if arg.@required { 
+            "<" + arg.@id + ">" + multi
+        } else {
+            "[" + arg.@id + "]" + multi
+        }
+    );
+
+    _option_matches: String -> Arg -> Bool;
+    _option_matches = |input, arg| (
+        if arg.@short != 0_U8 && arg._short_to_string == input {
+            true
+        };
+        if arg.@long != "" && arg._long_to_string == input {
+            true
+        };
+        false
     );
 }
 
 impl Arg: ToString {
     to_string = |arg| (
         if arg.@short != 0_U8 {
-            Array::empty(3).push_back('-').push_back(arg.@short)._unsafe_to_string
+            arg._short_to_string    
         };
         if arg.@long != "" {
-            "--" + arg.@long
+            arg._long_to_string
         };
-        if arg.@required { 
-            "<" + arg.@id + ">"
-        } else {
-            "[" + arg.@id + "]"
-        }
+        arg._positional_to_string
     );
 }
 
@@ -164,13 +198,13 @@ namespace Command {
 
     get_matches: Command -> IOFail ArgMatches;
     get_matches = |command| (
-        let raw_args = *IO::get_args;
-        command.get_matches_from(raw_args).from_result
+        let inputs = *IO::get_args;
+        command.get_matches_from(inputs).from_result
     );
 
     get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
-    get_matches_from = |raw_args, command| (
-        let parser = ArgParser::make(raw_args, command);
+    get_matches_from = |inputs, command| (
+        let parser = ArgParser::make(inputs, command);
         let parser = *parser.parse_args;
         let parser = *parser.check_required_args_present;
         let parser = *parser.set_default_if_not_present;
@@ -187,42 +221,43 @@ namespace ArgParser
         command: Command,
         args: Array Arg,
         matches: ArgMatches,
-        raw_args: Array String,
+        inputs: Array String,
         current_index: I64,
         positional_only: Bool
     };
 
     make: Array String -> Command -> ArgParser;
-    make = |raw_args, command| (
+    make = |inputs, command| (
         ArgParser {
             command: command,
             args: command.@args,
             matches: ArgMatches::empty,
-            raw_args: raw_args,
+            inputs: inputs,
             current_index: 1,
             positional_only: false
         }
     );
 
-    no_raw_args: ArgParser -> Bool;
-    no_raw_args = |parser| (
-        parser.@current_index >= parser.@raw_args.get_size
+
+    no_inputs: ArgParser -> Bool;
+    no_inputs = |parser| (
+        parser.@current_index >= parser.@inputs.get_size
     );
 
     advance: ArgParser -> Result ErrMsg (String, ArgParser);
     advance = |parser| (
-        if parser.no_raw_args {
-            err $ "No raw arg"
+        if parser.no_inputs {
+            err $ "No inputs"
         };
-        let raw_arg = parser.@raw_args.@(parser.@current_index);
+        let input = parser.@inputs.@(parser.@current_index);
         let parser = parser.mod_current_index(|i| i + 1);
-        ok $ (raw_arg, parser)
+        ok $ (input, parser)
     );
 
-    get_raw_arg: ArgParser -> Result ErrMsg String;
-    get_raw_arg = |parser| (
-        let (raw_arg, _) = *parser.advance;
-        ok $ raw_arg
+    get_input: ArgParser -> Result ErrMsg String;
+    get_input = |parser| (
+        let (input, _) = *parser.advance;
+        ok $ input
     );
 
 
@@ -231,47 +266,51 @@ namespace ArgParser
     parse_args = |parser| (
         loop_m(
             parser, |parser|
-            if parser.no_raw_args {
+            if parser.no_inputs {
                 break_m $ parser
             };
-            let raw_arg = *parser.get_raw_arg;
+            let input = *parser.get_input;
             if parser.@positional_only {
                 continue_m $ *parser._process_positional_arg
             };
-            if raw_arg == "--" {
+            if input == "--" {
                 let parser = parser.set_positional_only(true);
                 let (_, parser) = *parser.advance;
                 continue_m $ parser
             };
-            if raw_arg.substring(0, 1) == "-" {
+            if input.substring(0, 1) == "-" {
                 continue_m $ *parser._process_option_arg
             };
             continue_m $ *parser._process_positional_arg
         )
     );
     
-    // 現在のコマンドライン引数をオプションと見なして処理する。
+    _find_option_arg: String -> ArgParser -> Option Arg;
+    _find_option_arg = |input, parser| (
+        parser.@args.to_iter.filter(|arg| arg._option_matches(input)).get_first
+    );
+
+    // 現在の input をオプションと見なして処理する。
     _process_option_arg: ArgParser -> Result ErrMsg ArgParser;
     _process_option_arg = |parser| (
-        let (raw_arg, parser) = *parser.advance;
-        let i = parser.@args.find_by(|arg| arg.to_string == raw_arg);
-        if i.is_none {
-            err $ "Found argument '" + raw_arg + "' which wasn't expected, or isn't valid in this context"
-        };
-        let arg = parser.@args.@(i.as_some);
+        let (input, parser) = *parser.advance;
+        let arg = *parser._find_option_arg(input).map_or(
+            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context",
+            ok
+        );
         let parser = *parser._perform_action(arg);
         let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
         ok $ parser 
     );
 
-    // 現在のコマンドライン引数をポジショナルと見なして処理する。
+    // 現在の input をポジショナルと見なして処理する。
     _process_positional_arg: ArgParser -> Result ErrMsg ArgParser;
     _process_positional_arg = |parser| (
-        let raw_arg = *parser.get_raw_arg;
-        eval debug_println("_process_positional_arg: raw_arg=" + raw_arg + " i="+ parser.@current_index.to_string);
-        let args = parser.@args.to_iter.filter(|arg| arg.is_positional).to_array;
+        let input = *parser.get_input;
+        //eval debug_println("_process_positional_arg: input=" + input + " i="+ parser.@current_index.to_string);
+        let args = parser.@args.to_iter.filter(|arg| arg._is_positional).to_array;
         if args.get_size == 0 {
-            err $ "Found argument '" + raw_arg + "' which wasn't expected, or isn't valid in this context"
+            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
         };
         let arg = args.@(0);
         let parser = *parser._perform_action(arg);
@@ -282,7 +321,7 @@ namespace ArgParser
     // parser.@args から arg を除去する。
     _remove_arg: Arg -> ArgParser -> ArgParser;
     _remove_arg = |arg, parser| (
-        eval debug_println("_remove_arg: " + arg.to_string);
+        //eval debug_println("_remove_arg: " + arg.to_string);
         parser.mod_args(|args| args.to_iter.filter(|a| a.@id != arg.@id).to_array)
     );
 
@@ -308,10 +347,10 @@ namespace ArgParser
         err $ "error"
     );
 
-    // 次のコマンドライン引数を値と見なし, set or append アクションを実行する。
+    // 次のinputを値と見なし, set or append アクションを実行する。
     _set_or_append_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
     _set_or_append_value = |arg, parser| (
-        if parser.no_raw_args {
+        if parser.no_inputs {
             err $ "The argument '" + arg.to_string + "' requires a value but none was supplied"
         };
         let (value, parser) = *parser.advance;
@@ -320,7 +359,7 @@ namespace ArgParser
         } else {
             parser.append_value(arg, value)
         };
-        eval debug_println("_set_or_append_value: value=" + value + " i="+ parser.@current_index.to_string);
+        //eval debug_println("_set_or_append_value: value=" + value + " i="+ parser.@current_index.to_string);
         ok $ parser
     );
     
@@ -459,31 +498,32 @@ namespace HelpTemplate {
 
     _format_usage: Command -> HelpTemplate -> String;
     _format_usage = |command, help_template| (
-        let args = command.@args.to_iter.filter(|arg| arg.is_positional).to_array;
-        let options = command.@args.to_iter.filter(|arg| !arg.is_positional).to_array;
+        let args = command.@args.to_iter.filter(|arg| arg._is_positional).to_array;
+        let options = command.@args.to_iter.filter(|arg| !arg._is_positional).to_array;
         let usage = "USAGE:\n";
         let usage = usage + (
             "    " + command.@bin_name + "[EXE]"
+        );
+        let usage = usage + (
+            if options.get_size == 0 { "" } else { " [OPTIONS]" }
         );
         let usage = usage + (
             if args.get_size == 0 { "" } else {
                 args.to_iter.map(|arg| " " + arg.to_string).concat_iter
             }
         );
-        let usage = usage + (
-            if options.get_size == 0 { "" } else { " [OPTIONS]" }
-        );
         usage + "\n"
     );
 
     _format_all_args: Command -> HelpTemplate -> String;
     _format_all_args = |command, help_template| (
-        let args = command.@args.to_iter.filter(|arg| arg.is_positional).to_array;
-        let options = command.@args.to_iter.filter(|arg| !arg.is_positional).to_array;
+        let args = command.@args.to_iter.filter(|arg| arg._is_positional).to_array;
+        let options = command.@args.to_iter.filter(|arg| !arg._is_positional).to_array;
 
         let args_text = if args.get_size == 0 { "" } else {
             "ARGS:\n" +
-            args.to_iter.map(_format_arg).concat_iter
+            args.to_iter.map(_format_arg).concat_iter + 
+            "\n"
         };
         let options_text = if options.get_size == 0 { "" } else {
             "OPTIONS:\n" +
@@ -507,14 +547,14 @@ namespace HelpTemplate {
         let line = "    ";
         let line = line + (
             if arg.@short == 0_U8 { "    " } else {
-                arg.to_string + (
+                arg._short_to_string + (
                     if arg.@long == "" { "  " } else { ", " }
                 )
             }
         );
         let line = line + (
             if arg.@long == "" { " " } else {
-                "--" + arg.@long + " "
+                arg._long_to_string + " "
             }
         );
         let line = line + (
@@ -542,14 +582,18 @@ main = (
             .set_version("0.0.1")
             .set_about("A nice tool")
             .arg(Arg::new("count").short('n').long("count").help("How many times to iterate")
-                .takes_value(true))
+                .takes_value)
             .arg(Arg::new("output").short('o').long("output").help("An output file")
-                .takes_value(true))
-            .arg(Arg::new("FILE").help("An input file").takes_value(true))
+                .takes_value)
+            .arg(Arg::new("FILE").help("Input files").takes_multiple_values.required)
         );
-        let _ = *println(command.render_help).lift;
-        let raw_args = ["nice-tool", "hoge"];
-        let matches = *command.get_matches_from(raw_args).from_result;
+        //let _ = *println(command.render_help).lift;
+        let inputs = *IO::get_args.lift;
+        let inputs = if inputs.get_size > 0 { inputs } else {
+            ["nice-tool", "hoge"] 
+        };
+        let _ = *println("inputs="+inputs.to_string).lift;
+        let matches = *command.get_matches_from(inputs).from_result;
         let _ = *println("matches="+matches.@map.to_string).lift;
         pure()
     }

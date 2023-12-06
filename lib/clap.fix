@@ -1,7 +1,7 @@
-// Command line argument parser.  (partial port of `clap` crate)
+// Command line argument parser.  (Inspired by `clap` crate of Rust)
 // https://docs.rs/clap/3.2.0/clap/index.html
 
-module Main;
+module Clap;
 
 import Debug;
 import HashMap;
@@ -89,7 +89,7 @@ namespace Arg {
 
     _short_to_string: Arg -> String;
     _short_to_string = |arg| (
-        Array::empty(3).push_back('-').push_back(arg.@short)._unsafe_to_string
+        ['-', arg.@short]._unsafe_to_string
     );
 
     _long_to_string: Arg -> String;
@@ -307,7 +307,6 @@ namespace ArgParser
     _process_positional_arg: ArgParser -> Result ErrMsg ArgParser;
     _process_positional_arg = |parser| (
         let input = *parser.get_input;
-        //eval debug_println("_process_positional_arg: input=" + input + " i="+ parser.@current_index.to_string);
         let args = parser.@args.to_iter.filter(|arg| arg._is_positional).to_array;
         if args.get_size == 0 {
             err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
@@ -321,7 +320,6 @@ namespace ArgParser
     // parser.@args から arg を除去する。
     _remove_arg: Arg -> ArgParser -> ArgParser;
     _remove_arg = |arg, parser| (
-        //eval debug_println("_remove_arg: " + arg.to_string);
         parser.mod_args(|args| args.to_iter.filter(|a| a.@id != arg.@id).to_array)
     );
 
@@ -359,7 +357,6 @@ namespace ArgParser
         } else {
             parser.append_value(arg, value)
         };
-        //eval debug_println("_set_or_append_value: value=" + value + " i="+ parser.@current_index.to_string);
         ok $ parser
     );
     
@@ -367,7 +364,7 @@ namespace ArgParser
     set_value = |arg, value, parser| (
         parser.mod_matches(|matches|
             matches.set_values(arg.@id,
-                Array::empty(1).push_back(value)
+                [value]
             )
         )
     );
@@ -429,7 +426,7 @@ namespace ArgMatches {
     get_one: String -> ArgMatches -> Option String;
     get_one = |id, matches| (
         let array = *matches.get_many(id);
-        if array.get_size == 0 { none };
+        if array.get_size == 0 { none() };
         some(array.@(0))
     );
 
@@ -460,27 +457,27 @@ namespace HelpTemplate {
     default_help: HelpTemplate;
     default_help = HelpTemplate { 
         data: (
-            "{name} {version}\n" +
+            "{name-version}\n" +
             "{author-with-newline}" +
             "{about-with-newline}" +
             "\n" + 
             "{usage}\n" +
-            "{all-args}\n"
+            "{all-args}"
         )
     };
 
     default_version: HelpTemplate;
     default_version = HelpTemplate {
         data: (
-            "{name} {version}\n"
+            "{name-version}\n"
         )
     };
 
     format: Command -> HelpTemplate -> String;
     format = |command, help_template| (
         let help = help_template.@data;
-        let help = help.replace_all("{name}", command.@display_name);
-        let help = help.replace_all("{version}", command.@version);
+        let help = help.replace_all("{name-version}", command.@display_name + 
+            if command.@version == "" { "" } else { " " + command.@version });
         let help = help.replace_all("{author-with-newline}", 
             if command.@author == "" { "" } else { command.@author + "\n" }
         );
@@ -520,16 +517,20 @@ namespace HelpTemplate {
         let args = command.@args.to_iter.filter(|arg| arg._is_positional).to_array;
         let options = command.@args.to_iter.filter(|arg| !arg._is_positional).to_array;
 
-        let args_text = if args.get_size == 0 { "" } else {
-            "ARGS:\n" +
-            args.to_iter.map(_format_arg).concat_iter + 
-            "\n"
+        let output: Array String = Array::empty(2);
+        let output = if args.get_size == 0 { output } else {
+            output.push_back(
+                "ARGS:\n" +
+                args.to_iter.map(_format_arg).concat_iter
+            )
         };
-        let options_text = if options.get_size == 0 { "" } else {
-            "OPTIONS:\n" +
-            options.to_iter.map(_format_option).concat_iter
+        let output = if options.get_size == 0 { output } else {
+            output.push_back(
+                "OPTIONS:\n" +
+                options.to_iter.map(_format_option).concat_iter
+            )
         };
-        args_text + options_text
+        output.to_iter.join("\n")
     );
 
     _format_arg: Arg -> String;
@@ -572,7 +573,7 @@ namespace HelpTemplate {
 
 // ---------------------------------
 
-
+/*
 main: IO ();
 main = (
     do {
@@ -599,3 +600,4 @@ main = (
     }
     .try(|err| eprintln("error: " + err))
 );
+*/

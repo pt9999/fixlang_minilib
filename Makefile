@@ -7,10 +7,13 @@ clean:
 JSON_LIB_SOURCE := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/ordered_map.fix lib/string_ex.fix lib/unit_test.fix
 TCP_LIB_SOURCE := lib/tcp.fix
 
-test: test_string_ex test_ordered_map test_parser test_json
+test: test_string_ex test_clap test_ordered_map test_parser test_json
 
 test_string_ex:
 	fix run -f tests/string_ex_test.fix lib/string_ex.fix lib/unit_test.fix
+
+test_clap:
+	fix run -f tests/clap_test.fix lib/clap.fix lib/string_ex.fix lib/unit_test.fix
 
 test_ordered_map:
 	fix run -f tests/ordered_map_test.fix $(JSON_LIB_SOURCE)

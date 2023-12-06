@@ -3,6 +3,8 @@
 
 module Main;
 
+import HashMap;
+
 import StringEx;
 
 //----------------------------------------------
@@ -27,8 +29,8 @@ type Arg = unbox struct {
     short: U8,
     long: String,
     required: Bool,
-    //takes_value: Bool,
-    //multiple_values: Bool,
+    takes_value: Bool, // TODO
+    multiple_values: Bool,
     default_value: Option String,
     value_name: String,
     help: String,
@@ -43,9 +45,9 @@ namespace Arg {
             short: 0_U8,
             long: "",
             required: false,
-            //takes_value: false,
-            //multiple_values: false,
-            default_value: none,
+            takes_value: false,
+            multiple_values: false,
+            default_value: none(),
             value_name: "VALUE",
             help: "",
             action: ArgAction::set_true()
@@ -158,18 +160,13 @@ namespace Command {
 // ---------------------------------
 namespace ArgParser
 {
-    type ArgExpect = unbox union {
-        expect_arg: Arg,
-        expect_value: Arg,
-    };
-    
     type ArgParser = unbox struct {
         command: Command,
         args: Array Arg,
         matches: ArgMatches,
         raw_args: Array String,
         current_index: I64,
-        expects: Array ArgExpect
+        positional_only: Bool
     };
 
     make: Array String -> Command -> ArgParser;
@@ -180,10 +177,11 @@ namespace ArgParser
             matches: ArgMatches::empty,
             raw_args: raw_args,
             current_index: 1,
-            expects: command.@args.map(|arg| expect_arg(arg))
+            positional_only: false
         }
     );
 
+    // 実際のコマンドライン引数の配列を解析し、Argの値を設定する。
     _parse_args : ArgParser -> Result ErrMsg ArgParser;
     _parse_args = |parser| (
         loop_m(
@@ -191,42 +189,22 @@ namespace ArgParser
             if parser.@current_index >= parser.@raw_args.get_size {
                 break_m $ parser
             };
-            let expects = parser.@expects;
             let raw_arg = raw_args.@(parser.@current_index);
-            if expect.is_any_arg {
-                continue_m $ *parser._expect_any_arg()
+            if parser.positional_only {
+                continue_m $ *parser._process_positional_arg
             };
-            if expect.is_arg_value {
-                continue_m $ *parser._expect_arg_value()
+            if raw_arg == "--" {
+                let parser = parser.set_positional_only(true);
+                let parser = parser.mut_current_index(|i| i + 1);
+                continue_m $ parser
             };
-            if expect.is_arg_value {
-                continue_m $ *parser._parse_arg()
-            }
-            let arg = parser.@command._find_arg(raw_arg);
-            if expect.is_any_arg && arg.is_some {
-
-            }
-            continue_m $ (matches, allow_options, index + 1)
+            if raw_arg.get_sub_ex(0,1) == "-" {
+                continue_m $ *parser._process_option_arg
+            };
+            continue_m $ *parser._process_positional_arg
         )
     );
     
-    _find_arg: String -> Array ArgExpect -> Option Arg;
-    _find_arg = |raw_arg, expects| (
-        expects.to_iter.filter(|expect| 
-            expect.is_expect_arg &&
-            expect.as_expect_arg.to_string == raw_arg)
-        .get_first
-    );
-
-    _find_arg_value: String -> Array ArgExpect -> Option Arg;
-    _find_arg_value = |raw_arg, expects| (
-        expects.to_iter.filter(|expect| 
-            expect.is_expect_value &&
-            expect.as_expect_value.to_string == raw_arg)
-        .get_first
-    );
-
-    /*
     _get_sub_ex: I64 -> I64 -> String -> String;
     _get_sub_ex = |s, e, str| (
         let size = str.get_size;
@@ -234,12 +212,47 @@ namespace ArgParser
         let e = max(s, min(size, e));
         if s == 0 && e == size { str };
         str.get_sub(s,e)
-    )
-    */
+    );
 
-    _process_arg: Arg -> ArgParser -> Result ErrMsg ArgParser;
-    _process_arg = |arg, parser| (
+    // 現在のコマンドライン引数をオプションと見なして処理する。
+    _process_option_arg: ArgParser -> Result ErrMsg ArgParser;
+    _process_option_arg = |parser| (
+        let raw_arg = raw_args.@(parser.@current_index);
         let parser = parser.mut_current_index(|i| i + 1);
+        let i = parser.@args.find_by(|arg| arg.to_string == raw_arg);
+        if i.is_none {
+            err $ "Found argument '" + raw_arg + "' which wasn't expected, or isn't valid in this context"
+        };
+        let arg = parser.@args.@(i.as_some);
+        let parser = parser._perform_action(arg);
+        let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
+        ok $ parser 
+    );
+
+    // 現在のコマンドライン引数をポジショナルと見なして処理する。
+    _process_positional_arg: ArgParser -> Result ErrMsg ArgParser;
+    _process_positional_arg = |parser| (
+        let raw_arg = raw_args.@(parser.@current_index);
+        //let parser = parser.mut_current_index(|i| i + 1);
+        let args = parser.@args.to_iter.filter(|arg| arg.is_positional).to_array;
+        if args.get_size == 0 {
+            err $ "Found argument '" + raw_arg + "' which wasn't expected, or isn't valid in this context"
+        };
+        let arg = args.@(0);
+        let parser = parser._perform_action(arg);
+        let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
+        ok $ parser
+    ); 
+
+    // parser.@args から arg を除去する。
+    _remove_arg: Arg -> ArgParser -> ArgParser;
+    _remove_arg = |arg, parser| (
+        parser.mut_args(|args| args.filter(|a| a.@id != arg.@id))
+    );
+
+    // Arg に設定されたアクションを遂行する。
+    _perform_action: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _perform_action = |arg, parser| (
         let action = parser.@action;
         if action.is_help {
             err $ parser.@command.render_help
@@ -248,22 +261,23 @@ namespace ArgParser
             err $ parser.@command.render_version
         };
         if action.is_set_true || action.is_set_false {
-            let b = action.is_set_true;
-            let values = Array::empty(1).push_back(b.to_string);
+            let value = if action.is_set_true { "true" } else { "false" };
+            let values = Array::empty(1).push_back(value);
             let parser = parser.mut_matches(|matches|
                 matches.set_values(args.@id, values)
             );
             ok $ parser
         };
         if action.is_set || action.is_append {
-            parser._process_value(arg)
+            parser._set_or_append_value(arg)
         };
         eval assert(|_| "unknown action: arg="+arg.to_string, false);
         err $ "error"
     );
 
-    _process_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
-    _process_value = |arg, parser| (
+    // 次のコマンドライン引数を値と見なし, set or append アクションを実行する。
+    _set_or_append_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _set_or_append_value = |arg, parser| (
         if parser.@current_index >= parser.@raw_args.get_size {
             err $ "The argument '" + arg.to_string + "' requires a value but none was supplied"
         };
@@ -379,7 +393,7 @@ namespace HelpTemplate {
     default_version: HelpTemplate;
     default_version = HelpTemplate {
         data: (
-            "{name} {version}\n";
+            "{name} {version}\n"
         )
     };
 
@@ -490,5 +504,9 @@ main = (
         .arg(Arg::new("output").set_short('o').set_long("output").set_help("An output file"))
         .arg(Arg::new("FILE").set_help("An input file"))
     );
-    command.print_help
+    let _ = *println(command.render_help);
+    let raw_args = ["nice-tool", "hoge"];
+    let matches = command.get_matches_from(raw_args);
+    let _ = *println("matches="+matches.to_string);
+    pure()
 );

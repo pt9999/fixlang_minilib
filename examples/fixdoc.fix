@@ -1,0 +1,61 @@
+module Main;
+
+import Clap;
+import Character;
+import SimpleParser;
+
+match_global: Parser ();
+match_global = do {
+    let _ = *match_char_class(is_lower);
+    let _ = *zero_or_more(match_char_class(|c| c.is_lower || c == '_'));
+    let _ = *zero_or_more(match_char_class(is_space));
+    let _ = *match_char(':');
+    let _ = *zero_or_more(match_char_class(|c| c != ';'));
+    let _ = *match_char(';');
+    pure()    
+};
+
+process_file: String -> IO ();
+process_file = |contents| (
+    let doc = "";
+    contents.split("\n").loop_iter_m(
+        doc,
+        |doc, line|
+        let line = line.strip_spaces;
+        let is_comment = line.get_sub(0, 2) == "//";
+        let is_global: Bool = match_global.run_parser_str(line).is_ok;
+        if !is_comment && is_global {
+            let _ = *println("#### " + line);
+            let _ = *if doc == "" { print("\n") } else {
+                print("\n" + doc + "\n")
+            };
+            continue_m $ ""
+        };
+        if !is_comment {
+            continue_m $ ""
+        };
+        let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
+        let doc = doc + after_comment;
+        continue_m $ doc
+    ).map(|_| ())
+);
+
+command: Command;
+command = (
+    Command::new("fixdoc")
+    .set_version("0.1.0")
+    .set_about("Output a reference document from a fix source file")
+    .arg(Arg::new("FILE").help("Input file (*fix)").required.takes_value)
+);
+
+main: IO ();
+main = (
+    do {
+        let matches = *command.get_matches;
+        let input_file = matches.get_one("FILE").as_some;
+        let contents = *read_file_string(Path::parse(input_file).as_some);
+        let _ = *process_file(contents).lift;
+        pure()
+    }
+    .try(|err| eprintln (err))
+);

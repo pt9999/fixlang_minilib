@@ -188,7 +188,11 @@ If the match fails, a `_NotMatch` error is raised.
 
 Matches a zero-length string.
 
-#### class: (Char -> Bool) -> Parser String;
+#### match_char_class = (Char -> Bool) -> Parser Char;
+
+Matches a character satisfying the specified condition.
+
+#### match_str_class: (Char -> Bool) -> Parser String;
 
 Matches a zero-or-more-length string. Each character should satisfy the specified condition.
 

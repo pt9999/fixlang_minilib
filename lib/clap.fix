@@ -104,6 +104,9 @@ namespace Arg {
         arg.@short == 0_U8 && arg.@long == ""
     );
 
+    _is_option: Arg -> Bool;
+    _is_option = |arg| !arg._is_positional;
+
     _short_to_string: Arg -> String;
     _short_to_string = |arg| (
         ['-', arg.@short]._unsafe_to_string
@@ -151,21 +154,22 @@ impl Arg: ToString {
 // ---------------------------------
 //  Command
 // ---------------------------------
+
+// A structure representing a command (ie. application).
 type Command = unbox struct {
-    name: String,
-    bin_name: String,
-    display_name: String,
-    version: String,
-    author: String,
-    about: String,
-    args: Array Arg,
-    help_template: HelpTemplate,
-    version_template: HelpTemplate
+    name: String,           // The name of the command.
+    bin_name: String,       // The name of the executable binary of the command.
+    display_name: String,   // The display name of the command.
+    version: String,        // The version of the command.
+    author: String,         // Author of the command.
+    about: String,          // Description about the command.
+    args: Array Arg,        // Argument definitions of the command.
+    help_template: HelpTemplate,    // A help template of the command.
+    version_template: HelpTemplate  // A version template of the command.
 };
 
-type App = Command;
-
 namespace Command {
+    // Creates a command structure by specifying the command name.
     new: String -> Command;
     new = |name| (
         Command {
@@ -180,23 +184,30 @@ namespace Command {
             version_template: HelpTemplate::default_version
         }
     );
-    
-    // about(), version() .. please use set_about(), set_version() etc.
 
-    arg: Arg -> Command -> Command;
-    arg = |arg, command| (
-        command.mod_args(|args| args.push_back(arg))
-    );
+    // Sets the name of the command.
+    name: String -> Command -> Command;
+    name = set_name;
 
-    render_help: Command -> String;
-    render_help = |command| (
-        command.@help_template.format(command)
-    );
+    // Sets the name of the executable binary of the command.
+    bin_name: String -> Command -> Command;
+    bin_name = set_bin_name;
 
-    render_version: Command -> String;
-    render_version = |command| (
-        command.@version_template.format(command)
-    );
+    // Sets the display name of the command.
+    display_name: String -> Command -> Command;
+    display_name = set_display_name;
+
+    // Sets the version of the command.
+    version: String -> Command -> Command;
+    version = set_version;
+
+    // Sets the author of the command.
+    author: String -> Command -> Command;
+    author = set_author;
+
+    // Sets the description about the command.
+    about: String -> Command -> Command;
+    about = set_about;
 
     _default_args: Array Arg;
     _default_args = (
@@ -213,12 +224,34 @@ namespace Command {
         )
     );
 
+    // Add an argument definition to the command.
+    arg: Arg -> Command -> Command;
+    arg = |arg, command| (
+        command.mod_args(|args| args.push_back(arg))
+    );
+
+    // Generates a help string based on the help template.
+    render_help: Command -> String;
+    render_help = |command| (
+        command.@help_template.format(command)
+    );
+
+    // Generates a version string based on the version template.
+    render_version: Command -> String;
+    render_version = |command| (
+        command.@version_template.format(command)
+    );
+
+    // Parse command line arguments based on `IO::get_args`.
+    // If `--help` or `--version` is specified, the help string or version string will be returned as `throw`.
     get_matches: Command -> IOFail ArgMatches;
     get_matches = |command| (
         let inputs = *IO::get_args.lift;
         command.get_matches_from(inputs).from_result
     );
 
+    // Parses command line arguments based on the specified input array.
+    // If `--help` or `--version` is specified, the help string or version string will be returned as the error message.
     get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
     get_matches_from = |inputs, command| (
         let parser = ArgParser::make(inputs, command);
@@ -236,18 +269,19 @@ namespace ArgParser
 {
     type ArgParser = unbox struct {
         command: Command,
-        args: Array Arg,
+        remaining_args: Iterator Arg,
         matches: ArgMatches,
         inputs: Array String,
         current_index: I64,
         positional_only: Bool
     };
 
+    // Creates an `ArgParser` based on the input array and command.
     make: Array String -> Command -> ArgParser;
     make = |inputs, command| (
         ArgParser {
             command: command,
-            args: command.@args,
+            remaining_args: command.@args.to_iter,
             matches: ArgMatches::empty,
             inputs: inputs,
             current_index: 1,
@@ -255,12 +289,13 @@ namespace ArgParser
         }
     );
 
-
+    // Returns True if there are no more inputs. Returns False if there is more input.
     no_inputs: ArgParser -> Bool;
     no_inputs = |parser| (
         parser.@current_index >= parser.@inputs.get_size
     );
 
+    // Proceed to next input.
     advance: ArgParser -> Result ErrMsg (String, ArgParser);
     advance = |parser| (
         if parser.no_inputs {
@@ -271,14 +306,14 @@ namespace ArgParser
         ok $ (input, parser)
     );
 
+    // Get the current input.
     get_input: ArgParser -> Result ErrMsg String;
     get_input = |parser| (
         let (input, _) = *parser.advance;
         ok $ input
     );
 
-
-    // 実際のコマンドライン引数の配列を解析し、Argの値を設定する。
+    // Parse the actual command line argument array and set the value of `Arg`.
     parse_args : ArgParser -> Result ErrMsg ArgParser;
     parse_args = |parser| (
         loop_m(
@@ -302,45 +337,42 @@ namespace ArgParser
         )
     );
     
-    _find_option_arg: String -> ArgParser -> Option Arg;
-    _find_option_arg = |input, parser| (
-        parser.@args.to_iter.filter(|arg| arg._option_matches(input)).get_first
-    );
-
-    // 現在の input をオプションと見なして処理する。
+    // Treats the current input as an optional argument.
     _process_option_arg: ArgParser -> Result ErrMsg ArgParser;
     _process_option_arg = |parser| (
         let (input, parser) = *parser.advance;
-        let arg = *parser._find_option_arg(input).map_or(
-            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context",
-            ok
-        );
+        let remaining_option_args = parser.@remaining_args.filter(_is_option);
+        let matched_args = remaining_option_args.filter(_option_matches(input));
+        if matched_args.is_empty {
+            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
+        };
+        let arg = matched_args.get_first.as_some;
         let parser = *parser._perform_action(arg);
         let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
         ok $ parser 
     );
 
-    // 現在の input をポジショナルと見なして処理する。
+    // Treats the current input as a positional argument.
     _process_positional_arg: ArgParser -> Result ErrMsg ArgParser;
     _process_positional_arg = |parser| (
         let input = *parser.get_input;
-        let args = parser.@args.to_iter.filter(|arg| arg._is_positional).to_array;
-        if args.get_size == 0 {
+        let remaining_positional_args = parser.@remaining_args.filter(_is_positional);
+        if remaining_positional_args.is_empty {
             err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
         };
-        let arg = args.@(0);
+        let arg = remaining_positional_args.get_first.as_some;
         let parser = *parser._perform_action(arg);
         let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
         ok $ parser
     ); 
 
-    // parser.@args から arg を除去する。
+    // Remove `arg` from the remaining args.
     _remove_arg: Arg -> ArgParser -> ArgParser;
     _remove_arg = |arg, parser| (
-        parser.mod_args(|args| args.to_iter.filter(|a| a.@id != arg.@id).to_array)
+        parser.mod_remaining_args(filter(|a| a.@id != arg.@id))
     );
 
-    // Arg に設定されたアクションを遂行する。
+    // Performs the action set in `arg`.
     _perform_action: Arg -> ArgParser -> Result ErrMsg ArgParser;
     _perform_action = |arg, parser| (
         let action = arg.@action;
@@ -362,7 +394,7 @@ namespace ArgParser
         err $ "error"
     );
 
-    // 次のinputを値と見なし, set or append アクションを実行する。
+    // Takes the current input as a value and performs a `set` or `append` action.
     _set_or_append_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
     _set_or_append_value = |arg, parser| (
         if parser.no_inputs {
@@ -377,6 +409,7 @@ namespace ArgParser
         ok $ parser
     );
     
+    // Set the value to `arg`.
     set_value: Arg -> String -> ArgParser -> ArgParser;
     set_value = |arg, value, parser| (
         parser.mod_matches(|matches|
@@ -385,6 +418,8 @@ namespace ArgParser
             )
         )
     );
+
+    // Adds a value to the array of values ​​in `arg`.
     append_value: Arg -> String -> ArgParser -> ArgParser;
     append_value = |arg, value, parser| (
         parser.mod_matches(|matches|
@@ -394,6 +429,7 @@ namespace ArgParser
         )
     );
 
+    // Check whether the required argument values ​​are set. Reports an error if the value is not set.
     check_required_args_present: ArgParser -> Result ErrMsg ArgParser;
     check_required_args_present = |parser| (
         let missing_args: Iterator Arg = 
@@ -408,6 +444,7 @@ namespace ArgParser
         .concat_iter
     );
 
+    // If no value is set for the argument, set the default value.
     set_default_if_not_present: ArgParser -> Result ErrMsg ArgParser;
     set_default_if_not_present = |parser| (
         pure $ parser.@command.@args.to_iter.fold(
@@ -512,8 +549,8 @@ namespace HelpTemplate {
 
     _format_usage: Command -> HelpTemplate -> String;
     _format_usage = |command, help_template| (
-        let args = command.@args.to_iter.filter(|arg| arg._is_positional).to_array;
-        let options = command.@args.to_iter.filter(|arg| !arg._is_positional).to_array;
+        let args = command.@args.to_iter.filter(_is_positional).to_array;
+        let options = command.@args.to_iter.filter(_is_option).to_array;
         let usage = "USAGE:\n";
         let usage = usage + (
             "    " + command.@bin_name + "[EXE]"
@@ -531,8 +568,8 @@ namespace HelpTemplate {
 
     _format_all_args: Command -> HelpTemplate -> String;
     _format_all_args = |command, help_template| (
-        let args = command.@args.to_iter.filter(|arg| arg._is_positional).to_array;
-        let options = command.@args.to_iter.filter(|arg| !arg._is_positional).to_array;
+        let args = command.@args.to_iter.filter(_is_positional).to_array;
+        let options = command.@args.to_iter.filter(_is_option).to_array;
 
         let output: Array String = Array::empty(2);
         let output = if args.get_size == 0 { output } else {
@@ -587,34 +624,3 @@ namespace HelpTemplate {
         line + "\n"
     );
 }
-
-// ---------------------------------
-
-/*
-main: IO ();
-main = (
-    do {
-        let command = (
-            Command::new("nice-tool")
-            .set_display_name("MyNiceTool")
-            .set_version("0.0.1")
-            .set_about("A nice tool")
-            .arg(Arg::new("count").short('n').long("count").help("How many times to iterate")
-                .takes_value)
-            .arg(Arg::new("output").short('o').long("output").help("An output file")
-                .takes_value)
-            .arg(Arg::new("FILE").help("Input files").takes_multiple_values.required)
-        );
-        //let _ = *println(command.render_help).lift;
-        let inputs = *IO::get_args.lift;
-        let inputs = if inputs.get_size > 0 { inputs } else {
-            ["nice-tool", "hoge"] 
-        };
-        let _ = *println("inputs="+inputs.to_string).lift;
-        let matches = *command.get_matches_from(inputs).from_result;
-        let _ = *println("matches="+matches.@map.to_string).lift;
-        pure()
-    }
-    .try(|err| eprintln("error: " + err))
-);
-*/

@@ -10,8 +10,11 @@ This library is still under construction.
 - Simple parsers
 - Ordered maps
 - String utility, UTF8/UTF16/UTF32 conversion
-- TCP/IP Socket (x86_64-linux-gnu and IPv4 only)
 - Unit testing
+- Command Line Argument Parser
+- TCP/IP Socket
+  - Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
+  - WARNING: IPv6 is not supported yet.
 
 ## How to use
 

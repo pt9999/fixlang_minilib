@@ -291,7 +291,7 @@ Verifies that two values are not equal. If the values are equal, the test will f
 
 ## tcp.fix
 
-WARNING: This module only supports x86_64-linux-gnu.
+WARNING: This module only supports x86_64-linux-gnu and aarch64-linux-gnu.
 
 WARNING: IPv6 is not supported yet.
 

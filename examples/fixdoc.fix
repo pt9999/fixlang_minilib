@@ -1,8 +1,20 @@
 module Main;
 
-import Clap;
 import Character;
+
+import StringEx;
 import SimpleParser;
+import Clap;
+
+match_type: Parser String;
+match_type = do {
+    let _ = *match_str("type");
+    let _ = *one_or_more(match_char_class(is_space));
+    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
+    let _ = *zero_or_more(match_char_class(is_space));
+    let _ = *match_char('=');
+    pure $ chars._unsafe_to_string
+};
 
 match_global: Parser ();
 match_global = do {
@@ -23,20 +35,28 @@ process_file = |contents| (
         |doc, line|
         let line = line.strip_spaces;
         let is_comment = line.get_sub(0, 2) == "//";
+        if (is_comment) {
+            let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
+            let doc = doc + after_comment;
+            continue_m $ doc
+        };
         let is_global: Bool = match_global.run_parser_str(line).is_ok;
-        if !is_comment && is_global {
+        if is_global {
             let _ = *println("#### " + line);
             let _ = *if doc == "" { print("\n") } else {
                 print("\n" + doc + "\n")
             };
             continue_m $ ""
         };
-        if !is_comment {
+        let type_name: Result ErrMsg String = match_type.run_parser_str(line).map(|(str,_)| str);
+        if type_name.is_ok {
+            let _ = *println("### " + type_name.as_ok);
+            let _ = *if doc == "" { print("\n") } else {
+                print("\n" + doc + "\n")
+            };
             continue_m $ ""
         };
-        let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
-        let doc = doc + after_comment;
-        continue_m $ doc
+        continue_m $ ""
     ).map(|_| ())
 );
 

@@ -31,7 +31,7 @@ type Json = box union {
 ```
 
 #### to_object: Array (String, Json) -> Json;
-Converts an array of keys and values ​​to a JSON object.
+Converts an array of keys and values to a JSON object.
 
 #### `impl Json: Eq`
 
@@ -282,11 +282,11 @@ Verifies that the boolean value is true. If the boolean value is false, the test
 
 #### assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
 
-Verifies that two values ​​are equal. If the values ​​are different, the test will fail with the specified message.
+Verifies that two values are equal. If the values are different, the test will fail with the specified message.
 
 #### assert_not_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
 
-Verifies that two values ​​are not equal. If the values ​​are equal, the test will fail with the specified message.
+Verifies that two values are not equal. If the values are equal, the test will fail with the specified message.
 
 ## tcp.fix
 

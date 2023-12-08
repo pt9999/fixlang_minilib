@@ -4,9 +4,49 @@ import Debug;
 
 import Tcp;
 import Clap;
+import StringEx;
 
-http_fetch: String -> String -> IOFail ();
-http_fetch = |host_port, path| (
+type URL = unbox struct {
+    scheme: String,
+    host: String,
+    port: String,
+    path: String
+};
+
+namespace URL {
+    _cut: String -> String -> (String, String);
+    _cut = |str, delim| (
+        let pos = str.find(delim, 0);
+        if pos.is_none {
+            (str, "")
+        };
+        let pos = pos.as_some;
+        (str.substring(0, pos), str.substring(pos + delim.get_size, str.get_size))
+    );
+
+    parse: String -> Result ErrMsg URL;
+    parse = |url| (
+        let (scheme, rest) = url._cut("://");
+        eval debug_eprintln("scheme="+ scheme + " rest=" + rest);
+        if scheme != "http" || rest == "" {
+            err $ "url does not start with 'http://': " + url
+        };
+        let (host_port, path) = rest._cut("/");
+        let path = if path == "" { "/" } else { path };
+        
+        let (host, port) = host_port._cut(":");
+        let port = if port == "" { "80" } else { port };
+        
+        ok $ URL { scheme:scheme, host:host, port:port, path:path }
+    );
+}
+
+http_fetch: URL -> IOFail ();
+http_fetch = |url| (
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+    let _ = *println("host_port = " + host_port).lift;
+    let _ = *println("path = " + path).lift;
     let socket = *connect_to_tcp_server(host_port);
     let bufsock = BufferedSocket::make(socket);
     let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
@@ -25,27 +65,18 @@ http_fetch = |host_port, path| (
 main: IO ();
 main = (
     do {
-        let command = Command::new("sample_client")
+        let command = (
+            Command::new("sample_client")
             .version("0.1")
             .about("Fetches contents from remote HTTP server.")
-            .arg(Arg::new("host").short('H').long("host").takes_value.default_value("127.0.0.1")
-                .help("Remote host (eg. '127.0.0.1', 'www.example.com')"))
-            .arg(Arg::new("port").short('p').long("port").takes_value.default_value("80")
-                .help("Remote port number (eg. '8080')"))
-            .arg(Arg::new("path").short('l').long("path").takes_value.default_value("/index.html")
-                .help("Path to fetch"))
-            ;
+            .arg(Arg::new("URL").takes_value.default_value("http://localhost")
+                .help("The URL to fetch. NOTE: URL should start with 'http://'."))
+        );
         let matches = *command.get_matches;
-
-        let host_port = "127.0.0.1:8080";
-        let host_port = "localhost:8080";
-        //let host_port = "183.79.217.124:80";
-        //let host_port = "www.yahoo.co.jp:80";
-        let host_port = matches.get_one("host").as_some + ":" + matches.get_one("port").as_some;
-        let path = matches.get_one("path").as_some;
-        let _ = *println("host_port = " + host_port).lift;
-
-        http_fetch(host_port, path)
+        let url = matches.get_one("URL").as_some;
+        let _ = *println("url = " + url).lift;
+        let url = *URL::parse(url).from_result;
+        http_fetch(url)
     }.try (
         |err| eprintln("ERROR: " + err)
     )

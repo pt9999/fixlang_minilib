@@ -272,20 +272,20 @@ namespace ArgParser
         command: Command,
         remaining_args: Iterator Arg,
         matches: ArgMatches,
-        inputs: Array String,
-        current_index: I64,
+        inputs: Iterator String,
         positional_only: Bool
     };
 
     // Creates an `ArgParser` based on the input array and command.
     make: Array String -> Command -> ArgParser;
     make = |inputs, command| (
+        // drop first argument as it is the executable name
+        let inputs = inputs.to_iter.get_tail.map_or(Iterator::empty, |a|a);
         ArgParser {
             command: command,
             remaining_args: command.@args.to_iter,
             matches: ArgMatches::empty,
             inputs: inputs,
-            current_index: 1,
             positional_only: false
         }
     );
@@ -293,18 +293,16 @@ namespace ArgParser
     // Returns True if there are no more inputs. Returns False if there is more input.
     no_inputs: ArgParser -> Bool;
     no_inputs = |parser| (
-        parser.@current_index >= parser.@inputs.get_size
+        parser.@inputs.is_empty
     );
 
     // Proceed to next input.
     advance: ArgParser -> Result ErrMsg (String, ArgParser);
     advance = |parser| (
-        if parser.no_inputs {
-            err $ "No inputs"
-        };
-        let input = parser.@inputs.@(parser.@current_index);
-        let parser = parser.mod_current_index(|i| i + 1);
-        ok $ (input, parser)
+        parser.@inputs.advance.map_or(
+            err $ "No inputs",
+            |(input, next)| ok $ (input, parser.set_inputs(next))
+        )
     );
 
     // Get the current input.

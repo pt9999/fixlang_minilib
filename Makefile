@@ -33,7 +33,7 @@ examples: examples/json_cat.out examples/sample_client.out examples/sample_serve
 examples/json_cat.out: examples/json_cat.fix $(LIB_JSON) 
 	fix build -f $^ -o $@
 
-examples/sample_client.out: examples/sample_client.fix $(LIB_TCP)
+examples/sample_client.out: examples/sample_client.fix $(LIB_TCP) $(LIB_CLAP)
 	fix build -f $^ -o $@
 
 examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)

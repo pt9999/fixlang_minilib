@@ -7,6 +7,7 @@ import Clap;
 import StringEx;
 
 type URL = unbox struct {
+    url: String,
     scheme: String,
     host: String,
     port: String,
@@ -15,7 +16,7 @@ type URL = unbox struct {
 
 namespace URL {
     _cut: String -> String -> (String, String);
-    _cut = |str, delim| (
+    _cut = |delim, str| (
         let pos = str.find(delim, 0);
         if pos.is_none {
             (str, "")
@@ -26,27 +27,30 @@ namespace URL {
 
     parse: String -> Result ErrMsg URL;
     parse = |url| (
-        let (scheme, rest) = url._cut("://");
-        eval debug_eprintln("scheme="+ scheme + " rest=" + rest);
-        if scheme != "http" || rest == "" {
-            err $ "url does not start with 'http://': " + url
+        let (scheme, rest) = if url.find("://", 0).is_some {
+            url._cut("://")
+        } else {
+            ("http", url)
         };
         let (host_port, path) = rest._cut("/");
-        let path = if path == "" { "/" } else { path };
+        let path = if path == "" { "/" } else { "/" + path };
         
         let (host, port) = host_port._cut(":");
         let port = if port == "" { "80" } else { port };
         
-        ok $ URL { scheme:scheme, host:host, port:port, path:path }
+        ok $ URL { url:url, scheme:scheme, host:host, port:port, path:path }
     );
 }
 
 http_fetch: URL -> IOFail ();
 http_fetch = |url| (
+    if url.@scheme != "http" {
+        throw $ "url does not start with 'http://': url=" + url.@url
+    };
     let host_port = url.@host + ":" + url.@port;
     let path = url.@path;
-    let _ = *println("host_port = " + host_port).lift;
-    let _ = *println("path = " + path).lift;
+    //let _ = *println("host_port = " + host_port).lift;
+    //let _ = *println("path = " + path).lift;
     let socket = *connect_to_tcp_server(host_port);
     let bufsock = BufferedSocket::make(socket);
     let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
@@ -74,7 +78,7 @@ main = (
         );
         let matches = *command.get_matches;
         let url = matches.get_one("URL").as_some;
-        let _ = *println("url = " + url).lift;
+        //let _ = *println("url = " + url).lift;
         let url = *URL::parse(url).from_result;
         http_fetch(url)
     }.try (

@@ -37,7 +37,7 @@ examples/sample_client.out: examples/sample_client.fix $(LIB_TCP) $(LIB_CLAP)
 	fix build -f $^ -o $@
 
 examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
-	fix build -g -f $^ -o $@
+	fix build -f $^ -o $@
 
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix
 	fix build -f $^ -o $@

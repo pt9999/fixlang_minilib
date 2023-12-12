@@ -12,6 +12,7 @@ NOTE: This file is under construction.
 - [ordered_map.fix](#ordered_mapfix)
 - [simple_parser.fix](#simple_parserfix)
 - [string_ex.fix](#string_exfix)
+- [unicode.fix](#unicodefix)
 - [unit_test.fix](#unit_testfix)
 - [tcp.fix](#tcpfix)
 - [clap.fix](#clapfix)
@@ -81,14 +82,14 @@ type Stream = unbox struct {
 #### `impl Stream : FromString`
 Creates a stream from a string.
 
+#### `impl Stream : ToString`
+
 ### ParseResult
 Result type that returns a value of an arbitrary type and a stream.
 
 ```
 type ParseResult a = Result ErrMsg (a, Stream);
 ```
-
-#### `impl ParseResult : ToString`
 
 #### _NotMatch: ErrMsg;
 
@@ -207,6 +208,8 @@ Matches a zero-or-more-length string. Each character should satisfy the specifie
 
 #### `impl [a: ToString] Option a: ToString`
 
+#### `impl [a: ToString, e: ToString] Result e a: ToString`
+
 #### `impl [k: ToString, v: ToString] HashMap k v : ToString`
 
 #### `impl [a: ToString] Array a: ToString`
@@ -215,9 +218,17 @@ Matches a zero-or-more-length string. Each character should satisfy the specifie
 
 Convert a byte array to a string. Specifically, it calls `String::_unsafe_to_string()` after appending a null character to the end of the byte array.
 
+#### byte_to_string: U8 -> String;
+
+Converts a byte (a character) to a string of length 1.
+
 #### find_byte: U8 -> String -> Option I64;
 
 Searches for the specified byte from the beginning of a string. If found, returns the index of that byte.
+
+#### replace_all: String -> String -> String -> String;
+
+Replaces all occurrences of `from` in the string with `to`.
 
 #### substring: I64 -> I64 -> String -> String;
 
@@ -228,6 +239,24 @@ Returns a substring extracted from a specified range from a string. If the speci
 Compares two strings. Returns True if and only if the first string is less than the second string.
 
 #### `impl String: LessThan`
+
+#### encode_hex_char: U8 -> U8;
+
+Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').
+
+#### decode_hex_char: U8 -> Result ErrMsg U8;
+
+Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
+
+#### to_string_hex: U64 -> String;
+
+Converts a 64bit number to a hex string.
+
+#### from_string_hex: String -> Result ErrMsg U64;
+
+Converts a hex string to a 64bit number.
+
+## unicode.fix
 
 #### utf8_to_utf32: Array U8 -> Array U32 -> Array U32;
 
@@ -308,6 +337,10 @@ type IpAddress = unbox struct {
 #### `impl IpAddress: FromString`
 
 #### `impl IpAddress: ToString`
+
+#### from_array: Array U8 -> IpAddress;
+
+Creates `IPAddress` from an array. The array size must be 4.
 
 #### resolve: String -> IOFail IpAddress;
 

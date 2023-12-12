@@ -5,16 +5,21 @@ clean:
 
 LIB_UNIT_TEST := lib/unit_test.fix
 LIB_STRING_EX := lib/string_ex.fix
+LIB_UNICODE := lib/unicode.fix $(LIB_STRING_EX)
 LIB_CLAP := lib/clap.fix $(LIB_STRING_EX)
 LIB_ORDERED_MAP := lib/ordered_map.fix $(LIB_STRING_EX)
 LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
-LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix lib/ordered_map.fix $(LIB_STRING_EX)
+LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix \
+			lib/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/tcp.fix
 
-test: test_string_ex test_clap test_ordered_map test_parser test_json
+test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json
 
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+
+test_unicode:
+	fix run -f tests/unicode_test.fix $(LIB_UNICODE) $(LIB_UNIT_TEST)
 
 test_clap:
 	fix run -f tests/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)

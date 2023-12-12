@@ -8,6 +8,7 @@ import OrderedMap;
 import Json;
 import SimpleParser;
 import StringEx;
+import Unicode;
 
 // Parses JSON text and returns a JSON value.
 decode: String -> Result ErrMsg Json;
@@ -246,14 +247,6 @@ _unescape_table = (
     .to_array
 );
 
-_decode_hex_char: U8 -> U8;
-_decode_hex_char = |c| (
-    if '0' <= c && c <= '9' { c - '0' };
-    if 'A' <= c && c <= 'F' { c - 'A' + 10_U8 };
-    if 'a' <= c && c <= 'f' { c - 'a' + 10_U8 };
-    0_U8
-);
-
 // Parse a quoted character. ("\n", "\uD83D" etc.)
 // NOTE: Escape sequences of the form "\uXXXX" can only represent 
 // the range U+0000 to U+FFFF. Characters in the range U+10000 to U+10FFFF
@@ -268,7 +261,7 @@ _match_quoted_char_u16 = (
         .filter(|c| c != 0_U8)
         .map(|c| c.to_U16)
     );
-    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map(_decode_hex_char);
+    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map_result(decode_hex_char);
     let match_u_hex4: Parser U16 = do {
         let _ = *(match_char('u'));
         let a = (*match_hex).to_U16.shift_left(12_U16);

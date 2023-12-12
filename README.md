@@ -9,7 +9,8 @@ This library is still under construction.
 - JSON encoding and decoding
 - Simple parsers
 - Ordered maps
-- String utility, UTF8/UTF16/UTF32 conversion
+- String utility
+- UTF8/UTF16/UTF32 conversion
 - Unit testing
 - Command Line Argument Parser
 - TCP/IP Socket

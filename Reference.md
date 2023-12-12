@@ -381,6 +381,14 @@ The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192
 or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
 If the port number is omitted, the default port number is 80.
 
+#### get_ipaddress: SocketAddress -> IpAddress;
+
+Extracts an ip address from the socket address.
+
+#### get_port: SocketAddress -> I64;
+
+Extracts a port number from the socket address.
+
 #### `impl SocketAddress: ToString`
 
 ### Socket

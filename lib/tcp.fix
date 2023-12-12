@@ -22,7 +22,8 @@ _perror = |str| (
     )
 );
 
-
+// This type represents IPv4 ip address,
+// eg. 127.0.0.1, 192.168.0.1 etc.
 type IpAddress = unbox struct {
     addr: Array U8
 };
@@ -150,6 +151,14 @@ namespace HostEnt {
 }
 
 namespace IpAddress {
+    // Converts a byte array to an `IpAddress`. The length of the byte array must be 4.
+    from_array: Array U8 -> IpAddress;
+    from_array = |addr| (
+        eval assert(|_| "IpAddress::from_array: invalid size: " + addr.get_size.to_string,
+                    addr.get_size == 4);
+        IpAddress { addr: addr }
+    );
+
     // Resolve a hostname such as "127.0.0.1" or "www.example.com".
     resolve: String -> IOFail IpAddress;
     resolve = |host| (
@@ -168,6 +177,7 @@ namespace IpAddress {
     );
 }
 
+// This type reprents IPv4 port number, 0-65535.
 type Port = unbox struct { port: U16 };
 
 impl Port: FromString
@@ -191,6 +201,7 @@ namespace SocketAddress {
     _sockaddr_in_size: I64;
     _sockaddr_in_size = 16;
 
+    // This type represents IPv4 ip address and port number.
     type SocketAddress = unbox struct {
         sockaddr_in: Array U8
     };
@@ -200,6 +211,7 @@ namespace SocketAddress {
         SocketAddress { sockaddr_in: array }
     );
 
+    // Creates a `SocketAddress` from an ip address and a port.
     make: IpAddress -> Port -> SocketAddress;
     make = |ipaddress, port| (
         //eval debug_eprintln("ipaddress="+ipaddress.to_string + " port="+port.to_string);
@@ -218,6 +230,13 @@ namespace SocketAddress {
         SocketAddress { sockaddr_in: sockaddr_in }
     );
 
+    // Splits the first argument into a host name and a port number, then resolves the host
+    // name to an ip address, then creates a `SocketAddress` from the ip address and
+    // the port number.
+    //
+    // The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`),
+    // or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
+    // If the port number is omitted, the default port number is 80.
     resolve: String -> IOFail SocketAddress;
     resolve = |host_port| (
         let split = host_port.split(":").to_array;
@@ -230,18 +249,34 @@ namespace SocketAddress {
         let port: Port = *from_string(port).from_result;
         pure $ SocketAddress::make(ipaddress, port)
     );
+
+    // Extracts an ip address from the socket address.
+    get_ipaddress: SocketAddress -> IpAddress;
+    get_ipaddress = |socket_address| (
+        let sa = socket_address.@sockaddr_in;
+        IpAddress::from_array(sa.get_sub(4, 8))
+    );
+
+    // Extracts a port number from the socket address.
+    get_port: SocketAddress -> I64;
+    get_port = |socket_address| (
+        let sa = socket_address.@sockaddr_in;
+        let port = sa.@(2).to_U16.shift_left(8_U16).bit_or(sa.@(3).to_U16);
+        port.to_I64
+    );
 }
 
 impl SocketAddress : ToString {
     to_string = |socket_address| (
-        let sa = socket_address.@sockaddr_in;
-        let port = sa.@(2).to_U16.shift_left(8_U16).bit_or(sa.@(3).to_U16).to_string;
-        let addr = sa.@(4).to_string + "." + sa.@(5).to_string + "." + 
-            sa.@(6).to_string + "." + sa.@(7).to_string;
-        addr + ":" + port
+        let addr = socket_address.get_ipaddress;
+        let port = socket_address.get_port;
+        addr.to_string + ":" + port.to_string
     );
 }
 
+// This type represents an IPv4 socket.
+// It consists of a socket file descriptor.
+// The socket file descripter is closed automatically when Socket is deallocated.
 type Socket = unbox struct {
     data: Destructor I32
 };
@@ -260,6 +295,8 @@ namespace Socket {
     _SOCK_STREAM: I32;
     _SOCK_STREAM = 1_I32;
 
+    // Creates `Socket` from a file descriptor of a socket.
+    // The socket will be automatically closed when `Socket` is deallocated.
     _unsafe_from_fd: I32 -> Socket;
     _unsafe_from_fd = |fd| (
         Socket {
@@ -271,6 +308,8 @@ namespace Socket {
         }
     );
 
+    // Creates new tcp socket.
+    // The socket will be automatically closed when `Socket` is deallocated.
     make_tcp_socket: () -> IOFail Socket;
     make_tcp_socket = |_| (
         let sockfd = CALL_C[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
@@ -281,6 +320,7 @@ namespace Socket {
         pure $ _unsafe_from_fd(sockfd)
     );
 
+    // Assigns an IPv4 ip address and a port number to the socket.
     bind: SocketAddress -> Socket -> IOFail ();
     bind = |socket_address, socket| (
         let addr = socket_address.@sockaddr_in;
@@ -296,6 +336,8 @@ namespace Socket {
         pure $ ()
     );
 
+    // Listens the socket for incoming connection requests.
+    // The first argument (backlog) is the maximum length to which the queue of pending connections for sockfd may grow.
     listen: I64 -> Socket -> IOFail ();
     listen = |backlog, socket| (
         let ret = socket.@data.borrow (|fd|
@@ -308,12 +350,15 @@ namespace Socket {
         pure $ ()
     );
 
+    // Waits for an incoming connection request. If an incoming connection arrives, accept it,
+    // and returns a socket of accepted connection and the remote socket address.
     accept: Socket -> IOFail (Socket, SocketAddress);
     accept = |socket| (
         let (fd, remote_address) = *socket.accept_fd;
         pure $ (_unsafe_from_fd(fd), remote_address)
     );
 
+    // Same as `accept()`, except that it returns the accepted socket's file descriptor instead of `Socket`.
     accept_fd: Socket -> IOFail (I32, SocketAddress);
     accept_fd = |socket| (
         let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
@@ -339,6 +384,7 @@ namespace Socket {
         pure $ (fd, remote_address)
     );
 
+    // Connects to the specified address.
     connect: SocketAddress -> Socket -> IOFail ();
     connect = |remote_address, socket| (
         let addr = remote_address.@sockaddr_in;
@@ -355,6 +401,9 @@ namespace Socket {
         pure $ ()
     );
 
+    // Transmits a message to another socket.
+    // May be used only when the socket is in a connected state.
+    // Returns the number of bytes sent.
     send: Array U8 -> Socket -> IOFail I64;
     send = |bytes, socket| (
         let size_to_send = bytes.get_size.to_U64;
@@ -371,6 +420,11 @@ namespace Socket {
         pure $ size
     );
 
+    // Receives messages from a socket.
+    // The first argument is the maximum number of bytes to receive.
+    // If no message are available at the socket, `recv()` waits for a message to arrive.
+    // Returns the number of bytes received.
+    // When the socket has been shutdown, the return value will be 0.
     recv: I64 -> Socket -> IOFail (Array U8);
     recv = |size_to_recv, socket| (
         let bytes = Array::fill(size_to_recv, 0_U8);
@@ -389,6 +443,7 @@ namespace Socket {
     );
 }
 
+// This type is a structure that wraps a `Socket` and maintains a write buffer, a read buffer and an EOF flag.
 type BufferedSocket = unbox struct {
     socket: Socket,
     write_buf: Array U8,
@@ -400,6 +455,7 @@ namespace BufferedSocket {
     _BUFSIZE: I64;
     _BUFSIZE = 1024;
 
+    // Makes a `BufferedSocket` from a `Socket`.
     make: Socket -> BufferedSocket;
     make = |socket| (
         BufferedSocket {
@@ -410,6 +466,8 @@ namespace BufferedSocket {
         }
     );
 
+    // Writes a string to the write buffer. The contents of the write buffer is not sent
+    // until the size of the write buffer is equal to or greater than `_BUFSIZE`, or `flush()` is called.
     write_str: String -> BufferedSocket -> IOFail BufferedSocket;
     write_str = |str, bufsock| (
         let bytes = str.get_bytes.pop_back;
@@ -420,6 +478,7 @@ namespace BufferedSocket {
         bufsock.flush
     );
 
+    // Sends the contents of the writer buffer to the socket and cleans the write buffer.
     flush: BufferedSocket -> IOFail BufferedSocket;
     flush = |bufsock| (
         loop_m(
@@ -438,6 +497,11 @@ namespace BufferedSocket {
         )
     );
 
+    // Reads out a line (ie. a string that ends with a newline) from the read buffer. 
+    // When the read buffer does not contain a newline, it will read some bytes upto
+    // _BUFSIZE from the socket, and search for a newline again.
+    // When the connection is closed, the return value may or may not contain a newline.
+    // The next call of `read_line()` returns an empty string, which represents that the connection is closed.
     read_line: BufferedSocket -> IOFail (String, BufferedSocket);
     read_line = |bufsock| (
         loop_m(
@@ -467,6 +531,10 @@ namespace BufferedSocket {
     );
 }
 
+// Connects to a remote TCP server as a client.
+// The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`),
+// or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
+// If the port number is omitted, the default port number is 80.
 connect_to_tcp_server: String  -> IOFail Socket;
 connect_to_tcp_server = |host_port| (
     let socket_address: SocketAddress = *SocketAddress::resolve(host_port);
@@ -475,6 +543,14 @@ connect_to_tcp_server = |host_port| (
     pure $ socket
 );
 
+// Listens at the specified address as a server.
+//
+// The first argument is `{host}:{port}`, where `{host}` is an IP Address (typically, `127.0.0.1`),
+// or a FQDN host name (typically, `localhost`), and `{port}` is a port number (eg. `8080`).
+// If the port number is omitted, the default port number is 80.
+//
+// The second argument (`backlog`) is the maximum length to which the queue of pending connections
+// for the socket may grow.
 listen_tcp_server: String -> I64 -> IOFail Socket;
 listen_tcp_server = |server_host_port, backlog| (
     let socket_address: SocketAddress = *SocketAddress::resolve(server_host_port);

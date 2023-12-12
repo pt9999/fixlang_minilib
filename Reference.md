@@ -364,6 +364,11 @@ type Socket = unbox struct {
 
 #### `impl Socket: ToString`
 
+#### _unsafe_from_fd: I32 -> Socket;
+
+Creates `Socket` from a file descriptor of a socket.
+The socket will be automatically closed when `Socket` is deallocated.
+
 #### make_tcp_socket: () -> IOFail Socket;
 
 Creates new tcp socket.
@@ -381,6 +386,10 @@ The first argument (backlog) is the maximum length to which the queue of pending
 #### accept: Socket -> IOFail (Socket, SocketAddress);
 
 Waits for an incoming connection request. If an incoming connection arrives, accept it, and returns a socket of accepted connection and the remote socket address.
+
+#### accept_fd: Socket -> IOFail (I32, SocketAddress);
+
+Same as `accept()`, except that it returns the accepted socket's file descriptor instead of `Socket`.
 
 #### connect: SocketAddress -> Socket -> IOFail ();
 

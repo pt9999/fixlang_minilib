@@ -260,6 +260,17 @@ namespace Socket {
     _SOCK_STREAM: I32;
     _SOCK_STREAM = 1_I32;
 
+    _unsafe_from_fd: I32 -> Socket;
+    _unsafe_from_fd = |fd| (
+        Socket {
+            data: Destructor::make(fd, |fd|
+                //eval debug_eprintln ("closing socket fd: " + fd.to_string);
+                eval CALL_C[I32 close(I32), fd];
+                ()
+            )   
+        }
+    );
+
     make_tcp_socket: () -> IOFail Socket;
     make_tcp_socket = |_| (
         let sockfd = CALL_C[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
@@ -267,12 +278,7 @@ namespace Socket {
             let _ = *_perror("socket").lift;
             throw $ "creating socket failed"
         };
-        let data = Destructor::make(sockfd, |sockfd|
-            //eval debug_eprintln ("closing sockfd: " + sockfd.to_string);
-            eval CALL_C[I32 close(I32), sockfd];
-            ()
-        );
-        pure $ Socket { data: data }
+        pure $ _unsafe_from_fd(sockfd)
     );
 
     bind: SocketAddress -> Socket -> IOFail ();
@@ -304,6 +310,12 @@ namespace Socket {
 
     accept: Socket -> IOFail (Socket, SocketAddress);
     accept = |socket| (
+        let (fd, remote_address) = *socket.accept_fd;
+        pure $ (_unsafe_from_fd(fd), remote_address)
+    );
+
+    accept_fd: Socket -> IOFail (I32, SocketAddress);
+    accept_fd = |socket| (
         let addr: Array U8 = Array::fill(_sockaddr_in_size, 0_U8);
         let addrlen: Array U32 = Array::fill(1, 0_U32);
         let addrlen = addrlen.set(0, addr.get_size.to_U32);
@@ -324,16 +336,7 @@ namespace Socket {
             let addr = addr.get_sub_ex(0, len);
             SocketAddress::_unsafe_from_array(addr)
         );
-        let accepted_socket : Socket = (
-            Socket {
-                data: Destructor::make(fd, |fd|
-                    //eval debug_eprintln ("closing sockfd: " + fd.to_string);
-                    eval CALL_C[I32 close(I32), fd];
-                    ()
-                )
-            }
-        );
-        pure $ (accepted_socket, remote_address)
+        pure $ (fd, remote_address)
     );
 
     connect: SocketAddress -> Socket -> IOFail ();

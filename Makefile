@@ -12,8 +12,9 @@ LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
 LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix \
 			lib/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/tcp.fix
+LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 
-test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json
+test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json test_url
 
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
@@ -32,6 +33,10 @@ test_parser:
 
 test_json:
 	fix run -f tests/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
+
+test_url:
+	fix run -f tests/net/url_test.fix $(LIB_URL) $(LIB_UNIT_TEST)
+
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out
 

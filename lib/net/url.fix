@@ -1,4 +1,4 @@
-module Main;
+module URL;
 
 import StringEx;
 
@@ -9,6 +9,25 @@ type URL = unbox struct {
     port: String,
     path: String
 };
+
+impl URL: Eq {
+    eq = |a, b| (
+        a.@url == b.@url &&
+        a.@scheme == b.@scheme &&
+        a.@host == b.@host &&
+        a.@port == b.@port &&
+        a.@path == b.@path
+    );
+}
+
+impl URL: ToString {
+    to_string = |u| "URL { url:" + u.@url
+        + ", scheme:" + u.@scheme
+        + ", host:" + u.@host
+        + ", port:" + u.@port
+        + ", path:" + u.@path
+        + "}";
+}
 
 namespace URL {
     _cut: String -> String -> (String, String);
@@ -21,6 +40,15 @@ namespace URL {
         (str.substring(0, pos), str.substring(pos + delim.get_size, str.get_size))
     );
 
+    // Parses a string as a URL.
+    // Recognized format of a URL is:
+    //    [scheme://]host[:port][path]
+    // If the scheme part is omitted, a default value ("http") is used as a scheme.
+    // The host and port part should not contain "/".
+    // If the port part is omitted, a default value ("443" if scheme == "https", "80" otherwise)
+    // is used as a port.
+    // The path part should be starts with "/".
+    // If the path part is omitted, a default value ("/") is used as a path.
     parse: String -> Result ErrMsg URL;
     parse = |url| (
         let (scheme, rest) = if url.find("://", 0).is_some {
@@ -32,11 +60,19 @@ namespace URL {
         let path = if path == "" { "/" } else { "/" + path };
         
         let (host, port) = host_port._cut(":");
-        let port = if port == "" { "80" } else { port };
+        let port = if port == "" { 
+            if scheme == "https" { "443" } else { "80" }
+        } else { port };
         
+        if host == "" {
+            err $ "Invalid host"
+        };
+        let port_res: Result ErrMsg I64 = from_string (port);
+        if port_res.is_err {
+            err $ "Invalid port"
+        };
         ok $ URL { url:url, scheme:scheme, host:host, port:port, path:path }
     );
-
 }
 
 namespace URI {
@@ -101,6 +137,7 @@ namespace URI {
     );
 }
 
+/*
 main: IO ();
 main = (
     do {
@@ -112,3 +149,4 @@ main = (
     }
     .try(|err| eprintln(err))
 );
+*/

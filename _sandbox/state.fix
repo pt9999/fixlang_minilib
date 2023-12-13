@@ -23,20 +23,32 @@ impl State s: Monad {
         f(a).run_state(ss);
 }
 
-trait [m: * -> (* -> *)] m: StateMonad {
-    get_state: m s s;
-    put_state: s -> m s ();
+impl State s: Functor {
+    map = |f, ma| make_state_monad $ |s|
+        let (a, ss) = ma.run_state(s);
+        (f(a), ss);
 }
 
-impl State: StateMonad {
+trait [m: * -> *] m: GetPutState {
+    get_state: m s;
+    put_state: s -> m ();
+}
+
+trait StateMonad = Functor + Monad + GetPutState;
+
+impl State s: GetPutState {
     get_state = make_state_monad $ |s| (s, s);
     put_state = |s| make_state_monad $ |_| ((), s);
 }
+
+mod_state: [m: StateMonad] (s -> s) -> m ();
+mod_state = |f| put_state $ f $ *get_state;
 
 trait [m: * -> *] m: ToState {
     to_state: m a -> State s a;
 }
 
+/*
 impl Option: ToState {
     to_state = |ma| make_state_monad $ |s| pure $ (*ma, s);
 }
@@ -44,6 +56,7 @@ impl Option: ToState {
 impl Result e: ToState {
     to_state = |ma| make_state_monad $ |s| pure $ (*ma, s);
 }
+*/
 
 //-------------------------------------------------------
 // StateIO Monad
@@ -59,6 +72,12 @@ namespace StateIO {
     run_stateio = |s, ma| (ma.@_data) (s);
 }
 
+impl StateIO s: Functor {
+    map = |f, ma| make_stateio_monad $ |s|
+        let (a, ss) = *ma.run_stateio(s);
+        pure $ (f(a), ss);
+}
+
 impl StateIO s: Monad {
     pure = |a| make_stateio_monad $ |s| pure $ (a, s);
     bind = |f, ma| make_stateio_monad $ |s|
@@ -66,13 +85,17 @@ impl StateIO s: Monad {
         f(a).run_stateio(ss);
 }
 
-impl StateIO: StateMonad {
+impl StateIO s: GetPutState {
     get_state = make_stateio_monad $ |s| pure $ (s, s);
     put_state = |s| make_stateio_monad $ |_| pure $ ((), s);
 }
 
 trait [m: * -> *] m: ToStateIO {
     to_stateio: m a -> StateIO s a;
+}
+
+impl State s: ToStateIO {
+    to_stateio = |sa| make_stateio_monad $ |s| pure $ sa.run_state(s);
 }
 
 impl IO: ToStateIO {
@@ -93,6 +116,12 @@ namespace StateIOF {
     run_stateiof = |s, ma| (ma.@_data) (s);
 }
 
+impl StateIOF s: Functor {
+    map = |f, ma| make_stateiof_monad $ |s|
+        let (a, ss) = *ma.run_stateiof(s);
+        pure $ (f(a), ss);
+}
+
 impl StateIOF s: Monad {
     pure = |a| make_stateiof_monad $ |s| pure $ (a, s);
     bind = |f, ma| make_stateiof_monad $ |s|
@@ -100,13 +129,21 @@ impl StateIOF s: Monad {
         f(a).run_stateiof(ss);
 }
 
-impl StateIOF: StateMonad {
+impl StateIOF s: GetPutState {
     get_state = make_stateiof_monad $ |s| pure $ (s, s);
     put_state = |s| make_stateiof_monad $ |_| pure $ ((), s);
 }
 
 trait [m: * -> *] m: ToStateIOF {
     to_stateiof: m a -> StateIOF s a;
+}
+
+impl State s: ToStateIOF {
+    to_stateiof = |sa| make_stateio_monad $ |s| pure $ sa.run_state(s);
+}
+
+impl StateIO s: ToStateIOF {
+    to_stateiof = |sia| make_stateiof_monad $ |s| sia.run_stateio(s).lift;
 }
 
 impl IO: ToStateIOF {
@@ -117,49 +154,146 @@ impl IOFail: ToStateIOF {
     to_stateiof = |iofa| make_stateiof_monad $ |s| pure $ (*iofa, s);
 }
 
+impl Result ErrMsg: ToStateIOF {
+    to_stateiof = |res| make_stateiof_monad $ |s| pure $ (*res.from_result, s);
+}
+
 //-------------------------------------------------------
+
+type App = unbox struct {
+    users: Array String,
+    pages: Array String
+};
+
+type StateApp = State App;
+
+namespace App {
+    empty: App;
+    empty = App {
+        users: Array::empty(0),
+        pages: Array::empty(0)
+    };
+    
+    get_app: [m: StateMonad] m App;
+    get_app = get_state;
+
+    mod_app: [m: StateMonad] m ();
+    mod_app = mod_state;
+
+    add_user: [m: StateMonad] String -> m ();
+    add_user = |user| (
+        mod_state(mod_users(push_back(user)))
+    );
+
+    add_page: [m: StateMonad] String -> m ();
+    add_page = |page| (
+        mod_state(mod_pages(push_back(page)))
+    );
+
+    get_users: [m: StateMonad] m (Array String);
+    //get_users: State App (Array String);
+    get_users = get_state.map(@users);
+
+    get_pages: [m: StateMonad] m (Array String);
+    //get_pages: State App (Array String);
+    get_pages = get_state.map(@pages);
+
+    print_users: StateIO App ();
+    print_users = do {
+        let users = *get_users.to_stateio;
+        let _ = *println("---users---").to_stateio;
+        users.to_iter.fold_m((), |_, u| println(u)).to_stateio
+    };
+
+    print_pages: StateIO App ();
+    print_pages = do {
+        let pages = *get_pages;
+        let _ = *println("---pages---").to_stateio;
+        pages.to_iter.fold_m((), |_, p| println(p)).to_stateio
+    };
+
+    save_file: String -> StateIOF App ();
+    save_file = |path| (
+        let users = *get_users;
+        let pages = *get_pages;
+        do {
+            if path == "" { throw $ "Empty path" };
+            let path = Path::parse(path);
+            if path.is_none { throw $ "Path::parse failed" };
+            let path = path.as_some;
+            let fh = *open_file(path, "w");
+            let _ = *users.to_iter.join(",").write_string(fh); 
+            let _ = *pages.to_iter.join(",").write_string(fh); 
+            let _ = *close_file(fh).lift;
+            pure()
+        }
+        .to_stateiof
+    );
+}
+
+state_func: [m: StateMonad] m ();
+state_func = do {
+    let _ = *mod_state(|i| i+1);
+    pure()
+};
+
+register_users: State App ();
+register_users = do {
+    let _ = *add_user("taro");
+    let _ = *add_user("jiro");
+    let _ = *add_user("saburo");
+    pure()
+};
 
 test_state: IO ();
 test_state = do {
     let _ = *println("=== test_state ===");
-    let sm : State I64 () = do {
-        let a = *get_state;
-        let _ = *put_state(a+1);
-        pure()
+    let m = do {
+        let _ = *register_users;
+        get_users
     };
-    let (b,s) = sm.run_state(42);
-    let _ = *println(s.to_string);
+    let (users,_) = m.run_state(App::empty);
+    let _ = *println(users.to_iter.join(","));
+    pure()
+};
+
+create_user_pages: State App ();
+create_user_pages = do {
+    let users = *get_users;
+    users.to_iter.fold_m(
+        (), |_, user|
+        add_page(user + "'s page")
+    )
+};
+
+stateio_func: StateIO App ();
+stateio_func = do {
+    let _ = *register_users.to_stateio;
+    let _ = *create_user_pages.to_stateio;
+    let _ = *print_users;
+    let _ = *print_pages;
     pure()
 };
 
 test_stateio: IO ();
 test_stateio = do {
     let _ = *println("=== test_stateio ===");
-    let sm : StateIO I64 () = do {
-        let a = *get_state;
-        let _ = *println("hello").to_stateio;
-        let _ = *put_state(a+1);
-        pure()
-    };
-    let (b,s) = *sm.run_stateio(42);
-    let _ = *println(s.to_string);
+    let (_,s) = *stateio_func.run_stateio(App::empty);
+    pure()
+};
+
+stateiof_func: StateIOF App ();
+stateiof_func = do {
+    let _ = *stateio_func.to_stateiof;
+    let _ = *save_file("app.txt");
+    let _ = *println("completed.").to_stateiof;
     pure()
 };
 
 test_stateiof: IO ();
 test_stateiof = do {
     let _ = *println("=== test_stateiof ===").lift;
-    let sm : StateIOF I64 () = do {
-        let a = *get_state;
-        let _ = *println("hello").to_stateiof;
-        let _ = *write_string(stdout, "world\n").to_stateiof;
-        let _ = *put_state(a+1);
-        let m: IOFail () = throw $ "error";
-        let _ = *m.to_stateiof;
-        pure()
-    };
-    let (b,s) = *sm.run_stateiof(42);
-    let _ = *println(s.to_string).lift;
+    let (_,s) = *stateiof_func.run_stateiof(App::empty);
     pure()
 }.try(|err| eprintln("ERROR: " + err));
 

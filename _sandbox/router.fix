@@ -1,254 +1,18 @@
 module Main;
 
+import HashMap;
 import Debug;
 
-//import Tcp;
-import SimpleParser;
+//import URL;
+//import SimpleParser;
 import StringEx;
-import HashMap;
-
-trait a: BufRead {
-    read_line: a -> IOFail (String, a);
-}
-
-trait a: BufWrite {
-    write_str: String -> a -> IOFail a;
-    flush: a -> IOFail a;
-}
-
-type URL = unbox struct {
-    url: String,
-    scheme: String,
-    host: String,
-    port: String,
-    path: String
-};
-
-namespace URL {
-    _cut: String -> String -> (String, String);
-    _cut = |delim, str| (
-        let pos = str.find(delim, 0);
-        if pos.is_none {
-            (str, "")
-        };
-        let pos = pos.as_some;
-        (str.substring(0, pos), str.substring(pos + delim.get_size, str.get_size))
-    );
-
-    parse: String -> Result ErrMsg URL;
-    parse = |url| (
-        let (scheme, rest) = if url.find("://", 0).is_some {
-            url._cut("://")
-        } else {
-            ("http", url)
-        };
-        let (host_port, path) = rest._cut("/");
-        let path = if path == "" { "/" } else { "/" + path };
-        
-        let (host, port) = host_port._cut(":");
-        let port = if port == "" { "80" } else { port };
-        
-        ok $ URL { url:url, scheme:scheme, host:host, port:port, path:path }
-    );
-}
-
-namespace URI {
-    _unreserved_table: Array U8;
-    _unreserved_table = (
-        let chars = "-._~".get_bytes.pop_back.to_iter.append $
-            Iterator::seq('A').take(26).append $
-            Iterator::seq('a').take(26).append $
-            Iterator::seq('0').take(10);
-        chars.fold(Array::fill(256, 0_U8), |array, c|
-            array.set(c.to_I64, 1_U8)
-        )
-    );
-    _hex: Array U8; = "0123456789ABCDEF".get_bytes.pop_back;
-        
-    encodeURIComponent: String -> String;
-    encodeURIComponent = |str| (
-        str.get_bytes.pop_back.fold(
-            Array::empty(str.get_size * 3), |array, c|
-            if _unreserved_table.@(c.to_I64) != 0_U8 {
-                array.push_back(c)
-            };
-            array.push_back('%')
-            .push_back(_hex.@(c.shift_right(4_U8).bit_and(15_U8).to_I64))
-            .push_back(_hex.@(c.bit_and(15_U8).to_I64))
-        )
-        ._unsafe_from_array
-    );
-
-}
 
 
-type Header = (String, String);
+//type RequestHandler = Request -> Response -> IOFail Response;
+type RequestHandler = String;
 
-type Headers = unbox struct {
-    map: HashMap String String
-};
-
-impl Headers: ToString {
-    to_string = |headers| headers.@map.to_string;
-}
-
-namespace Headers {
-    empty: Headers;
-    empty = Headers { map: HashMap::empty(100) };
-
-    add: Header -> Headers -> Headers;
-    add = |(name, value), headers| (
-        headers.mod_map(|map| map.insert (name, value))
-    );
-
-    find: String -> Headers -> Option String;
-    find = |name, headers| (
-        headers.@map.find(name)
-    );
-
-    to_iter: Headers -> Iterator Header;
-    to_iter = |headers| headers.@map.to_iter;
-}
-
-type Request = unbox struct {
-    remote_addr: String,
-    method: String,             // eg. "GET"
-    request_target: String,     // eg. "/blogs/search?q=hello%25world&limit=30"
-    http_version: String,       // eg. "HTTP/1.1"
-    headers: Headers,
-    body: Array U8
-};
-
-impl Request: ToString {
-    to_string = |request| (
-        "Request {"
-        + " remote_addr:" + request.@remote_addr
-        + ", method:" + request.@method
-        + ", request_target:" + request.@request_target
-        + ", http_version:" + request.@http_version
-        + ", headers:" + request.@headers.to_string
-        //+ ", body:" + request.@body.to_string
-        + " }"
-    );
-}
-
-namespace Request {
-    parse: [r: BufRead] r -> String -> IOFail Request;
-    parse = |reader, remote_addr| (
-        let (start_line, reader) = *reader.read_line;
-        let start_line = start_line.strip_last_newlines;
-        let (method, request_target, http_version) = 
-            *match_request_line.run_parser_str(line).from_result;
-        let hreaders = Array::empty(32);
-        let headers = loop_m (
-            (headers, reader), |(headers, reader)|
-            let (line, reader) =  *reader.read_line;
-            let line = line.strip_last_newlines;
-            if line == "" {
-                break_m $ headers
-            };
-            let header = *match_header.run_parser_str(line).from_result;
-            let headers = headers.add(header);
-            continue_m $ (headers, reader)
-        );
-        // TODO read body
-        // TODO parse query string
-
-        let request = Request {
-            connection: connection,
-            remote_addr: remote_addr,
-            method: method,
-            request_target: request_target,
-            http_version: http_version,
-            headers: headers,
-            body: Array::empty(0)
-        };
-        pure $ request
-    );
-
-    match_request_line: Parser (String, String, String);
-    match_request_line = (
-        let method = *match_str_class(|c| c != ' ');
-        let _ = *match_char(' ');
-        let request_target = *match_str_class(|c| c != ' ');
-        let _ = *match_char(' ');
-        let http_version = *match_str_class(|c| c != ' ');
-        pure $ (method, request_target, http_version)
-    );
-
-    match_header: Parser Header;
-    match_header = (
-        let field_name = *match_str_class(|c| c != ':');
-        let _ = *match_char(':');
-        let field_value = *match_str_class(|c| true);
-        let field_value = field_value.strip_whitespaces;
-        (field_name, field_value)
-    );
-}
-
-type Response = unbox struct {
-    request: Request,
-    connection: BufferedSocket,
-    http_version: String,
-    status: I64,
-    reason: String,
-    headers: Headers,
-    headersSent: Bool
-};
-
-namespace Response {
-    make: Request -> Response;
-    make = |req| (
-        Response {
-            request: req,
-            connection: req.@connection,
-            http_version: req.@http_version,
-            status: 200,
-            reason: "",
-            headers: Headers::empty,
-            headersSent: false
-        }
-    );
-
-    status: I64 -> Response -> Response;
-    status = set_status;
-
-    _send_headers: Response -> IOFail Response;
-    _send_headers = |res| (
-        if res.@headersSent {
-            pure $ res
-        };
-        let status_line = res.@http_version + " " + 
-            res.@status.to_string + " " + res.@reason + "\r\n";
-        let _ = *res.@connection.write_str(status_line);
-        let _ = *res.@headers.to_iter.fold_m(
-            (), |_, header|
-            let (name, value) = header;
-            res.@connection.write_str(name + ":" + value + "\r\n")
-        );
-        let _ = *res.@connection.write_str("\r\n");
-        let res = res.set_headersSent(true);
-        pure $ res
-    );
-
-    write_str: String -> Response -> IOFail Response;
-    write_str = |str, res| (
-        let res = *res._send_headers;
-        let _ = *res.@connection.write_str(str);
-        pure $ res
-    );
-
-    end: Response -> IOFail ();
-    end = |res| (
-        let _ = *res.@connection.flush;
-        pure $ ()
-    );
-}
-
-type RequestHandler = Request -> Response -> IOFail Response;
-
-type RouterEntry = unbox struct {
-    map: HashMap String RequestHandler;
+type RouterEntry = box struct {
+    map: HashMap String RequestHandler
 };
 
 namespace RouterEntry {
@@ -262,11 +26,16 @@ namespace RouterEntry {
         entry.mod_map(|map| map.insert(method, handler))
     );
 
-    find: String -> Option RequestHandler;
+    find: String -> RouterEntry -> Option RequestHandler;
     find = |method, entry| (
         entry.@map.find(method)
     );
-};
+
+    show: RouterEntry -> IO ();
+    show = |entry| (
+        println (entry.@map.to_string)
+    );
+}
 
 /*
     /               ... [ ]
@@ -282,7 +51,7 @@ type RouterNode = box union {
 };
 namespace RouterNode {
     empty_directory: RouterNode;
-    empty_directory = directory $ HashMap::new(8);
+    empty_directory = directory $ HashMap::empty(8);
 
     create: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode;
     create =  |path, entry_updater| (
@@ -298,14 +67,14 @@ namespace RouterNode {
         let (name, child_path) = if path.is_empty {
             ("", Iterator::empty)
         } else {
-            path.advance.as_some;
+            path.advance.as_some
         };
         let dir = if node.is_directory { 
             node.as_directory
         } else {
             // node が entry だった場合、directory に置き換え、
             // "" に元のノードを登録する。
-            HashMap::new(8).insert("", node)
+            HashMap::empty(8).insert("", node)
         };
         let child_node = dir.find(name).map_or(
             create(child_path, entry_updater),
@@ -320,7 +89,7 @@ namespace RouterNode {
         let (name, child_path) = if path.is_empty {
             ("", Iterator::empty)
         } else {
-            path.advance.as_some;
+            path.advance.as_some
         };
         if node.is_entry {
             if name == "" { some(node.as_entry) } else { none() }
@@ -329,10 +98,27 @@ namespace RouterNode {
         // TODO: `:id` のようなパターンに対応する
         dir.find(name).map(|child_node| child_node.find(child_path))
     );
+
+    show: I64 -> RouterNode -> IO ();
+    show = |indent, node| (
+        let print_indent = |indent| print(Array::fill(indent, ' ')._unsafe_to_string);
+        if node.is_entry {
+            node.as_entry.show
+        };
+        let _ = *println("{");
+        let dir = node.as_directory;
+        let _ = *dir.to_iter.fold_m((), |_,(name, child_node)|
+            let _ = *print_indent(indent + 2);
+            let _ = *print(name + ": ");
+            child_node.show(indent + 2)
+        );
+        let _ = *print_indent(indent);
+        println("}")
+    );
 }
 
-type Router = unbox struct {
-    root: RouterNode;
+type Router = box struct {
+    root: RouterNode
 };
 
 namespace Router {
@@ -344,11 +130,12 @@ namespace Router {
 
     insert: String -> String -> RequestHandler -> Router -> Router;
     insert = |method, path, handler, router| (
-        let path: Array String = str.split("/").filter(|s| s != "").to_array;
-        let entry_updater = |entry| entry.update(method, handler);
+        let path: Iterator String = path.split("/").filter(|s| s != "");
+        let entry_updater : RouterEntry -> RouterEntry = |entry| entry.update(method, handler);
         router.mod_root(|root| root.update(path, entry_updater))
     );
 
+/*
     route: Request -> Response -> Router -> IOFail Response;
     route = |req, res, router| (
         // TODO: split query and path
@@ -356,5 +143,20 @@ namespace Router {
         let opt = router.@map.find(req.request_target);
         xxx
     );
+*/
 }
 
+main: IO ();
+main = (
+    let _ = *eprintln("start");
+    let node = RouterNode::empty_directory;
+    /*
+    let router = Router::empty;
+    let router = router.insert("GET", "/", "index");
+    let router = router.insert("GET", "/users", "users");
+    let router = router.insert("POST", "/users", "users-post");
+    let router = router.insert("GET", "/users/1", "users-1");
+    let _ = *router.@root.show(0);
+    */
+    pure()
+);

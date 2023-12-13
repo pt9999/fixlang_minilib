@@ -1,0 +1,199 @@
+module Main;
+
+import Debug;
+
+import URL;
+import SimpleParser;
+import StringEx;
+import HashMap;
+
+trait a: BufRead {
+    read_line: a -> IOFail (String, a);
+}
+
+trait a: BufWrite {
+    write_str: String -> a -> IOFail a;
+    flush: a -> IOFail a;
+}
+
+type Connection = unbox struct {
+    dummy: ()
+};
+
+impl Connection: BufRead {
+    read_line = |r| throw $ "not impl";
+}
+
+impl Connection: BufWrite {
+    write_str = |s, w| throw $ "not impl";
+    flush = |w| throw $ "not impl";
+}
+
+//---------------------------------
+
+type Header = (String, String);
+
+type Headers = unbox struct {
+    map: HashMap String String
+};
+
+impl Headers: ToString {
+    to_string = |headers| headers.@map.to_string;
+}
+
+namespace Headers {
+    empty: Headers;
+    empty = Headers { map: HashMap::empty(100) };
+
+    add: Header -> Headers -> Headers;
+    add = |(name, value), headers| (
+        headers.mod_map(|map| map.insert (name, value))
+    );
+
+    find: String -> Headers -> Option String;
+    find = |name, headers| (
+        headers.@map.find(name)
+    );
+
+    to_iter: Headers -> Iterator Header;
+    to_iter = |headers| headers.@map.to_iter;
+}
+
+type Request = unbox struct {
+    connection: Connection,
+    remote_addr: String,
+    method: String,             // eg. "GET"
+    request_target: String,     // eg. "/blogs/search?q=hello%25world&limit=30"
+    http_version: String,       // eg. "HTTP/1.1"
+    headers: Headers,
+    body: Array U8
+};
+
+impl Request: ToString {
+    to_string = |request| (
+        "Request {"
+        + " remote_addr:" + request.@remote_addr
+        + ", method:" + request.@method
+        + ", request_target:" + request.@request_target
+        + ", http_version:" + request.@http_version
+        + ", headers:" + request.@headers.to_string
+        //+ ", body:" + request.@body.to_string
+        + " }"
+    );
+}
+
+namespace Request {
+    parse: Connection -> String -> IOFail Request;
+    parse = |connection, remote_addr| (
+        let (start_line, connection) = *connection.read_line;
+        let start_line = start_line.strip_last_newlines;
+        let (method, request_target, http_version) = 
+            *match_request_line.run_parser_str(line).from_result;
+        let hreaders = Array::empty(32);
+        let headers = loop_m (
+            (headers, connection), |(headers, connection)|
+            let (line, connection) =  *connection.read_line;
+            let line = line.strip_last_newlines;
+            if line == "" {
+                break_m $ headers
+            };
+            let header = *match_header.run_parser_str(line).from_result;
+            let headers = headers.add(header);
+            continue_m $ (headers, connection)
+        );
+        // TODO read body
+        // TODO parse query string
+
+        let request = Request {
+            connection: connection,
+            remote_addr: remote_addr,
+            method: method,
+            request_target: request_target,
+            http_version: http_version,
+            headers: headers,
+            body: Array::empty(0)
+        };
+        pure $ request
+    );
+
+    match_request_line: Parser (String, String, String);
+    match_request_line = (
+        let method = *match_str_class(|c| c != ' ');
+        let _ = *match_char(' ');
+        let request_target = *match_str_class(|c| c != ' ');
+        let _ = *match_char(' ');
+        let http_version = *match_str_class(|c| c != ' ');
+        pure $ (method, request_target, http_version)
+    );
+
+    match_header: Parser Header;
+    match_header = (
+        let field_name = *match_str_class(|c| c != ':');
+        let _ = *match_char(':');
+        let field_value = *match_str_class(|c| true);
+        let field_value = field_value.strip_whitespaces;
+        (field_name, field_value)
+    );
+}
+
+type Response = unbox struct {
+    request: Request,
+    connection: Connection,
+    http_version: String,
+    status: I64,
+    reason: String,
+    headers: Headers,
+    headersSent: Bool
+};
+
+namespace Response {
+    make: Request -> Response;
+    make = |req| (
+        Response {
+            request: req,
+            connection: req.@connection,
+            http_version: req.@http_version,
+            status: 200,
+            reason: "",
+            headers: Headers::empty,
+            headersSent: false
+        }
+    );
+
+    status: I64 -> Response -> Response;
+    status = set_status;
+
+    _send_headers: Response -> IOFail Response;
+    _send_headers = |res| (
+        if res.@headersSent {
+            pure $ res
+        };
+        let connection = res.@connection;
+        let status_line = res.@http_version + " " + 
+            res.@status.to_string + " " + res.@reason + "\r\n";
+        let connection = *connection.write_str(status_line);
+        let connection = *res.@headers.to_iter.fold_m(
+            connection, |connection, header|
+            let (name, value) = header;
+            res.@connection.write_str(name + ":" + value + "\r\n")
+        );
+        let connection = *connection.write_str("\r\n");
+        let res = res.set_headersSent(true).set_connection(connection);
+        pure $ res
+    );
+
+    write_str: String -> Response -> IOFail Response;
+    write_str = |str, res| (
+        let res = *res._send_headers;
+        let connection = *res.@connection.write_str(str);
+        let res = res.set_connection(connection);
+        pure $ res
+    );
+
+    end: Response -> IOFail Response;
+    end = |res| (
+        let connection = *res.@connection.flush;
+        let res = res.set_connection(connection);
+        pure $ res
+    );
+}

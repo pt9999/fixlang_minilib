@@ -7,28 +7,6 @@ import SimpleParser;
 import StringEx;
 import HashMap;
 
-trait a: BufRead {
-    read_line: a -> IOFail (String, a);
-}
-
-trait a: BufWrite {
-    write_str: String -> a -> IOFail a;
-    flush: a -> IOFail a;
-}
-
-type Connection = unbox struct {
-    dummy: ()
-};
-
-impl Connection: BufRead {
-    read_line = |r| throw $ "not impl";
-}
-
-impl Connection: BufWrite {
-    write_str = |s, w| throw $ "not impl";
-    flush = |w| throw $ "not impl";
-}
-
 //---------------------------------
 
 type Header = (String, String);
@@ -60,7 +38,7 @@ namespace Headers {
 }
 
 type Request = unbox struct {
-    connection: Connection,
+    connection: IOHandle,
     remote_addr: String,
     method: String,             // eg. "GET"
     request_target: String,     // eg. "/blogs/search?q=hello%25world&limit=30"
@@ -83,16 +61,16 @@ impl Request: ToString {
 }
 
 namespace Request {
-    parse: Connection -> String -> IOFail Request;
+    parse: IOHandle -> String -> IOFail Request;
     parse = |connection, remote_addr| (
-        let (start_line, connection) = *connection.read_line;
+        let start_line = *connection.read_line;
         let start_line = start_line.strip_last_newlines;
         let (method, request_target, http_version) = 
             *match_request_line.run_parser_str(line).from_result;
         let hreaders = Array::empty(32);
         let headers = loop_m (
-            (headers, connection), |(headers, connection)|
-            let (line, connection) =  *connection.read_line;
+            headers, |headers|
+            let line = *connection.read_line;
             let line = line.strip_last_newlines;
             if line == "" {
                 break_m $ headers
@@ -138,7 +116,7 @@ namespace Request {
 
 type Response = unbox struct {
     request: Request,
-    connection: Connection,
+    connection: IOHandle,
     http_version: String,
     status: I64,
     reason: String,
@@ -171,29 +149,27 @@ namespace Response {
         let connection = res.@connection;
         let status_line = res.@http_version + " " + 
             res.@status.to_string + " " + res.@reason + "\r\n";
-        let connection = *connection.write_str(status_line);
-        let connection = *res.@headers.to_iter.fold_m(
-            connection, |connection, header|
+        let _ = *connection.write_string(status_line);
+        let _ = *res.@headers.to_iter.fold_m(
+            (), |_, header|
             let (name, value) = header;
-            res.@connection.write_str(name + ":" + value + "\r\n")
+            connection.write_string(name + ":" + value + "\r\n")
         );
-        let connection = *connection.write_str("\r\n");
-        let res = res.set_headersSent(true).set_connection(connection);
+        let _ = *connection.write_string("\r\n");
+        let res = res.set_headersSent(true);
         pure $ res
     );
 
     write_str: String -> Response -> IOFail Response;
     write_str = |str, res| (
         let res = *res._send_headers;
-        let connection = *res.@connection.write_str(str);
-        let res = res.set_connection(connection);
+        let _ = *res.@connection.write_string(str);
         pure $ res
     );
 
     end: Response -> IOFail Response;
     end = |res| (
         let connection = *res.@connection.flush;
-        let res = res.set_connection(connection);
         pure $ res
     );
 }

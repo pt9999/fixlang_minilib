@@ -1,11 +1,11 @@
-module Main;
+module Request;
 
+import HashMap;
 import Debug;
 
 import URL;
 import SimpleParser;
 import StringEx;
-import HashMap;
 
 //---------------------------------
 
@@ -65,19 +65,18 @@ namespace Request {
     parse = |connection, remote_addr| (
         let start_line = *connection.read_line;
         let start_line = start_line.strip_last_newlines;
-        let (method, request_target, http_version) = 
-            *match_request_line.run_parser_str(line).from_result;
-        let hreaders = Array::empty(32);
-        let headers = loop_m (
-            headers, |headers|
+        let ((method, request_target, http_version), _) = 
+            *match_request_line.run_parser_str(start_line).from_result;
+        let headers = *loop_m (
+            Headers::empty, |headers|
             let line = *connection.read_line;
             let line = line.strip_last_newlines;
             if line == "" {
                 break_m $ headers
             };
-            let header = *match_header.run_parser_str(line).from_result;
+            let (header, _) = *match_header.run_parser_str(line).from_result;
             let headers = headers.add(header);
-            continue_m $ (headers, connection)
+            continue_m $ headers
         );
         // TODO read body
         // TODO parse query string
@@ -109,8 +108,8 @@ namespace Request {
         let field_name = *match_str_class(|c| c != ':');
         let _ = *match_char(':');
         let field_value = *match_str_class(|c| true);
-        let field_value = field_value.strip_whitespaces;
-        (field_name, field_value)
+        let field_value = field_value.strip_spaces;
+        pure $ (field_name, field_value)
     );
 }
 

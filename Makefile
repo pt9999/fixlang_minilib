@@ -40,6 +40,9 @@ test_url:
 test_io_ex:
 	fix run -f tests/net/io_ex_test.fix lib/net/io_ex.fix $(LIB_UNIT_TEST)
 
+test_request:
+	fix run -f tests/net/request_test.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
+
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out
 
 examples/json_cat.out: examples/json_cat.fix $(LIB_JSON) 

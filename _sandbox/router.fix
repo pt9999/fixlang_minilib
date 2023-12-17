@@ -50,6 +50,9 @@ type RouterNode = box union {
     entry: RouterEntry
 };
 namespace RouterNode {
+    _INDEX_NAME: String;
+    _INDEX_NAME = "";
+
     empty_directory: RouterNode;
     empty_directory = directory $ HashMap::empty(8);
 
@@ -62,25 +65,71 @@ namespace RouterNode {
         node.update(path, entry_updater)
     ); 
     
+    // 現在注目しているノードからpathを辿った先のエントリを更新する。
+    // path は現在の node から更新対象のエントリにたどり着くまでの経路。
+    // path の各要素には空文字列を含んではいけない。
+    // entry_updater はエントリを更新する関数。
+    // node は現在注目しているノード。
+    // 更新後のノードが返る。
     update: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
     update = |path, entry_updater, node| (
-        let (name, child_path) = if path.is_empty {
-            ("", Iterator::empty)
+        if node.is_entry {
+            _update_entry(path, entry_updater, node)
         } else {
-            path.advance.as_some
+            _update_directory(path, entry_updater, node)
+        }
+    );
+
+    // node がエントリの場合
+    _update_entry: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
+    _update_entry = |path, entry_updater, node| (
+        eval assert (|_| "not a entry", node.is_entry);
+        if path.is_empty {
+            // path が空イテレータだった場合、このノードが更新対象である。
+            // このノードはエントリであるため、エントリを更新すればよい。
+            entry $ entry_updater $ node.as_entry
         };
-        let dir = if node.is_directory { 
-            node.as_directory
-        } else {
-            // node が entry だった場合、directory に置き換え、
-            // "" に元のノードを登録する。
-            HashMap::empty(8).insert("", node)
+        // path が空イテレータでない場合、子を辿る必要がある。
+        // しかし、このノードはディレクトリでなくエントリである。
+        // このため、このノードをディレクトリに変換する必要がある。もとのノード(エントリ)は、dir[_INDEX_NAME]に入る。
+        // we need to navigate to child, but this node is entry.
+        // so we need to convert this node to a directory.
+        let dir = empty_directory;
+        let dir = directory $ dir.as_directory.insert (_INDEX_NAME, node);
+        _update_directory (path, entry_updater, dir)
+    );
+
+    // node がディレクトリの場合
+    _update_directory: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
+    _update_directory = |path, entry_updater, node| (
+        eval assert (|_| "not a directory", node.is_directory);
+        if path.is_empty {
+            // path が空イテレータだった場合、このノードが更新対象である。
+            // しかし、このノードはエントリではなくディレクトリである。
+            // このため、dir[_INDEX_NAME]からエントリを取り出す。dir[_INDEX_NAME]に何も入っていなければ、空のエントリを作る。
+            // その後、エントリを更新し、dir[_INDEX_NAME]に入れる。
+            // we need to update this node as a entry, but this node is directory.
+            // so we need to treat dir[_INDEX_NAME] as an entry.
+            let dir = node.as_directory;
+            let ent = dir.find(_INDEX_NAME).map_or(
+                entry $ RouterEntry::empty,
+                |ent| ent
+            );
+            eval assert(|_| "not a entry", ent.is_entry);
+            let ent = _update_entry(path, entry_updater, ent);
+            let dir = dir.insert(_INDEX_NAME, ent);
+            directory $ dir
         };
-        let child_node = dir.find(name).map_or(
+        // path が空イテレータでない場合、子を辿る必要がある。
+        // we need to navigate to child
+        let dir = node.as_directory;
+        let (child_name, child_path) = path.advance.as_some;
+        eval assert (|_| "child name should not be an empty string", child_name != "");
+        let child_node = dir.find(child_name).map_or(
             create(child_path, entry_updater),
             |child_node| child_node.update(child_path, entry_updater)
         );
-        let dir = dir.insert(name, child_node);
+        let dir = dir.insert(child_name, child_node);
         directory $ dir
     );
 
@@ -149,14 +198,11 @@ namespace Router {
 main: IO ();
 main = (
     let _ = *eprintln("start");
-    let node = RouterNode::empty_directory;
-    /*
     let router = Router::empty;
     let router = router.insert("GET", "/", "index");
     let router = router.insert("GET", "/users", "users");
     let router = router.insert("POST", "/users", "users-post");
     let router = router.insert("GET", "/users/1", "users-1");
     let _ = *router.@root.show(0);
-    */
     pure()
 );

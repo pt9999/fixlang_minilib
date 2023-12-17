@@ -1,0 +1,72 @@
+module IOEx;
+
+creat: String -> U32 -> IOFail I32;
+creat = |path, mode| (
+    let _ = *pure();    // make it lazy
+    let fd = path.borrow_c_str(|p_path|
+        CALL_C[I32 creat(Ptr, U32), p_path, mode]
+    );
+    if fd == -1_I32 {
+        throw("creat failed!: some error occurred in creat.")
+    };
+    pure $ fd
+);
+
+unlink: String -> IOFail ();
+unlink = |path| (
+    let _ = *pure();    // make it lazy
+    let res = path.borrow_c_str(|p_path|
+        CALL_C[I32 unlink(Ptr), p_path]
+    );
+    if res == -1_I32 { 
+        throw("unlink failed!: some error occurred in unlink.")
+    };
+    pure()
+);
+
+fflush : IOHandle -> IOFail ();
+fflush = |handle| (
+    let _ = *pure();    // make it lazy
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 { 
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
+);
+
+fdopen: I32 -> String -> IOFail IOHandle;
+fdopen = |fd, mode| (
+    let _ = *pure();    // make it lazy
+    let file_ptr = mode.borrow_c_str(|p_mode|
+        CALL_C[Ptr fdopen(I32, Ptr), fd, p_mode]
+    );
+    if file_ptr == nullptr { 
+        throw("fdopen failed!: some error occurred in fdopen.")
+    };
+    pure $ IOHandle::from_file_ptr $ file_ptr
+);
+
+open_pipe: IOFail (IOHandle, IOHandle);
+open_pipe = (
+    let _ = *pure();    // make it lazy
+    let pipefd: Array I32 = Array::fill(2, 0_I32);
+    let res = pipefd.borrow_ptr(|p_pipefd|
+        CALL_C[I32 pipe(Ptr), p_pipefd]
+    );
+    if res == -1_I32 {
+        throw("pipe failed!: some error occurred in pipe.")
+    };
+    let read_fh = *fdopen(pipefd.@(0), "r");
+    let write_fh = *fdopen(pipefd.@(1), "w");
+    pure $ (read_fh, write_fh)
+);
+
+usleep: U32 -> IOFail ();
+usleep = |usec| (
+    let _ = *pure();    // make it lazy
+    let res = CALL_C[I32 usleep(U32), usec];
+    if res == -1_I32 {
+        throw("usleep failed!: some error occurred in usleep.")
+    };
+    pure()
+);

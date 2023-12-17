@@ -1,0 +1,79 @@
+module Main;
+
+import AsyncTask;
+
+import IOEx;
+import UnitTest;
+
+test_fdopen: TestCase;
+test_fdopen = (
+    let testname = "test_fdopen";
+    make_test(testname) $ |_|
+    let path = "/tmp/_test_fdopen.tmp";
+    let fd = *creat(path, /* 0o0644 = */ 420_U32);
+    let fh = *fdopen(fd, "w");
+    let _ = *write_string(fh, "test");
+    let _ = *fflush(fh);
+    let _ = *close_file(fh).lift;
+    let str = *read_file_string(Path::parse(path).as_some);
+    let _ = *unlink(path);
+    let _ = *assert_equal("eq", "test", str);
+    pure()
+);
+
+test_open_pipe: TestCase;
+test_open_pipe = (
+    let testname = "test_open_pipe";
+    make_test(testname) $ |_|
+
+    let max_count = 10;
+    let (read_fh, write_fh) = *open_pipe;
+    let reader: IOFail String = loop_m(
+        Array::empty(max_count), |array|
+        let line = *read_line(read_fh);
+        if line == "" {
+            let _ = *close_file(read_fh).lift;
+            break_m $ array.to_iter.join(",")
+        };
+        //let _ = *println(line.strip_last_newlines).lift;
+        let array = array.push_back(line.strip_last_newlines);
+        continue_m $ array
+    );
+    let reader: IO String = reader.try(|err| 
+        let _ = *eprintln("reader: "+ err); 
+        pure ("")
+    );
+
+    let writer: IOFail () = loop_m(
+        0, |i|
+        if i > max_count {
+            let _ = *close_file(write_fh).lift;
+            break_m $ ()
+        };
+        let _ = *write_string(write_fh, i.to_string + "\n");
+        let _ = *fflush(write_fh);
+        let _ = *usleep(1000_U32); // 1000 usec = 1 msec
+        continue_m $ i + 1
+    ); 
+    let writer: IO () = writer.try(|err| 
+        eprintln("writer: "+ err)
+    );
+
+    let read_task = AsyncIOTask::make(reader);
+    let write_task = AsyncIOTask::make(writer);
+    let _ = *write_task.get.lift;
+    let str = *read_task.get.lift;
+    //let _ = *println("str="+str).lift;
+    let _ = *assert_equal("eq", "0,1,2,3,4,5,6,7,8,9,10", str);
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_fdopen,
+        test_open_pipe,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

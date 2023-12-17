@@ -21,6 +21,9 @@ namespace RouterEntry {
         map: HashMap::empty(2)
     };
 
+    is_empty: RouterEntry -> Bool;
+    is_empty = |entry| entry.@map.get_size == 0;
+
     update: String -> RequestHandler -> RouterEntry -> RouterEntry;
     update = |method, handler, entry| (
         entry.mod_map(|map| map.insert(method, handler))
@@ -45,124 +48,78 @@ namespace RouterEntry {
     /users/:id      ... [ "users", ":id" ]
     /users/:id/     ... [ "users", ":id" ]
 */
-type RouterNode = box union {
+type RouterNode = box struct {
     directory: HashMap String RouterNode,
     entry: RouterEntry
 };
 namespace RouterNode {
-    _INDEX_NAME: String;
-    _INDEX_NAME = "";
-
-    empty_directory: RouterNode;
-    empty_directory = directory $ HashMap::empty(8);
+    empty: RouterNode;
+    empty = RouterNode {
+        directory: HashMap::empty(8),
+        entry: RouterEntry::empty
+    };
 
     create: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode;
     create =  |path, entry_updater| (
-        if path.is_empty {
-            entry $ entry_updater(RouterEntry::empty)
-        };
-        let node = RouterNode::empty_directory;
-        node.update(path, entry_updater)
+        update(path, entry_updater, RouterNode::empty)
     ); 
     
-    // 現在注目しているノードからpathを辿った先のエントリを更新する。
-    // path は現在の node から更新対象のエントリにたどり着くまでの経路。
+    // 現在のノードからpathを辿った先のノードを更新する。
+    // path は現在のノードから更新対象のノードにたどり着くまでの経路。
     // path の各要素には空文字列を含んではいけない。
     // entry_updater はエントリを更新する関数。
-    // node は現在注目しているノード。
+    // node は現在のノード。
     // 更新後のノードが返る。
     update: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
     update = |path, entry_updater, node| (
-        if node.is_entry {
-            _update_entry(path, entry_updater, node)
-        } else {
-            _update_directory(path, entry_updater, node)
-        }
-    );
-
-    // node がエントリの場合
-    _update_entry: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
-    _update_entry = |path, entry_updater, node| (
-        eval assert (|_| "not a entry", node.is_entry);
         if path.is_empty {
-            // path が空イテレータだった場合、このノードが更新対象である。
-            // このノードはエントリであるため、エントリを更新すればよい。
-            entry $ entry_updater $ node.as_entry
+            node.mod_entry(entry_updater)
         };
-        // path が空イテレータでない場合、子を辿る必要がある。
-        // しかし、このノードはディレクトリでなくエントリである。
-        // このため、このノードをディレクトリに変換する必要がある。もとのノード(エントリ)は、dir[_INDEX_NAME]に入る。
-        // we need to navigate to child, but this node is entry.
-        // so we need to convert this node to a directory.
-        let dir = empty_directory;
-        let dir = directory $ dir.as_directory.insert (_INDEX_NAME, node);
-        _update_directory (path, entry_updater, dir)
-    );
-
-    // node がディレクトリの場合
-    _update_directory: Iterator String -> (RouterEntry -> RouterEntry) -> RouterNode -> RouterNode;
-    _update_directory = |path, entry_updater, node| (
-        eval assert (|_| "not a directory", node.is_directory);
-        if path.is_empty {
-            // path が空イテレータだった場合、このノードが更新対象である。
-            // しかし、このノードはエントリではなくディレクトリである。
-            // このため、dir[_INDEX_NAME]からエントリを取り出す。dir[_INDEX_NAME]に何も入っていなければ、空のエントリを作る。
-            // その後、エントリを更新し、dir[_INDEX_NAME]に入れる。
-            // we need to update this node as a entry, but this node is directory.
-            // so we need to treat dir[_INDEX_NAME] as an entry.
-            let dir = node.as_directory;
-            let ent = dir.find(_INDEX_NAME).map_or(
-                entry $ RouterEntry::empty,
-                |ent| ent
-            );
-            eval assert(|_| "not a entry", ent.is_entry);
-            let ent = _update_entry(path, entry_updater, ent);
-            let dir = dir.insert(_INDEX_NAME, ent);
-            directory $ dir
-        };
-        // path が空イテレータでない場合、子を辿る必要がある。
-        // we need to navigate to child
-        let dir = node.as_directory;
         let (child_name, child_path) = path.advance.as_some;
         eval assert (|_| "child name should not be an empty string", child_name != "");
-        let child_node = dir.find(child_name).map_or(
-            create(child_path, entry_updater),
-            |child_node| child_node.update(child_path, entry_updater)
-        );
-        let dir = dir.insert(child_name, child_node);
-        directory $ dir
+        node.mod_directory(|dir|
+            let child_node = dir.find(child_name).map_or(
+                create(child_path, entry_updater),
+                |child_node| child_node.update(child_path, entry_updater)
+            );
+            dir.insert(child_name, child_node)
+        )
     );
 
+    // 現在のノードからpathを辿った先のノードのエントリを取得する。
     find: Iterator String -> RouterNode -> Option RouterEntry;
     find = |path, node| (
-        let (name, child_path) = if path.is_empty {
-            ("", Iterator::empty)
-        } else {
-            path.advance.as_some
+        if path.is_empty {
+            node.@entry
         };
-        if node.is_entry {
-            if name == "" { some(node.as_entry) } else { none() }
-        };
-        let dir = node.as_directory;
+        let (child_name, child_path) = path.advance.as_some;
+        eval assert (|_| "child name should not be an empty string", child_name != "");
         // TODO: `:id` のようなパターンに対応する
-        dir.find(name).map(|child_node| child_node.find(child_path))
+        node.@directory.find(child_name).map(|child_node| child_node.find(child_path))
     );
 
-    show: I64 -> RouterNode -> IO ();
-    show = |indent, node| (
-        let print_indent = |indent| print(Array::fill(indent, ' ')._unsafe_to_string);
-        if node.is_entry {
-            node.as_entry.show
-        };
-        let _ = *println("{");
-        let dir = node.as_directory;
-        let _ = *dir.to_iter.fold_m((), |_,(name, child_node)|
-            let _ = *print_indent(indent + 2);
-            let _ = *print(name + ": ");
-            child_node.show(indent + 2)
+    show: String -> RouterNode -> IO ();
+    show = |prefix, node| (
+        let print_entry = (
+            if node.@entry.is_empty {
+                pure()
+            };   
+            let _ = *print(prefix + ": ");
+            node.@entry.show
         );
-        let _ = *print_indent(indent);
-        println("}")
+        let print_directory = (
+            let ends_with: String -> String -> Bool = |e,s| (
+                s.substring(s.get_size - e.get_size, s.get_size) == e
+            );
+            let slash = if prefix.ends_with("/") { "" } else { "/" };
+            node.@directory.to_iter.fold_m(
+                (), |_, (child_name, child_node)|
+                child_node.show(prefix + slash + child_name)
+            )
+        );
+        let _ = *print_entry;
+        let _ = *print_directory;
+        pure()
     );
 }
 
@@ -174,7 +131,7 @@ namespace Router {
 
     empty: Router;
     empty = Router {
-        root: RouterNode::empty_directory
+        root: RouterNode::empty
     };
 
     insert: String -> String -> RequestHandler -> Router -> Router;
@@ -203,6 +160,6 @@ main = (
     let router = router.insert("GET", "/users", "users");
     let router = router.insert("POST", "/users", "users-post");
     let router = router.insert("GET", "/users/1", "users-1");
-    let _ = *router.@root.show(0);
+    let _ = *router.@root.show("/");
     pure()
 );

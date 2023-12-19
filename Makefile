@@ -14,7 +14,8 @@ LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_pa
 LIB_TCP := lib/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 
-test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json test_url
+test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json \
+	test_url test_io_ex test_request
 
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)

@@ -6,36 +6,18 @@ import Debug;
 import URL;
 import SimpleParser;
 import StringEx;
+import IOEx;
 
 //---------------------------------
 
-type Header = (String, String);
-
-type Headers = unbox struct {
-    map: HashMap String String
-};
-
-impl Headers: ToString {
-    to_string = |headers| headers.@map.to_string;
-}
+// TODO: allow multiple members
+type Headers = HashMap String String;
 
 namespace Headers {
     empty: Headers;
-    empty = Headers { map: HashMap::empty(100) };
-
-    add: Header -> Headers -> Headers;
-    add = |(name, value), headers| (
-        headers.mod_map(|map| map.insert (name, value))
-    );
-
-    find: String -> Headers -> Option String;
-    find = |name, headers| (
-        headers.@map.find(name)
-    );
-
-    to_iter: Headers -> Iterator Header;
-    to_iter = |headers| headers.@map.to_iter;
+    empty = HashMap::empty(10);
 }
+
 
 type Request = unbox struct {
     connection: IOHandle,
@@ -74,8 +56,8 @@ namespace Request {
             if line == "" {
                 break_m $ headers
             };
-            let (header, _) = *match_header.run_parser_str(line).from_result;
-            let headers = headers.add(header);
+            let ((name, value), _) = *match_header.run_parser_str(line).from_result;
+            let headers = headers.insert(name, value);
             continue_m $ headers
         );
         // TODO read body
@@ -103,7 +85,7 @@ namespace Request {
         pure $ (method, request_target, http_version)
     );
 
-    match_header: Parser Header;
+    match_header: Parser (String, String);
     match_header = (
         let field_name = *match_str_class(|c| c != ':');
         let _ = *match_char(':');
@@ -126,20 +108,39 @@ type Response = unbox struct {
 namespace Response {
     make: Request -> Response;
     make = |req| (
-        Response {
+        let res = Response {
             request: req,
             connection: req.@connection,
             http_version: req.@http_version,
-            status: 200,
+            status: 0,
             reason: "",
             headers: Headers::empty,
             headersSent: false
-        }
+        };
+        res.status(200).content_type("text/plain")
     );
 
+    // Sets the HTTP status code. (eg. 404)
     status: I64 -> Response -> Response;
-    status = set_status;
+    status = |status, res| (
+        let reason = _STATUS_REASON.find_or(status, "");
+        res.set_status(status).set_reason(reason)
+    );
 
+    // Sets the `Content-Type` header.
+    content_type: String -> Response -> Response;
+    content_type = |type, res| (
+        let content_type = type;    // TODO: support for "json", "html" etc.
+        res.header("Content-Type", content_type)
+    );
+
+    // Sets a header.
+    header: String -> String -> Response -> Response;
+    header = |name, value, res| (
+        res.mod_headers(HashMap::insert(name, value))
+    );
+
+    // Sends headers with a status line if they have not already been sent.
     _send_headers: Response -> IOFail Response;
     _send_headers = |res| (
         if res.@headersSent {
@@ -148,27 +149,83 @@ namespace Response {
         let connection = res.@connection;
         let status_line = res.@http_version + " " + 
             res.@status.to_string + " " + res.@reason + "\r\n";
-        let _ = *connection.write_string(status_line);
+        let _ = *write_string(connection, status_line);
         let _ = *res.@headers.to_iter.fold_m(
             (), |_, header|
             let (name, value) = header;
-            connection.write_string(name + ":" + value + "\r\n")
+            write_string(connection, name + ": " + value + "\r\n")
         );
-        let _ = *connection.write_string("\r\n");
+        let _ = *write_string(connection, "\r\n");
         let res = res.set_headersSent(true);
         pure $ res
     );
 
+    // Sends headers with a status line if they have not already been sent.
+    // Then send the specified string.
     write_str: String -> Response -> IOFail Response;
     write_str = |str, res| (
         let res = *res._send_headers;
-        let _ = *res.@connection.write_string(str);
+        let _ = *write_string(res.@connection, str);
         pure $ res
     );
 
+    // Sends headers with a status line if they have not already been sent.
+    // Then flush the connection.
     end: Response -> IOFail Response;
     end = |res| (
-        let connection = *res.@connection.flush;
+        let res = *res._send_headers;
+        let connection = *res.@connection.fflush;
         pure $ res
     );
 }
+
+// RFC9110
+// HTTP status and reason-phrase
+_STATUS_REASON: HashMap I64 String;
+_STATUS_REASON = (
+    HashMap::empty(44)
+    .insert(100, "Continue")
+    .insert(101, "Switching Protocols")
+    .insert(200, "OK")
+    .insert(201, "Created")
+    .insert(202, "Accepted")
+    .insert(203, "Non-Authoritative Information")
+    .insert(204, "No Content")
+    .insert(205, "Reset Content")
+    .insert(206, "Partial Content")
+    .insert(300, "Multiple Choices")
+    .insert(301, "Moved Permanently")
+    .insert(302, "Found")
+    .insert(303, "See Other")
+    .insert(304, "Not Modified")
+    .insert(305, "Use Proxy")
+    .insert(307, "Temporary Redirect")
+    .insert(308, "Permanent Redirect")
+    .insert(400, "Bad Request")
+    .insert(401, "Unauthorized")
+    .insert(402, "Payment Required")
+    .insert(403, "Forbidden")
+    .insert(404, "Not Found")
+    .insert(405, "Method Not Allowed")
+    .insert(406, "Not Acceptable")
+    .insert(407, "Proxy Authentication Required")
+    .insert(408, "Request Timeout")
+    .insert(409, "Conflict")
+    .insert(410, "Gone")
+    .insert(411, "Length Required")
+    .insert(412, "Precondition Failed")
+    .insert(413, "Content Too Large")
+    .insert(414, "URI Too Long")
+    .insert(415, "Unsupported Media Type")
+    .insert(416, "Range Not Satisfiable")
+    .insert(417, "Expectation Failed")
+    .insert(421, "Misdirected Request")
+    .insert(422, "Unprocessable Content")
+    .insert(426, "Upgrade Required")
+    .insert(500, "Internal Server Error")
+    .insert(501, "Not Implemented")
+    .insert(502, "Bad Gateway")
+    .insert(503, "Service Unavailable")
+    .insert(504, "Gateway Timeout")
+    .insert(505, "HTTP Version Not Supported")
+);

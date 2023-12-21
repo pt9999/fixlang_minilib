@@ -69,7 +69,7 @@ namespace Headers {
 
 //------------------------------------------------------------------------------------
 
-// A type that represents a HTTP request.
+// A type that represents an HTTP request.
 type Request = unbox struct {
     connection: IOHandle,       // An IOHandle of the socket
     remote_addr: String,        // The remote address, eg. "192.168.0.1:65432"
@@ -148,6 +148,7 @@ namespace Request {
     );
 }
 
+// A type that represents an HTTP response.
 type Response = unbox struct {
     request: Request,
     connection: IOHandle,
@@ -159,6 +160,8 @@ type Response = unbox struct {
 };
 
 namespace Response {
+
+    // `Response::make(request)` creates a basic HTTP response for an HTTP request.
     make: Request -> Response;
     make = |req| (
         let res = Response {
@@ -173,21 +176,22 @@ namespace Response {
         res.status(200).content_type("text/plain")
     );
 
-    // Sets the HTTP status code. (eg. 404)
+    // `response.status(code)` sets the HTTP status code. (eg. 404)
+    // It will also set the reason phrase (eg. "Not Found") of the status. 
     status: I64 -> Response -> Response;
     status = |status, res| (
         let reason = _STATUS_REASON.find_or(status, "");
         res.set_status(status).set_reason(reason)
     );
 
-    // Sets the `Content-Type` header.
+    // `response.content_type(type)` sets the `Content-Type` header.
     content_type: String -> Response -> Response;
     content_type = |type, res| (
         let content_type = type;    // TODO: support for "json", "html" etc.
         res.header("Content-Type", content_type)
     );
 
-    // Sets a header.
+    // `response.header(name, value)` sets a response header.
     header: String -> String -> Response -> Response;
     header = |name, value, res| (
         res.mod_headers(|headers| headers.set(name, value))
@@ -213,8 +217,8 @@ namespace Response {
         pure $ res
     );
 
-    // Sends headers with a status line if they have not already been sent.
-    // Then send the specified string.
+    // `response.write_str(str)` sends headers with a status line if they have not already been sent.
+    // Then it sends the specified string.
     write_str: String -> Response -> IOFail Response;
     write_str = |str, res| (
         let res = *res._send_headers;

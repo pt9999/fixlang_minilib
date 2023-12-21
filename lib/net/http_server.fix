@@ -24,27 +24,38 @@ namespace Worker {
     );
     handle: IOHandle -> String -> Worker -> IOFail ();
     handle = |connection, remote_addr, worker| (
-        let app = worker.@app;
-        eval debug_eprintln("parsing request");
-        let request = *Request::parse(connection, remote_addr);
-        eval debug_eprintln("request=" + request.to_string);
-        let response = Response::make(request);
-        eval debug_eprintln("finding handler");
-        let handler = app.@router.find(request.@method, request.@path).map_or(
-            not_found_handler,
-            |handler| 
-            eval debug_eprintln("found handler");
-            handler
-        );
-        eval debug_eprintln("handling response");
-        let response = *handler(request, response);  
-        // TODO: Fail した場合、500 Internal Server Error にする？
-        // すでにヘッダを送信していた場合は？
-        // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
-        let _ = *response.end;
-        let _ = *close_file(connection).lift;
-        eval debug_eprintln("worker finished");
-        pure $ ()        
+        do {
+            let app = worker.@app;
+            eval debug_eprintln("parsing request");
+            let request = *Request::parse(connection, remote_addr);
+            eval debug_eprintln("request=" + request.to_string);
+            let response = Response::make(request);
+            eval debug_eprintln("finding handler");
+            let handler = app.@router.find(request.@method, request.@path).map_or(
+                not_found_handler,
+                |handler| 
+                eval debug_eprintln("found handler");
+                handler
+            );
+            eval debug_eprintln("handling response");
+            let response = *handler(request, response);  
+            // TODO: Fail した場合、500 Internal Server Error にする？
+            // すでにヘッダを送信していた場合は？
+            // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
+            let _ = *response.end;
+            //let _ = *close_file(connection).lift;
+            eval debug_eprintln("worker finished");
+            pure $ ()        
+        }
+        ._finally(|_| close_file(connection))
+    );
+
+    _finally: (() -> IO a) -> IOFail a -> IOFail a;
+    _finally = |f, iof| (
+        let res = *iof.to_result.lift;
+        let _ = *f().lift;
+        if res.is_err { throw $ res.as_err };
+        pure $ res.as_ok
     );
 
     not_found_handler: Request -> Response -> IOFail Response;

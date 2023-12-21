@@ -15,7 +15,7 @@ LIB_TCP := lib/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 
 test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json \
-	test_url test_io_ex test_request
+	test_url test_io_ex test_request test_router
 
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
@@ -43,6 +43,9 @@ test_io_ex:
 
 test_request:
 	fix run -f tests/net/request_test.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
+
+test_router:
+	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out
 

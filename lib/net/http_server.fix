@@ -1,5 +1,16 @@
 module Main;
+//module HttpServer;
 
+import Debug;
+//import AsyncTask;
+
+import Tcp;
+import IOEx;
+import URL;
+import Request;
+import Router;
+
+type RequestHandler = Response -> IOFail Response;
 
 type Worker = unbox struct {
     app: App
@@ -12,20 +23,39 @@ namespace Worker {
             app: app
         }
     );
-    handle: Socket -> SocketAddress -> Worker -> IOFail ();
-    handle = |socket, remote_addr, worker| (
+    handle: IOHandle -> String -> Worker -> IOFail ();
+    handle = |connection, remote_addr, worker| (
         let app = worker.@app;
-        let connection = BufferedSocket::make(socket);
+        eval debug_eprintln("parsing request");
         let request = *Request::parse(connection, remote_addr);
+        eval debug_eprintln("request=" + request.to_string);
         let response = Response::make(request);
-        let response = *app.@router.route(request, response);
-        let _ = *response.end();
+        eval debug_eprintln("finding handler");
+        let handler = app.@router.find(request.@method, request.@path).map_or(
+            not_found_handler,
+            |handler| 
+            eval debug_eprintln("found handler");
+            handler
+        );
+        eval debug_eprintln("handling response");
+        let response = *handler(response);  
+        // TODO: Fail した場合、500 Internal Server Error にする？
+        // すでにヘッダを送信していた場合は？
+        // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
+        let _ = *response.end;
+        let _ = *close_file(connection).lift;
+        eval debug_eprintln("worker finished");
         pure $ ()        
+    );
+
+    not_found_handler: Response -> IOFail Response;
+    not_found_handler = |res| (
+        res.status(404).write_str("Not Found")
     );
 }
 
 type App = unbox struct {
-    router: Router,
+    router: Router RequestHandler,
     backlog: I64
 };
 
@@ -38,15 +68,15 @@ namespace App {
         }
     );
 
-    mount: String -> String -> RequestHandler -> App -> IOFail App;
-    mount = |method, path, callback, app| (
-        pure $ app.mod_router(|router|
-            router.add(method, path, callback)
+    insert_handler: String -> String -> RequestHandler -> App -> App;
+    insert_handler = |method, path, handler, app| (
+        app.mod_router(|router|
+            router.insert(method, path, handler)
         )
     );
 
-    get: String -> RequestHandler -> App -> IOFail App;
-    get = mount("GET");
+    get: String -> RequestHandler -> App -> App;
+    get = insert_handler("GET");
 
     listen: String -> App -> IOFail ();
     listen = |server_host_port, app| (
@@ -55,21 +85,23 @@ namespace App {
         let tasks: Array I64 = Array::empty(0);
         loop_m(
             tasks, |tasks|
-            let _ = *(lift $ eprintln ("Accepting connections"));
-            let (accepted_socket, addr) = *(socket.accept);
+            let _ = *eprintln ("Accepting connections").lift;
+            let res: (I32, SocketAddress) = *socket.accept_fd;
+            let (accepted_fd, addr) = res;
+            let connection = *fdopen(accepted_fd, "w+");
             let _ = *(lift $ eprintln ("Accepted new connection: addr=" + addr.to_string));
-            let worker = Worker::make(app);
+            let worker: IOFail () = Worker::make(app).handle(connection, addr.to_string);
             if true {
-                let _ = *worker.handle(accepted_socket, addr);
+                let _ = *worker;
                 continue_m $ tasks
             } else {
                 /*
-                //let _ = *(lift $ eprintln ("creating task"));
+                let _ = *(lift $ eprintln ("creating task"));
                 let task = AsyncIOTask::make(
-                    worker.handle(accepted_socket, addr)
+                    worker
                     .try(|err| eprintln("error: " + err))
                 );
-                //let _ = *(lift $ eprintln ("creating task done"));
+                let _ = *(lift $ eprintln ("creating task done"));
                 let tasks = tasks.push_back(task);
                 */
                 continue_m $ tasks
@@ -82,7 +114,7 @@ main: IO ();
 main = (
     do {
         let app = App::empty;
-        let app = *app.get("/", |req,res| res.write_str("Hello") );
+        let app = app.insert_handler("GET", "/", |res| res.write_str("Hello") );
         app.listen("localhost:8080")
     }
     .try(|err| eprintln("ERROR: " + err))

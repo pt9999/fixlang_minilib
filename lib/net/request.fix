@@ -77,6 +77,8 @@ type Request = unbox struct {
     request_target: String,     // eg. "/blogs/search?q=hello%25world&limit=30"
     http_version: String,       // eg. "HTTP/1.1"
     headers: Headers,           // A collection of headers of the request
+    path: String,               // eg. "/blogs/search"
+    query: Array (String, String), // eg. [("q", "hello%world"), ("limit", "30")]
     body: Array U8              // The body of the request
 };
 
@@ -88,6 +90,8 @@ impl Request: ToString {
         + ", request_target:" + request.@request_target
         + ", http_version:" + request.@http_version
         + ", headers:" + request.@headers.to_string
+        + ", path: " + request.@path.to_string
+        + ", query: " + request.@query.to_string
         //+ ", body:" + request.@body.to_string
         + " }"
     );
@@ -114,7 +118,10 @@ namespace Request {
             continue_m $ headers
         );
         // TODO read body
-        // TODO parse query string
+        
+        // parse query string
+        let (path, query) = request_target.split_first("?");
+        let query = *_parse_query_string(query);
 
         let request = Request {
             connection: connection,
@@ -123,6 +130,8 @@ namespace Request {
             request_target: request_target,
             http_version: http_version,
             headers: headers,
+            path: path,
+            query: query,
             body: Array::empty(0)
         };
         pure $ request
@@ -145,6 +154,16 @@ namespace Request {
         let field_value = *match_str_class(|c| true);
         let field_value = field_value.strip_spaces;
         pure $ (field_name, field_value)
+    );
+
+    _parse_query_string: String -> IOFail (Array (String, String));
+    _parse_query_string = |query| (
+        query.split_ex("&").fold_m(
+            Array::empty(0), |array, qstr|
+            let (name, value) = qstr.split_first("=");
+            let value = *decodeURIComponent(value).from_result;
+            pure $ array.push_back((name, value))
+        )
     );
 }
 

@@ -8,11 +8,14 @@ import SimpleParser;
 import StringEx;
 import IOEx;
 
-//---------------------------------
+//------------------------------------------------------------------------------------
 
-// TODO: allow multiple members
+// A type that represents a header. The header is a tuple of field name and field value.
+type Header = (String, String);
+
+// A collection of headers.
 type Headers = unbox struct {
-    iter: Iterator (String, String)
+    iter: Iterator Header
 };
 
 impl Headers: ToString {
@@ -24,9 +27,12 @@ impl Headers: ToString {
 }
 
 namespace Headers {
+    // An empty collection of headers.
     empty: Headers;
     empty = Headers { iter: Iterator::empty };
 
+    // `headers.set(name, value)` sets the value of the field named `name` to `value`.
+    // If a field with the same name already exists, it will be removed first.
     set: String -> String -> Headers -> Headers;
     set = |name, value, headers| (
         headers.mod_iter(|iter|
@@ -35,6 +41,8 @@ namespace Headers {
         )
     );
 
+    // `headers.append(name, value)` appends a new field `(name, value)` to the current headers collection.
+    // It will not be removed even if a field with the same name already exists, 
     append: String -> String -> Headers -> Headers;
     append = |name, value, headers| (
         headers.mod_iter(|iter|
@@ -42,6 +50,7 @@ namespace Headers {
         )
     );
 
+    // `headers.find(name)` finds the field with name `name`.
     find: String -> Headers -> Option String;
     find = |name, headers| (
         headers.@iter.loop_iter(
@@ -53,19 +62,22 @@ namespace Headers {
         )
     );
 
+    // `headers.to_iter` returns an iterator of headers.
     to_iter: Headers -> Iterator (String, String);
     to_iter = |headers| headers.@iter.reverse;
 }
 
+//------------------------------------------------------------------------------------
 
+// A type that represents a HTTP request.
 type Request = unbox struct {
-    connection: IOHandle,
-    remote_addr: String,
+    connection: IOHandle,       // An IOHandle of the socket
+    remote_addr: String,        // The remote address, eg. "192.168.0.1:65432"
     method: String,             // eg. "GET"
     request_target: String,     // eg. "/blogs/search?q=hello%25world&limit=30"
     http_version: String,       // eg. "HTTP/1.1"
-    headers: Headers,
-    body: Array U8
+    headers: Headers,           // A collection of headers of the request
+    body: Array U8              // The body of the request
 };
 
 impl Request: ToString {
@@ -82,12 +94,14 @@ impl Request: ToString {
 }
 
 namespace Request {
+
+    // `Request::parse(connection, remote_addr)` reads the HTTP request from `connection` and parse it.
     parse: IOHandle -> String -> IOFail Request;
     parse = |connection, remote_addr| (
         let start_line = *connection.read_line;
         let start_line = start_line.strip_last_newlines;
         let ((method, request_target, http_version), _) = 
-            *match_request_line.run_parser_str(start_line).from_result;
+            *_match_request_line.run_parser_str(start_line).from_result;
         let headers = *loop_m (
             Headers::empty, |headers|
             let line = *connection.read_line;
@@ -95,7 +109,7 @@ namespace Request {
             if line == "" {
                 break_m $ headers
             };
-            let ((name, value), _) = *match_header.run_parser_str(line).from_result;
+            let ((name, value), _) = *_match_header.run_parser_str(line).from_result;
             let headers = headers.append(name, value);
             continue_m $ headers
         );
@@ -114,8 +128,8 @@ namespace Request {
         pure $ request
     );
 
-    match_request_line: Parser (String, String, String);
-    match_request_line = (
+    _match_request_line: Parser (String, String, String);
+    _match_request_line = (
         let method = *match_str_class(|c| c != ' ');
         let _ = *match_char(' ');
         let request_target = *match_str_class(|c| c != ' ');
@@ -124,8 +138,8 @@ namespace Request {
         pure $ (method, request_target, http_version)
     );
 
-    match_header: Parser (String, String);
-    match_header = (
+    _match_header: Parser (String, String);
+    _match_header = (
         let field_name = *match_str_class(|c| c != ':');
         let _ = *match_char(':');
         let field_value = *match_str_class(|c| true);

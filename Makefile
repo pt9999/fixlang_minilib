@@ -13,7 +13,7 @@ LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_pa
 			lib/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
-LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) lib/simple_parser.fix $(LIB_STRING_EX)
+LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
 
 test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json \
 	test_url test_io_ex test_request test_router
@@ -48,8 +48,6 @@ test_request:
 test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
-http_server:
-	fix run -f $(LIB_HTTP_SERVER)
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out
 
@@ -65,3 +63,8 @@ examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix
 	fix build -f $^ -o $@
 
+examples/sample_http_server.out: examples/sample_http_server.fix $(LIB_HTTP_SERVER)
+	fix build -f $^ -o $@
+
+http_server: examples/sample_http_server.fix $(LIB_HTTP_SERVER)
+	fix run -f $^

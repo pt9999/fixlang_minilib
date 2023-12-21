@@ -1,5 +1,4 @@
-module Main;
-//module HttpServer;
+module HttpServer;
 
 import Debug;
 //import AsyncTask;
@@ -10,7 +9,7 @@ import URL;
 import Request;
 import Router;
 
-type RequestHandler = Response -> IOFail Response;
+type RequestHandler = Request -> Response -> IOFail Response;
 
 type Worker = unbox struct {
     app: App
@@ -38,7 +37,7 @@ namespace Worker {
             handler
         );
         eval debug_eprintln("handling response");
-        let response = *handler(response);  
+        let response = *handler(request, response);  
         // TODO: Fail した場合、500 Internal Server Error にする？
         // すでにヘッダを送信していた場合は？
         // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
@@ -48,8 +47,8 @@ namespace Worker {
         pure $ ()        
     );
 
-    not_found_handler: Response -> IOFail Response;
-    not_found_handler = |res| (
+    not_found_handler: Request -> Response -> IOFail Response;
+    not_found_handler = |req, res| (
         res.status(404).write_str("Not Found")
     );
 }
@@ -75,8 +74,8 @@ namespace App {
         )
     );
 
-    get: String -> RequestHandler -> App -> App;
-    get = insert_handler("GET");
+    on: String -> String -> RequestHandler -> App -> App;
+    on = insert_handler;
 
     listen: String -> App -> IOFail ();
     listen = |server_host_port, app| (
@@ -109,15 +108,3 @@ namespace App {
         )
     );
 }
-
-main: IO ();
-main = (
-    do {
-        let app = App::empty;
-        let app = app.insert_handler("GET", "/", |res| res.write_str("Hello") );
-        app.listen("localhost:8080")
-    }
-    .try(|err| eprintln("ERROR: " + err))
-);
-
-

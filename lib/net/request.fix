@@ -4,7 +4,6 @@ import HashMap;
 import Debug;
 
 import URL;
-import SimpleParser;
 import StringEx;
 import IOEx;
 
@@ -104,8 +103,8 @@ namespace Request {
     parse = |connection, remote_addr| (
         let start_line = *connection.read_line;
         let start_line = start_line.strip_last_newlines;
-        let ((method, request_target, http_version), _) = 
-            *_match_request_line.run_parser_str(start_line).from_result;
+        let (method, request_target, http_version) = 
+            *_parse_request_line(start_line).from_result;
         let headers = *loop_m (
             Headers::empty, |headers|
             let line = *connection.read_line;
@@ -113,15 +112,16 @@ namespace Request {
             if line == "" {
                 break_m $ headers
             };
-            let ((name, value), _) = *_match_header.run_parser_str(line).from_result;
+            let (name, value) = *_parse_header(line).from_result;
             let headers = headers.append(name, value);
             continue_m $ headers
         );
-        // TODO read body
-        
         // parse query string
         let (path, query) = request_target.split_first("?");
         let query = *_parse_query_string(query);
+
+        // TODO read body
+        
 
         let request = Request {
             connection: connection,
@@ -137,23 +137,20 @@ namespace Request {
         pure $ request
     );
 
-    _match_request_line: Parser (String, String, String);
-    _match_request_line = (
-        let method = *match_str_class(|c| c != ' ');
-        let _ = *match_char(' ');
-        let request_target = *match_str_class(|c| c != ' ');
-        let _ = *match_char(' ');
-        let http_version = *match_str_class(|c| c != ' ');
-        pure $ (method, request_target, http_version)
+    _parse_request_line: String -> Result ErrMsg (String, String, String);
+    _parse_request_line = |line| (
+        let fields = line.split_ex(" ").to_array;
+        if fields.get_size != 3 {
+            err $ "Invalid request line: `" + line + "`"
+        };
+        ok $ (fields.@(0), fields.@(1), fields.@(2))
     );
 
-    _match_header: Parser (String, String);
-    _match_header = (
-        let field_name = *match_str_class(|c| c != ':');
-        let _ = *match_char(':');
-        let field_value = *match_str_class(|c| true);
+    _parse_header: String -> Result ErrMsg (String, String);
+    _parse_header = |line| (
+        let (field_name, field_value) = line.split_first(":");
         let field_value = field_value.strip_spaces;
-        pure $ (field_name, field_value)
+        ok $ (field_name, field_value)
     );
 
     _parse_query_string: String -> IOFail (Array (String, String));

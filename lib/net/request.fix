@@ -11,11 +11,50 @@ import IOEx;
 //---------------------------------
 
 // TODO: allow multiple members
-type Headers = HashMap String String;
+type Headers = unbox struct {
+    iter: Iterator (String, String)
+};
+
+impl Headers: ToString {
+    to_string = |headers| (
+        "Headers { " +
+            headers.@iter.reverse.map(|(name, value)| name + ": " + value).join(", ")
+        + " }"
+    );
+}
 
 namespace Headers {
     empty: Headers;
-    empty = HashMap::empty(10);
+    empty = Headers { iter: Iterator::empty };
+
+    set: String -> String -> Headers -> Headers;
+    set = |name, value, headers| (
+        headers.mod_iter(|iter|
+            iter.filter(|(n,v)| n != name)
+            .push_front((name, value))
+        )
+    );
+
+    append: String -> String -> Headers -> Headers;
+    append = |name, value, headers| (
+        headers.mod_iter(|iter|
+            iter.push_front((name, value))
+        )
+    );
+
+    find: String -> Headers -> Option String;
+    find = |name, headers| (
+        headers.@iter.loop_iter(
+            none(), |_, (n, v)|
+            if name == n {
+                break $ some(v)
+            };
+            continue $ none()
+        )
+    );
+
+    to_iter: Headers -> Iterator (String, String);
+    to_iter = |headers| headers.@iter.reverse;
 }
 
 
@@ -57,7 +96,7 @@ namespace Request {
                 break_m $ headers
             };
             let ((name, value), _) = *match_header.run_parser_str(line).from_result;
-            let headers = headers.insert(name, value);
+            let headers = headers.append(name, value);
             continue_m $ headers
         );
         // TODO read body
@@ -137,7 +176,7 @@ namespace Response {
     // Sets a header.
     header: String -> String -> Response -> Response;
     header = |name, value, res| (
-        res.mod_headers(HashMap::insert(name, value))
+        res.mod_headers(|headers| headers.set(name, value))
     );
 
     // Sends headers with a status line if they have not already been sent.

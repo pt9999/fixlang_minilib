@@ -1,0 +1,160 @@
+/*
+Red-Black Tree
+
+下記の書籍の「3.3 赤黒木」を参考にした。
+
+「純粋関数型データ構造」
+Chris Okasaki 著
+稲葉一浩、遠藤侑介 訳
+ISBN：978-4-04-893056-7
+*/
+
+module Main;
+
+import Debug;
+
+namespace RBNode {
+
+    type RBNode a = box union {
+        empty: (),
+        red:  (RBNode a, a, RBNode a),
+        black: (RBNode a, a, RBNode a)
+    };
+
+    type RBPathComponent = unbox union {
+        left: (),
+        right: ()
+    };
+
+    type RBPath = Iterator RBPathComponent;
+
+    // If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.
+    // If the node is empty, it will abort.
+    get_triplet: RBNode a -> (RBNode a, a, RBNode a);
+    get_triplet = |node| (
+        if node.is_red { node.as_red } else { node.as_black }
+    );
+
+    get_left: RBNode a -> RBNode a;
+    get_left = |node| node.get_triplet.@0;
+
+    get_right: RBNode a -> RBNode a;
+    get_right = |node| node.get_triplet.@2;
+
+    lookup: a -> (a -> a -> Bool) -> RBNode a -> (RBPath, RBNode a);
+    lookup = |x, less_than, node| (
+        if node.is_empty { (Iterator::empty, node) };
+        let (left, elem, right) = node.get_triplet;
+        if less_than(x, elem) {
+            let (path, found_node) = left.lookup(x, less_than);
+            (path.push_front(left()), found_node)
+        };
+        if less_than(elem, x) {
+            let (path, found_node) = right.lookup(x, less_than);
+            (path.push_front(right()), found_node)
+        };
+        (Iterator::empty, node)
+    );
+
+    balance: RBNode a -> RBNode a;
+    balance = |node| (
+        if node.is_empty || node.is_red { node };
+        let (left, _, right) = node.as_black;
+        if left.is_red && left.get_left.is_red {
+            let (left, e3, n4) = node.as_black;
+            let (left_left, e2, n3) = left.as_red;
+            let (n1, e1, n2) = left_left.as_red;
+            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+        };
+        if left.is_red && left.get_right.is_red {
+            let (left, e3, n4) = node.as_black;
+            let (n1, e1, left_right) = left.as_red;
+            let (n2, e2, n3) = left_right.as_red;
+            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+        };
+        if right.is_red && right.get_left.is_red {
+            let (n1, e1, right) = node.as_black;
+            let (right_left, e3, n4) = right.as_red;
+            let (n2, e2, n3) = right_left.as_red;
+            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+        };
+        if right.is_red && right.get_right.is_red {
+            let (n1, e1, right) = node.as_black;
+            let (n2, e2, right_right) = right.as_red;
+            let (n3, e3, n4) = right_right.as_red;
+            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+        };
+        node
+    );
+
+    _insert1: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    _insert1 = |x, less_than, node| (
+        if node.is_empty { red $ (node, x, node) };
+        let color = if node.is_red { red } else { black }; // constructor
+        let (left, elem, right) = node.get_triplet;
+        if less_than(x, elem) {  
+            let node = color $ (left._insert1(x, less_than), elem, right);
+            node.balance
+        };
+        if less_than(elem, x) {  
+            let node = color $ (left, elem, right._insert1(x, less_than));
+            node.balance
+        };
+        // If neither `x < elem` nor `elem < x` holds, replace `elem` to `x`.
+        color $ (left, x, right)
+    );
+
+    insert: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    insert = |x, less_than, node| (
+        let node = node._insert1(x, less_than);
+        black $ node.get_triplet
+    );
+
+    to_iter: RBNode a -> Iterator a;
+    to_iter = |node| (
+        if node.is_empty { Iterator::empty };
+        let (left, elem, right) = node.get_triplet;
+        left.to_iter.append(right.to_iter.push_front(elem))
+    );
+
+    from_iter_lt: (a -> a -> Bool) -> Iterator a -> RBNode a;
+    from_iter_lt = |less_than, iter| (
+        iter.fold(
+            empty(), |node, x|
+            node.insert(x, less_than)
+        )
+    );
+
+    from_iter: [a: LessThan] Iterator a -> RBNode a;
+    from_iter = |iter| (
+        iter.from_iter_lt(|x,y| x < y)
+    );
+}
+
+impl [a: ToString] RBNode a: ToString {
+    to_string = |node| (
+        if node.is_empty { "E" };
+        if node.is_red { 
+            let (left, elem, right) = node.as_red;
+            "R(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
+        };
+        let (left, elem, right) = node.as_black;
+        "B(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
+    );
+}
+
+
+test1: IO ();
+test1 = (
+    let node: RBNode I64 = [1,3,5,7,9,8,6,4,2,0].to_iter.from_iter;
+    let _ = *println(node.to_string);
+    let _ = *println(node.to_iter.map(to_string).join(","));
+    pure()
+);
+
+
+main: IO ();
+main = (
+    test1
+);
+

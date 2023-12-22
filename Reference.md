@@ -218,6 +218,14 @@ Matches a zero-or-more-length string. Each character should satisfy the specifie
 
 Convert a byte array to a string. Specifically, it calls `String::_unsafe_to_string()` after appending a null character to the end of the byte array.
 
+#### to_lower: String -> String;
+
+Converts the specified string to lowercase.
+
+#### to_upper: String -> String;
+
+Converts the specified string to uppercase.
+
 #### byte_to_string: U8 -> String;
 
 Converts a byte (a character) to a string of length 1.
@@ -229,6 +237,17 @@ Searches for the specified byte from the beginning of a string. If found, return
 #### replace_all: String -> String -> String -> String;
 
 Replaces all occurrences of `from` in the string with `to`.
+
+#### split_first: String -> String -> (String, String);
+
+`str.split_first(delim)` splits the string `str` into two parts with the delimiter `delim`.
+Returns `(left, right)` where `left` is the left part of the delimiter, and
+`right` is the right part of the delimiter.
+Returns `(str, "")` if the delimiter is not found.
+
+#### split_ex: String -> String -> Iterator String;
+
+Same as Std::String::split, except that `"foo".split_ex(",")` returns a singleton iterator of "foo".
 
 #### substring: I64 -> I64 -> String -> String;
 

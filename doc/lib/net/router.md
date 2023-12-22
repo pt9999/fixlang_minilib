@@ -1,5 +1,15 @@
 ## router.fix
 
+### type RouterEntry
+
+`RouterEntry h` represents a map from method name to a request handler.
+`h` is a type of request handler.
+
+```
+type RouterEntry h = box struct {
+    map: HashMap String h
+};
+```
 ### namespace RouterEntry
 
 #### empty: RouterEntry h;
@@ -20,6 +30,17 @@ Returns true iff it is an empty entry.
 
 #### show: [h: ToString] RouterEntry h -> IO ();
 
+### type RouterNode
+
+`RouterNode h` represents a resource of URI.
+`h` is a type of request handler.
+
+```
+type RouterNode h = box struct {
+    directory: HashMap String (RouterNode h),
+    entry: RouterEntry h
+};
+```
 ### namespace RouterNode
 
 #### empty: RouterNode h;
@@ -42,6 +63,13 @@ An empty router node.
 
 #### show: [h: ToString] String -> RouterNode h -> IO ();
 
+### type Router
+
+```
+type Router h = box struct {
+    root: RouterNode h
+};
+```
 ### namespace Router
 
 #### empty: Router h;

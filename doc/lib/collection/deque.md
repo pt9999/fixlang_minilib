@@ -1,5 +1,15 @@
 ## deque.fix
 
+### type Deque
+
+A type that represents a double-ended queue.
+
+```
+type Deque a = unbox struct {
+    front: Array a,     // reversed array
+    back: Array a
+};
+```
 ### namespace Deque
 
 #### empty: I64 -> Deque a;

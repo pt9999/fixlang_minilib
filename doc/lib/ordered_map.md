@@ -1,5 +1,15 @@
 ## ordered_map.fix
 
+### type OrderedMap
+
+Similar to HashMap, but `to_iter()` returns entries in the same order as they were inserted.
+
+```
+type OrderedMap k v = unbox struct {
+    map: HashMap k (I64, v),
+    serial: I64
+};
+```
 ### namespace OrderedMap
 
 #### contains_key: [k : HashKey] k -> OrderedMap k v -> Bool;

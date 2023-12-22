@@ -31,6 +31,21 @@ and offset from the beginning of the file.
 
 Report the error along with where it occurred.
 
+### type ParseResult
+
+Result type that returns a value of an arbitrary type and a stream.
+
+```
+type ParseResult a = Result ErrMsg (a, Stream);
+```
+### type Parser
+
+A structure with a function that receive a stream, parse it, and
+return the parsed result and the next stream position.
+
+```
+type Parser a = unbox struct { _parser: Stream -> ParseResult a };
+```
 #### parser: (Stream -> ParseResult a) -> Parser a;
 
 A function that creates a Parser structure based on the parsing function.

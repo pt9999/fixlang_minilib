@@ -7,25 +7,32 @@ This library is still work in progress.
 ## Tested Platform
 - x86_64-linux-gnu
 - aarch64-linux-gnu
-- NOTE: MacOS is not tests.
+- NOTE: Currently not tested on MacOS.
 
 ## Features
 
-- JSON encoding and decoding
-- Simple parsers
-- Ordered maps
-- String utility
-- UTF8/UTF16/UTF32 conversion
+- Application support
+  - Clap (Command Line Argument Parser)
+- Collections
+  - Ordered maps
+  - Deque (double-ended queue)
+- File format
+  - JSON encoding and decoding
+- Text handling
+  - Simple parsers
+  - String utility
+  - UTF8/UTF16/UTF32 conversion
+- Networking
+  - TCP/IP Socket (WARNING: IPv6 is not supported yet)
+  - URL, URI
+  - Simple HTTP Server
 - Unit testing
-- Command Line Argument Parser
-- TCP/IP Socket (WARNING: IPv6 is not supported yet)
-- Simple HTTP Server
 
 ## How to use
 
-To build the example code, type `make examples`.
+To build example programs, type `make examples`.
 
-To run the test code, type `make test`. It has been tested in the following environment.
+To run test codes, type `make test`. It has been tested in the following environment.
 
 - Ubuntu-22.04 on WSL 2
 - rustup 1.26.0

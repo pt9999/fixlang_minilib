@@ -42,93 +42,135 @@ matches = |str, parser| (
 );
 
 type State = unbox struct {
-    doc: String,    // document (function comment etc.)
+    output: IOHandle,   // output file handle
+    doc: String,        // document (function comment etc.)
     type_name: String,  // name of type declaration
     typedef: String     // body of type declaration
 };
 
 namespace State {
-    empty: State;
-    empty = State{
-        doc: "",
-        type_name: "",
-        typedef: ""
-    };
+    make: IOHandle -> State;
+    make = |output| (
+        State{
+            output: output,
+            doc: "",
+            type_name: "",
+            typedef: ""
+        }
+    );
 
-    print_doc: State -> IO State;
+    print: String -> State -> IOFail ();
+    print = |str, state| (
+        write_string(state.@output, str)
+    );
+
+    println: String -> State -> IOFail ();
+    println = |str, state| (
+        state.print(str + "\n")
+    );
+
+    print_doc: State -> IOFail State;
     print_doc = |state| (
         let _ = *if state.@doc == "" {
-            print("\n") 
+            state.print("\n") 
         } else {
-            print("\n" + state.@doc + "\n")
+            state.print("\n" + state.@doc + "\n")
         };
         pure $ state.set_doc("")
     );
 
-    print_typedef: State -> IO State;
+    print_typedef: State -> IOFail State;
     print_typedef = |state| (
-        let _ = *println("```");
-        let _ = *print(state.@typedef);
-        let _ = *println("```");
+        let _ = *state.println("```");
+        let _ = *state.print(state.@typedef);
+        let _ = *state.println("```");
         pure $ state.set_typedef("")
     );
-}
 
-process_file: String -> String -> IO ();
-process_file = |input_filepath, contents| (
-    let input_filename = input_filepath.split_ex("/").to_array.get_last.as_some;
-    let _ = *println("## " + input_filename);
-    let _ = *println("");
-    let state = State::empty;
-    contents.split("\n").loop_iter_m(
-        state,
-        |state, orig_line|
+    process_comment: String -> State -> IOFail State;
+    process_comment = |line, state| (
+        let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
+        let state = state.mod_doc(|doc| doc + after_comment);
+        pure $ state
+    );
+
+    process_global: String -> State -> IOFail State;
+    process_global = |line, state| (
+        let _ = *state.println("#### " + line);
+        let state = *state.print_doc;
+        pure $ state
+    );
+
+    process_type_decl: String -> String -> Result ErrMsg String -> State -> IOFail State;
+    process_type_decl = |orig_line, line, type_name, state| (
+        let state = if type_name.is_ok { 
+            state.set_type_name(type_name.as_ok) 
+        } else { 
+            state 
+        };
+        let state = state.mod_typedef(|t| t + orig_line + "\n");
+        if state.@typedef.find(";", 0).is_none {
+            pure $ state
+        };
+        let _ = *state.println("### type " + state.@type_name);
+        let state = *state.print_doc;
+        let state = *state.print_typedef;
+        pure $ state
+    );
+
+    process_namespace: String -> String -> State -> IOFail State;
+    process_namespace = |line, namespace_name, state| (
+        let _ = *state.println("### namespace " + namespace_name);
+        let state = *state.print_doc;
+        pure $ state
+    );
+
+    process_line: String -> State -> IOFail State;
+    process_line = |orig_line, state| (
         let line = orig_line.strip_spaces;
         let is_comment = line.get_sub(0, 2) == "//";
         if (is_comment) {
-            let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
-            let state = state.mod_doc(|doc| doc + after_comment);
-            continue_m $ state
+            state.process_comment(line)
         };
         let is_global: Bool = match_global.matches(line).is_ok;
         if is_global {
-            let _ = *println("#### " + line);
-            let state = *state.print_doc;
-            continue_m $ state
+            state.process_global(line)
         };
         let type_name: Result ErrMsg String = match_type.matches(line);
         if type_name.is_ok || state.@typedef != "" {
-            let state = if type_name.is_ok { 
-                state.set_type_name(type_name.as_ok) 
-            } else { 
-                state 
-            };
-            let state = state.mod_typedef(|t| t + orig_line + "\n");
-            if state.@typedef.find(";", 0).is_none {
-                continue_m $ state
-            };
-            let _ = *println("### type " + state.@type_name);
-            let state = *state.print_doc;
-            let state = *state.print_typedef;
-            continue_m $ state
+            state.process_type_decl(orig_line, line, type_name)
         };
         let namespace_name: Result ErrMsg String = match_namespace.matches(line);
         if namespace_name.is_ok {
-            let _ = *println("### namespace " + namespace_name.as_ok);
-            let state = *state.print_doc;
-            continue_m $ state
+            state.process_namespace(line, namespace_name.as_ok)
         };
         let state = state.set_doc("");
-        continue_m $ state
-    ).map(|_| ())
-);
+        pure $ state
+    );
+
+    process_file: String -> String -> IOHandle -> IOFail ();
+    process_file = |input_filepath, contents, output| (
+        let input_filename = input_filepath.split_ex("/").to_array.get_last.as_some;
+        let state = State::make(output);
+        let _ = *state.println("## " + input_filename);
+        let _ = *state.println("");
+        let state = *contents.split("\n").loop_iter_m(
+            state,
+            |state, orig_line|
+            let state = *state.process_line(orig_line);
+            continue_m $ state
+        );
+        pure $ ()
+    );
+}
 
 command: Command;
 command = (
     Command::new("fixdoc")
     .version("0.1.0")
     .about("Output a reference document from a fix source file")
-    .arg(Arg::new("FILE").help("Input file (*fix)").required.takes_value)
+    .arg(Arg::new("FILE").help("Input file (*.fix)").required.takes_value)
+    .arg(Arg::new("output").short('o').long("output").help("Output file").takes_value)
 );
 
 main: IO ();
@@ -136,8 +178,14 @@ main = (
     do {
         let matches = *command.get_matches;
         let input_file = matches.get_one("FILE").as_some;
+        let output_file = matches.get_one("output");
+        let output = *if output_file.is_some {
+            open_file(Path::parse(output_file.as_some).as_some, "w")
+        } else {
+            pure $ IO::stdout
+        };
         let contents = *read_file_string(Path::parse(input_file).as_some);
-        let _ = *process_file(input_file, contents).lift;
+        let _ = *process_file(input_file, contents, output);
         pure()
     }
     .try(|err| eprintln (err))

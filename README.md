@@ -4,6 +4,11 @@ Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
 This library is still under construction.
 
+## Tested Platform
+- x86_64-linux-gnu
+- aarch64-linux-gnu
+- NOTE: MacOS is not tests.
+
 ## Features
 
 - JSON encoding and decoding
@@ -13,9 +18,8 @@ This library is still under construction.
 - UTF8/UTF16/UTF32 conversion
 - Unit testing
 - Command Line Argument Parser
-- TCP/IP Socket
-  - Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
-  - WARNING: IPv6 is not supported yet.
+- TCP/IP Socket (WARNING: IPv6 is not supported yet)
+- Simple HTTP Server
 
 ## How to use
 
@@ -41,3 +45,5 @@ To run the test code, type `make test`. It has been tested in the following envi
 ## Library Reference
 
 See [Reference.md](./Reference.md).
+
+For libraries under `lib/net/`, see [ReferenceNet.md](./ReferenceNet.md).

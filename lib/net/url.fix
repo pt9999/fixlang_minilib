@@ -76,16 +76,12 @@ namespace URL {
 }
 
 namespace URI {
-    _unreserved_table: Array U8;
-    _unreserved_table = (
+    _alpha_numeric: Array U8;
+    _alpha_numeric = (
         let char_ranges = [
             ('A', 'Z'),
             ('a', 'z'),
-            ('0', '9'),
-            ('-', '-'),
-            ('.', '.'),
-            ('_', '_'),
-            ('~', '~')
+            ('0', '9')
         ];
         char_ranges.to_iter.fold(
             Array::fill(256, 0_U8), |array, (min, max)|
@@ -95,12 +91,42 @@ namespace URI {
         )
     );
 
-    encodeURIComponent: String -> String;
-    encodeURIComponent = |str| (
+    _encodeURIComponent_table: Array U8;
+    _encodeURIComponent_table = (
+        "-_.!~*'()".get_bytes.pop_back.to_iter.fold(
+            _alpha_numeric, |array, c|
+            array.set(c.to_I64, 1_U8)
+        )
+    );
+
+    _encodeURI_table: Array U8;
+    _encodeURI_table = (
+        ";,/?:@&=+$".get_bytes.pop_back.to_iter.fold(
+            _encodeURIComponent_table, |array, c|
+            array.set(c.to_I64, 1_U8)
+        )
+    );
+
+    _decodeURIComponent_table: Array U8;
+    _decodeURIComponent_table = (
+        Array::fill(256, 0_U8)
+    );
+
+    _decodeURI_table: Array U8;
+    _decodeURI_table = (
+        // preserve_escape_table
+        ";/?:@&=+$,#".get_bytes.pop_back.to_iter.fold(
+            _decodeURIComponent_table, |array, c|
+            array.set(c.to_I64, 1_U8)
+        )    
+    );
+
+    _encode_with: Array U8 -> String -> String;
+    _encode_with = |unescaped_table, str| (
         let input = str.get_bytes.pop_back;
         input.to_iter.fold(
             Array::empty(input.get_size * 3), |output, c|
-            if _unreserved_table.@(c.to_I64) != 0_U8 {
+            if unescaped_table.@(c.to_I64) != 0_U8 {
                 output.push_back(c)
             };
             let hi = c.shift_right(4_U8).bit_and(15_U8);
@@ -112,8 +138,8 @@ namespace URI {
         ._unsafe_to_string
     );
 
-    decodeURIComponent: String -> Result ErrMsg String;
-    decodeURIComponent = |str| (
+    _decode_with: Array U8 -> String -> Result ErrMsg String;
+    _decode_with = |preserve_escape_table, str| (
         let input = str.get_bytes.pop_back;
         let input_size = input.get_size;
         let output = *loop_m(
@@ -131,9 +157,35 @@ namespace URI {
             let hi = *decode_hex_char(input.@(i + 1));
             let lo = *decode_hex_char(input.@(i + 2));
             let c = hi.shift_left(4_U8).bit_or(lo);
+            if preserve_escape_table.@(c.to_I64) != 0_U8 {
+                let output = output.push_back(input.@(i))
+                    .push_back(input.@(i + 1))
+                    .push_back(input.@(i + 2));
+                continue_m $ (output, i + 3)
+            };
             continue_m $ (output.push_back(c), i + 3)
         );
         ok $ output._unsafe_to_string
+    );
+
+    encodeURI: String -> String;
+    encodeURI = |str| (
+        str._encode_with(_encodeURI_table)
+    );
+
+    decodeURI: String -> Result ErrMsg String;
+    decodeURI = |str| (
+        str._decode_with(_decodeURI_table)
+    );
+
+    encodeURIComponent: String -> String;
+    encodeURIComponent = |str| (
+        str._encode_with(_encodeURIComponent_table)
+    );
+
+    decodeURIComponent: String -> Result ErrMsg String;
+    decodeURIComponent = |str| (
+        str._decode_with(_decodeURIComponent_table)
     );
 }
 

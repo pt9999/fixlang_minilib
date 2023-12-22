@@ -9,25 +9,27 @@ import URL;
 import Request;
 import Router;
 
-type RequestHandler = Request -> Response -> IOFail Response;
+type RequestHandler s = Request s -> Response s -> IOFail (Response s);
 
-type Worker = unbox struct {
-    app: App
+type Worker s = unbox struct {
+    app: App s
 };
 
 namespace Worker {
-    make: App -> Worker;
+    make: App s -> Worker s;
     make = |app| (
         Worker {
             app: app
         }
     );
-    handle: IOHandle -> String -> Worker -> IOFail ();
+
+    handle: IOHandle -> String -> Worker s -> IOFail s;
     handle = |connection, remote_addr, worker| (
         do {
             let app = worker.@app;
             eval debug_eprintln("parsing request");
-            let request = *Request::parse(connection, remote_addr);
+            let request = *Request::parse(app.@state, connection, remote_addr);
+            
             eval debug_eprintln("request=" + request.to_string);
             let response = Response::make(request);
             eval debug_eprintln("finding handler");
@@ -46,12 +48,12 @@ namespace Worker {
             let _ = *response.end;
             //let _ = *close_file(connection).lift;
             eval debug_eprintln("worker finished");
-            pure $ ()        
+            pure $ response.@state
         }
         ._finally(|_| close_file(connection))
     );
 
-    _finally: (() -> IO a) -> IOFail a -> IOFail a;
+    _finally: (() -> IO ()) -> IOFail a -> IOFail a;
     _finally = |f, iof| (
         let res = *iof.to_result.lift;
         let _ = *f().lift;
@@ -59,64 +61,74 @@ namespace Worker {
         pure $ res.as_ok
     );
 
-    not_found_handler: Request -> Response -> IOFail Response;
+    not_found_handler: Request s -> Response s -> IOFail (Response s);
     not_found_handler = |req, res| (
         res.status(404).write_str("Not Found")
     );
 }
 
-type App = unbox struct {
-    router: Router RequestHandler,
+// This type represents an application. `s` is an application state.
+type App s = unbox struct {
+    state: s,
+    merge_state: s -> s -> s,
+    router: Router (RequestHandler s),
     backlog: I64
 };
 
 namespace App {
-    empty: App;
-    empty = (
+    // `App::make()` creates an empty application with no state.
+    make: () -> App ();
+    make = |_| (
+        let state = ();
+        let merge_state = |_, _| ();
+        App::make_with_state(state, merge_state)
+    );
+
+    // `App::make_with_state(state, merge_state)` creates 
+    // an empty application with a state and a function to merge two states.
+    make_with_state: s -> (s -> s -> s) -> App s;
+    make_with_state = |state, merge_state| (
         App {
+            state: state,
+            merge_state: merge_state,
             router: Router::empty,
             backlog: 10
         }
     );
 
-    insert_handler: String -> String -> RequestHandler -> App -> App;
+    // `app.insert_handler(method, path, handler)` inserts a handler
+    // at `path` for `method`.
+    insert_handler: String -> String -> RequestHandler s -> App s -> App s;
     insert_handler = |method, path, handler, app| (
         app.mod_router(|router|
             router.insert(method, path, handler)
         )
     );
 
-    on: String -> String -> RequestHandler -> App -> App;
+    // Alias of `insert_handler`.
+    on: String -> String -> RequestHandler s -> App s -> App s;
     on = insert_handler;
 
-    listen: String -> App -> IOFail ();
+    // `app.listen(server_host_port)` listens for incoming requests,
+    // and respond to accepted connections.
+    listen: String -> App s -> IOFail (App s);
     listen = |server_host_port, app| (
-        let socket = *(listen_tcp_server(server_host_port, app.@backlog));
-        let _ = *(lift $ eprintln ("Listening on " + server_host_port));
-        let tasks: Array I64 = Array::empty(0);
+        let socket = *listen_tcp_server(server_host_port, app.@backlog);
+        let _ = *eprintln ("Listening on " + server_host_port).lift;
         loop_m(
-            tasks, |tasks|
+            app, |app|
             let _ = *eprintln ("Accepting connections").lift;
             let res: (I32, SocketAddress) = *socket.accept_fd;
             let (accepted_fd, addr) = res;
             let connection = *fdopen(accepted_fd, "w+");
-            let _ = *(lift $ eprintln ("Accepted new connection: addr=" + addr.to_string));
-            let worker: IOFail () = Worker::make(app).handle(connection, addr.to_string);
-            if true {
-                let _ = *worker;
-                continue_m $ tasks
-            } else {
-                /*
-                let _ = *(lift $ eprintln ("creating task"));
-                let task = AsyncIOTask::make(
-                    worker
-                    .try(|err| eprintln("error: " + err))
-                );
-                let _ = *(lift $ eprintln ("creating task done"));
-                let tasks = tasks.push_back(task);
-                */
-                continue_m $ tasks
-            }
+            let _ = *eprintln ("Accepted new connection: addr=" + addr.to_string).lift;
+            let worker = Worker::make(app).handle(connection, addr.to_string);
+            let worker_state = *worker;
+
+            // currently only single thread is supported
+            let state = (app.@merge_state) (app.@state, worker_state);
+            let app = app.set_state(state);
+            continue_m $ app
         )
     );
 }

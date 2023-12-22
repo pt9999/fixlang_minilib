@@ -76,7 +76,8 @@ namespace Headers {
 //------------------------------------------------------------------------------------
 
 // A type that represents an HTTP request.
-type Request = unbox struct {
+type Request s = unbox struct {
+    state: s,                   // Application state
     connection: IOHandle,       // An IOHandle of the socket
     remote_addr: String,        // The remote address, eg. "192.168.0.1:65432"
     method: String,             // eg. "GET"
@@ -88,7 +89,7 @@ type Request = unbox struct {
     body: Array U8              // The body of the request
 };
 
-impl Request: ToString {
+impl Request s: ToString {
     to_string = |request| (
         "Request {"
         + " remote_addr:" + request.@remote_addr
@@ -105,9 +106,9 @@ impl Request: ToString {
 
 namespace Request {
 
-    // `Request::parse(connection, remote_addr)` reads the HTTP request from `connection` and parse it.
-    parse: IOHandle -> String -> IOFail Request;
-    parse = |connection, remote_addr| (
+    // `Request::parse(state, connection, remote_addr)` reads the HTTP request from `connection` and parse it.
+    parse: s -> IOHandle -> String -> IOFail (Request s);
+    parse = |state, connection, remote_addr| (
         let start_line = *connection.read_line;
         let start_line = start_line.strip_last_newlines;
         let (method, request_target, http_version) = 
@@ -133,6 +134,7 @@ namespace Request {
         let body = *read_n_bytes(connection, content_length);
 
         let request = Request {
+            state: state,
             connection: connection,
             remote_addr: remote_addr,
             method: method,
@@ -145,7 +147,6 @@ namespace Request {
         };
         pure $ request
     );
-
     _parse_request_line: String -> Result ErrMsg (String, String, String);
     _parse_request_line = |line| (
         let fields = line.split_ex(" ").to_array;
@@ -175,22 +176,24 @@ namespace Request {
 }
 
 // A type that represents an HTTP response.
-type Response = unbox struct {
-    request: Request,
-    connection: IOHandle,
-    http_version: String,
-    status: I64,
-    reason: String,
-    headers: Headers,
-    headersSent: Bool
+type Response s = unbox struct {
+    state: s,                   // Application state
+    request: Request s,         // HTTP request
+    connection: IOHandle,       // An IOHandle of the socket 
+    http_version: String,       // eg. "HTTP/1.1"
+    status: I64,                // HTTP status (eg. 404)
+    reason: String,             // reason phrase (eg. "Not Found") 
+    headers: Headers,           // response headers
+    headersSent: Bool           // true iff response headers are sent
 };
 
 namespace Response {
 
     // `Response::make(request)` creates a basic HTTP response for an HTTP request.
-    make: Request -> Response;
+    make: Request s -> Response s;
     make = |req| (
         let res = Response {
+            state: req.@state,
             request: req,
             connection: req.@connection,
             http_version: req.@http_version,
@@ -204,7 +207,7 @@ namespace Response {
 
     // `response.status(code)` sets the HTTP status code. (eg. 404)
     // It will also set the reason phrase (eg. "Not Found") of the status. 
-    status: I64 -> Response -> Response;
+    status: I64 -> Response s -> Response s;
     status = |status, res| (
         let reason = _STATUS_REASON.find_or(status, "");
         res.set_status(status).set_reason(reason)
@@ -213,7 +216,7 @@ namespace Response {
     // `response.content_type(type)` sets the `Content-Type` header.
     // You can specify an alias for the content type (e.g. "text", "json").
     // See the definition of `_CONTENT_TYPE_ALIASES` for a list of available aliases.
-    content_type: String -> Response -> Response;
+    content_type: String -> Response s -> Response s;
     content_type = |type_, res| (
         let content_type = (
             if (type_.find("/", 0).is_some) {
@@ -226,13 +229,13 @@ namespace Response {
     );
 
     // `response.header(name, value)` sets a response header.
-    header: String -> String -> Response -> Response;
+    header: String -> String -> Response s -> Response s;
     header = |name, value, res| (
         res.mod_headers(|headers| headers.set(name, value))
     );
 
     // Sends headers with a status line if they have not already been sent.
-    _send_headers: Response -> IOFail Response;
+    _send_headers: Response s -> IOFail (Response s);
     _send_headers = |res| (
         if res.@headersSent {
             pure $ res
@@ -253,7 +256,7 @@ namespace Response {
 
     // `response.write_str(str)` sends headers with a status line if they have not already been sent.
     // Then it sends the specified string.
-    write_str: String -> Response -> IOFail Response;
+    write_str: String -> Response s -> IOFail (Response s);
     write_str = |str, res| (
         let res = *res._send_headers;
         let _ = *write_string(res.@connection, str);
@@ -262,7 +265,7 @@ namespace Response {
 
     // Sends headers with a status line if they have not already been sent.
     // Then flush the connection.
-    end: Response -> IOFail Response;
+    end: Response s -> IOFail (Response s);
     end = |res| (
         let res = *res._send_headers;
         let connection = *res.@connection.fflush;

@@ -36,48 +36,90 @@ match_namespace = do {
     pure $ chars._unsafe_to_string
 };
 
+matches: String -> Parser a -> Result ErrMsg a;
+matches = |str, parser| (
+    parser.run_parser_str(str).map(|(x,_)| x)
+);
+
+type State = unbox struct {
+    doc: String,    // document (function comment etc.)
+    type_name: String,  // name of type declaration
+    typedef: String     // body of type declaration
+};
+
+namespace State {
+    empty: State;
+    empty = State{
+        doc: "",
+        type_name: "",
+        typedef: ""
+    };
+
+    print_doc: State -> IO State;
+    print_doc = |state| (
+        let _ = *if state.@doc == "" {
+            print("\n") 
+        } else {
+            print("\n" + state.@doc + "\n")
+        };
+        pure $ state.set_doc("")
+    );
+
+    print_typedef: State -> IO State;
+    print_typedef = |state| (
+        let _ = *println("```");
+        let _ = *print(state.@typedef);
+        let _ = *println("```");
+        pure $ state.set_typedef("")
+    );
+}
 
 process_file: String -> String -> IO ();
 process_file = |input_filepath, contents| (
     let input_filename = input_filepath.split_ex("/").to_array.get_last.as_some;
     let _ = *println("## " + input_filename);
     let _ = *println("");
-    let doc = "";
+    let state = State::empty;
     contents.split("\n").loop_iter_m(
-        doc,
-        |doc, line|
-        let line = line.strip_spaces;
+        state,
+        |state, orig_line|
+        let line = orig_line.strip_spaces;
         let is_comment = line.get_sub(0, 2) == "//";
         if (is_comment) {
             let after_comment = line.get_sub(2, line.get_size).strip_spaces + "\n";
-            let doc = doc + after_comment;
-            continue_m $ doc
+            let state = state.mod_doc(|doc| doc + after_comment);
+            continue_m $ state
         };
-        let is_global: Bool = match_global.run_parser_str(line).is_ok;
+        let is_global: Bool = match_global.matches(line).is_ok;
         if is_global {
             let _ = *println("#### " + line);
-            let _ = *if doc == "" { print("\n") } else {
-                print("\n" + doc + "\n")
-            };
-            continue_m $ ""
+            let state = *state.print_doc;
+            continue_m $ state
         };
-        let type_name: Result ErrMsg String = match_type.run_parser_str(line).map(|(str,_)| str);
-        if type_name.is_ok {
-            let _ = *println("### type " + type_name.as_ok);
-            let _ = *if doc == "" { print("\n") } else {
-                print("\n" + doc + "\n")
+        let type_name: Result ErrMsg String = match_type.matches(line);
+        if type_name.is_ok || state.@typedef != "" {
+            let state = if type_name.is_ok { 
+                state.set_type_name(type_name.as_ok) 
+            } else { 
+                state 
             };
-            continue_m $ ""
+            let state = state.mod_typedef(|t| t + orig_line + "\n");
+            if state.@typedef.find(";", 0).is_none {
+                continue_m $ state
+            };
+            let _ = *println("### type " + state.@type_name);
+            let state = *state.print_doc;
+            let state = *state.print_typedef;
+            continue_m $ state
         };
-        let namespace_name: Result ErrMsg String = match_namespace.run_parser_str(line).map(|(str,_)| str);
+        let namespace_name: Result ErrMsg String = match_namespace.matches(line);
         if namespace_name.is_ok {
             let _ = *println("### namespace " + namespace_name.as_ok);
-            let _ = *if doc == "" { print("\n") } else {
-                print("\n" + doc + "\n")
-            };
-            continue_m $ ""
+            let state = *state.print_doc;
+            continue_m $ state
         };
-        continue_m $ ""
+        let state = state.set_doc("");
+        continue_m $ state
     ).map(|_| ())
 );
 

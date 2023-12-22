@@ -1,0 +1,122 @@
+module HttpServer;
+
+import Debug;
+//import AsyncTask;
+
+import Tcp;
+import IOEx;
+import URL;
+import Request;
+import Router;
+
+type RequestHandler = Request -> Response -> IOFail Response;
+
+type Worker = unbox struct {
+    app: App
+};
+
+namespace Worker {
+    make: App -> Worker;
+    make = |app| (
+        Worker {
+            app: app
+        }
+    );
+    handle: IOHandle -> String -> Worker -> IOFail ();
+    handle = |connection, remote_addr, worker| (
+        do {
+            let app = worker.@app;
+            eval debug_eprintln("parsing request");
+            let request = *Request::parse(connection, remote_addr);
+            eval debug_eprintln("request=" + request.to_string);
+            let response = Response::make(request);
+            eval debug_eprintln("finding handler");
+            let path = *request.@path.decodeURI.from_result;
+            let handler = app.@router.find(request.@method, path).map_or(
+                not_found_handler,
+                |handler| 
+                eval debug_eprintln("found handler");
+                handler
+            );
+            eval debug_eprintln("handling response");
+            let response = *handler(request, response);  
+            // TODO: Fail した場合、500 Internal Server Error にする？
+            // すでにヘッダを送信していた場合は？
+            // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
+            let _ = *response.end;
+            //let _ = *close_file(connection).lift;
+            eval debug_eprintln("worker finished");
+            pure $ ()        
+        }
+        ._finally(|_| close_file(connection))
+    );
+
+    _finally: (() -> IO a) -> IOFail a -> IOFail a;
+    _finally = |f, iof| (
+        let res = *iof.to_result.lift;
+        let _ = *f().lift;
+        if res.is_err { throw $ res.as_err };
+        pure $ res.as_ok
+    );
+
+    not_found_handler: Request -> Response -> IOFail Response;
+    not_found_handler = |req, res| (
+        res.status(404).write_str("Not Found")
+    );
+}
+
+type App = unbox struct {
+    router: Router RequestHandler,
+    backlog: I64
+};
+
+namespace App {
+    empty: App;
+    empty = (
+        App {
+            router: Router::empty,
+            backlog: 10
+        }
+    );
+
+    insert_handler: String -> String -> RequestHandler -> App -> App;
+    insert_handler = |method, path, handler, app| (
+        app.mod_router(|router|
+            router.insert(method, path, handler)
+        )
+    );
+
+    on: String -> String -> RequestHandler -> App -> App;
+    on = insert_handler;
+
+    listen: String -> App -> IOFail ();
+    listen = |server_host_port, app| (
+        let socket = *(listen_tcp_server(server_host_port, app.@backlog));
+        let _ = *(lift $ eprintln ("Listening on " + server_host_port));
+        let tasks: Array I64 = Array::empty(0);
+        loop_m(
+            tasks, |tasks|
+            let _ = *eprintln ("Accepting connections").lift;
+            let res: (I32, SocketAddress) = *socket.accept_fd;
+            let (accepted_fd, addr) = res;
+            let connection = *fdopen(accepted_fd, "w+");
+            let _ = *(lift $ eprintln ("Accepted new connection: addr=" + addr.to_string));
+            let worker: IOFail () = Worker::make(app).handle(connection, addr.to_string);
+            if true {
+                let _ = *worker;
+                continue_m $ tasks
+            } else {
+                /*
+                let _ = *(lift $ eprintln ("creating task"));
+                let task = AsyncIOTask::make(
+                    worker
+                    .try(|err| eprintln("error: " + err))
+                );
+                let _ = *(lift $ eprintln ("creating task done"));
+                let tasks = tasks.push_back(task);
+                */
+                continue_m $ tasks
+            }
+        )
+    );
+}

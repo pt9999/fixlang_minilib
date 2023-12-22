@@ -10,6 +10,7 @@ import IOEx;
 //------------------------------------------------------------------------------------
 
 // A type that represents a header. The header is a tuple of field name and field value.
+// Note that the field name is case-insensitive (RFC9112).
 type Header = (String, String);
 
 // A collection of headers.
@@ -31,9 +32,11 @@ namespace Headers {
     empty = Headers { iter: Iterator::empty };
 
     // `headers.set(name, value)` sets the value of the field named `name` to `value`.
+    // The field name is converted to lowercase.
     // If a field with the same name already exists, it will be removed first.
     set: String -> String -> Headers -> Headers;
     set = |name, value, headers| (
+        let name = name.to_lower;
         headers.mod_iter(|iter|
             iter.filter(|(n,v)| n != name)
             .push_front((name, value))
@@ -41,17 +44,21 @@ namespace Headers {
     );
 
     // `headers.append(name, value)` appends a new field `(name, value)` to the current headers collection.
+    // The field name is converted to lowercase.
     // It will not be removed even if a field with the same name already exists, 
     append: String -> String -> Headers -> Headers;
     append = |name, value, headers| (
+        let name = name.to_lower;
         headers.mod_iter(|iter|
             iter.push_front((name, value))
         )
     );
 
     // `headers.find(name)` finds the field with name `name`.
+    // The field name is converted to lowercase.
     find: String -> Headers -> Option String;
     find = |name, headers| (
+        let name = name.to_lower;
         headers.@iter.loop_iter(
             none(), |_, (n, v)|
             if name == n {
@@ -120,8 +127,10 @@ namespace Request {
         let (path, query) = request_target.split_first("?");
         let query = *_parse_query_string(query);
 
-        // TODO read body
-        
+        // read body
+        let content_length: String = headers.find("Content-Length").map_or("0", |s|s);
+        let content_length: I64 = *from_string(content_length).from_result;
+        let body = *read_n_bytes(connection, content_length.as_some);
 
         let request = Request {
             connection: connection,
@@ -132,7 +141,7 @@ namespace Request {
             headers: headers,
             path: path,
             query: query,
-            body: Array::empty(0)
+            body: body
         };
         pure $ request
     );

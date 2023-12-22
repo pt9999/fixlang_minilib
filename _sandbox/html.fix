@@ -1,0 +1,163 @@
+module Main;
+
+import StringEx;
+
+type HTMLNode = box union {
+    element: HTMLElement,
+    text_node: String
+};
+
+type HTMLElement = unbox struct {
+    tag: String,
+    attrs: Iterator HTMLAttribute,
+    children: Array HTMLNode
+};
+
+type HTMLAttribute = (String, String);
+
+namespace HTMLElement {
+    make: String -> HTMLElement;
+    make = |tag| (
+        HTMLElement {
+            tag: tag,
+            attrs: Iterator::empty,
+            children: Array::empty(0)
+        }
+    );
+
+    attr: String -> String -> HTMLElement -> HTMLElement;
+    attr = |name, value, el| (
+        el.mod_attrs(|attrs|
+            attrs.filter(|(n,v)| n != name)
+                 .push_front((name,value))
+        )
+    );
+
+    add: HTMLElement -> HTMLElement -> HTMLElement;
+    add = |child, el| (
+        el.mod_children(push_back(element(child)))
+    );
+
+    text: String -> HTMLElement -> HTMLElement;
+    text = |txt, el| (
+        el.mod_children(push_back(text_node(txt)))
+    );
+        
+    to_html: HTMLElement -> String;
+    to_html = |el| (
+        el._output_html(Array::empty(100)).to_iter.concat_iter
+    );
+
+    _output_html: Array String -> HTMLElement -> Array String;
+    _output_html = |output, el| (
+        let output = output.push_back("<" + el.@tag);
+        let output = el.@attrs.reverse._output_html(output);
+        let output = output.push_back(">");
+        let output = if el.@children.get_size > 0 && el.@children.@(0).is_element {
+            output.push_back("\n")
+        } else { 
+            output
+        };
+        let output = el.@children.to_iter.fold(
+            output, |output, node|
+            if node.is_text_node {
+                output.push_back(escape_html(node.as_text_node))
+            };
+            node.as_element._output_html(output)
+        );
+        let output = output.push_back("</" + el.@tag + ">");
+        let output = output.push_back("\n");
+        output
+    );
+}
+
+namespace HTMLAttribute {
+    _output_html: Array String -> Iterator HTMLAttribute -> Array String;
+    _output_html = |output, attrs| (
+        attrs.fold(
+            output, |output, (name, value)|
+            output
+            .push_back(" ")
+            .push_back(name)
+            .push_back("=\"")
+            .push_back(escape_html(value))
+            .push_back("\"")
+        )
+    );
+}
+
+type HTMLDocument = unbox struct {
+    html: HTMLElement
+};
+
+namespace HTMLDocument {
+    empty: HTMLDocument;
+    empty = (
+        HTMLDocument {
+            html: HTMLElement::make("html")
+        }
+    );    
+
+    add: HTMLElement -> HTMLDocument -> HTMLDocument;
+    add = |child, doc| (
+        doc.mod_html(add(child))
+    );
+
+    to_html: HTMLDocument -> String;
+    to_html = |doc| (
+        "<!DOCTYPE html>\n" +
+        doc.@html.to_html
+    );   
+}
+
+escape_html: String -> String;
+escape_html = |str| (
+    str.replace_all("&", "&amp;")
+        .replace_all("<", "&lt;")
+        .replace_all(">", "&gt;")
+        .replace_all("\"", "&quot;")
+        .replace_all("'", "&#039;")
+);
+
+html: HTMLDocument;
+html = HTMLDocument::empty;
+
+head: HTMLElement;
+head = HTMLElement::make("head");
+
+meta: HTMLElement;
+meta = HTMLElement::make("meta");
+
+title: HTMLElement;
+title = HTMLElement::make("title");
+
+body: HTMLElement;
+body = HTMLElement::make("body");
+
+h1: HTMLElement;
+h1 = HTMLElement::make("h1");
+
+div: HTMLElement;
+div = HTMLElement::make("div");
+
+span: HTMLElement;
+span = HTMLElement::make("span");
+
+p: HTMLElement;
+p = HTMLElement::make("p");
+
+//-------------------------------
+
+main: IO ();
+main = (
+    let root = html
+        .add(head
+            .add(meta.attr("charset", "utf-8"))
+            .add(title.text("Hello world"))
+        )
+        .add(body
+            .add(h1.text("Hello world").attr("style", "background-color:#ffc;"))
+            .add(p.text("This is a text.").attr("style", "border: 1px solid black"))
+        );
+    println(root.to_html)
+);

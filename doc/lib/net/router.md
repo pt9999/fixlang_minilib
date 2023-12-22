@@ -1,0 +1,54 @@
+## router.fix
+
+### namespace RouterEntry
+
+#### empty: RouterEntry h;
+
+An empty entry.
+
+#### is_empty: RouterEntry h -> Bool;
+
+Returns true iff it is an empty entry.
+
+#### update: String -> h -> RouterEntry h -> RouterEntry h;
+
+`router_entry.update(method, handler)` sets the handler of the method `method` to `handler`.
+
+#### find: String -> RouterEntry h -> Option h;
+
+`router_entry.find(method)` finds the handler of the method.
+
+#### show: [h: ToString] RouterEntry h -> IO ();
+
+### namespace RouterNode
+
+#### empty: RouterNode h;
+
+An empty router node.
+
+#### create: Iterator String -> (RouterEntry h -> RouterEntry h) -> RouterNode h;
+
+`RouterNode::create(path, entry_updater)` creates a node.
+
+#### update: Iterator String -> (RouterEntry h -> RouterEntry h) -> RouterNode h -> RouterNode h;
+
+`current_node.update(path, entry_updater)` updates the entry of a target node that is reached via `path` from `current_node`.
+`path` is a path from `current_node` to the target node. If `path` is an empty iterator, `current_node` becomes the target node.
+`entry_updater` is a function that updates the `RouterEntry` of the target node.
+
+#### find: Iterator String -> RouterNode h -> Option (RouterEntry h);
+
+現在のノードからpathを辿った先のノードのエントリを取得する。
+
+#### show: [h: ToString] String -> RouterNode h -> IO ();
+
+### namespace Router
+
+#### empty: Router h;
+
+#### insert: String -> String -> h -> Router h -> Router h;
+
+#### find: String -> String -> Router h -> Option h;
+
+#### main: IO ();
+

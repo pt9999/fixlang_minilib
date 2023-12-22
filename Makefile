@@ -48,6 +48,11 @@ test_request:
 test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
+document: examples/fixdoc.out
+	find lib -name "*.fix" -print | while read input; do \
+		mkdir -pv $$(dirname doc/$$input) && \
+		examples/fixdoc.out $$input -o doc/$${input%%.fix}.md && \
+		echo $$input; done
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out examples/sample_http_server.out
 

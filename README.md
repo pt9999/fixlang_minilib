@@ -2,7 +2,7 @@
 
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
-This library is still under construction.
+This library is still work in progress.
 
 ## Tested Platform
 - x86_64-linux-gnu
@@ -37,6 +37,7 @@ To run the test code, type `make test`. It has been tested in the following envi
 
 ```
 /_sandbox   ... Experimental source code (Not included in the library itself)
+/doc        ... Library Reference documentation
 /examples   ... Example code using this library
 /lib        ... Library code
 /tests      ... Test code
@@ -44,6 +45,4 @@ To run the test code, type `make test`. It has been tested in the following envi
 
 ## Library Reference
 
-See [Reference.md](./Reference.md).
-
-For libraries under `lib/net/`, see [ReferenceNet.md](./ReferenceNet.md).
+See `/doc` directory. (work in progress)

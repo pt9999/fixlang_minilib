@@ -15,7 +15,7 @@ LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
 
-test: test_string_ex test_unicode test_clap test_ordered_map test_parser test_json \
+test: test_string_ex test_unicode test_clap test_ordered_map test_deque test_parser test_json \
 	test_url test_io_ex test_request test_router
 
 test_string_ex:
@@ -29,6 +29,9 @@ test_clap:
 
 test_ordered_map:
 	fix run -f tests/ordered_map_test.fix $(LIB_ORDERED_MAP) $(LIB_UNIT_TEST)
+
+test_deque:
+	fix run -f tests/collection/deque_test.fix lib/collection/deque.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_parser:
 	fix run -f tests/simple_parser_test.fix $(LIB_PARSER) $(LIB_UNIT_TEST)

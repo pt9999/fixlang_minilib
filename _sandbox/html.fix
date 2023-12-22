@@ -2,20 +2,80 @@ module Main;
 
 import StringEx;
 
+namespace HTML {
+
+    html: HTMLDocument;
+    html = HTMLDocument::empty;
+
+    head: HTMLElement;
+    head = HTMLElement::make("head");
+
+    meta: HTMLElement;
+    meta = HTMLElement::make("meta");
+
+    title: HTMLElement;
+    title = HTMLElement::make("title");
+
+    body: HTMLElement;
+    body = HTMLElement::make("body");
+
+    h1: HTMLElement;
+    h1 = HTMLElement::make("h1");
+
+    div: HTMLElement;
+    div = HTMLElement::make("div");
+
+    span: HTMLElement;
+    span = HTMLElement::make("span");
+
+    p: HTMLElement;
+    p = HTMLElement::make("p");
+}
+
+// A type that represents an HTML document.
+type HTMLDocument = unbox struct {
+    html: HTMLElement           // root element, ie. `<html>`
+};
+
+namespace HTMLDocument {
+    // An empty HTML document.
+    empty: HTMLDocument;
+    empty = (
+        HTMLDocument {
+            html: HTMLElement::make("html")
+        }
+    );    
+
+    // Adds a child element to `<html>` element.
+    add: HTMLElement -> HTMLDocument -> HTMLDocument;
+    add = |child, doc| (
+        doc.mod_html(add(child))
+    );
+
+    // Converts the HTML document to HTML string.
+    to_html: HTMLDocument -> String;
+    to_html = |doc| (
+        "<!DOCTYPE html>\n" +
+        doc.@html.to_html
+    );   
+}
+
+// A type that represents an HTML node.
 type HTMLNode = box union {
-    element: HTMLElement,
-    text_node: String
+    element: HTMLElement,           // HTML element
+    text_node: String               // text node
 };
 
+// A type that represents an HTML element.
 type HTMLElement = unbox struct {
-    tag: String,
-    attrs: Iterator HTMLAttribute,
-    children: Array HTMLNode
+    tag: String,                    // tag name
+    attrs: Iterator HTMLAttribute,  // attributes (reversed iterator)
+    children: Array HTMLNode        // child nodes
 };
-
-type HTMLAttribute = (String, String);
 
 namespace HTMLElement {
+
+    // `HTMLElement::make(tag)` creates an empty element with specified tag name.
     make: String -> HTMLElement;
     make = |tag| (
         HTMLElement {
@@ -25,6 +85,9 @@ namespace HTMLElement {
         }
     );
 
+    // `el.attr(name,value)` adds an attribute to `el`.
+    // If an attribute of same name exists, it will be removed first.
+    // NOTE: validity of attribute names are not checked.
     attr: String -> String -> HTMLElement -> HTMLElement;
     attr = |name, value, el| (
         el.mod_attrs(|attrs|
@@ -33,21 +96,25 @@ namespace HTMLElement {
         )
     );
 
+    // `el.add(child)` adds a child element to `el`.
     add: HTMLElement -> HTMLElement -> HTMLElement;
     add = |child, el| (
         el.mod_children(push_back(element(child)))
     );
 
+    // `el.text(txt)` adds a text node to `el`.
     text: String -> HTMLElement -> HTMLElement;
     text = |txt, el| (
         el.mod_children(push_back(text_node(txt)))
     );
         
+    // `el.to_html` converts the element to HTML string.
     to_html: HTMLElement -> String;
     to_html = |el| (
         el._output_html(Array::empty(100)).to_iter.concat_iter
     );
 
+    // `el._output_html` output the element as HTML string.
     _output_html: Array String -> HTMLElement -> Array String;
     _output_html = |output, el| (
         let output = output.push_back("<" + el.@tag);
@@ -71,14 +138,18 @@ namespace HTMLElement {
     );
 }
 
+// A type that represents name and value of an attribute.
+type HTMLAttribute = (String, String);
+
 namespace HTMLAttribute {
+    // `attrs._output_html` output the attributes as HTML string.
     _output_html: Array String -> Iterator HTMLAttribute -> Array String;
     _output_html = |output, attrs| (
         attrs.fold(
             output, |output, (name, value)|
             output
             .push_back(" ")
-            .push_back(name)
+            .push_back(escape_html(name))
             .push_back("=\"")
             .push_back(escape_html(value))
             .push_back("\"")
@@ -86,65 +157,19 @@ namespace HTMLAttribute {
     );
 }
 
-type HTMLDocument = unbox struct {
-    html: HTMLElement
-};
-
-namespace HTMLDocument {
-    empty: HTMLDocument;
-    empty = (
-        HTMLDocument {
-            html: HTMLElement::make("html")
-        }
-    );    
-
-    add: HTMLElement -> HTMLDocument -> HTMLDocument;
-    add = |child, doc| (
-        doc.mod_html(add(child))
+namespace HTMLHelpers {
+    // Escapes HTML special characters.
+    // `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
+    escape_html: String -> String;
+    escape_html = |str| (
+        str.replace_all("&", "&amp;")
+            .replace_all("<", "&lt;")
+            .replace_all(">", "&gt;")
+            .replace_all("\"", "&quot;")
+            .replace_all("'", "&#039;")
     );
-
-    to_html: HTMLDocument -> String;
-    to_html = |doc| (
-        "<!DOCTYPE html>\n" +
-        doc.@html.to_html
-    );   
 }
 
-escape_html: String -> String;
-escape_html = |str| (
-    str.replace_all("&", "&amp;")
-        .replace_all("<", "&lt;")
-        .replace_all(">", "&gt;")
-        .replace_all("\"", "&quot;")
-        .replace_all("'", "&#039;")
-);
-
-html: HTMLDocument;
-html = HTMLDocument::empty;
-
-head: HTMLElement;
-head = HTMLElement::make("head");
-
-meta: HTMLElement;
-meta = HTMLElement::make("meta");
-
-title: HTMLElement;
-title = HTMLElement::make("title");
-
-body: HTMLElement;
-body = HTMLElement::make("body");
-
-h1: HTMLElement;
-h1 = HTMLElement::make("h1");
-
-div: HTMLElement;
-div = HTMLElement::make("div");
-
-span: HTMLElement;
-span = HTMLElement::make("span");
-
-p: HTMLElement;
-p = HTMLElement::make("p");
 
 //-------------------------------
 
@@ -158,6 +183,7 @@ main = (
         .add(body
             .add(h1.text("Hello world").attr("style", "background-color:#ffc;"))
             .add(p.text("This is a text.").attr("style", "border: 1px solid black"))
+            .add(p.text("escape: <&>\"'").attr("data-<&>\"'", "<&>\"'"))
         );
     println(root.to_html)
 );

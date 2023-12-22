@@ -7,10 +7,10 @@ LIB_UNIT_TEST := lib/unit_test.fix
 LIB_STRING_EX := lib/string_ex.fix
 LIB_UNICODE := lib/unicode.fix $(LIB_STRING_EX)
 LIB_CLAP := lib/clap.fix $(LIB_STRING_EX)
-LIB_ORDERED_MAP := lib/ordered_map.fix $(LIB_STRING_EX)
+LIB_ORDERED_MAP := lib/collection/ordered_map.fix $(LIB_STRING_EX)
 LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
 LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix \
-			lib/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
+			lib/collection/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
@@ -28,7 +28,7 @@ test_clap:
 	fix run -f tests/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)
 
 test_ordered_map:
-	fix run -f tests/ordered_map_test.fix $(LIB_ORDERED_MAP) $(LIB_UNIT_TEST)
+	fix run -f tests/collection/ordered_map_test.fix $(LIB_ORDERED_MAP) $(LIB_UNIT_TEST)
 
 test_deque:
 	fix run -f tests/collection/deque_test.fix lib/collection/deque.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)

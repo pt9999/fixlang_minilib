@@ -11,7 +11,7 @@ LIB_ORDERED_MAP := lib/ordered_map.fix $(LIB_STRING_EX)
 LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
 LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix \
 			lib/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
-LIB_TCP := lib/tcp.fix
+LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
 
@@ -49,7 +49,7 @@ test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 
-examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out
+examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out examples/sample_http_server.out
 
 examples/json_cat.out: examples/json_cat.fix $(LIB_JSON) 
 	fix build -f $^ -o $@

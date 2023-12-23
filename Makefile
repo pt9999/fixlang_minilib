@@ -52,7 +52,7 @@ test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_html:
-	fix run -f tests/net/html_test.fix lib/net/html.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/net/html_test.fix lib/net/html.fix lib/unicode.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 document: examples/fixdoc.out
 	find lib -name "*.fix" -print | while read input; do \
@@ -74,8 +74,8 @@ examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix
 	fix build -f $^ -o $@
 
-examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix $(LIB_HTTP_SERVER)
+examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
 	fix build -f $^ -o $@
 
-http_server: examples/sample_http_server.fix lib/net/html.fix $(LIB_HTTP_SERVER)
+http_server: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
 	fix run -f $^

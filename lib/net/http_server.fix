@@ -23,7 +23,7 @@ namespace Worker {
         }
     );
 
-    handle: IOHandle -> String -> Worker s -> IOFail s;
+    handle: IOHandle -> String -> Worker s -> IO s;
     handle = |connection, remote_addr, worker| (
         do {
             let app = worker.@app;
@@ -51,6 +51,10 @@ namespace Worker {
             pure $ response.@state
         }
         ._finally(|_| close_file(connection))
+        .try(|err|
+            let _ = eprintln("ERROR: " + err);
+            pure $ worker.@app.@state        // app state is not changed when an error occured
+        )
     );
 
     _finally: (() -> IO ()) -> IOFail a -> IOFail a;
@@ -122,10 +126,11 @@ namespace App {
             let (accepted_fd, addr) = res;
             let connection = *fdopen(accepted_fd, "w+");
             let _ = *eprintln ("Accepted new connection: addr=" + addr.to_string).lift;
-            let worker = Worker::make(app).handle(connection, addr.to_string);
-            let worker_state = *worker;
 
             // currently only single thread is supported
+            let worker = Worker::make(app).handle(connection, addr.to_string);
+            let worker_state = *worker.lift;
+
             let state = (app.@merge_state) (app.@state, worker_state);
             let app = app.set_state(state);
             continue_m $ app

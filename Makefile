@@ -74,8 +74,8 @@ examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix
 	fix build -f $^ -o $@
 
-examples/sample_http_server.out: examples/sample_http_server.fix $(LIB_HTTP_SERVER)
+examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix $(LIB_HTTP_SERVER)
 	fix build -f $^ -o $@
 
-http_server: examples/sample_http_server.fix $(LIB_HTTP_SERVER)
+http_server: examples/sample_http_server.fix lib/net/html.fix $(LIB_HTTP_SERVER)
 	fix run -f $^

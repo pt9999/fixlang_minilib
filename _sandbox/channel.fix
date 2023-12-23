@@ -1,43 +1,46 @@
 module Main;
 
 import AsyncTask;
+import Random;
 
 import StringEx;
 import IOEx;
 
+impl String: FromString {
+    from_string = |s| ok $ s;
+}
 
-Trait MutState = ToString + FromString;
+trait MutState = ToString + FromString;
 
-run_mut_state_manager: [s: MutState] s -> I32 -> IOFail s;
-run_mut_state_manager = |state, read_fd| (
-    let read_fh = *fdopen(read_fd, "r");
+run_state_manager_task: [s: MutState] s -> IOHandle -> IO ();
+run_state_manager_task = |state, req_read_fh| (
     loop_m(
         state, |state|
-        let line = *read_line(read_fh);
+        let line = *read_line(req_read_fh);
         let line = line.strip_spaces;  
         if line == "shutdown" || line == "" {
-            break_m $ state
+            let _ = *println("manager: complete").lift;
+            break_m $ ()
         };
-        if line.substr(0, 4) == "get " {
-            continue_m $ *_handle_get(state, line);
-        };
-        if line.substr(0, 4) == "set " {
-            continue_m $ *_handle_set(state, line);
-        };
-        conitnue_m $ state
+        let state = *_handle_request(state, _handler, line);
+        continue_m $ state
     )
-    .finally(|_| close_file(read_fh))    
+    .finally(|_| close_file(req_read_fh))
+    .try(|err| eprintln(err))
 );
 
-_handle_get: [s: MutState] s -> line -> IOFail s;
-_handle_get = |state, line| (
+_handle_request: [s: MutState] s -> (String -> (String, s) -> IOFail (String, s)) -> String -> IOFail s;
+_handle_request = |state, handler, line| (
     let fields = line.split_ex(" ").to_array;
+    let cmd: String = fields.@(0);
     let read_fd: I32 = *from_string(fields.@(1)).from_result; 
     let write_fd: I32 = *from_string(fields.@(2)).from_result; 
     let read_fh = *fdopen(read_fd, "r");
     let write_fh = *fdopen(write_fd, "w");
     do {
-        let _ = *write_string(write_fh, state.to_string);
+        let input = *read_string(read_fh);
+        let (output, state) = *handler(cmd, (input, state));
+        let _ = *write_string(write_fh, output);
         pure $ state
     }
     .finally(|_|
@@ -46,25 +49,20 @@ _handle_get = |state, line| (
     )
 );
 
-_handle_set: [s: MutState] s -> line -> IOFail s;
-_handle_set = |state, line| (
-    let fields = line.split_ex(" ").to_array;
-    let read_fd: I32 = *from_string(fields.@(1)).from_result; 
-    let write_fd: I32 = *from_string(fields.@(2)).from_result; 
-    let read_fh = *fdopen(read_fd, "r");
-    let write_fh = *fdopen(write_fd, "w");
-    do {
-        let str = *read_string(read_fd);
-        let state = *from_string(str).from_result; 
-        pure $ state
-    }
-    .finally(|_|
-        let _ = *close_file(write_fh);
-        close_file(read_fh)
-    )
+_handler: [s: MutState] String -> (String, s) -> IOFail (String, s);
+_handler = |cmd, (input, state)| (
+    if cmd == "set" {
+        let state = *from_string(input).from_result;
+        pure $ ("", state)
+    };
+    if cmd == "get" {
+        let output = state.to_string;
+        pure $ (output, state)
+    };
+    throw $ "unknown command: " + cmd
 );
 
-finally: (() -> IO a) -> IOFail a -> IOFail a;
+finally: (() -> IO ()) -> IOFail a -> IOFail a;
 finally = |f, iof| (
     let res = *iof.to_result.lift;
     let _ = *f().lift;
@@ -77,7 +75,71 @@ catch_err = |iof| (
     iof.map(|_| ()).try(|err| eprintln(err))
 );
 
-do_main:r  IOFail ();
-do_main = (
+_request: String -> String -> IOHandle -> IOFail String;
+_request = |cmd, input, req_write_fh| (
+    let (read_fd_peer, write_fd) = *pipe;
+    let (read_fd, write_fd_peer) = *pipe;
+    let read_fh = *fdopen(read_fd, "r");
+    let write_fh = *fdopen(write_fd, "w");
+    do {
+        let line = cmd + " " + read_fd_peer.to_string + " " + write_fd_peer.to_string + "\n";
+        let _ = *write_string(req_write_fh, line);
+        let _ = *fflush(req_write_fh);
+        let _ = *write_string(write_fh, input);
+        let _ = *fflush(write_fh);
+        let _ = *close_file(write_fh).lift;
+        let output = *read_string(read_fh);
+        pure $ output
+    }
+    .finally(|_|
+        let _ = *close_file(write_fh);
+        close_file(read_fh)
+    )
 );
 
+run_client_task: String -> Random -> IOHandle -> IO ();
+run_client_task = |name, random, req_write_fh| (
+    loop_m (
+        (random, 0), |(random, i)|
+        if i >= 10 {
+            let _ = *println(name + ": complete").lift;
+            break_m $ ()
+        };
+        let output: String = *_request("get", "", req_write_fh);
+        let _ = *println(name + ":" + i.to_string + ": got " + output).lift;
+        let (r, random) = random.generate_I64_nonneg;
+        let input = output + r.to_string + " ";
+        let _ = *println(name + ":" + i.to_string + ": send " + input).lift;
+        let output: String = *_request("set", input, req_write_fh);
+        let _ = *usleep((r % 100000).to_U32);
+        continue_m $ (random, i + 1)
+    )
+    .catch_err
+);
+
+do_main:  IOFail ();
+do_main = (
+    let (req_read_fh, req_write_fh) = *open_pipe;
+    let state = "";
+    let state_manager_task = AsyncIOTask::make(
+        run_state_manager_task(state, req_read_fh));
+
+    let client1_task = AsyncIOTask::make(
+        run_client_task("client1", Random::init_by_seed(1_U64), req_write_fh)
+    );
+    let client2_task = AsyncIOTask::make(
+        run_client_task("client2", Random::init_by_seed(1_U64), req_write_fh)
+    );
+    let _ = *client1_task.get.lift;
+    let _ = *client2_task.get.lift;
+    let _ = *close_file(req_write_fh).lift;
+    let _ = *close_file(req_read_fh).lift;
+    let _ = *state_manager_task.get.lift;
+    let _ = *println("completed").lift;
+    pure()    
+);
+
+main: IO ();
+main = (
+    do_main.catch_err    
+);

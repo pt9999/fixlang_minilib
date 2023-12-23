@@ -10,7 +10,7 @@ impl String: FromString {
     from_string = |s| ok $ s;
 }
 
-trait MutState = ToString + FromString;
+trait MutState = ToString + FromString + Add;
 
 run_state_manager_task: [s: MutState] s -> IOHandle -> IO ();
 run_state_manager_task = |state, req_read_fh| (
@@ -53,6 +53,11 @@ _handler: [s: MutState] String -> (String, s) -> IOFail (String, s);
 _handler = |cmd, (input, state)| (
     if cmd == "set" {
         let state = *from_string(input).from_result;
+        pure $ ("", state)
+    };
+    if cmd == "add" {
+        let input = *from_string(input).from_result;
+        let state = state + input;
         pure $ ("", state)
     };
     if cmd == "get" {
@@ -109,9 +114,9 @@ run_client_task = |name, random, req_write_fh| (
         let output: String = *_request("get", "", req_write_fh);
         let _ = *println(name + ":" + i.to_string + ": got " + output).lift;
         let (r, random) = random.generate_I64_nonneg;
-        let input = output + r.to_string + " ";
+        let input = name + ":" + i.to_string + " ";
         let _ = *println(name + ":" + i.to_string + ": send " + input).lift;
-        let output: String = *_request("set", input, req_write_fh);
+        let output: String = *_request("add", input, req_write_fh);
         let _ = *usleep((r % 100000).to_U32);
         continue_m $ (random, i + 1)
     )

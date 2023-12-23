@@ -1,0 +1,83 @@
+module Main;
+
+import AsyncTask;
+
+import StringEx;
+import IOEx;
+
+
+Trait MutState = ToString + FromString;
+
+run_mut_state_manager: [s: MutState] s -> I32 -> IOFail s;
+run_mut_state_manager = |state, read_fd| (
+    let read_fh = *fdopen(read_fd, "r");
+    loop_m(
+        state, |state|
+        let line = *read_line(read_fh);
+        let line = line.strip_spaces;  
+        if line == "shutdown" || line == "" {
+            break_m $ state
+        };
+        if line.substr(0, 4) == "get " {
+            continue_m $ *_handle_get(state, line);
+        };
+        if line.substr(0, 4) == "set " {
+            continue_m $ *_handle_set(state, line);
+        };
+        conitnue_m $ state
+    )
+    .finally(|_| close_file(read_fh))    
+);
+
+_handle_get: [s: MutState] s -> line -> IOFail s;
+_handle_get = |state, line| (
+    let fields = line.split_ex(" ").to_array;
+    let read_fd: I32 = *from_string(fields.@(1)).from_result; 
+    let write_fd: I32 = *from_string(fields.@(2)).from_result; 
+    let read_fh = *fdopen(read_fd, "r");
+    let write_fh = *fdopen(write_fd, "w");
+    do {
+        let _ = *write_string(write_fh, state.to_string);
+        pure $ state
+    }
+    .finally(|_|
+        let _ = *close_file(write_fh);
+        close_file(read_fh)
+    )
+);
+
+_handle_set: [s: MutState] s -> line -> IOFail s;
+_handle_set = |state, line| (
+    let fields = line.split_ex(" ").to_array;
+    let read_fd: I32 = *from_string(fields.@(1)).from_result; 
+    let write_fd: I32 = *from_string(fields.@(2)).from_result; 
+    let read_fh = *fdopen(read_fd, "r");
+    let write_fh = *fdopen(write_fd, "w");
+    do {
+        let str = *read_string(read_fd);
+        let state = *from_string(str).from_result; 
+        pure $ state
+    }
+    .finally(|_|
+        let _ = *close_file(write_fh);
+        close_file(read_fh)
+    )
+);
+
+finally: (() -> IO a) -> IOFail a -> IOFail a;
+finally = |f, iof| (
+    let res = *iof.to_result.lift;
+    let _ = *f().lift;
+    if res.is_err { throw $ res.as_err };
+    pure $ res.as_ok
+);
+
+catch_err: IOFail a -> IO ();
+catch_err = |iof| (
+    iof.map(|_| ()).try(|err| eprintln(err))
+);
+
+do_main:r  IOFail ();
+do_main = (
+);
+

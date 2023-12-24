@@ -1,6 +1,6 @@
-## router.fix
+# router.fix
 
-This is an implementation of an HTTP request router.
+## module Router
 
 ### type RouterEntry
 

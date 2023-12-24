@@ -1,4 +1,6 @@
-## ordered_map.fix
+# ordered_map.fix
+
+## module OrderedMap
 
 Ordered map.
 This is similar to HashMap except it preserves the order of entries.

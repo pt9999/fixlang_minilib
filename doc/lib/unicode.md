@@ -1,6 +1,6 @@
-## unicode.fix
+# unicode.fix
 
-Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
+## module Unicode
 
 #### utf8_to_utf32: Array U8 -> Array U32 -> Array U32;
 

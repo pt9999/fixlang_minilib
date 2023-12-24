@@ -1,7 +1,6 @@
-## tcp.fix
+# tcp.fix
 
-Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
-WARNING: IPv6 is not supported yet.
+## module Tcp
 
 #### get_sub_ex: I64 -> I64 -> Array a -> Array a;
 

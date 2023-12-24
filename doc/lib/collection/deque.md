@@ -1,4 +1,6 @@
-## deque.fix
+# deque.fix
+
+## module Deque
 
 Double-ended queues
 

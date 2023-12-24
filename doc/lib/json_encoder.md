@@ -1,4 +1,6 @@
-## json_encoder.fix
+# json_encoder.fix
+
+## module JsonEncoder
 
 Encodes a JSON value to a string.
 

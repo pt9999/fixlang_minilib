@@ -1,4 +1,6 @@
-## io_ex.fix
+# io_ex.fix
+
+## module IOEx
 
 IO extensions
 

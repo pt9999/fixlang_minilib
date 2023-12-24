@@ -1,3 +1,4 @@
+// Fix document generator
 module Main;
 
 import Character;
@@ -6,6 +7,16 @@ import StringEx;
 import SimpleParser;
 import Clap;
 
+// Matches `/^module\s+(\w+)/`.
+match_module: Parser String;
+match_module = do {
+    let _ = *match_str("module");
+    let _ = *one_or_more(match_char_class(is_space));
+    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
+    pure $ chars._unsafe_to_string
+};
+
+// Matches `/^type\s+(\w+)/`.
 match_type: Parser String;
 match_type = do {
     let _ = *match_str("type");
@@ -14,6 +25,7 @@ match_type = do {
     pure $ chars._unsafe_to_string
 };
 
+// Matches `/^(impl [^{]+)/`.
 match_impl: Parser String;
 match_impl = do {
     let _ = *match_str("impl ");
@@ -21,10 +33,10 @@ match_impl = do {
     pure $ ("impl " + decl._unsafe_to_string).strip_spaces
 };
 
+// Matches `/^[a-z]\w*\s*:[^;]*;/`. Note that a line that begins with '_' does not match.
 match_global: Parser ();
 match_global = do {
     let _ = *match_char_class(is_lower);
-    let _ = *one_or_more(match_char_class(|c| c.is_lower || c == '_'));
     let _ = *zero_or_more(match_char_class(|c| c.is_alnum || c == '_'));
     let _ = *zero_or_more(match_char_class(is_space));
     let _ = *match_char(':');
@@ -33,6 +45,7 @@ match_global = do {
     pure()    
 };
 
+// Matches `/^namespace\s+(\w+)`.
 match_namespace: Parser String;
 match_namespace = do {
     let _ = *match_str("namespace");
@@ -41,41 +54,47 @@ match_namespace = do {
     pure $ chars._unsafe_to_string
 };
 
+// `parser.matches(str)` runs the parser and returns the parsed result.
 matches: String -> Parser a -> Result ErrMsg a;
 matches = |str, parser| (
     parser.run_parser_str(str).map(|(x,_)| x)
 );
 
+// The state of parsing FixLang source code.
 type State = unbox struct {
     output: IOHandle,   // output file handle
-    first_decl: Bool,   // first declaration has appered
+    //first_decl: Bool,   // first declaration has appered
     doc: String,        // document (function comment etc.)
     type_name: String,  // name of type declaration
-    typedef: String     // body of type declaration
+    type_decl: String    // body of type declaration
 };
 
 namespace State {
+    // Creates new state and sets the output stream.
     make: IOHandle -> State;
     make = |output| (
         State{
             output: output,
-            first_decl: false,
+            //first_decl: false,
             doc: "",
             type_name: "",
-            typedef: ""
+            type_decl: ""
         }
     );
 
+    // Prints a string to the output stream.
     print: String -> State -> IOFail ();
     print = |str, state| (
         write_string(state.@output, str)
     );
 
+    // Prints a string and a newline to the output stream.
     println: String -> State -> IOFail ();
     println = |str, state| (
         state.print(str + "\n")
     );
 
+    // Prints the doc comment, and clears the doc comment.
     print_doc: State -> IOFail State;
     print_doc = |state| (
         let _ = *if state.@doc == "" {
@@ -86,12 +105,13 @@ namespace State {
         pure $ state.set_doc("")
     );
 
-    print_typedef: State -> IOFail State;
-    print_typedef = |state| (
+    // Prints the declaration of the type.
+    print_type_declaration: State -> IOFail State;
+    print_type_declaration = |state| (
         let _ = *state.println("```");
-        let _ = *state.print(state.@typedef);
+        let _ = *state.print(state.@type_decl);
         let _ = *state.println("```");
-        pure $ state.set_typedef("")
+        pure $ state.set_type_decl("")
     );
 
     process_comment: String -> State -> IOFail State;
@@ -101,15 +121,22 @@ namespace State {
         pure $ state
     );
 
-    process_impl: String -> State -> IOFail State;
-    process_impl = |impl_, state| (
+    process_module_decl: String -> State -> IOFail State;
+    process_module_decl = |module_name, state| (
+        let _ = *state.println("## module " + module_name + "\n");
+        let state = *state.print_doc;
+        pure $ state
+    );
+
+    process_impl_decl: String -> State -> IOFail State;
+    process_impl_decl = |impl_, state| (
         let _ = *state.println("#### `" + impl_ + "`\n");
         let state = *state.print_doc;
         pure $ state
     );
 
-    process_global: String -> State -> IOFail State;
-    process_global = |line, state| (
+    process_global_decl: String -> State -> IOFail State;
+    process_global_decl = |line, state| (
         let _ = *state.println("#### " + line + "\n");
         let state = *state.print_doc;
         pure $ state
@@ -122,18 +149,18 @@ namespace State {
         } else { 
             state 
         };
-        let state = state.mod_typedef(|t| t + orig_line + "\n");
-        if state.@typedef.find(";", 0).is_none {
+        let state = state.mod_type_decl(|t| t + orig_line + "\n");
+        if state.@type_decl.find(";", 0).is_none {
             pure $ state
         };
         let _ = *state.println("### type " + state.@type_name + "\n");
         let state = *state.print_doc;
-        let state = *state.print_typedef;
+        let state = *state.print_type_declaration;
         pure $ state
     );
 
-    process_namespace: String -> String -> State -> IOFail State;
-    process_namespace = |line, namespace_name, state| (
+    process_namespace_decl: String -> String -> State -> IOFail State;
+    process_namespace_decl = |line, namespace_name, state| (
         let _ = *state.println("### namespace " + namespace_name + "\n");
         let state = *state.print_doc;
         pure $ state
@@ -141,6 +168,7 @@ namespace State {
 
     process_other: String -> State -> IOFail State;
     process_other = |line, state| (
+        /*
         if !state.@first_decl {
             if line == "" {
                 pure $ state
@@ -149,6 +177,7 @@ namespace State {
             let state = state.set_first_decl(true).set_doc("");
             pure $ state
         };
+        */
         let state = state.set_doc("");
         pure $ state
     );
@@ -160,21 +189,25 @@ namespace State {
         if (is_comment) {
             state.process_comment(line)
         };
-        let is_impl: Result ErrMsg String = match_impl.matches(line);
-        if is_impl.is_ok {
-            state.process_impl(is_impl.as_ok)
+        let module_decl = match_module.matches(line);
+        if module_decl.is_ok {
+            state.process_module_decl(module_decl.as_ok)
         };
-        let is_global: Result ErrMsg () = match_global.matches(line);
-        if is_global.is_ok {
-            state.process_global(line)
+        let impl_decl: Result ErrMsg String = match_impl.matches(line);
+        if impl_decl.is_ok {
+            state.process_impl_decl(impl_decl.as_ok)
+        };
+        let global_decl: Result ErrMsg () = match_global.matches(line);
+        if global_decl.is_ok {
+            state.process_global_decl(line)
         };
         let type_name: Result ErrMsg String = match_type.matches(line);
-        if type_name.is_ok || state.@typedef != "" {
+        if type_name.is_ok || state.@type_decl != "" {
             state.process_type_decl(orig_line, line, type_name)
         };
-        let namespace_name: Result ErrMsg String = match_namespace.matches(line);
-        if namespace_name.is_ok {
-            state.process_namespace(line, namespace_name.as_ok)
+        let namespace_decl: Result ErrMsg String = match_namespace.matches(line);
+        if namespace_decl.is_ok {
+            state.process_namespace_decl(line, namespace_decl.as_ok)
         };
         state.process_other(line)
     );
@@ -183,7 +216,7 @@ namespace State {
     process_file = |input_filepath, contents, output| (
         let input_filename = input_filepath.split_ex("/").to_array.get_last.as_some;
         let state = State::make(output);
-        let _ = *state.println("## " + input_filename);
+        let _ = *state.println("# " + input_filename);
         let _ = *state.println("");
         let state = *contents.split("\n").loop_iter_m(
             state,

@@ -1,4 +1,6 @@
-## html.fix
+# html.fix
+
+## module HTML
 
 ### namespace HTML
 
@@ -26,6 +28,26 @@ An empty `<script>` element.
 
 An empty `<body>` element.
 
+#### h1: HTMLElement;
+
+An empty `<h1>` element.
+
+#### h2: HTMLElement;
+
+An empty `<h2>` element.
+
+#### h3: HTMLElement;
+
+An empty `<h3>` element.
+
+#### h4: HTMLElement;
+
+An empty `<h4>` element.
+
+#### h5: HTMLElement;
+
+An empty `<h5>` element.
+
 #### div: HTMLElement;
 
 An empty `<div>` element.
@@ -37,6 +59,10 @@ to avoid ambiguity with Std::Div::div
 #### span: HTMLElement;
 
 An empty `<span>` element.
+
+#### p: HTMLElement;
+
+An empty `<p>` element.
 
 #### input: HTMLElement;
 

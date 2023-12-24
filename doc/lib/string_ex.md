@@ -1,4 +1,6 @@
-## string_ex.fix
+# string_ex.fix
+
+## module StringEx
 
 String extensions
 

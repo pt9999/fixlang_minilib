@@ -1,4 +1,6 @@
-## simple_parser.fix
+# simple_parser.fix
+
+## module SimpleParser
 
 A monadic text parser
 

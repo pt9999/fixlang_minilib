@@ -1,4 +1,6 @@
-## json_decoder.fix
+# json_decoder.fix
+
+## module JsonDecoder
 
 Decodes a JSON value from a string.
 

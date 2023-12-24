@@ -1,0 +1,254 @@
+module Main;
+
+import Character;
+import Debug;
+
+import SimpleParser;
+import StringEx;
+
+type CharClass = unbox struct {
+    f: U8 -> Bool
+};
+
+namespace CharClass {
+
+    empty: CharClass;
+    empty = CharClass { f: |c| false };
+
+    make: (U8 -> Bool) -> CharClass;
+    make = |f| CharClass { f: f };
+
+    contains: U8 -> CharClass -> Bool;
+    contains = |c, cls| (cls.@f)(c);
+
+    singleton: U8 -> CharClass;
+    singleton = |c1| CharClass { f: |c| c == c1 };
+
+    range: U8 -> U8 -> CharClass;
+    range = |start, end| CharClass { f: |c| start <= c && c <= end };
+
+    consists_of: String -> CharClass;
+    consists_of = |str| CharClass { f: |c| str.find_byte(c).is_some };
+
+    negate: CharClass -> CharClass;
+    negate = |cls| (
+        let f = cls.@f;
+        CharClass { f: |c| !f(c) }
+    );
+
+    union: CharClass -> CharClass -> CharClass;
+    union = |cls1, cls2| (
+        let f = cls1.@f;
+        let g = cls2.@f;
+        CharClass { f: |c| f(c) || g(c) }
+    );
+
+    add: U8 -> CharClass -> CharClass;
+    add = |c, cls| cls.union(singleton(c));
+
+    to_table: CharClass -> CharClass;
+    to_table = |cls| (
+        let table = Iterator::count_up(0).take(256).fold(
+            Array::fill(256, false), |arr, i|
+            arr.set(i, cls.contains(i.to_U8))
+        );
+        CharClass::make $ |c| table.@(c.to_I64)
+    );
+
+    cls_dot: CharClass;
+    cls_dot = CharClass::make $ |c| c != '\n' && c != '\r';
+
+    cls_digit: CharClass;
+    cls_digit = CharClass::make $ is_digit;
+
+    cls_non_digit: CharClass;
+    cls_non_digit = cls_digit.negate;
+
+    cls_word_char: CharClass;
+    cls_word_char = CharClass::make $ |c| is_alnum(c) || c == '_';
+
+    cls_non_word_char: CharClass;
+    cls_non_word_char = cls_word_char.negate;
+
+    cls_whitespace: CharClass;
+    cls_whitespace = CharClass::make $ is_space;
+
+    cls_non_whitespace: CharClass;
+    cls_non_whitespace = cls_whitespace.negate;
+}
+
+
+type Pattern = box union {
+    pnormal: U8,
+    pclass: CharClass,
+    psequence: Array Pattern,
+    peither: (Pattern, Pattern),
+    prepeat: (Pattern, /*min_count:*/ I64, /*max_count:*/ I64)
+};
+
+impl Pattern: ToString {
+    to_string = |pat| (
+        if pat.is_pnormal { 
+            pat.as_pnormal.byte_to_string
+        };
+        if pat.is_pclass {
+            "[]"
+        };
+        if pat.is_psequence {
+            pat.as_psequence.to_iter.map(to_string).join("")
+        };
+        if pat.is_peither {
+            let (pat1, pat2) = pat.as_peither;
+            pat1.to_string + "|" + pat2.to_string
+        };
+        if pat.is_prepeat {
+            let (pat1, min, max) = pat.as_prepeat;
+            pat1.to_string + "{" + min.to_string + "," + max.to_string + "}"
+        };
+        eval assert(|_|"err", false);
+        ""
+    );
+}
+
+namespace Pattern {
+    match_char_if_exists: U8 -> Parser (Option U8);
+    match_char_if_exists = |c| (
+        let n: Option U8 = none();
+        let p: Parser (Option U8) = match_any_char.filter(|c1| c1 == c).map(some);
+        p.or_else(pure $ n)
+    );
+
+    _normal_chars: CharClass;
+    _normal_chars = (
+        CharClass::consists_of(
+            ".?*+^$[](){}\\"
+        ).negate.to_table
+    );
+
+    //pattern_seq: Parser Pattern;
+
+    pattern_repeat: Parser Pattern;
+    pattern_repeat = do {
+        let pat = *pattern_norepeat;
+        let question = *match_char_if_exists('?');
+        if question.is_some {
+            pure $ prepeat $ (pat, 0, 1)
+        };
+        let asterisk = *match_char_if_exists('*');
+        if asterisk.is_some {
+            pure $ prepeat $ (pat, 0, maximum)
+        };
+        let plus = *match_char_if_exists('+');
+        if plus.is_some {
+            pure $ prepeat $ (pat, 1, maximum)
+        };
+        pure $ pat
+    };
+
+    pattern_norepeat: Parser Pattern;
+    pattern_norepeat = do {
+        pattern_class    
+    };
+
+    pattern_class: Parser Pattern;
+    pattern_class = do {
+        let c = *match_any_char;
+        if _normal_chars.contains(c) {
+            pure $ pnormal(c)
+        };
+        if c == '.' {
+            pure $ pclass(cls_dot)
+        };
+        if c == '[' {
+            pure $ pclass(*pattern_bracket)
+        };
+        if c == '\\' {
+            pure $ pclass(*pattern_backslash_cls)
+        };
+        not_match
+    };
+
+    pattern_bracket: Parser CharClass;
+    pattern_bracket = do {
+        let circumflex = *match_char_if_exists('^');
+        let start_hyphen = *match_char_if_exists('-');
+        let inners = *repeat(pattern_bracket_inner);
+        let end_hyphen = *match_char_if_exists('-');
+        let _ = *match_char(']').or_error("']' is missing");
+
+        let cls = inners.to_iter.fold(
+            CharClass::empty, union
+        );
+        let cls = if start_hyphen.is_some || end_hyphen.is_some { cls.add('-') } else { cls };
+        let cls = if circumflex.is_some { cls.negate } else { cls };
+        pure $ cls.to_table
+    };
+
+    pattern_bracket_inner: Parser CharClass;
+    pattern_bracket_inner = do {
+        let _ = *match_char('\\');
+        pattern_backslash_cls.or_else $
+        pattern_backslash_char
+    }.or_else $ do {
+        let start = *match_any_char.filter(|c| c != ']' && c != '\\');
+        let _ = *match_char('-');
+        let end = *match_any_char.filter(|c| c != ']' && c != '\\');
+        pure $ CharClass::range(start, end)
+    }.or_else $ do {
+        let c = *match_any_char.filter(|c| c != ']' && c != '\\');
+        pure $ CharClass::singleton(c)
+    };
+
+    pattern_backslash_cls: Parser CharClass;
+    pattern_backslash_cls = do {
+        let c = *match_any_char;
+        if c == 'd' { pure $ CharClass::cls_digit };
+        if c == 'D' { pure $ CharClass::cls_non_digit };
+        if c == 'w' { pure $ CharClass::cls_word_char };
+        if c == 'W' { pure $ CharClass::cls_non_word_char };
+        if c == 's' { pure $ CharClass::cls_whitespace };
+        if c == 'S' { pure $ CharClass::cls_non_whitespace };
+        not_match
+    };
+
+    pattern_backslash_char: Parser CharClass;
+    pattern_backslash_char = do {
+        let c = *match_any_char;
+        if c == 't' { pure $ CharClass::singleton('\t') };
+        if c == 'r' { pure $ CharClass::singleton('\r') };
+        if c == 'n' { pure $ CharClass::singleton('\n') };
+        if c == 'v' { pure $ CharClass::singleton(11_U8) };
+        if c == 'f' { pure $ CharClass::singleton(12_U8) };
+        if c == 'b' { pure $ CharClass::singleton(8_U8) };
+        // TODO: support for \xhh, \uhhhh
+        not_match
+    };
+}
+
+type Capture = unbox struct {
+    start: I64,
+    end: I64
+};
+
+
+type RegExp = unbox struct {
+    parser: Parser ()
+};
+
+namespace RegExp {
+    compile: String -> String -> Result ErrMsg RegExp;
+    compile = |pattern, flags| (
+        err $ "not impl"
+    );
+}
+
+main: IO ();
+main = (
+    do {
+        let p = pattern_repeat;
+        let res = *p.run_parser_str("[abc]+").from_result;
+        let (pat, s) = res;
+        println(pat.to_string).lift
+    }
+    .try(eprintln)
+);

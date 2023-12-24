@@ -1,5 +1,9 @@
 ## json_encoder.fix
 
+Encodes a JSON value to a string.
+
+#### `impl Json: ToString`
+
 #### encode: Json -> String;
 
 Encodes JSON and converts it to a string.

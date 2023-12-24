@@ -1,5 +1,7 @@
 ## router.fix
 
+This is an implementation of an HTTP request router.
+
 ### type RouterEntry
 
 `RouterEntry h` represents a map from method name to a request handler.

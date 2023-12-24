@@ -17,6 +17,8 @@ type Headers = unbox struct {
     iter: Iterator Header
 };
 ```
+#### `impl Headers: ToString`
+
 ### namespace Headers
 
 #### empty: Headers;
@@ -62,6 +64,8 @@ type Request s = unbox struct {
     body: Array U8              // The body of the request
 };
 ```
+#### `impl Request s: ToString`
+
 ### namespace Request
 
 #### parse: s -> IOHandle -> String -> IOFail (Request s);

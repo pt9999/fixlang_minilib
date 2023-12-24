@@ -1,22 +1,25 @@
+// A monadic text parser
 module SimpleParser;
 
 import Debug;
 import Character;
 import StringEx;
 
+// The type of characters. Currently only UTF-8 string is supported.
 type Char = U8;
 
 namespace Stream {
     // A character iterator that stores the file name, line number, column number,
     // and offset from the beginning of the file.
     type Stream = unbox struct {
-        filename: String,
-        line: I64,
-        column: I64,
-        position: I64,
-        iter: Iterator Char
+        filename: String,       // File name (empty if no file name is set)
+        line: I64,              // Line number
+        column: I64,            // Column number
+        position: I64,          // Stream position from the beginning of the file
+        iter: Iterator Char     // The character iterator
     };
 
+    // An empty Stream.
     empty: Stream;
     empty = Stream{
         filename: "",
@@ -26,6 +29,7 @@ namespace Stream {
         iter: Iterator::empty
     };
 
+    // `stream.advance` gets next character and increment the stream position.
     advance: Stream -> Option (Char, Stream);
     advance = |s| (
         let (c, next) = *(s.@iter.advance);
@@ -40,6 +44,7 @@ namespace Stream {
         pure $ (c, s)
     );
 
+    // `stream.read_all` reads all characters to the end of stream.
     read_all: Stream -> (Array Char, Stream);
     read_all = |s| (
         let arr = Array::empty(100);
@@ -55,7 +60,7 @@ namespace Stream {
         )
     );
 
-    // Report the error along with where it occurred.
+    // `stream.error(str)` reports an error along with where it occurred.
     error: String -> Stream -> Result ErrMsg a;
     error = |str, s| (
         let msg =
@@ -74,6 +79,7 @@ impl Stream: FromString {
     );
 }
 
+// Converts a stream to a string, for example `"Stream(pos=1001)"`
 impl Stream: ToString {
     to_string = |s| (
         "Stream(pos=" + s.@position.to_string + ")"
@@ -84,7 +90,7 @@ impl Stream: ToString {
 type ParseResult a = Result ErrMsg (a, Stream);
 
 /*
-impl [a: ToString] ParseResult a: ToString {
+//impl [a: ToString] ParseResult a: ToString {
     to_string = |res| (
         if res.is_err {
             "err $ \"" + res.as_err + "\""
@@ -140,6 +146,8 @@ impl Parser: Monad {
 }
 
 namespace Parser {
+    // `parser.map_result(f)` maps the parser result with `f`, possibly reports 
+    // an error message.
     map_result: (a -> Result ErrMsg b) -> Parser a -> Parser b;
     map_result = |f, p| parser $ |s| (
             let (a, s) = *(p.run_parser(s));
@@ -150,7 +158,7 @@ namespace Parser {
             ok $ (res.as_ok, s)
     );
 
-    // Print the parser result.
+    // Prints the parser result.
     debug: [a: ToString] String -> Parser a -> Parser a;
     debug = |msg, p| parser $ |s| (
         eval debug_println(msg + ": begin");
@@ -247,7 +255,7 @@ namespace Parser {
         repeat(p).filter(|array| array.get_size >= 1)
     );
 
-    // Match zero-length string at the end of stream.
+    // Matches zero-length string at the end of stream.
     match_end_of_stream: Parser ();
     match_end_of_stream = parser $ |s| (
         if s.advance.is_some {

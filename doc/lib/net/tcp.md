@@ -1,5 +1,8 @@
 ## tcp.fix
 
+Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
+WARNING: IPv6 is not supported yet.
+
 #### get_sub_ex: I64 -> I64 -> Array a -> Array a;
 
 ### type IpAddress
@@ -12,6 +15,10 @@ type IpAddress = unbox struct {
     addr: Array U8
 };
 ```
+#### `impl IpAddress: FromString`
+
+#### `impl IpAddress: ToString`
+
 ### type HostEnt
 
 ```
@@ -47,6 +54,10 @@ This type reprents IPv4 port number, 0-65535.
 ```
 type Port = unbox struct { port: U16 };
 ```
+#### `impl Port: FromString`
+
+#### `impl Port: ToString`
+
 ### namespace SocketAddress
 
 ### type SocketAddress
@@ -76,6 +87,8 @@ Extracts an ip address from the socket address.
 
 Extracts a port number from the socket address.
 
+#### `impl SocketAddress : ToString`
+
 ### type Socket
 
 This type represents an IPv4 socket.
@@ -87,6 +100,8 @@ type Socket = unbox struct {
     data: Destructor I32
 };
 ```
+#### `impl Socket: ToString`
+
 ### namespace Socket
 
 #### make_tcp_socket: () -> IOFail Socket;

@@ -1,5 +1,7 @@
 ## deque.fix
 
+Double-ended queues
+
 ### type Deque
 
 A type that represents a double-ended queue.

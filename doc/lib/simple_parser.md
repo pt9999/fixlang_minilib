@@ -1,6 +1,10 @@
 ## simple_parser.fix
 
+A monadic text parser
+
 ### type Char
+
+The type of characters. Currently only UTF-8 string is supported.
 
 ```
 type Char = U8;
@@ -14,22 +18,36 @@ and offset from the beginning of the file.
 
 ```
     type Stream = unbox struct {
-        filename: String,
-        line: I64,
-        column: I64,
-        position: I64,
-        iter: Iterator Char
+        filename: String,       // File name (empty if no file name is set)
+        line: I64,              // Line number
+        column: I64,            // Column number
+        position: I64,          // Stream position from the beginning of the file
+        iter: Iterator Char     // The character iterator
     };
 ```
 #### empty: Stream;
 
+An empty Stream.
+
 #### advance: Stream -> Option (Char, Stream);
+
+`stream.advance` gets next character and increment the stream position.
 
 #### read_all: Stream -> (Array Char, Stream);
 
+`stream.read_all` reads all characters to the end of stream.
+
 #### error: String -> Stream -> Result ErrMsg a;
 
-Report the error along with where it occurred.
+`stream.error(str)` reports an error along with where it occurred.
+
+#### `impl Stream: FromString`
+
+Creates a stream from a string.
+
+#### `impl Stream: ToString`
+
+Converts a stream to a string, for example `"Stream(pos=1001)"`
 
 ### type ParseResult
 
@@ -61,13 +79,20 @@ Apply a stream to a parsing function and return the parsed result.
 Create a stream from a string, then apply a stream to a parsing function
 and return the parsed result.
 
+#### `impl Parser: Functor`
+
+#### `impl Parser: Monad`
+
 ### namespace Parser
 
 #### map_result: (a -> Result ErrMsg b) -> Parser a -> Parser b;
 
+`parser.map_result(f)` maps the parser result with `f`, possibly reports
+an error message.
+
 #### debug: [a: ToString] String -> Parser a -> Parser a;
 
-Print the parser result.
+Prints the parser result.
 
 #### unit: Parser ();
 
@@ -115,7 +140,7 @@ if the array length is zero.
 
 #### match_end_of_stream: Parser ();
 
-Match zero-length string at the end of stream.
+Matches zero-length string at the end of stream.
 
 #### match_any_char: Parser Char;
 

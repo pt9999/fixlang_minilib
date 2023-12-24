@@ -1,5 +1,8 @@
 ## clap.fix
 
+Command line argument parser.
+Inspired by [`clap` crate of Rust](https://docs.rs/clap/3.2.0/clap/index.html).
+
 ### namespace ArgAction
 
 ### type ArgAction
@@ -74,6 +77,8 @@ Sets `@value_name`.
 #### help: String -> Arg -> Arg;
 
 Sets `@help`.
+
+#### `impl Arg: ToString`
 
 ### type Command
 

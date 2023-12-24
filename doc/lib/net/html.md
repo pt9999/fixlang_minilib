@@ -146,3 +146,9 @@ type HTMLAttribute = (String, String);
 Escapes HTML special characters.
 eg. `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
 
+#### unescape_html: String -> String;
+
+Unescapes HTML special characters.
+eg. `&amp;` -> `&`, `&lt;` -> `<`, `&gt;` -> `>`, `&quot;` -> `\"`, `&#039;` -> `'`.
+NOTE: Other character references is also converted.
+

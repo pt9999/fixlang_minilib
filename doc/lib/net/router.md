@@ -59,11 +59,14 @@ An empty router node.
 
 #### find: Iterator String -> RouterNode h -> Option (RouterEntry h);
 
-現在のノードからpathを辿った先のノードのエントリを取得する。
+Finds the entry in the node following the path from the current node.
 
 #### show: [h: ToString] String -> RouterNode h -> IO ();
 
 ### type Router
+
+Router is a mapping from a method name and a path to a request handler.
+`h` is a type of request handler.
 
 ```
 type Router h = box struct {
@@ -74,9 +77,14 @@ type Router h = box struct {
 
 #### empty: Router h;
 
+An empty router.
+
 #### insert: String -> String -> h -> Router h -> Router h;
+
+`router.insert(method, path, handler)` tells that `method` and  path
+should be mapped to this handler.
 
 #### find: String -> String -> Router h -> Option h;
 
-#### main: IO ();
+`router.find(method, path)` finds the handler that matches `method` and `path`.
 

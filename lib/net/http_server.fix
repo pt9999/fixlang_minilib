@@ -9,13 +9,22 @@ import URL;
 import Request;
 import Router;
 
+// The request handler interprets an HTTP request and outputs an HTTP response to `response.@connection`.
+// It returns an HTTP response with (probably modified) application state.
+// `s` is the type of any application state.
 type RequestHandler s = Request s -> Response s -> IOFail (Response s);
 
+
+// The worker is responsible for processing a request. Specifically, 
+// it reads one request from the socket, processes it, and writes a response to the socket.
+// `s` is the type of any application state.
 type Worker s = unbox struct {
     app: App s
 };
 
 namespace Worker {
+
+    // Creates a worker for the application.
     make: App s -> Worker s;
     make = |app| (
         Worker {
@@ -23,6 +32,8 @@ namespace Worker {
         }
     );
 
+    // `worker.handle(connection, remote_addr)` receives an HTTP request from the socket connection,
+    // then finds the request handler for the request, and call that handler.
     handle: IOHandle -> String -> Worker s -> IO s;
     handle = |connection, remote_addr, worker| (
         do {
@@ -35,18 +46,14 @@ namespace Worker {
             eval debug_eprintln("finding handler");
             let path = *request.@path.decodeURI.from_result;
             let handler = app.@router.find(request.@method, path).map_or(
-                not_found_handler,
+                _not_found_handler,
                 |handler| 
                 eval debug_eprintln("found handler");
                 handler
             );
             eval debug_eprintln("handling response");
             let response = *handler(request, response);  
-            // TODO: Fail した場合、500 Internal Server Error にする？
-            // すでにヘッダを送信していた場合は？
-            // Failの場合、responseが返らないため、ヘッダを送信したかどうか判断できない。
             let _ = *response.end;
-            //let _ = *close_file(connection).lift;
             eval debug_eprintln("worker finished");
             pure $ response.@state
         }
@@ -65,18 +72,18 @@ namespace Worker {
         pure $ res.as_ok
     );
 
-    not_found_handler: Request s -> Response s -> IOFail (Response s);
-    not_found_handler = |req, res| (
+    _not_found_handler: Request s -> Response s -> IOFail (Response s);
+    _not_found_handler = |req, res| (
         res.status(404).write_str("Not Found")
     );
 }
 
 // This type represents an application. `s` is an application state.
 type App s = unbox struct {
-    state: s,
-    merge_state: s -> s -> s,
-    router: Router (RequestHandler s),
-    backlog: I64
+    state: s,                           // An application state
+    merge_state: s -> s -> s,           // A function that merges two application state
+    router: Router (RequestHandler s),  // An HTTP request router
+    backlog: I64                        // Number of backlogs used for `listen()`
 };
 
 namespace App {

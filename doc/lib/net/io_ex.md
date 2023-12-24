@@ -8,6 +8,8 @@
 
 #### fdopen: I32 -> String -> IOFail IOHandle;
 
+#### pipe: IOFail (I32, I32);
+
 #### open_pipe: IOFail (IOHandle, IOHandle);
 
 #### usleep: U32 -> IOFail ();

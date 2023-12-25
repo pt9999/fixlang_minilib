@@ -80,7 +80,7 @@ namespace CharClass {
 
 type Pattern = box union {
     pnormal: U8,
-    pliteral: String,
+//    pliteral: String,
     pclass: CharClass,
     psequence: Array Pattern,
     peither: (Pattern, Pattern),
@@ -93,9 +93,9 @@ impl Pattern: ToString {
         if pat.is_pnormal { 
             pat.as_pnormal.byte_to_string
         };
-        if pat.is_pliteral {
+ /*       if pat.is_pliteral {
             pat.as_pliteral
-        };
+        }; */
         if pat.is_pclass {
             "[]"
         };
@@ -127,7 +127,11 @@ namespace Pattern {
     );
 
     parse_pattern: Parser Pattern;
-    parse_pattern = pattern_either;
+    parse_pattern = do {
+        let pat = *pattern_either;
+        let _ = *match_end_of_stream;
+        pure $ pat
+    };
 
     pattern_either: Parser Pattern;
     pattern_either = do {
@@ -176,7 +180,7 @@ namespace Pattern {
     pattern_group = do {
         let lparen = *match_char('(');
         let pat = *pattern_either;
-        let rparen = *match_char_if_exists(')').or_error("')' is missing");
+        let rparen = *match_char(')').or_error("')' is missing");
         pure $ pgroup $ pat
     };
 
@@ -262,20 +266,153 @@ namespace Pattern {
     };
 }
 
-type Capture = unbox struct {
+// multi-parser
+type MParser a = unbox struct {
+    _mparser: Stream -> Iterator (ParseResult a)
+};
+
+namespace MParser {
+    run_mparser: Stream -> MParser a -> Iterator (ParseResult a);
+    run_mparser = |s, mp| (mp.@_mparser)(s);
+}
+
+impl MParser: Functor {
+    map = |f, p| parser $ |s| (
+        let (c, s) = *(*(p.run_mparser(s)));
+        pure $ pure $ (f(c), s)
+    );
+}
+
+impl MParser: Monad {
+    pure = |a| MParser { _mparser: |s| ok $ pure $ (a, s) };
+    bind = |f, pa| (
+        parser $ |s|
+        let res = (pa.run_parser(s));
+        let (a, s) = *res;
+        let pb = f(a);
+        pb.run_parser(s)
+    );
+}
+
+
+type Group = unbox struct {
     start: I64,
     end: I64
 };
 
+type MatchState = unbox struct {
+    stream: Stream,
+    groups: Array Group    // matched groups
+};
+
+namespace MatchState {
+    make: Stream -> MatchState;
+    make = |stream| (
+        MatchState {
+            stream: stream,
+            groups: Array::empty(1)
+        }
+    );        
+            
+    _match_pattern: Pattern -> MatchState -> Iterator MatchState;
+    _match_pattern = |pattern, state| (
+        if pattern.is_pnormal {
+            state._match_pattern_pnormal(pattern.as_pnormal)
+        };
+        if pattern.is_pclass {
+            state._match_pattern_pclass(pattern.as_pclass)
+        };
+        if pattern.is_psequence {
+            state._match_pattern_psequence(pattern.as_psequence.to_iter)
+        };
+        if pattern.is_peither {
+            state._match_pattern_peither(pattern.as_peither)
+        };
+        if pattern.prepeat {
+            state._match_pattern_prepeat(pattern.as_prepeat)
+        };
+    );
+
+    to_iter_parser: Parser a -> Parser (Iterator a);
+    to_iter_parser = |p| (
+        p.map(pure).or_else(pure $ Iterator::empty)
+    );
+
+    run_iter_parsers: Stream -> Iterator (Parser a) -> Iterator (a, Stream);
+    run_iter_parsers = |s, piter| (
+        piter.map(|p| p.run_parser(s))
+    );
+
+    _match_pattern_pnormal: U8 -> MatchState -> Iterator MatchState;
+    _match_pattern_pnormal = |c, state| (
+        state.@stream.advance.map_or(
+            Iterator::empty,
+            |c1, next|
+            if c != c1 { Iterator::empty };
+            pure $ state
+        )    
+    );
+    
+    _match_pattern_pclass: (U8 -> Bool) -> MatchState -> Iterator MatchState;
+    _match_pattern_pclass = |f, state| (
+        state.@stream.advance.map_or(
+            Iterator::empty,
+            |c1, next|
+            if !f(c1) { Iterator::empty };
+            pure $ state
+        )    
+    );
+    
+    
+    _match_pattern_psequence: Iterator Pattern -> MatchState -> Iterator MatchState;
+    _match_pattern_psequence = |patterns, state| (
+        let pattern = *patterns;
+        state._match_pattern(pattern)
+    );
+
+    _match_pattern_prepeat: (Pattern, I64, I64) -> MatchState -> Iterator MatchState;
+    _match_pattern_prepeat = |(pattern, min_count, max_count), state| (
+        let result: Iterator State = Iterator::empty;
+        let current: Iterator State = pure $ state;
+
+        loop(
+            (result, current, 0), |(result, current, i)|
+            if current.is_empty {
+                break $ result
+            };
+            if max_count < i {
+                break $ result
+            };
+            let result = if min_count <= i && i <= max_count {
+                result.append(current)
+            } else {
+                result
+            };
+            let current = current.map(|state| state._match_pattern(pat));
+            continue $ (result, current, i + 1)
+        )
+    );
+    
+}
 
 type RegExp = unbox struct {
-    parser: Parser ()
+    pattern: Pattern,
+    flags: String, // TODO: support flags
 };
 
 namespace RegExp {
     compile: String -> String -> Result ErrMsg RegExp;
     compile = |pattern, flags| (
-        err $ "not impl"
+        let pattern = *parse_pattern.run_parser_str(pattern).map(|(p,_)| p);
+        RegExp { pattern: pattern, flags: flags, groups: Array::empty(1), last_index: 0 }
+    );
+
+    exec: String -> RegExp -> Result ErrMsg (Array String);
+    exec = |target, regexp| (
+        let stream: Stream = *from_string(target);
+        
+        let regexp = regexp.mod_groups();
+        
     );
 }
 

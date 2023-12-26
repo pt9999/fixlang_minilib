@@ -6,5 +6,8 @@ all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out fix
 channel: channel.fix ../lib/string_ex.fix ../lib/net/io_ex.fix
 	fix run -f $^
 
+regexp: regexp.fix ../lib/simple_parser.fix ../lib/string_ex.fix
+	fix run -f $^
+
 clean:
 	rm -f *.out

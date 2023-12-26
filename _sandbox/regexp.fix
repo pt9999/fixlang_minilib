@@ -108,12 +108,15 @@ namespace CharClass {
         }
     );
 
+    // A character class of `.`. (any character except newlines)
     cls_dot: CharClass;
     cls_dot = CharClass::make(".") $ |c| c != '\n' && c != '\r';
 
+    // A character class of `\d`. (digits)
     cls_digit: CharClass;
     cls_digit = CharClass::make("\\d") $ is_digit;
 
+    // A character class of `\D`. (non-digits)
     cls_non_digit: CharClass;
     cls_non_digit = cls_digit.negate.set_label("\\D");
 
@@ -136,8 +139,8 @@ type PAssertion = unbox union {
     pa_end: ()          // end of line,       ie. '$'
 };
 
+// Converts a pattern to a string.
 impl PAssertion: ToString {
-    // Converts a pattern to a string.
     to_string = |pa| (
         if pa.is_pa_begin { "^" };
         if pa.is_pa_end { "$" };
@@ -470,7 +473,7 @@ impl MatchState: ToString {
     to_string = |state| (
         "MatchState{"
         + "stream:" + state.@stream.to_string
-        + ", groups:" + state.@groups.to_array.map(|g| "\n        " + g.to_string).to_string
+        + ", groups:" + state.@groups.map(|g| /*"\n        " +*/ g.to_string).to_string
         + "}"
     );
 }
@@ -560,8 +563,10 @@ namespace MatchState {
 
     _match_pattern_peither: (Pattern, Pattern) -> MatchState -> Iterator MatchState;
     _match_pattern_peither = |(pat1, pat2), state| (
-        state._match_pattern(pat1).append $
-        state._match_pattern(pat2)
+        let res = state._match_pattern(pat1).append $
+                  state._match_pattern(pat2);
+        //eval debug_println("peither: state=" +state.to_string + " res="+ res.map(|s| "\n    " + s.to_string).concat_iter);
+        res
     );
 
     _match_pattern_pquant: (Pattern, I64, I64) -> MatchState -> Iterator MatchState;
@@ -598,8 +603,24 @@ namespace MatchState {
 //            eval debug_eprintln("states=" + states.to_array.map(|s| "\n  " + s.to_string).to_string);
             if states.is_empty { none() };
             some $ (states, states)
-        );
+        ).push_front(pure $ state);
+        // TODO: greedy match の場合、マッチ回数が多いものから試す必要がある。
+        // しかし、patternが0文字にマッチする場合、無限回マッチしてしまう。eg. `()*`
+        // pattern は複数のマッチ経路が存在する可能性がある。eg. `(abc|)*`
+        // 単純に進んだ文字数で降順にソートするべきかもしれないが、グループのキャプチャが変わってくる可能性はないか。
+        // マッチ回数が多いものから試す以上、lazy にしてもあまり意味はない。
+        // 現状ではバックトラックのため Iterator から Iterator を作っているため試行回数が爆発する。
+        // 例えば `.*.*.*` を `abcde` にマッチさせると分岐がたくさんできる。
+        // 重複削除、または taboo list が必要。
+        // その場合、すでにチェックした (pattern, state) の組を HashSet に登録し、すでにチェック済みの場合はスキップする。
+        // しかし、MatchState は hashkey にできるが、Pattern はできない。(CharClassがあるため)
         states_of_each_iteration.take(max_count).__skip(min_count).flatten
+    );
+
+    _drop_if_no_advance: MatchState -> Iterator MatchState -> Iterator MatchState;
+    _drop_if_no_advance = |state, next_states| (
+        let start_position = state.@stream.@position;
+        next_states.filter(|s| s.@stream.@posision - start_position > 0)
     );
 
     __skip: I64 -> Iterator a -> Iterator a;
@@ -718,6 +739,6 @@ main = (
     let _ = *check_regexp(".*([ade]+)", "abcdef", ["abcde", "de"]);
     let _ = *check_regexp("\\w+", "abcd,efg", ["abcd"]);
     let _ = *check_regexp("\\s*(\\w+)\\s*", "  abc d,e fg ", ["  abc ", "abc"]);
-    let _ = *check_regexp(".*(bc|c*df*e)", "abcccdef", ["abc", "bc"]);
+    let _ = *check_regexp(".*(bc|c*df*e)", "abcccdef", ["abcccde", "de"]);
     pure()
 );

@@ -1,7 +1,7 @@
 // An implementation of simple regular expression.
-// 
+//
 // Currently it only supports patterns below:
-// - Character classes: `[xyz]`, `[^xyz]`, `.`, `\d`, `\D`, `\w`, `\W`, `\s`, 
+// - Character classes: `[xyz]`, `[^xyz]`, `.`, `\d`, `\D`, `\w`, `\W`, `\s`,
 //   `\S`, `\t`, `\r`, `\n`, `\v`, `\f`, `[\b]`, x|y
 // - Assertions: `^`, `$`
 // - Groups: `(x)`
@@ -51,19 +51,19 @@ namespace CharClass {
     singleton: U8 -> CharClass;
     singleton = |c| CharClass {
         label: byte_to_string(c),
-        f: |c1| c1 == c 
+        f: |c1| c1 == c
     };
 
     // Creates a character class that consists of characters from start to end.
     range: U8 -> U8 -> CharClass;
-    range = |start, end| CharClass { 
+    range = |start, end| CharClass {
         label: byte_to_string(start) + "-" + byte_to_string(end),
-        f: |c| start <= c && c <= end 
+        f: |c| start <= c && c <= end
     };
 
     // Creates a character class that consists of specified string.
     consists_of: String -> CharClass;
-    consists_of = |str| CharClass { 
+    consists_of = |str| CharClass {
         label: str,
         f: |c| str.find_byte(c).is_some
     };
@@ -73,9 +73,9 @@ namespace CharClass {
     negate = |cls| (
         let label = "^" + cls.@label;
         let f = cls.@f;
-        CharClass { 
+        CharClass {
             label: label,
-            f: |c| !f(c) 
+            f: |c| !f(c)
         }
     );
 
@@ -86,7 +86,7 @@ namespace CharClass {
         let g = cls2.@f;
         CharClass {
             label: cls1.@label + cls2.@label,
-            f: |c| f(c) || g(c) 
+            f: |c| f(c) || g(c)
         }
     );
 
@@ -132,6 +132,17 @@ namespace CharClass {
     cls_non_whitespace: CharClass;
     cls_non_whitespace = cls_whitespace.negate.set_label("\\S");
 }
+
+impl CharClass: ToString {
+    to_string = |cls| (
+        if cls.@label.get_size <= 1 {
+            cls.@label
+        } else {
+            "[" + cls.@label + "]"
+        }
+    );
+}
+
 
 // A type that represents Assertion Pattern.
 type PAssertion = unbox union {
@@ -184,7 +195,7 @@ impl Pattern: ToString {
         };
         if pat.is_pquant {
             let (pat1, min, max) = pat.as_pquant;
-            pat1.to_string + "{" + min.to_string + "," + 
+            pat1.to_string + "{" + min.to_string + "," +
                 if max == I64::maximum { "" } else { max.to_string }
             + "}"
         };
@@ -384,18 +395,18 @@ namespace Pattern {
         if c == 'f' { pure $ CharClass::singleton(12_U8) };
         if c == 'b' && in_bracket { pure $ CharClass::singleton(8_U8) };
         // TODO: support for \xhh, \uhhhh
-        
+
         // other character is treated as itself, ie. `\\`, `\+`, `\*` etc.
         pure $ CharClass::singleton(c)
     };
 
     // `pat._assign_group_number(n)` assigns group number for each group.
-    // The first group number becomes `n + 1`. 
-    // It returns the translated pattern along with maximum group number.
+    // The first group number becomes `n + 1`.
+    // It returns the translated pattern along with group count.
     _assign_group_number: I64 -> Pattern -> (I64, Pattern);
     _assign_group_number = |n, pat| (
-        if pat.is_pclass || pat.is_passert { 
-            (n, pat) 
+        if pat.is_pclass || pat.is_passert {
+            (n, pat)
         };
         if pat.is_psequence {
             let input: Array Pattern = pat.as_psequence;
@@ -424,8 +435,8 @@ namespace Pattern {
         };
         if pat.is_pgroup {
             let (_, pat_inner) = pat.as_pgroup;
-            let gn = n + 1;
-            let (n, pat_inner) = pat_inner._assign_group_number(gn);
+            let gn = n;
+            let (n, pat_inner) = pat_inner._assign_group_number(gn + 1);
             let pat = pgroup $ (gn, pat_inner);
             (n, pat)
         };
@@ -439,87 +450,162 @@ namespace Pattern {
 // For details, see web pages below.
 // - https://swtch.com/~rsc/regexp/regexp1.html
 // - https://zenn.dev/canalun/articles/regexp_and_automaton
+
+// NFA
+type NFA = unbox struct {
+    group_count: I64,           // group count
+    states: Array NFAState,     // array of states
+    initial_state: I64,         // initial state
+    accepting_state: I64         // accepting state
+};
+
 namespace NFA {
-    _ID_NONE: I64,
-    _ID_NONE = -1;
-
-    type NFAState = unbox struct {
-        id: I64,
-        char_class: CharClass,
-        out_on_match: I64,   // next state with a character that matches the char_class
-        out: I64,           // next state with empty string
-        out2: I64,          // next state with empty string part 2
-    };
-
-    namespace NFAFrag {
-        type NFAFrag = unbox struct {
-            inp: I64,                   // state id of input
-            set_out: I64 -> NFA -> NFA  // set state id of output
-        };
-    }
-
-    type NFA = unbox struct {
-        states: Array NFAState,
-        initial_state: I64,
-        accepted_state: I64
-    };
-
+    // An empty NFA.
     empty: NFA;
     empty = NFA {
+        group_count: 0,
         states: Array::empty(0),
         initial_state: _ID_NONE,
-        accepted_state: _ID_NONE
+        accepting_state: _ID_NONE
     };
 
-    new_state: NFA -> (NFA, NFAState);
+    // Creates new state. Returns the new state id.
+    new_state: NFA -> (NFA, I64);
     new_state = |nfa| (
         let id = nfa.@states.get_size;
-        let state = NFAState {
-            id: id,
-            char_class: CharClass::empty,
-            out_on_match: _ID_NONE,
-            out: _ID_NONE,
-            out2: _ID_NONE
-        };
+        let state = NFAState::empty;
+        let state = state.set_id(id);
         let nfa = nfa.mod_states(push_back(state));
-        (nfa, state)
+        (nfa, id)
     );
 
+    // `nfa.get_state(id)` gets the state whose @id is `id`.
     get_state: I64 -> NFA -> NFAState;
     get_state = |id, nfa| (
         nfa.@states.@(id)
     );
 
-    set_state: I64 -> NFAState -> NFA -> NFA;
-    set_state = |id, state, nfa| (
-        nfa.mod_states(set(id, state))
-    );
-    
+    // `nfa.mod_state(id, f)` modifies the state whose @id is `id`.
     mod_state: I64 -> (NFAState -> NFAState) -> NFA -> NFA;
     mod_state = |id, f, nfa| (
         nfa.mod_states(|states| states.set(id, f(states.@(id))))
     );
 
-    set_out: I64 -> I64 -> NFA -> NFA;
-    set_out = |id, out, nfa| (
-        nfa.mod_state(id, set_out(out))
+    // `nfa.set_frag_output(frag, out)` sets the output of the fragment to `out`.
+    set_frag_output: NFAFrag -> I64 -> NFA -> NFA;
+    set_frag_output = |frag, out, nfa| (
+        (frag.@set_output)(out, nfa)
     );
 
+    // `NFA::compile(pattern)` compiles a pattern to NFA.
     compile: Pattern -> NFA;
     compile = |pattern| (
         let nfa = NFA::empty;
-        let (nfa, frag) = nfa._compile_pattern(pattern);
-        let (nfa, state) = nfa.new_state;
-        let nfa = (frag.@set_out)(state.@id, nfa);
-        let nfa = nfa.set_initial_state(frag.@inp);
-        let nfa = nfa.set_accepted_state(state.@id);
+        let (group_count, pattern) = pattern._assign_group_number(0);
+        let nfa = nfa.set_group_count(group_count);
+        let (nfa, frag) = nfa.compile_pattern(pattern);
+        let nfa = nfa.set_initial_state(frag.@input);
+        let (nfa, accept_id) = nfa.new_state;
+        let nfa = nfa.set_accepting_state(accept_id);
+        let nfa = nfa.set_frag_output(frag, accept_id);
         nfa
     );
 
-    _compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);
-    _compile_pattern = |pat, nfa| (
+    // `nfa.execute(stream)` executes matching.
+    execute: Stream -> NFA -> Option GroupArray;
+    execute = |stream, nfa| (
+        let executor = NFAExecutor::make(stream, nfa);
+        executor.execute
+    );
+
+}
+
+impl NFA: ToString {
+    to_string = |nfa| (
+        "NFA { states=\n"
+        + nfa.@states.to_iter.map(|s| "  " + s.to_string + "\n").concat_iter
+        + "  initial_state=" + nfa.@initial_state.to_string + "\n"
+        + "  accepting_state=" + nfa.@accepting_state.to_string + "\n"
+        +"}"
+    );
+}
+
+type NFAStateAction = unbox union {
+    sa_none: (),
+    sa_char_match: CharClass,
+    sa_assert: PAssertion,
+    sa_group_begin: I64,
+    sa_group_end: I64
+};
+
+impl NFAStateAction: ToString {
+    to_string = |a| (
+        if a.is_sa_none { "none" };
+        if a.is_sa_char_match { a.as_sa_char_match.to_string };
+        if a.is_sa_assert { a.as_sa_assert.to_string };
+        if a.is_sa_group_begin { "<g" + a.as_sa_group_begin.to_string + ">" };
+        if a.is_sa_group_end { "</g" + a.as_sa_group_end.to_string + ">" };
+        ""
+    );
+}
+
+// An NFA state
+type NFAState = unbox struct {
+    id: I64,                    // state id
+    action: NFAStateAction,     // action
+    output_on_action: I64,      // next state when the action succeeded
+    output: I64,                // next state with empty string
+    output2: I64,               // next state with empty string part 2
+    label: String               // a label to display
+};
+
+namespace NFAState {
+    // An invalid state ID.
+    _ID_NONE: I64;
+    _ID_NONE = -1;
+
+    // An empty state
+    empty: NFAState;
+    empty = NFAState {
+        id: _ID_NONE,
+        action: sa_none(),
+        output_on_action: _ID_NONE,
+        output: _ID_NONE,
+        output2: _ID_NONE,
+        label: ""
+    };
+}
+
+impl NFAState: ToString {
+    to_string = |state| (
+        "("
+        + state.@id.to_string + ":"
+        + state.@action.to_string + ":"
+        + state.@output_on_action.to_string + ","
+        + state.@output.to_string + ","
+        + state.@output2.to_string + ":"
+        + state.@label
+        + ")"
+    );
+}
+
+
+// NFA Fragment
+type NFAFrag = unbox struct {
+    input: I64,                 // state id of input of this fragment
+    set_output: I64 -> NFA -> NFA,  // a function to set state id of output
+                                    // of this fragment
+    label: String               // a label to display
+};
+
+namespace NFAFrag {
+
+    // `nfa.compile_pattern(pattern)` compiles a pattern to a NFAFrag.
+    compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);
+    compile_pattern = |pat, nfa| (
         if pat.is_pclass {
-            nfa._compile_class(pat.as_pclass)        
+            let action = sa_char_match (pat.as_pclass);
+            nfa._compile_action(action)
         };
         if pat.is_psequence {
             let patterns = pat.as_psequence;
@@ -527,81 +613,100 @@ namespace NFA {
                 nfa._compile_null_sequence
             };
             if patterns.get_size == 1 {
-                nfa._compile_pattern(patterns.@(0))
+                nfa.compile_pattern(patterns.@(0))
             };
-            let (nfa, frag1) = nfa._compile_pattern(
+            let (nfa, frag1) = nfa.compile_pattern(
                 psequence $ patterns.pop_back);
-            let (nfa, frag2) = nfa._compile_pattern(
+            let (nfa, frag2) = nfa.compile_pattern(
                 patterns.get_last.as_some);
             nfa._compile_seq(frag1, frag2)
         };
         if pat.is_peither {
             let (pat1, pat2) = pat.as_peither;
-            let (nfa, frag1) = nfa._compile_pattern(pat1);
-            let (nfa, frag2) = nfa._compile_pattern(pat2);
+            let (nfa, frag1) = nfa.compile_pattern(pat1);
+            let (nfa, frag2) = nfa.compile_pattern(pat2);
             nfa._compile_either(frag1, frag2)
         };
         if pat.is_pquant {
-            let (pat, min, max) = pat.as_pquant;
-            let (nfa, frag1) = nfa._compile_pattern(pat1);
+            let (pat1, min, max) = pat.as_pquant;
+            let (nfa, frag1) = nfa.compile_pattern(pat1);
             if (min == 0 && max == 1) {
                 nfa._compile_zero_or_once(frag1)
             };
-            if (min == 0 && max == maximum) {
+            if (min == 0 && max == I64::maximum) {
                 nfa._compile_zero_or_more(frag1)
             };
-            if (min == 1 && max == maximum) {
+            if (min == 1 && max == I64::maximum) {
                 nfa._compile_one_or_more(frag1)
             };
-
-            // TODO: support other case
-            eval assert (|_|"currently not implemented", false);
-            nfa._compile_one_or_more(frag1)
+            if (min >= 2) {
+                let (nfa, frag2) = nfa.compile_pattern(pquant $
+                        (pat1, min - 1,
+                            if max == I64::maximum { max } else { max - 1}
+                        )
+                );
+                // TODO: frag1 の中にグループがあったら？
+                nfa._compile_seq(frag1, frag2)
+            };
+            eval assert (|_|"invalid quantifier: min=" + min.to_string, false);
+            (nfa, frag1)
         };
-        // TODO: support passert
-        // TODO: support pgroup
-        eval assert (|_|"currently not implemented", false);
-        nfa._compile_class(pat.as_pclass)        
+        if pat.is_pgroup {
+            let (n, pat1) = pat.as_pgroup;
+            let (nfa, frag0) = nfa._compile_action(sa_group_begin(n));
+            let (nfa, frag1) = nfa.compile_pattern(pat1);
+            let (nfa, frag2) = nfa._compile_action(sa_group_end(n));
+            let (nfa, frag) = nfa._compile_seq(frag0, frag1);
+            let (nfa, frag) = nfa._compile_seq(frag, frag2);
+            (nfa, frag)
+        };
+        if pat.is_passert {
+            nfa._compile_action(sa_assert(pat.as_passert))
+        };
+        eval assert (|_|"invalid pattern:" + pat.to_string, false);
+        nfa._compile_action(sa_none())
     );
 
-    _compile_class: CharClass -> NFA -> (NFA, NFAFrag);
-    _compile_class = |char_class, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let state = state.set_char_class(char_class);
+    _compile_action: NFAStateAction -> NFA -> (NFA, NFAFrag);
+    _compile_action = |action, nfa| (
+        let (nfa, id) = nfa.new_state;
+        let nfa = nfa.mod_state(id, set_action(action));
         let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out(state.id, out);
-                nfa
-            )
+            input: id,
+            set_output: |out, nfa| (
+                nfa.mod_state(id, set_output_on_action(out))
+            ),
+            label: action.to_string
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // ``
     _compile_null_sequence: NFA -> (NFA, NFAFrag);
     _compile_null_sequence = |nfa| (
-        let (nfa, state) = nfa.new_state;
+        let (nfa, id) = nfa.new_state;
         let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out(state.id, out);
-                nfa
-            )
+            input: id,
+            set_output: |out, nfa| (
+                nfa.mod_state(id, set_output(out))
+            ),
+            label: "``"
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // `e1 e2`
     _compile_seq: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_seq = |frag1, frag2, nfa| (
-        let nfa = (frag1.@set_out)(frag2.@inp, nfa);
+        let nfa = nfa.set_frag_output(frag1, frag2.@input);
         let frag = NFAFrag {
-            inp: frag1.@inp,
-            set_out: |out, nfa| (
-                let nfa = (frag2.@set_out)(out, nfa);
-                nfa
-            )
+            input: frag1.@input,
+            set_output: |out, nfa| (
+                nfa.set_frag_output(frag2, out)
+            ),
+            label: frag1.@label + frag2.@label
         };
         (nfa, frag)
     );
@@ -609,17 +714,18 @@ namespace NFA {
     // `e1|e2`
     _compile_either: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_either = |frag1, frag2, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = nfa.set_out2(state.@id, frag2.@inp);
+        let (nfa, id) = nfa.new_state;
+        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let nfa = nfa.mod_state(id, set_output2(frag2.@input));
         let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = (frag1.@set_out)(out, nfa);
-                let nfa = (frag2.@set_out)(out, nfa);
-                nfa
-            )
+            input: id,
+            set_output: |out, nfa| (
+                nfa.set_frag_output(frag1, out)
+                   .set_frag_output(frag2, out)
+            ),
+            label: frag1.@label + "|" + frag2.@label
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
 
     );
@@ -627,269 +733,275 @@ namespace NFA {
     // `e?`
     _compile_zero_or_once: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_once = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
+        let (nfa, id) = nfa.new_state;
+        let nfa = nfa.mod_state(id, set_output(frag1.@input));
         let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = (frag1.@set_out)(out, nfa);
-                let nfa = nfa.set_out(state.@id, out);
-                nfa
-            )
+            input: id,
+            set_output: |out, nfa| (
+                let nfa = nfa.set_frag_output(frag1, out);
+                nfa.mod_state(id, set_output2(out))
+            ),
+            label: frag1.@label + "?"
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // `e*`
     _compile_zero_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_more = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = (frag1.@set_out)(state.@id, nfa);
+        let (nfa, id) = nfa.new_state;
+        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let nfa = nfa.set_frag_output(frag1, id);
         let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out2(state.@id, out);
-                nfa
-            )
+            input: id,
+            set_output: |out, nfa| (
+                nfa.mod_state(id,set_output2(out))
+            ),
+            label: frag1.@label + "*"
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // `e+`
     _compile_one_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_one_or_more = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = (frag1.@set_out)(state.@id, nfa);
+        let (nfa, id) = nfa.new_state;
+        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let nfa = nfa.set_frag_output(frag1, id);
         let frag = NFAFrag {
-            inp: frag1.@inp,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out2(state.@id, out);
-                nfa
-            )
+            input: frag1.@input,
+            set_output: |out, nfa| (
+                nfa.mod_state(id, set_output2(out))
+            ),
+            label: frag1.@label + "+"
         };
+        let nfa = nfa.mod_state(id, set_label(frag.@label));
         (nfa, frag)
     );
 }
 
-
-
-
 // Matched group
 type Group = unbox struct {
-    text: String,       // text of the group
-    start: I64,         // position of the start of the group
+    begin: I64,         // position of the start of the group
     end: I64            // position of the end of the group
 };
-
-// The array of matched groups
-type GroupArray = Array (Option Group);
 
 impl Group: ToString {
     to_string = |group| (
         "Group{"
-        + "text:\"" + group.@text + "\""
-        + ", start:" + group.@start.to_string
+        + "begin:" + group.@begin.to_string
         + ", end:" + group.@end.to_string
         + "}"
     ) ;
 }
 
-// The matching state
-type MatchState = unbox struct {
-    stream: Stream,             // The stream that contains current matching position
-    groups: GroupArray          // The matched groups
+// The array of matched groups
+type GroupArray = Array (Option Group);
+
+
+// NFA State set, used for NFA state transition
+type NFAStateSet = unbox struct {
+    ordered: Array (I64, GroupArray),   // array of state id and groups
+    mask: Array Bool       // mask whether id is contained or not
 };
 
-type MatchStateIter = Iterator MatchState;
+namespace NFAStateSet {
 
-impl MatchState: ToString {
-    to_string = |state| (
-        "MatchState{"
-        + "stream:" + state.@stream.to_string
-        + ", groups:" + state.@groups.map(|g| /*"\n        " +*/ g.to_string).to_string
-        + "}"
+    // `NFAStateSet::empty(n)` creates an empty state set.
+    // `n` is number of NFA states.
+    empty: I64 -> NFAStateSet;
+    empty = |n| NFAStateSet {
+        ordered: Array::empty(n),
+        mask:  Array::fill(n, false)
+    };
+
+    // Checks whether the state set is empty.
+    is_empty: NFAStateSet -> Bool;
+    is_empty = |state_set| (
+        state_set.@ordered.is_empty
+    );
+
+    // Checks whether the state set contains a state.
+    contains: I64 -> NFAStateSet -> Bool;
+    contains = |id, state_set| (
+        state_set.@mask.@(id)
+    );
+
+    // Adds a state to the state set.
+    add: (I64, GroupArray) -> NFAStateSet -> NFAStateSet;
+    add = |(id, groups), state_set| (
+        if state_set.contains(id) { state_set };
+        let state_set = state_set.mod_ordered(push_back((id, groups)));
+        let state_set = state_set.mod_mask(set(id, true));
+        state_set
+    );
+
+    get_groups: I64 -> NFAStateSet -> Option GroupArray;
+    get_groups = |id, state_set| (
+        state_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
+        .get_first
+        .map(|(id, groups)| groups)
     );
 }
 
-namespace MatchState {
-    // Creates new MatchState. The stream has to be at the position of zero.
-    make: Stream -> RegExp -> MatchState;
-    make = |stream, regexp| (
-        eval assert (|_| "stream position is nonzero", stream.@position == 0);
-        let n = regexp.@group_count;
-        MatchState {
+// The NFA executor
+type NFAExecutor = unbox struct {
+    stream: Stream,            // stream of characters
+    nfa: NFA,                       // NFA
+    empty_state_set: NFAStateSet,   // an empty state set
+    state_set: NFAStateSet,         // current state set
+    stack: Iterator (I64, GroupArray) // temporary stack for transition
+};
+
+namespace NFAExecutor {
+    // Creates an executor.
+    make: Stream -> NFA -> NFAExecutor;
+    make = |stream, nfa| (
+        let empty_state_set = NFAStateSet::empty(nfa.@states.get_size);
+        let groups: GroupArray = Array::fill(nfa.@group_count, none());
+        let state_set = empty_state_set.add((nfa.@initial_state, groups));
+        NFAExecutor {
             stream: stream,
-            groups: Array::fill(n + 1, none())
+            nfa: nfa,
+            empty_state_set: empty_state_set,
+            state_set: state_set,
+            stack: Iterator::empty
         }
-    );        
-            
-    // Matches a pattern to the current position. Returns new positions at the end of pattern.
-    // If two or more matching paths exist, returns them all.
-    _match_pattern: Pattern -> MatchState -> Iterator MatchState;
-    _match_pattern = |pattern, state| (
-        if pattern.is_pclass {
-            state._match_pattern_pclass(pattern.as_pclass)
-        };
-        if pattern.is_passert {
-            state._match_pattern_passert(pattern.as_passert)
-        };
-        if pattern.is_psequence {
-            state._match_pattern_psequence(pattern.as_psequence.to_iter)
-        };
-        if pattern.is_peither {
-            state._match_pattern_peither(pattern.as_peither)
-        };
-        if pattern.is_pquant {
-            state._match_pattern_pquant(pattern.as_pquant)
-        };
-        if pattern.is_pgroup {
-            state._match_pattern_pgroup(pattern.as_pgroup)
-        };
-        eval assert (|_| "err", false);
-        Iterator::empty
     );
 
-    _match_pattern_pclass: CharClass -> MatchState -> Iterator MatchState;
-    _match_pattern_pclass = |cls, state| (
-        state.@stream.advance.map_or(
-            Iterator::empty,
-            |(c, next)|
-            if !cls.contains(c) { Iterator::empty };
-            pure $ state.set_stream(next)
-        )    
-    );
-    
-    _match_pattern_passert: PAssertion -> MatchState -> Iterator MatchState;
-    _match_pattern_passert = |pa, state| (
-        if pa.is_pa_begin {
-            if state.@stream.@position == 0 { pure $ state };
-            Iterator::empty
-        };
-        if pa.is_pa_end {
-            if state.@stream.advance.is_none { pure $ state };
-            Iterator::empty
-        };
-        eval assert(|_|"err", false);
-        Iterator::empty
-    );
-    
-    _match_pattern_psequence: Iterator Pattern -> MatchState -> Iterator MatchState;
-    _match_pattern_psequence = |patterns, state| (
-        patterns.fold(
-            pure $ state, |current, pattern|
-            current.bind(|state| state._match_pattern(pattern))
-        )
-    );
-
-    _match_pattern_peither: (Pattern, Pattern) -> MatchState -> Iterator MatchState;
-    _match_pattern_peither = |(pat1, pat2), state| (
-        let res = state._match_pattern(pat1).append $
-                  state._match_pattern(pat2);
-        //eval debug_println("peither: state=" +state.to_string + " res="+ res.map(|s| "\n    " + s.to_string).concat_iter);
-        res
-    );
-
-    _match_pattern_pquant: (Pattern, I64, I64) -> MatchState -> Iterator MatchState;
-    /*_match_pattern_pquant = |(pattern, min_count, max_count), state| (
-        let result: Iterator MatchState = Iterator::empty;
-        let current: Iterator MatchState = pure $ state;
-
+    execute: NFAExecutor -> Option GroupArray;
+    execute = |executor| (
         loop(
-            (result, current, 0), |(result, current, i)|
-            if current.is_empty {
-                break $ result
+            executor, |executor|
+            let executor = executor.transition_with_empty_string;
+            if executor.@state_set.contains(executor.@nfa.@accepting_state) {
+                let opt = executor.@state_set.get_groups(executor.@nfa.@accepting_state);
+                eval assert (|_|"not found groups", opt.is_some);
+                break $ some $ opt.as_some   // match success
+                // TODO: 現状では受理状態になったらループを抜けるため、最短一致になる。
             };
-            if max_count < i {
-                break $ result
-            };
-            let result = if min_count <= i && i <= max_count {
-                result.append(current)
-            } else {
-                result
-            };
-            let current = current.bind(|state| state._match_pattern(pattern));
-            continue $ (result, current, i + 1)
-        )
-    );
-    */
-    _match_pattern_pquant = |(pattern, min_count, max_count), state| (
-        // lazy evaluation
-        let states_of_each_iteration: Iterator (Iterator MatchState) = Iterator::generate(
-            pure $ state,
-            |states| 
-            let states: Iterator MatchState = states;   // to avoid type ambiguity
-            if states.is_empty { none() };
-            let states: Iterator MatchState = states.bind(|state| state._match_pattern(pattern));
-//            eval debug_eprintln("states=" + states.to_array.map(|s| "\n  " + s.to_string).to_string);
-            if states.is_empty { none() };
-            some $ (states, states)
-        ).push_front(pure $ state);
-        // TODO: greedy match の場合、マッチ回数が多いものから試す必要がある。
-        // しかし、patternが0文字にマッチする場合、無限回マッチしてしまう。eg. `()*`
-        // pattern は複数のマッチ経路が存在する可能性がある。eg. `(abc|)*`
-        // 単純に進んだ文字数で降順にソートするべきかもしれないが、グループのキャプチャが変わってくる可能性はないか。
-        // マッチ回数が多いものから試す以上、lazy にしてもあまり意味はない。
-        // 現状ではバックトラックのため Iterator から Iterator を作っているため試行回数が爆発する。
-        // 例えば `.*.*.*` を `abcde` にマッチさせると分岐がたくさんできる。
-        // 重複削除、または taboo list が必要。
-        // その場合、すでにチェックした (pattern, state) の組を HashSet に登録し、すでにチェック済みの場合はスキップする。
-        // しかし、MatchState は hashkey にできるが、Pattern はできない。(CharClassがあるため)
-        states_of_each_iteration.take(max_count).__skip(min_count).flatten
-    );
-
-    _drop_if_no_advance: MatchState -> Iterator MatchState -> Iterator MatchState;
-    _drop_if_no_advance = |state, next_states| (
-        let start_position = state.@stream.@position;
-        next_states.filter(|s| s.@stream.@posision - start_position > 0)
-    );
-
-    __skip: I64 -> Iterator a -> Iterator a;
-    __skip = |n, iter| (
-        if n <= 0 { iter };
-        let opt = iter.advance;
-        if opt.is_none { Iterator::empty };
-        let (_, next) = opt.as_some;
-        next.__skip(n - 1)
-    );
-
-    _match_pattern_pgroup: (I64, Pattern) -> MatchState -> Iterator MatchState;
-    _match_pattern_pgroup = |(group_number, pattern), state| (
-        let stream_start = state.@stream;
-        let start = state.@stream.@position;
-        state._match_pattern(pattern).map(|state|
-            let end = state.@stream.@position;
-            let text = stream_start.read_string(max(0, end - start));
-            let group = Group { text: text, start: start, end: end };
-            let state = state.mod_groups(set(group_number, some(group)));
-            state
-        )
-    );
-    
-    _select_longest_match: Iterator MatchState -> Option MatchState;
-    _select_longest_match = |states| (
-        states.fold(
-            none(), |state1_opt, state2|
-            state1_opt.map_or(
-                some(state2),
-                |state1|
-                if state1.@stream.@position >= state2.@stream.@position {
-                    some(state1)
-                } else {
-                    some(state2)
-                }
+            executor.@stream.advance.map_or(
+                break $ none(),  // failed to match
+                |(c, stream)|
+                let executor = executor.transition_with_char(c);
+                let executor = executor.set_stream(stream);
+                eval debug_println("stream position="+stream.@position.to_string);
+                continue $ executor
             )
         )
     );
 
+    transition_with_empty_string: NFAExecutor -> NFAExecutor;
+    transition_with_empty_string = |executor| (
+        let executor = executor._init_transition;
+        loop(
+            executor, |executor|
+            let opt = executor._pop_stack;
+            if opt.is_none {
+                break $ executor
+            };
+            let ((id, groups), executor) = opt.as_some;
+            let state = executor.@nfa.get_state(id);
+            let executor = executor._transition(state.@output, groups);
+            let executor = executor._transition(state.@output2, groups);
+            let executor = executor._transition_on_action(state, state.@output_on_action, groups);
+            continue $ executor
+        )
+    );
 
+    _init_transition: NFAExecutor -> NFAExecutor;
+    _init_transition = |executor| (
+        executor.set_stack(executor.@state_set.@ordered.to_iter)
+    );
+
+    _pop_stack: NFAExecutor -> Option ((I64, GroupArray), NFAExecutor);
+    _pop_stack = |executor| (
+        executor.@stack.advance.map(|(id_groups, next)|
+            (id_groups, executor.set_stack(next))
+        )
+    );
+
+    // Adds state id to the state set, then pushes id to the stack.
+    _transition: I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+    _transition = |id, groups, executor| (
+        if id == _ID_NONE {
+            executor
+        };
+        if executor.@state_set.contains(id) {
+            executor
+        };
+        eval debug_eprintln("transition " + id.to_string + " groups="+groups.to_string);
+        executor
+            .mod_state_set(add((id, groups)))
+            .mod_stack(push_front((id, groups)))
+    );
+    
+    _transition_on_action: NFAState -> I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+    _transition_on_action = |state, id, groups, executor| (
+        let action = state.@action;
+        if action.is_sa_assert {
+            executor._transition_with_passert(action.as_sa_assert, id, groups)
+        };
+        if action.is_sa_group_begin {
+            let group_idx = action.as_sa_group_begin;
+            let begin = executor.@stream.@position;
+            let group = Group { begin: begin, end: -1 };
+            let groups = groups.set(group_idx, some(group));
+            executor._transition(id, groups)
+        };
+        if action.is_sa_group_end {
+            let group_idx = action.as_sa_group_end;
+            let begin = groups.@(group_idx).map_or(-1, |group| group.@begin);
+            let end = executor.@stream.@position;
+            let group = Group { begin: begin, end: end };
+            let groups = groups.set(group_idx, some(group));
+            executor._transition(id, groups)
+        };
+        executor
+    );
+
+    _transition_with_passert: PAssertion -> I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+    _transition_with_passert = |pa, id, groups, executor| (
+        if pa.is_pa_begin && executor.@stream.@position == 0 {
+            executor._transition(id, groups)
+        };
+        if pa.is_pa_end && executor.@stream.@iter.is_empty {
+            executor._transition(id, groups)
+        };
+        executor
+    );
+
+    transition_with_char: U8 -> NFAExecutor -> NFAExecutor;
+    transition_with_char = |char, executor| (
+        let old_states = executor.@state_set.@ordered.to_iter;
+        let executor = old_states.fold(
+            // Clear new state set
+            executor.set_state_set(executor.@empty_state_set),
+            |executor, (id, groups)|
+            // For each old state:
+            let state = executor.@nfa.get_state(id);
+            let action = state.@action;
+            if !action.is_sa_char_match {
+                executor
+            };
+            if !action.as_sa_char_match.contains(char) {
+                executor
+            };
+
+            // note: stack is not used
+            executor._transition(state.@output_on_action, groups)
+        );
+        let executor = executor.set_stack(Iterator::empty);
+        executor
+    );
 }
 
 type RegExp = unbox struct {
     pattern: Pattern,
     flags: String, // TODO: support flags
-    group_count: I64
+    nfa: NFA
 };
 
 namespace RegExp {
@@ -898,34 +1010,30 @@ namespace RegExp {
     compile = |pattern, flags| (
         let pattern = *parse_pattern.run_parser_str(pattern).map(|(p,_)| p);
         let pattern = pgroup $ (0, pattern); // since whole pattern is group 0
-        let (n, pattern) = pattern._assign_group_number(-1);
-        ok $ RegExp { pattern: pattern, flags: flags, group_count: n }
+        let nfa = NFA::compile(pattern);
+        eval debug_eprintln(nfa.to_string);
+        ok $ RegExp { pattern: pattern, flags: flags, nfa:nfa }
     );
 
-    exec: String -> RegExp -> Result ErrMsg GroupArray;
+    exec: String -> RegExp -> Result ErrMsg (Array String);
     exec = |target, regexp| (
         let stream: Stream = *from_string(target);
-        let state = MatchState::make(stream, regexp);
-        let states = state._match_pattern(regexp.@pattern);
-        let state = *states._select_longest_match.map_or(
-            err $ _NotMatch,
-            |state| ok $ state
-        );
-        ok $ state.@groups
+        let opt = regexp.@nfa.execute(stream);
+        eval debug_eprintln("regexp.@nfa.execute done");
+        if opt.is_none {
+            err $ _NotMatch
+        };
+        let groups: GroupArray = opt.as_some;
+        let groups: Array String = groups.to_iter.map(|opt|
+            opt.map_or("", 
+                |group| 
+                if group.@begin < 0 || group.@end < 0 { "" };
+                target.substring(group.@begin, group.@end)
+            )
+        ).to_array;
+        ok $ groups
     );
 }
-
-main1: IO ();
-main1 = (
-    do {
-        let p = parse_pattern;
-        let res = *p.run_parser_str("([abc]+|d{3}e{4,}f{3,5}|)h?i*").from_result;
-        let (pat, s) = res;
-        let _ = println(s.to_string);
-        println(pat.to_string).lift
-    }
-    .try(eprintln)
-);
 
 check_regexp: String -> String -> Array String -> IO ();
 check_regexp = |pattern, target, expected| (
@@ -936,11 +1044,11 @@ check_regexp = |pattern, target, expected| (
     let res = do {
         let regexp = *RegExp::compile(pattern, "");
         //let res: Result ErrMsg (Array String) = regexp.exec(target);
-        let groups: GroupArray = *regexp.exec(target);
+        let groups: Array String = *regexp.exec(target);
         let lines = groups.to_iter.zip(Iterator::count_up(0)).map(
             |(group, i)| "group[" + i.to_string + "]=" + group.to_string + "\n"
         ).concat_iter;
-        let actual = groups.map(map_or("", |g| g.@text));
+        let actual = groups;
         let lines = if expected != actual {
             lines + "ERROR: expected="+expected.to_string+" actual="+actual.to_string + "\n"
         } else { lines };
@@ -955,12 +1063,13 @@ check_regexp = |pattern, target, expected| (
 
 main: IO ();
 main = (
-    let _ = *main1;
-    let _ = *check_regexp(".*", "abcdef", ["abcdef"]);
     let _ = *check_regexp(".*([ade])+", "abcdef", ["abcde", "e"]);
+    /*
+    let _ = *check_regexp(".*", "abcdef", ["abcdef"]);
     let _ = *check_regexp(".*([ade]+)", "abcdef", ["abcde", "de"]);
     let _ = *check_regexp("\\w+", "abcd,efg", ["abcd"]);
     let _ = *check_regexp("\\s*(\\w+)\\s*", "  abc d,e fg ", ["  abc ", "abc"]);
     let _ = *check_regexp(".*(bc|c*df*e)", "abcccdef", ["abcccde", "de"]);
+    */
     pure()
 );

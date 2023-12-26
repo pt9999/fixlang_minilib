@@ -151,7 +151,9 @@ impl PAssertion: ToString {
 
 // A type that represents Pattern of Regular Expression.
 type Pattern = box union {
-    // Character class pattern, eg. `a`, `[a-z]`, `\d` etc.
+    // Literal character pattern, eg. `a`
+    pnormal: U8,
+    // Character class pattern, eg. `[a-z]`, `\d` etc.
     pclass: CharClass,
     // Assertion pattern, eg. `^`, `$`
     passert: PAssertion,
@@ -168,6 +170,9 @@ type Pattern = box union {
 impl Pattern: ToString {
     // Converts a pattern to a string.
     to_string = |pat| (
+        if pat.is_pnormal { 
+            pat.as_pnormal.byte_to_string
+        };
         if pat.is_pclass {
             "[" + pat.as_pclass.@label + "]"
         };
@@ -394,7 +399,7 @@ namespace Pattern {
     // It returns the translated pattern along with maximum group number.
     _assign_group_number: I64 -> Pattern -> (I64, Pattern);
     _assign_group_number = |n, pat| (
-        if pat.is_pclass || pat.is_passert { 
+        if pat.is_pnormal || pat.is_pclass || pat.is_passert { 
             (n, pat) 
         };
         if pat.is_psequence {
@@ -432,249 +437,9 @@ namespace Pattern {
         eval assert(|_|"err", false);
         (n, pat)
     );
+
+
 }
-
-// NFA (Nondeterministic Finite Automaton)
-//
-// For details, see web pages below.
-// - https://swtch.com/~rsc/regexp/regexp1.html
-// - https://zenn.dev/canalun/articles/regexp_and_automaton
-namespace NFA {
-    _ID_NONE: I64,
-    _ID_NONE = -1;
-
-    type NFAState = unbox struct {
-        id: I64,
-        char_class: CharClass,
-        out_on_match: I64,   // next state with a character that matches the char_class
-        out: I64,           // next state with empty string
-        out2: I64,          // next state with empty string part 2
-    };
-
-    namespace NFAFrag {
-        type NFAFrag = unbox struct {
-            inp: I64,                   // state id of input
-            set_out: I64 -> NFA -> NFA  // set state id of output
-        };
-    }
-
-    type NFA = unbox struct {
-        states: Array NFAState,
-        initial_state: I64,
-        accepted_state: I64
-    };
-
-    empty: NFA;
-    empty = NFA {
-        states: Array::empty(0),
-        initial_state: _ID_NONE,
-        accepted_state: _ID_NONE
-    };
-
-    new_state: NFA -> (NFA, NFAState);
-    new_state = |nfa| (
-        let id = nfa.@states.get_size;
-        let state = NFAState {
-            id: id,
-            char_class: CharClass::empty,
-            out_on_match: _ID_NONE,
-            out: _ID_NONE,
-            out2: _ID_NONE
-        };
-        let nfa = nfa.mod_states(push_back(state));
-        (nfa, state)
-    );
-
-    get_state: I64 -> NFA -> NFAState;
-    get_state = |id, nfa| (
-        nfa.@states.@(id)
-    );
-
-    set_state: I64 -> NFAState -> NFA -> NFA;
-    set_state = |id, state, nfa| (
-        nfa.mod_states(set(id, state))
-    );
-    
-    mod_state: I64 -> (NFAState -> NFAState) -> NFA -> NFA;
-    mod_state = |id, f, nfa| (
-        nfa.mod_states(|states| states.set(id, f(states.@(id))))
-    );
-
-    set_out: I64 -> I64 -> NFA -> NFA;
-    set_out = |id, out, nfa| (
-        nfa.mod_state(id, set_out(out))
-    );
-
-    compile: Pattern -> NFA;
-    compile = |pattern| (
-        let nfa = NFA::empty;
-        let (nfa, frag) = nfa._compile_pattern(pattern);
-        let (nfa, state) = nfa.new_state;
-        let nfa = (frag.@set_out)(state.@id, nfa);
-        let nfa = nfa.set_initial_state(frag.@inp);
-        let nfa = nfa.set_accepted_state(state.@id);
-        nfa
-    );
-
-    _compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);
-    _compile_pattern = |pat, nfa| (
-        if pat.is_pclass {
-            nfa._compile_class(pat.as_pclass)        
-        };
-        if pat.is_psequence {
-            let patterns = pat.as_psequence;
-            if patterns.get_size == 0 {
-                nfa._compile_null_sequence
-            };
-            if patterns.get_size == 1 {
-                nfa._compile_pattern(patterns.@(0))
-            };
-            let (nfa, frag1) = nfa._compile_pattern(
-                psequence $ patterns.pop_back);
-            let (nfa, frag2) = nfa._compile_pattern(
-                patterns.get_last.as_some);
-            nfa._compile_seq(frag1, frag2)
-        };
-        if pat.is_peither {
-            let (pat1, pat2) = pat.as_peither;
-            let (nfa, frag1) = nfa._compile_pattern(pat1);
-            let (nfa, frag2) = nfa._compile_pattern(pat2);
-            nfa._compile_either(frag1, frag2)
-        };
-        if pat.is_pquant {
-            let (pat, min, max) = pat.as_pquant;
-            let (nfa, frag1) = nfa._compile_pattern(pat1);
-            if (min == 0 && max == 1) {
-                nfa._compile_zero_or_once(frag1)
-            };
-            if (min == 0 && max == maximum) {
-                nfa._compile_zero_or_more(frag1)
-            };
-            if (min == 1 && max == maximum) {
-                nfa._compile_one_or_more(frag1)
-            };
-
-            // TODO: support other case
-            eval assert (|_|"currently not implemented", false);
-            nfa._compile_one_or_more(frag1)
-        };
-        // TODO: support passert
-        // TODO: support pgroup
-        eval assert (|_|"currently not implemented", false);
-        nfa._compile_class(pat.as_pclass)        
-    );
-
-    _compile_class: CharClass -> NFA -> (NFA, NFAFrag);
-    _compile_class = |char_class, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let state = state.set_char_class(char_class);
-        let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out(state.id, out);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-
-    // ``
-    _compile_null_sequence: NFA -> (NFA, NFAFrag);
-    _compile_null_sequence = |nfa| (
-        let (nfa, state) = nfa.new_state;
-        let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out(state.id, out);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-
-    // `e1 e2`
-    _compile_seq: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
-    _compile_seq = |frag1, frag2, nfa| (
-        let nfa = (frag1.@set_out)(frag2.@inp, nfa);
-        let frag = NFAFrag {
-            inp: frag1.@inp,
-            set_out: |out, nfa| (
-                let nfa = (frag2.@set_out)(out, nfa);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-
-    // `e1|e2`
-    _compile_either: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
-    _compile_either = |frag1, frag2, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = nfa.set_out2(state.@id, frag2.@inp);
-        let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = (frag1.@set_out)(out, nfa);
-                let nfa = (frag2.@set_out)(out, nfa);
-                nfa
-            )
-        };
-        (nfa, frag)
-
-    );
-
-    // `e?`
-    _compile_zero_or_once: NFAFrag -> NFA -> (NFA, NFAFrag);
-    _compile_zero_or_once = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = (frag1.@set_out)(out, nfa);
-                let nfa = nfa.set_out(state.@id, out);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-
-    // `e*`
-    _compile_zero_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
-    _compile_zero_or_more = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = (frag1.@set_out)(state.@id, nfa);
-        let frag = NFAFrag {
-            inp: state.@id,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out2(state.@id, out);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-
-    // `e+`
-    _compile_one_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
-    _compile_one_or_more = |frag1, nfa| (
-        let (nfa, state) = nfa.new_state;
-        let nfa = nfa.set_out(state.@id, frag1.@inp);
-        let nfa = (frag1.@set_out)(state.@id, nfa);
-        let frag = NFAFrag {
-            inp: frag1.@inp,
-            set_out: |out, nfa| (
-                let nfa = nfa.set_out2(state.@id, out);
-                nfa
-            )
-        };
-        (nfa, frag)
-    );
-}
-
-
-
 
 // Matched group
 type Group = unbox struct {
@@ -729,6 +494,9 @@ namespace MatchState {
     // If two or more matching paths exist, returns them all.
     _match_pattern: Pattern -> MatchState -> Iterator MatchState;
     _match_pattern = |pattern, state| (
+        if pattern.is_pnormal {
+            state._match_pattern_pnormal(pattern.as_pnormal)
+        };
         if pattern.is_pclass {
             state._match_pattern_pclass(pattern.as_pclass)
         };
@@ -751,6 +519,16 @@ namespace MatchState {
         Iterator::empty
     );
 
+    _match_pattern_pnormal: U8 -> MatchState -> Iterator MatchState;
+    _match_pattern_pnormal = |c, state| (
+        state.@stream.advance.map_or(
+            Iterator::empty,
+            |(c1, next)|
+            if c != c1 { Iterator::empty };
+            pure $ state.set_stream(next)
+        )    
+    );
+    
     _match_pattern_pclass: CharClass -> MatchState -> Iterator MatchState;
     _match_pattern_pclass = |cls, state| (
         state.@stream.advance.map_or(

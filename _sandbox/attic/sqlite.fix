@@ -1,5 +1,7 @@
 module Main;
 
+import Debug;
+
 _sqlite3_open: String -> IOFail Ptr;
 _sqlite3_open = |filepath| (
     let pdb : Array Ptr = Array::fill(1, nullptr);
@@ -11,24 +13,217 @@ _sqlite3_open = |filepath| (
     if res != 0_I32 {
         throw $ "sqlite3_open failed: res = " + res.to_string
     };
-    let ptr = pdb.@(0);
-    pure $ ptr
+    let db = pdb.@(0);
+    pure $ db
 );
 
-/*
+_sqlite3_close: Ptr -> IOFail ();
+_sqlite3_close = |db| (
+    let res = CALL_C[I32 sqlite3_close(Ptr), db];
+    if res != 0_I32 {
+        throw $ "sqlite3_close failed: res = " + res.to_string
+    };
+    pure $ ()
+);
+
+_sqlite3_prepare_v2: Ptr -> String -> IOFail Ptr;
+_sqlite3_prepare_v2 = |db, sql| (
+    let nbyte = sql.get_size.to_I32;
+    let pstmt: Array Ptr = Array::fill(1, nullptr);
+    let ztail: Array Ptr = Array::fill(1, nullptr);
+    let res = (
+        ztail.borrow_ptr(|pztail|
+            pstmt.borrow_ptr(|ppstmt|
+                sql.borrow_c_str(|zsql|
+                    CALL_C[I32 sqlite3_prepare_v2(Ptr, Ptr, I32, Ptr, Ptr), db, zsql, nbyte, ppstmt, pztail]
+                )
+            )
+        )
+    );
+    if res != 0_I32 {
+        throw $ "sqlite3_prepare_v2 failed: res = " + res.to_string + " sql=" + sql
+    };
+    let stmt = pstmt.@(0);
+    pure $ stmt
+); 
+
+_sqlite3_finalize: Ptr -> IOFail ();
+_sqlite3_finalize = |stmt| (
+    let res = CALL_C[I32 sqlite3_finalize(Ptr), stmt];
+    if res != 0_I32 {
+        throw $ "sqlite3_finalize failed: res = " + res.to_string
+    };
+    pure $ ()
+);
+
+_sqlite3_step: Ptr -> IOFail ();
+_sqlite3_step = |stmt| (
+    let res = CALL_C[I32 sqlite3_step(Ptr), stmt];
+    if res != 0_I32 && res != /* SQLITE_ROW: */ 100_I32 && res != /* SQLITE_DONE: */ 101_I32 {
+        throw $ "sqlite3_step failed: res = " + res.to_string
+    };
+    pure $ ()
+);
+
+_SQLITE_INTEGER: I32;
+_SQLITE_INTEGER = 1_I32;
+_SQLITE_FLOAT: I32;
+_SQLITE_FLOAT = 2_I32;
+_SQLITE_TEXT: I32;
+_SQLITE_TEXT = 3_I32;
+_SQLITE_BLOB: I32;
+_SQLITE_BLOB = 4_I32;
+_SQLITE_NULL: I32;
+_SQLITE_NULL = 5_I32;
+
+_sqlite3_column_type: I64 -> Ptr -> IOFail I32;
+_sqlite3_column_type = |icol, stmt| (
+    let res = CALL_C[I32 sqlite3_column_type(Ptr, I32), stmt, icol.to_I32];
+    pure $ res
+);
+
+_sqlite3_column_int: I64 -> Ptr -> IOFail I32;
+_sqlite3_column_int = |icol, stmt| (
+    let res = CALL_C[I32 sqlite3_column_int(Ptr, I32), stmt, icol.to_I32];
+    pure $ res
+);
+
+_sqlite3_column_text: I64 -> Ptr -> IOFail String;
+_sqlite3_column_text = |icol, stmt| (
+    //eval debug_eprintln("get text: icol="+icol.to_string);
+    let ptr = CALL_C[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32];
+    //eval debug_eprintln("get text done: icol="+icol.to_string);
+    let str = _unsafe_from_c_str_ptr(ptr);
+    pure $ str
+);
+
 type Sqlite = unbox struct {
-    ptr: Destructor Ptr
+    dtor: Destructor Ptr
 };
 
 namespace Sqlite {
-    
+    open: String -> IOFail Sqlite;
+    open = |filepath| (
+        let db = *_sqlite3_open(filepath);
+        let dtor = Destructor::make(db, |db|
+            //eval debug_eprintln ("closing db");
+            _sqlite3_close(db).to_result.map(|_|())._unsafe_perform
+        );
+        pure $ Sqlite { dtor:dtor }
+    ); 
 }
-*/
+
+type Statement = unbox struct {
+    db: Sqlite,
+    dtor: Destructor Ptr
+};
+
+namespace Statement {
+    prepare: String -> Sqlite -> IOFail Statement;
+    prepare = |sql, db| (
+        eval debug_eprintln ("prepare: "+ sql);
+        db.@dtor.borrow(|pdb| 
+            let stmt = *_sqlite3_prepare_v2(pdb, sql);
+            let dtor = Destructor::make(stmt, |stmt|
+                //eval debug_eprintln ("finalizing statement");
+                _sqlite3_finalize(stmt).to_result.map(|_|())._unsafe_perform
+            );
+            pure $ Statement { db:db, dtor:dtor }
+        )
+    );
+
+    step: Statement -> IOFail ();
+    step = |stmt| (
+        stmt.@dtor.borrow(|stmt|
+            let _ = *_sqlite3_step(stmt);
+            pure $ ()
+        )
+    );
+
+    column_type: I64 -> Statement -> IOFail I32;
+    column_type = |icol, stmt| (
+        stmt.@dtor.borrow(|stmt|
+            let val = *_sqlite3_column_type(icol, stmt);
+            pure $ val
+        )
+    );
+
+    column_int: I64 -> Statement -> IOFail I32;
+    column_int = |icol, stmt| (
+        stmt.@dtor.borrow(|stmt|
+            let val = *_sqlite3_column_int(icol, stmt);
+            pure $ val
+        )
+    );
+
+    column_text: I64 -> Statement -> IOFail String;
+    column_text = |icol, stmt| (
+        stmt.@dtor.borrow(|stmt|
+            let val = *_sqlite3_column_text(icol, stmt);
+            pure $ val
+        )
+    );
+
+    column_to_string: I64 -> Statement -> IOFail (Option String);
+    column_to_string = |icol, stmt| (
+        let typ = *stmt.column_type(icol);
+        if (typ == _SQLITE_INTEGER) {
+            pure $ some $ (*stmt.column_int(icol)).to_string
+        };
+        if (typ == _SQLITE_TEXT) {
+            pure $ some $ *stmt.column_text(icol)
+        };
+        pure $ none()
+    );
+
+    row: Statement -> IOFail (Array String);
+    row = |stmt| (
+        loop_m(
+            (Array::empty(100), 0), |(array, i)|
+            /*
+            let typ = *_sqlite3_column_type(i, stmt);
+            //let _ = *println("typ=" + typ.to_string).lift;
+            if typ <= 0_I32 || typ == _SQLITE_NULL {
+                break_m $ array
+            };
+            let res = *_sqlite3_column_text(i, stmt).to_result.lift;
+            if res.is_err {
+                break_m $ array
+            };
+            let array = array.push_back(res.as_ok);
+            */
+            let str = *stmt.column_to_string(i);
+            if str.is_none {
+                break_m $ array
+            };
+            let array = array.push_back(str.as_some);
+            continue_m $ (array, i + 1)
+        )
+    );
+
+}
+
+step_and_show: Statement -> IOFail ();
+step_and_show = |stmt| (
+    let _ = *stmt.step;
+    let row = *stmt.row;
+    let _ = *println("> " + row.to_iter.join(",")).lift;
+    pure $ ()
+);
 
 main: IO ();
 main = (
     do {
-        let ptr = *_sqlite3_open("a.db");
+        //let ptr = *_sqlite3_open("a.db");
+        let db = *Sqlite::open("a.db");
+        let stmt = *db.prepare("DROP TABLE IF EXISTS t1;");
+        let _ = *stmt.step_and_show;
+        let stmt = *db.prepare("CREATE TABLE t1 (a int, b text);");
+        let _ = *stmt.step_and_show;
+        let stmt = *db.prepare("INSERT INTO t1 VALUES (123, 'hello');");
+        let _ = *stmt.step_and_show;
+        let stmt = *db.prepare("SELECT * FROM t1;");
+        let _ = *stmt.step_and_show;
         pure()
     }
     .try(|err| eprintln(err))

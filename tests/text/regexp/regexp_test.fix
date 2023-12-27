@@ -1,0 +1,52 @@
+module Main;
+
+import Debug;
+
+import RegExp;
+import StringEx;
+import UnitTest;
+
+impl [a:Eq, e:Eq] Result e a: Eq
+{
+    eq = |a, b| (
+        if a.is_ok && b.is_ok { a.as_ok == b.as_ok };
+        if a.is_err && b.is_err { a.as_err == b.as_err };
+        false
+    );
+}
+
+test_regexp_match: (String, String, Result ErrMsg (Array String)) -> TestCase;
+test_regexp_match = |(pattern, target, expected)| (
+    let testname = "test_regexp_match(" + pattern + "," + target + ")";
+    make_test(testname) $ |_|
+    let actual = do {
+        let regexp = *RegExp::compile(pattern, "");
+        regexp.match(target)
+    };
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_char_class: TestCase;
+test_char_class = (
+    [
+        test_regexp_match $ ("", "", ok $ [""]),
+        test_regexp_match $ ("[a-z]", "a", ok $ ["a"]),
+        test_regexp_match $ ("[0-9]", "a", err $ "NotMatch"),
+        test_regexp_match $ ("[-a-z]", "-", ok $ ["-"]),
+        test_regexp_match $ ("[a-z-]", "-", ok $ ["-"]),
+        test_regexp_match $ ("[---]", "-", ok $ ["-"]),
+        test_regexp_match $ ("[a-z", "a", err $ "']' is missing"),
+        test_regexp_match $ ("[a-z\\]]", "]", ok $ ["]"]),
+        TestCase::empty
+    ].run_tests
+);
+
+main: IO ();
+main = (
+    [
+        test_char_class,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

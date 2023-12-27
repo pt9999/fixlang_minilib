@@ -17,10 +17,8 @@
 //
 module Main;
 
-import Character;
 import Debug;
 
-import SimpleParser;
 import StringEx;
 import RegExpPattern;
 import RegExpNFA;
@@ -34,21 +32,20 @@ type RegExp = unbox struct {
 namespace RegExp {
 
     compile: String -> String -> Result ErrMsg RegExp;
-    compile = |pattern, flags| (
-        let pattern = *parse_pattern.run_parser_str(pattern).map(|(p,_)| p);
+    compile = |pattern_str, flags| (
+        let pattern = *Pattern::parse(pattern_str);
         let pattern = pgroup $ (0, pattern); // since whole pattern is group 0
         let nfa = NFA::compile(pattern);
         eval debug_eprintln(nfa.to_string);
         ok $ RegExp { pattern: pattern, flags: flags, nfa:nfa }
     );
 
-    exec: String -> RegExp -> Result ErrMsg (Array String);
-    exec = |target, regexp| (
-        let stream: Stream = *from_string(target);
-        let opt = regexp.@nfa.execute(stream);
+    match: String -> RegExp -> Result ErrMsg (Array String);
+    match = |target, regexp| (
+        let opt = regexp.@nfa.execute(target);
         eval debug_eprintln("regexp.@nfa.execute done");
         if opt.is_none {
-            err $ _NotMatch
+            err $ "not match"
         };
         let groups: Groups = opt.as_some;
         let groups: Array String = groups.to_iter.map(|(begin, end)|
@@ -67,8 +64,8 @@ check_regexp = |pattern, target, expected| (
 
     let res = do {
         let regexp = *RegExp::compile(pattern, "");
-        //let res: Result ErrMsg (Array String) = regexp.exec(target);
-        let groups: Array String = *regexp.exec(target);
+        //let res: Result ErrMsg (Array String) = regexp.match(target);
+        let groups: Array String = *regexp.match(target);
         let lines = groups.to_iter.zip(Iterator::count_up(0)).map(
             |(group, i)| "group[" + i.to_string + "]=" + group.to_string + "\n"
         ).concat_iter;
@@ -88,12 +85,10 @@ check_regexp = |pattern, target, expected| (
 main: IO ();
 main = (
     let _ = *check_regexp(".*([ade])+", "abcdef", ["abcde", "e"]);
-    /*
     let _ = *check_regexp(".*", "abcdef", ["abcdef"]);
     let _ = *check_regexp(".*([ade]+)", "abcdef", ["abcde", "de"]);
     let _ = *check_regexp("\\w+", "abcd,efg", ["abcd"]);
-    let _ = *check_regexp("\\s*(\\w+)\\s*", "  abc d,e fg ", ["  abc ", "abc"]);
+    let _ = *check_regexp("\\s*(\\w+)\\s+", "  abc d,e fg ", ["  abc ", "abc"]);
     let _ = *check_regexp(".*(bc|c*df*e)", "abcccdef", ["abcccde", "de"]);
-    */
     pure()
 );

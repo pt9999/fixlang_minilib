@@ -182,7 +182,7 @@ type NFAFrag = unbox struct {
 
 namespace NFAFrag {
 
-    // `nfa.compile_pattern(pattern)` compiles a pattern to a NFAFrag.
+    // `nfa.compile_pattern(pattern)` compiles a pattern to a fragment.
     compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);
     compile_pattern = |pat, nfa| (
         if pat.is_pclass {
@@ -249,6 +249,7 @@ namespace NFAFrag {
         nfa._compile_action(sa_none())
     );
 
+    // Compiles an action to a fragment.
     _compile_action: NFANodeAction -> NFA -> (NFA, NFAFrag);
     _compile_action = |action, nfa| (
         let (nfa, id) = nfa.new_node;
@@ -264,7 +265,7 @@ namespace NFAFrag {
         (nfa, frag)
     );
 
-    // ``
+    // Compiles null sequence (``) to a fragment.
     _compile_null_sequence: NFA -> (NFA, NFAFrag);
     _compile_null_sequence = |nfa| (
         let (nfa, id) = nfa.new_node;
@@ -279,7 +280,7 @@ namespace NFAFrag {
         (nfa, frag)
     );
 
-    // `e1 e2`
+    // Compiles a sequence of two fragments (`e1 e2`) to a fragment.
     _compile_seq: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_seq = |frag1, frag2, nfa| (
         let nfa = nfa.set_frag_output(frag1, frag2.@input);
@@ -293,7 +294,7 @@ namespace NFAFrag {
         (nfa, frag)
     );
 
-    // `e1|e2`
+    // Compiles an alternative of two fragments (`e1|e2`) to a fragment.
     _compile_either: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_either = |frag1, frag2, nfa| (
         let (nfa, id) = nfa.new_node;
@@ -312,7 +313,7 @@ namespace NFAFrag {
 
     );
 
-    // `e?`
+    // Compiles zero or once occurrence (`e?`) to a fragment.
     _compile_zero_or_once: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_once = |frag1, nfa| (
         let (nfa, id) = nfa.new_node;
@@ -329,7 +330,7 @@ namespace NFAFrag {
         (nfa, frag)
     );
 
-    // `e*`
+    // Compiles zero or more occurrence (`e*`) to a fragment.
     _compile_zero_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_more = |frag1, nfa| (
         let (nfa, id) = nfa.new_node;
@@ -346,7 +347,7 @@ namespace NFAFrag {
         (nfa, frag)
     );
 
-    // `e+`
+    // Compiles one or more occurrence (`e+`) to a fragment.
     _compile_one_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_one_or_more = |frag1, nfa| (
         let (nfa, id) = nfa.new_node;
@@ -456,6 +457,7 @@ namespace NFAExecutor {
         )
     );
 
+    // Applies transitions with an empty string.
     transition_with_empty_string: NFAExecutor -> NFAExecutor;
     transition_with_empty_string = |executor| (
         let executor = executor._init_transition;
@@ -501,11 +503,19 @@ namespace NFAExecutor {
             .mod_stack(push_front((id, groups)))
     );
 
+    // Applies transitions on an action with empty string.
     _transition_on_action: NFANode -> NodeID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition_on_action = |node, id, groups, executor| (
         let action = node.@action;
         if action.is_sa_assert {
-            executor._transition_with_passert(action.as_sa_assert, id, groups)
+            let pa = action.as_sa_assert;
+            if pa.is_pa_begin && executor.@stream.@position == 0 {
+                executor._transition(id, groups)
+            };
+            if pa.is_pa_end && executor.@stream.@iter.is_empty {
+                executor._transition(id, groups)
+            };
+            executor
         };
         if action.is_sa_group_begin {
             let group_idx = action.as_sa_group_begin;
@@ -523,17 +533,7 @@ namespace NFAExecutor {
         executor
     );
 
-    _transition_with_passert: PAssertion -> NodeID -> Groups -> NFAExecutor -> NFAExecutor;
-    _transition_with_passert = |pa, id, groups, executor| (
-        if pa.is_pa_begin && executor.@stream.@position == 0 {
-            executor._transition(id, groups)
-        };
-        if pa.is_pa_end && executor.@stream.@iter.is_empty {
-            executor._transition(id, groups)
-        };
-        executor
-    );
-
+    // Applies transitions with a string of one character.
     transition_with_char: U8 -> NFAExecutor -> NFAExecutor;
     transition_with_char = |char, executor| (
         let old_nodes = executor.@node_set.@ordered.to_iter;

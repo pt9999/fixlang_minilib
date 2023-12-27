@@ -339,7 +339,7 @@ namespace NFAFrag {
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
-                nfa.mod_node(id,set_output2(out))
+                nfa.mod_node(id, set_output2(out))
             ),
             label: frag1.@label + "*"
         };
@@ -365,46 +365,49 @@ namespace NFAFrag {
     );
 }
 
-// NFA Node set, used for NFA node transition
-type NFANodeSet = unbox struct {
-    ordered: Array (NodeID, Groups),   // array of node id and groups
+// NFA state
+type NFAState = (NodeID, Groups);
+
+// NFA state set, used for NFA state transition
+type NFAStateSet = unbox struct {
+    ordered: Array NFAState,            // array of node id and groups
     mask: Array Bool                    // mask whether id is contained or not
 };
 
-namespace NFANodeSet {
+namespace NFAStateSet {
 
-    // `NFANodeSet::empty(node_count)` creates an empty node set.
+    // `NFAStateSet::empty(node_count)` creates an empty state set.
     // `node_count` is number of NFA nodes.
-    empty: I64 -> NFANodeSet;
-    empty = |node_count| NFANodeSet {
+    empty: I64 -> NFAStateSet;
+    empty = |node_count| NFAStateSet {
         ordered: Array::empty(node_count),
         mask:  Array::fill(node_count, false)
     };
 
-    // Checks whether the node set is empty.
-    is_empty: NFANodeSet -> Bool;
-    is_empty = |node_set| (
-        node_set.@ordered.is_empty
+    // Checks whether the state set is empty.
+    is_empty: NFAStateSet -> Bool;
+    is_empty = |state_set| (
+        state_set.@ordered.is_empty
     );
 
-    // Checks whether the node set contains a node.
-    contains: NodeID -> NFANodeSet -> Bool;
-    contains = |id, node_set| (
-        node_set.@mask.@(id.@val)
+    // Checks whether the state set contains a node.
+    contains: NodeID -> NFAStateSet -> Bool;
+    contains = |id, state_set| (
+        state_set.@mask.@(id.@val)
     );
 
-    // Adds a node to the node set.
-    add: (NodeID, Groups) -> NFANodeSet -> NFANodeSet;
-    add = |(id, groups), node_set| (
-        if node_set.contains(id) { node_set };
-        let node_set = node_set.mod_ordered(push_back((id, groups)));
-        let node_set = node_set.mod_mask(set(id.@val, true));
-        node_set
+    // Adds a node to the state set.
+    add: NFAState -> NFAStateSet -> NFAStateSet;
+    add = |(id, groups), state_set| (
+        if state_set.contains(id) { state_set };
+        let state_set = state_set.mod_ordered(push_back((id, groups)));
+        let state_set = state_set.mod_mask(set(id.@val, true));
+        state_set
     );
 
-    get_groups: NodeID -> NFANodeSet -> Option Groups;
-    get_groups = |id, node_set| (
-        node_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
+    get_groups: NodeID -> NFAStateSet -> Option Groups;
+    get_groups = |id, state_set| (
+        state_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
         .get_first
         .map(|(id, groups)| groups)
     );
@@ -414,23 +417,24 @@ namespace NFANodeSet {
 type NFAExecutor = unbox struct {
     stream: Stream,                     // stream of characters
     nfa: NFA,                           // NFA
-    empty_node_set: NFANodeSet,       // an empty node set
-    node_set: NFANodeSet,             // current node set
-    stack: Iterator (NodeID, Groups)   // temporary stack for transition
+    empty_state_set: NFAStateSet,       // an empty state set
+    state_set: NFAStateSet,             // current state set
+    stack: Iterator NFAState            // temporary stack for transition
 };
 
 namespace NFAExecutor {
     // Creates an executor.
     make: Stream -> NFA -> NFAExecutor;
     make = |stream, nfa| (
-        let empty_node_set = NFANodeSet::empty(nfa.@nodes.get_size);
+        let empty_state_set = NFAStateSet::empty(nfa.@nodes.get_size);
         let groups: Groups = Array::fill(nfa.@group_count, (-1, -1));
-        let node_set = empty_node_set.add((nfa.@initial_node, groups));
+        let initial_state = (nfa.@initial_node, groups);
+        let state_set = empty_state_set.add(initial_state);
         NFAExecutor {
             stream: stream,
             nfa: nfa,
-            empty_node_set: empty_node_set,
-            node_set: node_set,
+            empty_state_set: empty_state_set,
+            state_set: state_set,
             stack: Iterator::empty
         }
     );
@@ -440,8 +444,8 @@ namespace NFAExecutor {
         loop(
             executor, |executor|
             let executor = executor.transition_with_empty_string;
-            if executor.@node_set.contains(executor.@nfa.@accepting_node) {
-                let opt = executor.@node_set.get_groups(executor.@nfa.@accepting_node);
+            if executor.@state_set.contains(executor.@nfa.@accepting_node) {
+                let opt = executor.@state_set.get_groups(executor.@nfa.@accepting_node);
                 eval assert (|_|"not found groups", opt.is_some);
                 break $ some $ opt.as_some   // match success
                 // TODO: 現状では受理状態になったらループを抜けるため、最短一致になる。
@@ -478,28 +482,28 @@ namespace NFAExecutor {
 
     _init_transition: NFAExecutor -> NFAExecutor;
     _init_transition = |executor| (
-        executor.set_stack(executor.@node_set.@ordered.to_iter)
+        executor.set_stack(executor.@state_set.@ordered.to_iter)
     );
 
-    _pop_stack: NFAExecutor -> Option ((NodeID, Groups), NFAExecutor);
+    _pop_stack: NFAExecutor -> Option (NFAState, NFAExecutor);
     _pop_stack = |executor| (
-        executor.@stack.advance.map(|(id_groups, next)|
-            (id_groups, executor.set_stack(next))
+        executor.@stack.advance.map(|(state, next)|
+            (state, executor.set_stack(next))
         )
     );
 
-    // Adds node id to the node set, then pushes id to the stack.
+    // Adds node id to the state set, then pushes id to the stack.
     _transition: NodeID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition = |id, groups, executor| (
         if id == _INVALID_NODE_ID {
             executor
         };
-        if executor.@node_set.contains(id) {
+        if executor.@state_set.contains(id) {
             executor
         };
         eval debug_eprintln("transition " + id.to_string + " groups="+groups.to_string);
         executor
-            .mod_node_set(add((id, groups)))
+            .mod_state_set(add((id, groups)))
             .mod_stack(push_front((id, groups)))
     );
 
@@ -536,10 +540,10 @@ namespace NFAExecutor {
     // Applies transitions with a string of one character.
     transition_with_char: U8 -> NFAExecutor -> NFAExecutor;
     transition_with_char = |char, executor| (
-        let old_nodes = executor.@node_set.@ordered.to_iter;
+        let old_nodes = executor.@state_set.@ordered.to_iter;
         let executor = old_nodes.fold(
-            // Clear new node set
-            executor.set_node_set(executor.@empty_node_set),
+            // Clear new state set
+            executor.set_state_set(executor.@empty_state_set),
             |executor, (id, groups)|
             // For each old node:
             let node = executor.@nfa.get_node(id);

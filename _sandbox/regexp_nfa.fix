@@ -22,9 +22,9 @@ type Groups = Array Group;
 
 // NFA
 type NFA = unbox struct {
-    states: Array NFAState,     // array of states
-    initial_state: StateID,     // initial state
-    accepting_state: StateID,   // accepting state
+    nodes: Array NFANode,     // array of nodes
+    initial_node: NodeID,     // initial node
+    accepting_node: NodeID,   // accepting node
     group_count: I64            // group count
 };
 
@@ -32,36 +32,36 @@ namespace NFA {
     // An empty NFA.
     empty: NFA;
     empty = NFA {
-        states: Array::empty(0),
-        initial_state: _ID_NONE,
-        accepting_state: _ID_NONE,
+        nodes: Array::empty(0),
+        initial_node: _INVALID_NODE_ID,
+        accepting_node: _INVALID_NODE_ID,
         group_count: 0
     };
 
-    // Creates new state. Returns the new state id.
-    new_state: NFA -> (NFA, StateID);
-    new_state = |nfa| (
-        let id = StateID { val: nfa.@states.get_size };
-        let state = NFAState::empty;
-        let state = state.set_id(id);
-        let nfa = nfa.mod_states(push_back(state));
+    // Creates new node. Returns the new node id.
+    new_node: NFA -> (NFA, NodeID);
+    new_node = |nfa| (
+        let id = NodeID { val: nfa.@nodes.get_size };
+        let node = NFANode::empty;
+        let node = node.set_id(id);
+        let nfa = nfa.mod_nodes(push_back(node));
         (nfa, id)
     );
 
-    // `nfa.get_state(id)` gets the state whose @id is `id`.
-    get_state: StateID -> NFA -> NFAState;
-    get_state = |id, nfa| (
-        nfa.@states.@(id.@val)
+    // `nfa.get_node(id)` gets the node whose @id is `id`.
+    get_node: NodeID -> NFA -> NFANode;
+    get_node = |id, nfa| (
+        nfa.@nodes.@(id.@val)
     );
 
-    // `nfa.mod_state(id, f)` modifies the state whose @id is `id`.
-    mod_state: StateID -> (NFAState -> NFAState) -> NFA -> NFA;
-    mod_state = |id, f, nfa| (
-        nfa.mod_states(|states| states.set(id.@val, f(states.@(id.@val))))
+    // `nfa.mod_node(id, f)` modifies the node whose @id is `id`.
+    mod_node: NodeID -> (NFANode -> NFANode) -> NFA -> NFA;
+    mod_node = |id, f, nfa| (
+        nfa.mod_nodes(|nodes| nodes.set(id.@val, f(nodes.@(id.@val))))
     );
 
     // `nfa.set_frag_output(frag, out)` sets the output of the fragment to `out`.
-    set_frag_output: NFAFrag -> StateID -> NFA -> NFA;
+    set_frag_output: NFAFrag -> NodeID -> NFA -> NFA;
     set_frag_output = |frag, out, nfa| (
         (frag.@set_output)(out, nfa)
     );
@@ -73,9 +73,9 @@ namespace NFA {
         let (group_count, pattern) = pattern._assign_group_number(0);
         let nfa = nfa.set_group_count(group_count);
         let (nfa, frag) = nfa.compile_pattern(pattern);
-        let nfa = nfa.set_initial_state(frag.@input);
-        let (nfa, accept_id) = nfa.new_state;
-        let nfa = nfa.set_accepting_state(accept_id);
+        let nfa = nfa.set_initial_node(frag.@input);
+        let (nfa, accept_id) = nfa.new_node;
+        let nfa = nfa.set_accepting_node(accept_id);
         let nfa = nfa.set_frag_output(frag, accept_id);
         nfa
     );
@@ -91,15 +91,15 @@ namespace NFA {
 
 impl NFA: ToString {
     to_string = |nfa| (
-        "NFA { states=\n"
-        + nfa.@states.to_iter.map(|s| "  " + s.to_string + "\n").concat_iter
-        + "  initial_state=" + nfa.@initial_state.to_string + "\n"
-        + "  accepting_state=" + nfa.@accepting_state.to_string + "\n"
+        "NFA { nodes=\n"
+        + nfa.@nodes.to_iter.map(|s| "  " + s.to_string + "\n").concat_iter
+        + "  initial_node=" + nfa.@initial_node.to_string + "\n"
+        + "  accepting_node=" + nfa.@accepting_node.to_string + "\n"
         +"}"
     );
 }
 
-type NFAStateAction = unbox union {
+type NFANodeAction = unbox union {
     sa_none: (),
     sa_char_match: CharClass,
     sa_assert: PAssertion,
@@ -107,7 +107,7 @@ type NFAStateAction = unbox union {
     sa_group_end: I64
 };
 
-impl NFAStateAction: ToString {
+impl NFANodeAction: ToString {
     to_string = |a| (
         if a.is_sa_none { "none" };
         if a.is_sa_char_match { a.as_sa_char_match.to_string };
@@ -118,55 +118,55 @@ impl NFAStateAction: ToString {
     );
 }
 
-// An NFA state
-type NFAState = unbox struct {
-    id: StateID,                // state id
-    action: NFAStateAction,     // action
-    output_on_action: StateID,  // next state when the action succeeded
-    output: StateID,            // next state with empty string
-    output2: StateID,           // next state with empty string part 2
+// An NFA node
+type NFANode = unbox struct {
+    id: NodeID,                // node id
+    action: NFANodeAction,     // action
+    output_on_action: NodeID,  // next node when the action succeeded
+    output: NodeID,            // next node with empty string
+    output2: NodeID,           // next node with empty string part 2
     label: String               // a label to display
 };
 
-// ID of NFA state. -1 is invalid value.
-type StateID = unbox struct {
+// ID of NFA node. -1 is invalid value.
+type NodeID = unbox struct {
     val: I64
 };
 
-impl StateID: ToString {
+impl NodeID: ToString {
     to_string = |a| a.@val.to_string;
 }
 
-impl StateID: Eq {
+impl NodeID: Eq {
     eq = |a, b| a.@val == b.@val;
 }
 
-namespace NFAState {
-    // An invalid state ID.
-    _ID_NONE: StateID;
-    _ID_NONE = StateID { val: -1 };
+namespace NFANode {
+    // An invalid node ID.
+    _INVALID_NODE_ID: NodeID;
+    _INVALID_NODE_ID = NodeID { val: -1 };
 
-    // An empty state
-    empty: NFAState;
-    empty = NFAState {
-        id: _ID_NONE,
+    // An empty node
+    empty: NFANode;
+    empty = NFANode {
+        id: _INVALID_NODE_ID,
         action: sa_none(),
-        output_on_action: _ID_NONE,
-        output: _ID_NONE,
-        output2: _ID_NONE,
+        output_on_action: _INVALID_NODE_ID,
+        output: _INVALID_NODE_ID,
+        output2: _INVALID_NODE_ID,
         label: ""
     };
 }
 
-impl NFAState: ToString {
-    to_string = |state| (
+impl NFANode: ToString {
+    to_string = |node| (
         "("
-        + state.@id.to_string + ":"
-        + state.@action.to_string + ":"
-        + state.@output_on_action.to_string + ","
-        + state.@output.to_string + ","
-        + state.@output2.to_string + ":"
-        + state.@label
+        + node.@id.to_string + ":"
+        + node.@action.to_string + ":"
+        + node.@output_on_action.to_string + ","
+        + node.@output.to_string + ","
+        + node.@output2.to_string + ":"
+        + node.@label
         + ")"
     );
 }
@@ -174,8 +174,8 @@ impl NFAState: ToString {
 
 // NFA Fragment
 type NFAFrag = unbox struct {
-    input: StateID,                 // state id of input of this fragment
-    set_output: StateID -> NFA -> NFA,  // a function to set state id of output
+    input: NodeID,                 // node id of input of this fragment
+    set_output: NodeID -> NFA -> NFA,  // a function to set node id of output
                                     // of this fragment
     label: String               // a label to display
 };
@@ -249,33 +249,33 @@ namespace NFAFrag {
         nfa._compile_action(sa_none())
     );
 
-    _compile_action: NFAStateAction -> NFA -> (NFA, NFAFrag);
+    _compile_action: NFANodeAction -> NFA -> (NFA, NFAFrag);
     _compile_action = |action, nfa| (
-        let (nfa, id) = nfa.new_state;
-        let nfa = nfa.mod_state(id, set_action(action));
+        let (nfa, id) = nfa.new_node;
+        let nfa = nfa.mod_node(id, set_action(action));
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
-                nfa.mod_state(id, set_output_on_action(out))
+                nfa.mod_node(id, set_output_on_action(out))
             ),
             label: action.to_string
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // ``
     _compile_null_sequence: NFA -> (NFA, NFAFrag);
     _compile_null_sequence = |nfa| (
-        let (nfa, id) = nfa.new_state;
+        let (nfa, id) = nfa.new_node;
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
-                nfa.mod_state(id, set_output(out))
+                nfa.mod_node(id, set_output(out))
             ),
             label: "``"
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
 
@@ -296,9 +296,9 @@ namespace NFAFrag {
     // `e1|e2`
     _compile_either: NFAFrag -> NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_either = |frag1, frag2, nfa| (
-        let (nfa, id) = nfa.new_state;
-        let nfa = nfa.mod_state(id, set_output(frag1.@input));
-        let nfa = nfa.mod_state(id, set_output2(frag2.@input));
+        let (nfa, id) = nfa.new_node;
+        let nfa = nfa.mod_node(id, set_output(frag1.@input));
+        let nfa = nfa.mod_node(id, set_output2(frag2.@input));
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
@@ -307,7 +307,7 @@ namespace NFAFrag {
             ),
             label: frag1.@label + "|" + frag2.@label
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
 
     );
@@ -315,95 +315,95 @@ namespace NFAFrag {
     // `e?`
     _compile_zero_or_once: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_once = |frag1, nfa| (
-        let (nfa, id) = nfa.new_state;
-        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let (nfa, id) = nfa.new_node;
+        let nfa = nfa.mod_node(id, set_output(frag1.@input));
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
                 let nfa = nfa.set_frag_output(frag1, out);
-                nfa.mod_state(id, set_output2(out))
+                nfa.mod_node(id, set_output2(out))
             ),
             label: frag1.@label + "?"
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // `e*`
     _compile_zero_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_zero_or_more = |frag1, nfa| (
-        let (nfa, id) = nfa.new_state;
-        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let (nfa, id) = nfa.new_node;
+        let nfa = nfa.mod_node(id, set_output(frag1.@input));
         let nfa = nfa.set_frag_output(frag1, id);
         let frag = NFAFrag {
             input: id,
             set_output: |out, nfa| (
-                nfa.mod_state(id,set_output2(out))
+                nfa.mod_node(id,set_output2(out))
             ),
             label: frag1.@label + "*"
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
 
     // `e+`
     _compile_one_or_more: NFAFrag -> NFA -> (NFA, NFAFrag);
     _compile_one_or_more = |frag1, nfa| (
-        let (nfa, id) = nfa.new_state;
-        let nfa = nfa.mod_state(id, set_output(frag1.@input));
+        let (nfa, id) = nfa.new_node;
+        let nfa = nfa.mod_node(id, set_output(frag1.@input));
         let nfa = nfa.set_frag_output(frag1, id);
         let frag = NFAFrag {
             input: frag1.@input,
             set_output: |out, nfa| (
-                nfa.mod_state(id, set_output2(out))
+                nfa.mod_node(id, set_output2(out))
             ),
             label: frag1.@label + "+"
         };
-        let nfa = nfa.mod_state(id, set_label(frag.@label));
+        let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
 }
 
-// NFA State set, used for NFA state transition
-type NFAStateSet = unbox struct {
-    ordered: Array (StateID, Groups),   // array of state id and groups
+// NFA Node set, used for NFA node transition
+type NFANodeSet = unbox struct {
+    ordered: Array (NodeID, Groups),   // array of node id and groups
     mask: Array Bool                    // mask whether id is contained or not
 };
 
-namespace NFAStateSet {
+namespace NFANodeSet {
 
-    // `NFAStateSet::empty(state_count)` creates an empty state set.
-    // `state_count` is number of NFA states.
-    empty: I64 -> NFAStateSet;
-    empty = |state_count| NFAStateSet {
-        ordered: Array::empty(state_count),
-        mask:  Array::fill(state_count, false)
+    // `NFANodeSet::empty(node_count)` creates an empty node set.
+    // `node_count` is number of NFA nodes.
+    empty: I64 -> NFANodeSet;
+    empty = |node_count| NFANodeSet {
+        ordered: Array::empty(node_count),
+        mask:  Array::fill(node_count, false)
     };
 
-    // Checks whether the state set is empty.
-    is_empty: NFAStateSet -> Bool;
-    is_empty = |state_set| (
-        state_set.@ordered.is_empty
+    // Checks whether the node set is empty.
+    is_empty: NFANodeSet -> Bool;
+    is_empty = |node_set| (
+        node_set.@ordered.is_empty
     );
 
-    // Checks whether the state set contains a state.
-    contains: StateID -> NFAStateSet -> Bool;
-    contains = |id, state_set| (
-        state_set.@mask.@(id.@val)
+    // Checks whether the node set contains a node.
+    contains: NodeID -> NFANodeSet -> Bool;
+    contains = |id, node_set| (
+        node_set.@mask.@(id.@val)
     );
 
-    // Adds a state to the state set.
-    add: (StateID, Groups) -> NFAStateSet -> NFAStateSet;
-    add = |(id, groups), state_set| (
-        if state_set.contains(id) { state_set };
-        let state_set = state_set.mod_ordered(push_back((id, groups)));
-        let state_set = state_set.mod_mask(set(id.@val, true));
-        state_set
+    // Adds a node to the node set.
+    add: (NodeID, Groups) -> NFANodeSet -> NFANodeSet;
+    add = |(id, groups), node_set| (
+        if node_set.contains(id) { node_set };
+        let node_set = node_set.mod_ordered(push_back((id, groups)));
+        let node_set = node_set.mod_mask(set(id.@val, true));
+        node_set
     );
 
-    get_groups: StateID -> NFAStateSet -> Option Groups;
-    get_groups = |id, state_set| (
-        state_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
+    get_groups: NodeID -> NFANodeSet -> Option Groups;
+    get_groups = |id, node_set| (
+        node_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
         .get_first
         .map(|(id, groups)| groups)
     );
@@ -413,23 +413,23 @@ namespace NFAStateSet {
 type NFAExecutor = unbox struct {
     stream: Stream,                     // stream of characters
     nfa: NFA,                           // NFA
-    empty_state_set: NFAStateSet,       // an empty state set
-    state_set: NFAStateSet,             // current state set
-    stack: Iterator (StateID, Groups)   // temporary stack for transition
+    empty_node_set: NFANodeSet,       // an empty node set
+    node_set: NFANodeSet,             // current node set
+    stack: Iterator (NodeID, Groups)   // temporary stack for transition
 };
 
 namespace NFAExecutor {
     // Creates an executor.
     make: Stream -> NFA -> NFAExecutor;
     make = |stream, nfa| (
-        let empty_state_set = NFAStateSet::empty(nfa.@states.get_size);
+        let empty_node_set = NFANodeSet::empty(nfa.@nodes.get_size);
         let groups: Groups = Array::fill(nfa.@group_count, (-1, -1));
-        let state_set = empty_state_set.add((nfa.@initial_state, groups));
+        let node_set = empty_node_set.add((nfa.@initial_node, groups));
         NFAExecutor {
             stream: stream,
             nfa: nfa,
-            empty_state_set: empty_state_set,
-            state_set: state_set,
+            empty_node_set: empty_node_set,
+            node_set: node_set,
             stack: Iterator::empty
         }
     );
@@ -439,8 +439,8 @@ namespace NFAExecutor {
         loop(
             executor, |executor|
             let executor = executor.transition_with_empty_string;
-            if executor.@state_set.contains(executor.@nfa.@accepting_state) {
-                let opt = executor.@state_set.get_groups(executor.@nfa.@accepting_state);
+            if executor.@node_set.contains(executor.@nfa.@accepting_node) {
+                let opt = executor.@node_set.get_groups(executor.@nfa.@accepting_node);
                 eval assert (|_|"not found groups", opt.is_some);
                 break $ some $ opt.as_some   // match success
                 // TODO: 現状では受理状態になったらループを抜けるため、最短一致になる。
@@ -466,44 +466,44 @@ namespace NFAExecutor {
                 break $ executor
             };
             let ((id, groups), executor) = opt.as_some;
-            let state = executor.@nfa.get_state(id);
-            let executor = executor._transition(state.@output, groups);
-            let executor = executor._transition(state.@output2, groups);
-            let executor = executor._transition_on_action(state, state.@output_on_action, groups);
+            let node = executor.@nfa.get_node(id);
+            let executor = executor._transition(node.@output, groups);
+            let executor = executor._transition(node.@output2, groups);
+            let executor = executor._transition_on_action(node, node.@output_on_action, groups);
             continue $ executor
         )
     );
 
     _init_transition: NFAExecutor -> NFAExecutor;
     _init_transition = |executor| (
-        executor.set_stack(executor.@state_set.@ordered.to_iter)
+        executor.set_stack(executor.@node_set.@ordered.to_iter)
     );
 
-    _pop_stack: NFAExecutor -> Option ((StateID, Groups), NFAExecutor);
+    _pop_stack: NFAExecutor -> Option ((NodeID, Groups), NFAExecutor);
     _pop_stack = |executor| (
         executor.@stack.advance.map(|(id_groups, next)|
             (id_groups, executor.set_stack(next))
         )
     );
 
-    // Adds state id to the state set, then pushes id to the stack.
-    _transition: StateID -> Groups -> NFAExecutor -> NFAExecutor;
+    // Adds node id to the node set, then pushes id to the stack.
+    _transition: NodeID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition = |id, groups, executor| (
-        if id == _ID_NONE {
+        if id == _INVALID_NODE_ID {
             executor
         };
-        if executor.@state_set.contains(id) {
+        if executor.@node_set.contains(id) {
             executor
         };
         eval debug_eprintln("transition " + id.to_string + " groups="+groups.to_string);
         executor
-            .mod_state_set(add((id, groups)))
+            .mod_node_set(add((id, groups)))
             .mod_stack(push_front((id, groups)))
     );
 
-    _transition_on_action: NFAState -> StateID -> Groups -> NFAExecutor -> NFAExecutor;
-    _transition_on_action = |state, id, groups, executor| (
-        let action = state.@action;
+    _transition_on_action: NFANode -> NodeID -> Groups -> NFAExecutor -> NFAExecutor;
+    _transition_on_action = |node, id, groups, executor| (
+        let action = node.@action;
         if action.is_sa_assert {
             executor._transition_with_passert(action.as_sa_assert, id, groups)
         };
@@ -523,7 +523,7 @@ namespace NFAExecutor {
         executor
     );
 
-    _transition_with_passert: PAssertion -> StateID -> Groups -> NFAExecutor -> NFAExecutor;
+    _transition_with_passert: PAssertion -> NodeID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition_with_passert = |pa, id, groups, executor| (
         if pa.is_pa_begin && executor.@stream.@position == 0 {
             executor._transition(id, groups)
@@ -536,14 +536,14 @@ namespace NFAExecutor {
 
     transition_with_char: U8 -> NFAExecutor -> NFAExecutor;
     transition_with_char = |char, executor| (
-        let old_states = executor.@state_set.@ordered.to_iter;
-        let executor = old_states.fold(
-            // Clear new state set
-            executor.set_state_set(executor.@empty_state_set),
+        let old_nodes = executor.@node_set.@ordered.to_iter;
+        let executor = old_nodes.fold(
+            // Clear new node set
+            executor.set_node_set(executor.@empty_node_set),
             |executor, (id, groups)|
-            // For each old state:
-            let state = executor.@nfa.get_state(id);
-            let action = state.@action;
+            // For each old node:
+            let node = executor.@nfa.get_node(id);
+            let action = node.@action;
             if !action.is_sa_char_match {
                 executor
             };
@@ -552,7 +552,7 @@ namespace NFAExecutor {
             };
 
             // note: stack is not used
-            executor._transition(state.@output_on_action, groups)
+            executor._transition(node.@output_on_action, groups)
         );
         let executor = executor.set_stack(Iterator::empty);
         executor

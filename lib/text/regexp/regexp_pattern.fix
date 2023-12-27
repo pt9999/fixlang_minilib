@@ -224,8 +224,7 @@ namespace Pattern {
     _parse_psequence: Parser Pattern;
     _parse_psequence = do {
         pure $ psequence $ *zero_or_more(
-            _parse_passert.or_else $
-            _parse_pquant
+            _parse_passert.or_else(_parse_pquant)
         )
     };
 
@@ -290,8 +289,7 @@ namespace Pattern {
     // Parses quantifiable item.
     _parse_quantifiable_item: Parser Pattern;
     _parse_quantifiable_item = do {
-        _parse_pgroup.or_else $
-        _parse_pclass
+        _parse_pgroup.or_else(_parse_pclass)
     };
 
     // TODO: support backreferences, ie. `\\1`, `\\2` etc.
@@ -353,18 +351,25 @@ namespace Pattern {
 
     // Parses each component in a bracket.
     _parse_bracket_component: Parser CharClass;
-    _parse_bracket_component = do {
-        let _ = *match_char('\\');
-        _parse_backslash_char_class(true)
-    }.or_else $ do {
-        let start = *match_any_char.filter(|c| c != ']' && c != '\\');
-        let _ = *match_char('-');
-        let end = *match_any_char.filter(|c| c != ']' && c != '\\');
-        pure $ CharClass::range(start, end)
-    }.or_else $ do {
-        let c = *match_any_char.filter(|c| c != ']' && c != '\\');
-        pure $ CharClass::singleton(c)
-    };
+    _parse_bracket_component = (
+        let parse_backslash = do {
+            let _ = *match_char('\\');
+            _parse_backslash_char_class(true)
+        };
+        let parse_triplet = do {
+            let start = *match_any_char.filter(|c| c != ']' && c != '\\');
+            let _ = *match_char('-');
+            let end = *match_any_char.filter(|c| c != ']' && c != '\\');
+            pure $ CharClass::range(start, end)
+        };
+        let parse_single = do {
+            let c = *match_any_char.filter(|c| c != ']' && c != '\\' && c != '-');
+            pure $ CharClass::singleton(c)
+        };
+        parse_backslash
+        .or_else(parse_triplet)
+        .or_else(parse_single)
+    );
 
     // Parses the char class that begins with a backslash.
     // The backslash itself is parsed already.

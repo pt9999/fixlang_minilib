@@ -50,6 +50,8 @@ test_empty = (
 test_char_class_bracket: TestCase;
 test_char_class_bracket = (
     [
+        test_regexp_match $ ("[a-z]", "a", ok $ ["a"]),
+        test_regexp_match $ ("[a-z]", "m", ok $ ["m"]),
         test_regexp_match $ ("[a-z]", "z", ok $ ["z"]),
         test_regexp_match $ ("[a-z]", "A", err $ _NotMatch),
         test_regexp_match $ ("[^a-z]", "a", err $ _NotMatch),
@@ -57,6 +59,11 @@ test_char_class_bracket = (
         test_regexp_match $ ("[-a-z]", "-", ok $ ["-"]),
         test_regexp_match $ ("[a-z-]", "-", ok $ ["-"]),
         test_regexp_match $ ("[---]", "-", ok $ ["-"]),
+        test_regexp_match $ ("[a-ceg-z]", "c", ok $ ["c"]),
+        test_regexp_match $ ("[a-ceg-z]", "d", err $ _NotMatch),
+        test_regexp_match $ ("[a-ceg-z]", "e", ok $ ["e"]),
+        test_regexp_match $ ("[a-ceg-z]", "f", err $ _NotMatch),
+        test_regexp_match $ ("[a-ceg-z]", "g", ok $ ["g"]),
         test_regexp_match $ ("[a-z", "a", err $ "']' is missing"),
         test_regexp_match $ ("[a-z\\]]", "]", ok $ ["]"]),
         test_regexp_match $ ("[\\-]", "-", ok $ ["-"]),
@@ -98,12 +105,72 @@ test_char_class_nonbracket = (
     ].run_tests
 );
 
+test_sequence: TestCase;
+test_sequence = (
+    [
+        test_regexp_match $ (".\\w\\S[a-z][\\w]", "abcde", ok $ ["abcde"]),
+        TestCase::empty
+    ].run_tests
+);
+
+test_assertion: TestCase;
+test_assertion = (
+    [
+        test_regexp_match $ ("^$", "", ok $ [""]),
+        test_regexp_match $ ("^abc", "abc", ok $ ["abc"]),
+        test_regexp_match $ ("a^bc", "abc", err $ _NotMatch),
+        test_regexp_match $ ("abc$", "abc", ok $ ["abc"]),
+        test_regexp_match $ ("abc$", "abcde", err $ _NotMatch),
+        test_regexp_match $ ("ab$c", "abc", err $ _NotMatch),
+        TestCase::empty
+    ].run_tests
+);
+
+test_quant: TestCase;
+test_quant = (
+    [
+        test_regexp_match $ ("\\w*", "", ok $ [""]),
+        test_regexp_match $ ("\\w*", "abc", ok $ ["abc"]),
+        test_regexp_match $ ("\\w+", "", err $ _NotMatch),
+        test_regexp_match $ ("\\w+", "abc", ok $ ["abc"]),
+        test_regexp_match $ ("a+b+", "aabbcc", ok $ ["aabb"]),
+        test_regexp_match $ ("a{3,5}", "aaaaaa", ok $ ["aaaaa"]),
+        test_regexp_match $ ("a{3,5}$", "aaaaaa", err $ _NotMatch),
+        test_regexp_match $ ("a{3,5}$", "aaaaa", ok $ ["aaaaa"]),
+        test_regexp_match $ ("a{3,5}$", "aaa", ok $ ["aaa"]),
+        test_regexp_match $ ("a{3,5}", "aa", err $ _NotMatch),
+        TestCase::empty
+    ].run_tests
+);
+
+test_group: TestCase;
+test_group = (
+    [
+        test_regexp_match $ (".(..).", "abcde", ok $ ["abcd", "bc"]),
+        TestCase::empty
+    ].run_tests
+);
+
+test_either: TestCase;
+test_either = (
+    [
+        test_regexp_match $ ("az\\w+|\\w+d|ab", "abcde", ok $ ["abcd"]),
+        test_regexp_match $ ("(az\\w+|\\w+d|ab)", "abcde", ok $ ["abcd", "abcd"]),
+        TestCase::empty
+    ].run_tests
+);
 
 main: IO ();
 main = (
     [
         test_empty,
         test_char_class_bracket,
+        test_char_class_nonbracket,
+        test_sequence,
+        test_assertion,
+        test_quant,
+        test_group,
+        test_either,
         TestCase::empty
     ]
     .run_test_driver

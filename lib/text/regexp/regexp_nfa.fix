@@ -26,7 +26,8 @@ type NFA = unbox struct {
     nodes: Array NFANode,     // array of nodes
     initial_node: NodeID,     // initial node
     accepting_node: NodeID,   // accepting node
-    group_count: I64            // group count
+    group_count: I64,         // group count
+    debug: Bool               // true if debug
 };
 
 namespace NFA {
@@ -36,7 +37,8 @@ namespace NFA {
         nodes: Array::empty(0),
         initial_node: _INVALID_NODE_ID,
         accepting_node: _INVALID_NODE_ID,
-        group_count: 0
+        group_count: 0,
+        debug: false
     };
 
     // Creates new node. Returns the new node id.
@@ -78,6 +80,7 @@ namespace NFA {
         let (nfa, accept_id) = nfa.new_node;
         let nfa = nfa.set_accepting_node(accept_id);
         let nfa = nfa.set_frag_output(frag, accept_id);
+        eval nfa.debug(nfa.to_string);
         nfa
     );
 
@@ -91,6 +94,10 @@ namespace NFA {
         .get_longest_match.map(|state| state.@groups)
     );
 
+    debug: String -> NFA -> ();
+    debug = |msg, nfa| (
+        if nfa.@debug { debug_eprintln(msg) } else { () }
+    );
 }
 
 impl NFA: ToString {
@@ -392,7 +399,7 @@ impl NFAState: Hash {
 
 impl NFAState: ToString {
     to_string = |s| (
-        "{id:" + s.@id.to_string + ", groups=" + s.@id.to_string + "}"
+        "{id:" + s.@id.to_string + ", groups=" + s.@groups.to_string + "}"
     );
 }
 
@@ -530,9 +537,9 @@ namespace NFAExecutor {
             executor
         };
         let (char, stream) = opt.as_some;
+        eval executor.@nfa.debug("stream position="+stream.@position.to_string + " char='" + byte_to_string(char) + "'");
         let executor = executor._transition_with_char(char);
         let executor = executor.set_stream(stream);
-        //eval debug_println("stream position="+stream.@position.to_string);
         executor.execute    // tail recursion
     );
 
@@ -551,6 +558,7 @@ namespace NFAExecutor {
     // Applies transitions with an empty string.
     _transition_with_empty_string: NFAExecutor -> NFAExecutor;
     _transition_with_empty_string = |executor| (
+        eval executor.@nfa.debug("_transition_with_empty_string");
         let executor = executor.set_stack(executor.@state_set.to_iter);
         loop(
             executor, |executor|
@@ -583,7 +591,7 @@ namespace NFAExecutor {
         if executor.@state_set.contains(state) {
             executor
         };
-        //eval debug_eprintln("transition " + state.to_string);
+        eval executor.@nfa.debug("transition " + state.to_string);
         executor
             .mod_state_set(add(state))
             .mod_stack(push_front(state))
@@ -592,6 +600,7 @@ namespace NFAExecutor {
     // Applies transitions on an action with empty string.
     _transition_on_action: NFANode -> NFAState -> NFAExecutor -> NFAExecutor;
     _transition_on_action = |old_node, state, executor| (
+        eval executor.@nfa.debug("_transition_on_action");
         let action = old_node.@action;
         if action.is_sa_assert {
             let pa = action.as_sa_assert;
@@ -621,6 +630,7 @@ namespace NFAExecutor {
     // Applies transitions with a string of one character.
     _transition_with_char: U8 -> NFAExecutor -> NFAExecutor;
     _transition_with_char = |char, executor| (
+        eval executor.@nfa.debug("_transition_with_char");
         let old_state_set = executor.@state_set;
         let executor = old_state_set.to_iter.fold(
             // Clear new state set

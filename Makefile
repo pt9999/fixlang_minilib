@@ -32,8 +32,7 @@ test_file_format: test_json
 test_json:
 	fix run -f tests/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
 
-test_text: test_string_ex test_unicode test_parser 
-#test_text: test_string_ex test_unicode test_parser test_regexp
+test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_unicode:

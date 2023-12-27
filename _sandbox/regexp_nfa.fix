@@ -14,28 +14,34 @@ import StringEx;
 
 import RegExpPattern;
 
+// matched group `(begin, end)`. -1 is invalid position.
+type Group = (I64, I64);
+
+// The array of matched groups
+type Groups = Array Group;
+
 // NFA
 type NFA = unbox struct {
-    group_count: I64,           // group count
     states: Array NFAState,     // array of states
-    initial_state: I64,         // initial state
-    accepting_state: I64         // accepting state
+    initial_state: StateID,     // initial state
+    accepting_state: StateID,   // accepting state
+    group_count: I64            // group count
 };
 
 namespace NFA {
     // An empty NFA.
     empty: NFA;
     empty = NFA {
-        group_count: 0,
         states: Array::empty(0),
         initial_state: _ID_NONE,
-        accepting_state: _ID_NONE
+        accepting_state: _ID_NONE,
+        group_count: 0
     };
 
     // Creates new state. Returns the new state id.
-    new_state: NFA -> (NFA, I64);
+    new_state: NFA -> (NFA, StateID);
     new_state = |nfa| (
-        let id = nfa.@states.get_size;
+        let id = StateID { val: nfa.@states.get_size };
         let state = NFAState::empty;
         let state = state.set_id(id);
         let nfa = nfa.mod_states(push_back(state));
@@ -43,19 +49,19 @@ namespace NFA {
     );
 
     // `nfa.get_state(id)` gets the state whose @id is `id`.
-    get_state: I64 -> NFA -> NFAState;
+    get_state: StateID -> NFA -> NFAState;
     get_state = |id, nfa| (
-        nfa.@states.@(id)
+        nfa.@states.@(id.@val)
     );
 
     // `nfa.mod_state(id, f)` modifies the state whose @id is `id`.
-    mod_state: I64 -> (NFAState -> NFAState) -> NFA -> NFA;
+    mod_state: StateID -> (NFAState -> NFAState) -> NFA -> NFA;
     mod_state = |id, f, nfa| (
-        nfa.mod_states(|states| states.set(id, f(states.@(id))))
+        nfa.mod_states(|states| states.set(id.@val, f(states.@(id.@val))))
     );
 
     // `nfa.set_frag_output(frag, out)` sets the output of the fragment to `out`.
-    set_frag_output: NFAFrag -> I64 -> NFA -> NFA;
+    set_frag_output: NFAFrag -> StateID -> NFA -> NFA;
     set_frag_output = |frag, out, nfa| (
         (frag.@set_output)(out, nfa)
     );
@@ -75,7 +81,7 @@ namespace NFA {
     );
 
     // `nfa.execute(stream)` executes matching.
-    execute: Stream -> NFA -> Option GroupArray;
+    execute: Stream -> NFA -> Option Groups;
     execute = |stream, nfa| (
         let executor = NFAExecutor::make(stream, nfa);
         executor.execute
@@ -114,18 +120,31 @@ impl NFAStateAction: ToString {
 
 // An NFA state
 type NFAState = unbox struct {
-    id: I64,                    // state id
+    id: StateID,                // state id
     action: NFAStateAction,     // action
-    output_on_action: I64,      // next state when the action succeeded
-    output: I64,                // next state with empty string
-    output2: I64,               // next state with empty string part 2
+    output_on_action: StateID,  // next state when the action succeeded
+    output: StateID,            // next state with empty string
+    output2: StateID,           // next state with empty string part 2
     label: String               // a label to display
 };
 
+// ID of NFA state. -1 is invalid value.
+type StateID = unbox struct {
+    val: I64
+};
+
+impl StateID: ToString {
+    to_string = |a| a.@val.to_string;
+}
+
+impl StateID: Eq {
+    eq = |a, b| a.@val == b.@val;
+}
+
 namespace NFAState {
     // An invalid state ID.
-    _ID_NONE: I64;
-    _ID_NONE = -1;
+    _ID_NONE: StateID;
+    _ID_NONE = StateID { val: -1 };
 
     // An empty state
     empty: NFAState;
@@ -155,8 +174,8 @@ impl NFAState: ToString {
 
 // NFA Fragment
 type NFAFrag = unbox struct {
-    input: I64,                 // state id of input of this fragment
-    set_output: I64 -> NFA -> NFA,  // a function to set state id of output
+    input: StateID,                 // state id of input of this fragment
+    set_output: StateID -> NFA -> NFA,  // a function to set state id of output
                                     // of this fragment
     label: String               // a label to display
 };
@@ -345,39 +364,20 @@ namespace NFAFrag {
     );
 }
 
-// Matched group
-type Group = unbox struct {
-    begin: I64,         // position of the start of the group
-    end: I64            // position of the end of the group
-};
-
-impl Group: ToString {
-    to_string = |group| (
-        "Group{"
-        + "begin:" + group.@begin.to_string
-        + ", end:" + group.@end.to_string
-        + "}"
-    ) ;
-}
-
-// The array of matched groups
-type GroupArray = Array (Option Group);
-
-
 // NFA State set, used for NFA state transition
 type NFAStateSet = unbox struct {
-    ordered: Array (I64, GroupArray),   // array of state id and groups
-    mask: Array Bool       // mask whether id is contained or not
+    ordered: Array (StateID, Groups),   // array of state id and groups
+    mask: Array Bool                    // mask whether id is contained or not
 };
 
 namespace NFAStateSet {
 
-    // `NFAStateSet::empty(n)` creates an empty state set.
-    // `n` is number of NFA states.
+    // `NFAStateSet::empty(state_count)` creates an empty state set.
+    // `state_count` is number of NFA states.
     empty: I64 -> NFAStateSet;
-    empty = |n| NFAStateSet {
-        ordered: Array::empty(n),
-        mask:  Array::fill(n, false)
+    empty = |state_count| NFAStateSet {
+        ordered: Array::empty(state_count),
+        mask:  Array::fill(state_count, false)
     };
 
     // Checks whether the state set is empty.
@@ -387,21 +387,21 @@ namespace NFAStateSet {
     );
 
     // Checks whether the state set contains a state.
-    contains: I64 -> NFAStateSet -> Bool;
+    contains: StateID -> NFAStateSet -> Bool;
     contains = |id, state_set| (
-        state_set.@mask.@(id)
+        state_set.@mask.@(id.@val)
     );
 
     // Adds a state to the state set.
-    add: (I64, GroupArray) -> NFAStateSet -> NFAStateSet;
+    add: (StateID, Groups) -> NFAStateSet -> NFAStateSet;
     add = |(id, groups), state_set| (
         if state_set.contains(id) { state_set };
         let state_set = state_set.mod_ordered(push_back((id, groups)));
-        let state_set = state_set.mod_mask(set(id, true));
+        let state_set = state_set.mod_mask(set(id.@val, true));
         state_set
     );
 
-    get_groups: I64 -> NFAStateSet -> Option GroupArray;
+    get_groups: StateID -> NFAStateSet -> Option Groups;
     get_groups = |id, state_set| (
         state_set.@ordered.to_iter.filter(|(id1,_)| id1 == id)
         .get_first
@@ -411,11 +411,11 @@ namespace NFAStateSet {
 
 // The NFA executor
 type NFAExecutor = unbox struct {
-    stream: Stream,            // stream of characters
-    nfa: NFA,                       // NFA
-    empty_state_set: NFAStateSet,   // an empty state set
-    state_set: NFAStateSet,         // current state set
-    stack: Iterator (I64, GroupArray) // temporary stack for transition
+    stream: Stream,                     // stream of characters
+    nfa: NFA,                           // NFA
+    empty_state_set: NFAStateSet,       // an empty state set
+    state_set: NFAStateSet,             // current state set
+    stack: Iterator (StateID, Groups)   // temporary stack for transition
 };
 
 namespace NFAExecutor {
@@ -423,7 +423,7 @@ namespace NFAExecutor {
     make: Stream -> NFA -> NFAExecutor;
     make = |stream, nfa| (
         let empty_state_set = NFAStateSet::empty(nfa.@states.get_size);
-        let groups: GroupArray = Array::fill(nfa.@group_count, none());
+        let groups: Groups = Array::fill(nfa.@group_count, (-1, -1));
         let state_set = empty_state_set.add((nfa.@initial_state, groups));
         NFAExecutor {
             stream: stream,
@@ -434,7 +434,7 @@ namespace NFAExecutor {
         }
     );
 
-    execute: NFAExecutor -> Option GroupArray;
+    execute: NFAExecutor -> Option Groups;
     execute = |executor| (
         loop(
             executor, |executor|
@@ -479,7 +479,7 @@ namespace NFAExecutor {
         executor.set_stack(executor.@state_set.@ordered.to_iter)
     );
 
-    _pop_stack: NFAExecutor -> Option ((I64, GroupArray), NFAExecutor);
+    _pop_stack: NFAExecutor -> Option ((StateID, Groups), NFAExecutor);
     _pop_stack = |executor| (
         executor.@stack.advance.map(|(id_groups, next)|
             (id_groups, executor.set_stack(next))
@@ -487,7 +487,7 @@ namespace NFAExecutor {
     );
 
     // Adds state id to the state set, then pushes id to the stack.
-    _transition: I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+    _transition: StateID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition = |id, groups, executor| (
         if id == _ID_NONE {
             executor
@@ -500,8 +500,8 @@ namespace NFAExecutor {
             .mod_state_set(add((id, groups)))
             .mod_stack(push_front((id, groups)))
     );
-    
-    _transition_on_action: NFAState -> I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+
+    _transition_on_action: NFAState -> StateID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition_on_action = |state, id, groups, executor| (
         let action = state.@action;
         if action.is_sa_assert {
@@ -510,22 +510,20 @@ namespace NFAExecutor {
         if action.is_sa_group_begin {
             let group_idx = action.as_sa_group_begin;
             let begin = executor.@stream.@position;
-            let group = Group { begin: begin, end: -1 };
-            let groups = groups.set(group_idx, some(group));
+            let groups = groups.set(group_idx, (begin, -1));
             executor._transition(id, groups)
         };
         if action.is_sa_group_end {
             let group_idx = action.as_sa_group_end;
-            let begin = groups.@(group_idx).map_or(-1, |group| group.@begin);
+            let (begin, _) = groups.@(group_idx);
             let end = executor.@stream.@position;
-            let group = Group { begin: begin, end: end };
-            let groups = groups.set(group_idx, some(group));
+            let groups = groups.set(group_idx, (begin, end));
             executor._transition(id, groups)
         };
         executor
     );
 
-    _transition_with_passert: PAssertion -> I64 -> GroupArray -> NFAExecutor -> NFAExecutor;
+    _transition_with_passert: PAssertion -> StateID -> Groups -> NFAExecutor -> NFAExecutor;
     _transition_with_passert = |pa, id, groups, executor| (
         if pa.is_pa_begin && executor.@stream.@position == 0 {
             executor._transition(id, groups)

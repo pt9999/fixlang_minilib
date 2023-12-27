@@ -15,6 +15,9 @@ impl [a:Eq, e:Eq] Result e a: Eq
     );
 }
 
+_NotMatch: String;
+_NotMatch = "NotMatch";
+
 test_regexp_match: (String, String, Result ErrMsg (Array String)) -> TestCase;
 test_regexp_match = |(pattern, target, expected)| (
     let testname = "test_regexp_match(" + pattern + "," + target + ")";
@@ -23,29 +26,84 @@ test_regexp_match = |(pattern, target, expected)| (
         let regexp = *RegExp::compile(pattern, "");
         regexp.match(target)
     };
-    let _ = *(assert_equal("eq", expected, actual));
+    let _ = *if expected.is_ok {
+        assert_equal("eq", expected, actual)
+    } else {
+        let _ = *assert_true("is_err", actual.is_err);
+        // check whether it contains the expected error message
+        let check = actual.as_err.find(expected.as_err, 0).is_some;
+        assert_true("err: actual="+actual.as_err, check)
+    };
     pure()
 );
 
-test_char_class: TestCase;
-test_char_class = (
+test_empty: TestCase;
+test_empty = (
     [
         test_regexp_match $ ("", "", ok $ [""]),
-        test_regexp_match $ ("[a-z]", "a", ok $ ["a"]),
-        test_regexp_match $ ("[0-9]", "a", err $ "NotMatch"),
+        test_regexp_match $ ("", "", ok $ [""]),
+        test_regexp_match $ ("a", "", err $ _NotMatch),
+        TestCase::empty
+    ].run_tests
+);
+
+test_char_class_bracket: TestCase;
+test_char_class_bracket = (
+    [
+        test_regexp_match $ ("[a-z]", "z", ok $ ["z"]),
+        test_regexp_match $ ("[a-z]", "A", err $ _NotMatch),
+        test_regexp_match $ ("[^a-z]", "a", err $ _NotMatch),
+        test_regexp_match $ ("[^a-z]", "A", ok $ ["A"]),
         test_regexp_match $ ("[-a-z]", "-", ok $ ["-"]),
         test_regexp_match $ ("[a-z-]", "-", ok $ ["-"]),
         test_regexp_match $ ("[---]", "-", ok $ ["-"]),
         test_regexp_match $ ("[a-z", "a", err $ "']' is missing"),
         test_regexp_match $ ("[a-z\\]]", "]", ok $ ["]"]),
+        test_regexp_match $ ("[\\-]", "-", ok $ ["-"]),
+        test_regexp_match $ ("[\\\\]", "\\", ok $ ["\\"]),
+        test_regexp_match $ ("[\\d]", "0", ok $ ["0"]),
+        test_regexp_match $ ("[\\w]", "a", ok $ ["a"]),
+        test_regexp_match $ ("[\\s]", " ", ok $ [" "]),
+        test_regexp_match $ ("[\\t]", "\t", ok $ ["\t"]),
+        test_regexp_match $ ("[\\r]", "\r", ok $ ["\r"]),
+        test_regexp_match $ ("[\\n]", "\n", ok $ ["\n"]),
+        test_regexp_match $ ("[\\v]", "\u000b", ok $ ["\u000b"]),
+        test_regexp_match $ ("[\\f]", "\u000c", ok $ ["\u000c"]),
+        test_regexp_match $ ("[\\b]", "\u0008", ok $ ["\u0008"]),
         TestCase::empty
     ].run_tests
 );
 
+test_char_class_nonbracket: TestCase;
+test_char_class_nonbracket = (
+    [
+        test_regexp_match $ (".", "a", ok $ ["a"]),
+        test_regexp_match $ (".", "\n", err $ _NotMatch),
+        test_regexp_match $ ("\\d", "0", ok $ ["0"]),
+        test_regexp_match $ ("\\D", "0", err $ _NotMatch),
+        test_regexp_match $ ("\\w", "a", ok $ ["a"]),
+        test_regexp_match $ ("\\w", "_", ok $ ["_"]),
+        test_regexp_match $ ("\\W", "a", err $ _NotMatch),
+        test_regexp_match $ ("\\W", "_", err $ _NotMatch),
+        test_regexp_match $ ("\\s", " ", ok $ [" "]),
+        test_regexp_match $ ("\\s", "\n", ok $ ["\n"]),
+        test_regexp_match $ ("\\S", " ", err $ _NotMatch),
+        test_regexp_match $ ("\\S", "\n", err $ _NotMatch),
+        test_regexp_match $ ("\\t", "\t", ok $ ["\t"]),
+        test_regexp_match $ ("\\r", "\r", ok $ ["\r"]),
+        test_regexp_match $ ("\\n", "\n", ok $ ["\n"]),
+        test_regexp_match $ ("\\v", "\u000b", ok $ ["\u000b"]),
+        test_regexp_match $ ("\\f", "\u000c", ok $ ["\u000c"]),
+        TestCase::empty
+    ].run_tests
+);
+
+
 main: IO ();
 main = (
     [
-        test_char_class,
+        test_empty,
+        test_char_class_bracket,
         TestCase::empty
     ]
     .run_test_driver

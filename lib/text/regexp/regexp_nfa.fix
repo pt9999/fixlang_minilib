@@ -21,12 +21,16 @@ type Group = (I64, I64);
 // The array of matched groups
 type Groups = Array Group;
 
+// special quant ID
+type QuantID = I64;
+
 // NFA
 type NFA = unbox struct {
     nodes: Array NFANode,     // array of nodes
     initial_node: NodeID,     // initial node
     accepting_node: NodeID,   // accepting node
     group_count: I64,         // group count
+    quant_count: I64,         // special quant count
     debug: Bool               // true if debug
 };
 
@@ -38,6 +42,7 @@ namespace NFA {
         initial_node: _INVALID_NODE_ID,
         accepting_node: _INVALID_NODE_ID,
         group_count: 0,
+        quant_count: 0,
         debug: false
     };
 
@@ -67,6 +72,13 @@ namespace NFA {
     set_frag_output: NFAFrag -> NodeID -> NFA -> NFA;
     set_frag_output = |frag, out, nfa| (
         (frag.@set_output)(out, nfa)
+    );
+
+    // Creates new quant. Returns the new quant id.
+    new_quant: NFA -> (NFA, QuantID);
+    new_quant = |nfa| (
+        let nfa = nfa.mod_quant_count(|n| n + 1);
+        (nfa, nfa.@quant_count - 1)
     );
 
     // `NFA::compile(pattern)` compiles a pattern to NFA.
@@ -115,7 +127,10 @@ type NFANodeAction = unbox union {
     sa_char_match: CharClass,
     sa_assert: PAssertion,
     sa_group_begin: I64,
-    sa_group_end: I64
+    sa_group_end: I64,
+    sa_quant_begin: QuantID,
+    sa_quant_loop: QuantID,
+    sa_quant_end: (QuantID, I64, I64)
 };
 
 impl NFANodeAction: ToString {
@@ -125,6 +140,9 @@ impl NFANodeAction: ToString {
         if a.is_sa_assert { a.as_sa_assert.to_string };
         if a.is_sa_group_begin { "<g" + a.as_sa_group_begin.to_string + ">" };
         if a.is_sa_group_end { "</g" + a.as_sa_group_end.to_string + ">" };
+        if a.is_sa_quant_begin { "<q" + a.as_sa_quant_begin.to_string + ">" };
+        if a.is_sa_quant_loop { "<ql" + a.as_sa_quant_loop.to_string + ">" };
+        if a.is_sa_quant_end { "</q" + a.as_sa_quant_end.to_string + ">" };
         ""
     );
 }
@@ -236,16 +254,10 @@ namespace NFAFrag {
             if (min == 1 && max == I64::maximum) {
                 nfa._compile_one_or_more(frag1)
             };
-            if (min >= 2) {
-                let (nfa, frag2) = nfa.compile_pattern(pquant $
-                        (pat1, min - 1,
-                            if max == I64::maximum { max } else { max - 1}
-                        )
-                );
-                // TODO: frag1 の中にグループがあったら？
-                nfa._compile_seq(frag1, frag2)
+            if (min <= max) {
+                nfa._compile_special_quant(frag1, min, max)
             };
-            eval assert (|_|"invalid quantifier: min=" + min.to_string, false);
+            eval assert (|_|"invalid quantifier: (min,max)=" + (min,max).to_string, false);
             (nfa, frag1)
         };
         if pat.is_pgroup {
@@ -378,28 +390,57 @@ namespace NFAFrag {
         let nfa = nfa.mod_node(id, set_label(frag.@label));
         (nfa, frag)
     );
+
+    // Compiles special quant (`e{min,max}`) to a fragment.
+    _compile_special_quant: NFAFrag -> I64 -> I64 -> NFA -> (NFA, NFAFrag);
+    _compile_special_quant = |frag1, min, max, nfa| (
+        let (nfa, qid) = nfa.new_quant;
+        let (nfa, branch_id) = nfa.new_node;
+        let nfa = nfa.mod_node(branch_id, set_label("branch(q" + qid.to_string + ")"));
+        let (nfa, frag_begin) = nfa._compile_action(sa_quant_begin $ qid);
+        let (nfa, frag_loop) = nfa._compile_action(sa_quant_loop $ qid);
+        let (nfa, frag_end) = nfa._compile_action(sa_quant_end $ (qid, min, max));
+        let nfa = nfa.set_frag_output(frag_begin, branch_id);
+        let nfa = nfa.mod_node(branch_id, set_output(frag1.@input));
+        let nfa = nfa.mod_node(branch_id, set_output2(frag_end.@input));
+        let nfa = nfa.set_frag_output(frag1, frag_loop.@input);
+        let nfa = nfa.set_frag_output(frag_loop, branch_id);
+        let frag = NFAFrag {
+            input: frag_begin.@input,
+            set_output: |out, nfa| (
+                nfa.set_frag_output(frag_end, out)
+            ),
+            label: frag1.@label + "{" + min.to_string + "," + max.to_string + "}"
+        };
+        (nfa, frag)
+    );
 }
 
 // NFA state
 type NFAState = unbox struct {
     id: NodeID, 
-    groups: Groups
+    groups: Groups,
+    quants: Array I64   // special quant counter
 };
 
 impl NFAState: Eq {
-    eq = |a, b| a.@id == b.@id && a.@groups == b.@groups;
+    eq = |a, b| a.@id == b.@id && a.@groups == b.@groups && a.@quants == b.@quants;
 }
 
 impl NFAState: Hash {
     hash = |s| (
         s.@id.hash * 103231_U64 +
-        s.@groups.hash * 103577_U64
+        s.@groups.hash * 103577_U64 +
+        s.@quants.hash * 103769_U64
     );
 }
 
 impl NFAState: ToString {
     to_string = |s| (
-        "{id:" + s.@id.to_string + ", groups=" + s.@groups.to_string + "}"
+        "{id:" + s.@id.to_string + 
+        ", groups=" + s.@groups.to_string + 
+        ", quants=" + s.@quants.to_string +
+        "}"
     );
 }
 
@@ -408,7 +449,8 @@ namespace NFAState {
     make: NodeID -> Groups -> NFAState;
     make = |id, groups| NFAState {
         id: id,
-        groups: groups
+        groups: groups,
+        quants: Array::empty(0)
     };
 
     // Makes transition to next node.
@@ -419,6 +461,24 @@ namespace NFAState {
     mod_group: I64 -> (Group -> Group) -> NFAState -> NFAState;
     mod_group = |group_idx, f, state| (
         state.mod_groups(mod(group_idx, f))
+    );
+
+    // get quant loop count
+    get_quant: QuantID -> NFAState -> I64;
+    get_quant = |qid, state| (
+        if state.@quants.get_size <= qid {
+            0
+        };
+        state.@quants.@(qid)
+    );
+
+    // set quant loop count
+    set_quant: QuantID -> I64 -> NFAState -> NFAState;
+    set_quant = |qid, val, state| (
+        if state.@quants.get_size <= qid {
+            state.mod_quants(push_back(0)).set_quant(qid, val)
+        };
+        state.mod_quants(set(qid, val))
     );
 
     // Gets the length of specified group.
@@ -622,6 +682,26 @@ namespace NFAExecutor {
             let group_idx = action.as_sa_group_end;
             let end = executor.@stream.@position;
             let state = state.mod_group(group_idx, |(begin, _)| (begin, end));
+            executor._add_to_state_set_and_stack(state)
+        };
+        if action.is_sa_quant_begin {
+            let qid = action.as_sa_quant_begin;
+            let state = state.set_quant(qid, 0);
+            executor._add_to_state_set_and_stack(state)
+        };
+        if action.is_sa_quant_loop {
+            let qid = action.as_sa_quant_loop;
+            let count = state.get_quant(qid);
+            let state = state.set_quant(qid, count + 1);
+            executor._add_to_state_set_and_stack(state)
+        };
+        if action.is_sa_quant_end {
+            let (qid, min_count, max_count) = action.as_sa_quant_end;
+            let count = state.get_quant(qid);
+            if count < min_count || max_count < count {
+                executor
+            };
+            let state = state.set_quant(qid, count);
             executor._add_to_state_set_and_stack(state)
         };
         executor

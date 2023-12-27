@@ -274,6 +274,7 @@ namespace Pattern {
     // Parses inner of `X{n}`, `X{n,}`, `X{n,m}`
     _parse_pquant_n_m_inner: Parser (I64, I64);
     _parse_pquant_n_m_inner = do {
+        let start_stream = *get_stream;
         let min_count = *match_integer;
         let comma = *match_char_if_exists(',');
         if comma.is_none {
@@ -281,7 +282,14 @@ namespace Pattern {
         };
         let max_count = *match_integer.map(some).or_else(pure $ none());
         if max_count.is_some {
-            pure $ (min_count, max_count.as_some)
+            let max_count = max_count.as_some;
+            if min_count > max_count {
+                let start = start_stream.@position;
+                let end = (*get_stream).@position;
+                let text = start_stream.read_string(end - start);
+                error_parser $ "Invalid quantifier:{" + text + "}"
+            };
+            pure $ (min_count, max_count)
         };
         pure $ (min_count, maximum)
     };

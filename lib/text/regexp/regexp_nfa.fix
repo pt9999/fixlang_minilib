@@ -109,13 +109,12 @@ namespace NFA {
     );
 
     // `nfa.execute(target)` executes matching.
-    execute: String -> NFA -> Option Groups;
+    execute: String -> NFA -> NFAExecutor;
     execute = |target, nfa| (
         let stream: Stream = Stream::make(target);
         let executor = NFAExecutor::make(stream, nfa);
         let executor = executor.execute;
-        executor.@accepted_states.to_iter
-        .get_longest_match.map(|state| state.@groups)
+        executor
     );
 
     debug: String -> NFA -> ();
@@ -494,6 +493,24 @@ namespace NFAState {
         state.mod_quants(set(qid, val))
     );
 
+    overlaps: NFAState -> NFAState -> Bool;
+    overlaps = |a, b| (
+        let (a_begin, a_end) = a.@groups.@(0);
+        let (b_begin, b_end) = b.@groups.@(0);
+        if a_end <= b_begin || b_end <= a_begin { false };
+        true
+    );
+
+    // Gets the beginning of specified group.
+    group_begin: I64 -> NFAState -> I64;
+    group_begin = |i, state| (
+        let groups = state.@groups;
+        if i < 0 || groups.get_size <= i { I64::maximum };
+        let group = groups.@(i);
+        let (begin, end) = group;
+        begin
+    );
+
     // Gets the length of specified group.
     group_length: I64 -> NFAState -> I64;
     group_length = |i, state| (
@@ -522,6 +539,43 @@ namespace NFAState {
             )
         )
     );
+
+    collect_first_match: Array NFAState -> Option NFAState;
+    collect_first_match = |states| (
+        let states = states._sort_by_group0_begin_and_length;
+        states.get_first
+    );
+
+    collect_all_non_overlapping: Array NFAState -> Array NFAState;
+    collect_all_non_overlapping = |states| (
+        let states = states._sort_by_group0_begin_and_length;
+        let output = Array::empty(states.get_size);
+        states.to_iter.fold(
+            output, |output, a|
+            if output.is_empty {
+                output.push_back(a)
+            };
+            if !output.get_last.as_some.overlaps(a) {
+                output.push_back(a)
+            };
+            output
+        )
+    );
+
+    // Sorts states by beginning of group 0 (ascending order)
+    // and length of group 0 (descending order).
+    _sort_by_group0_begin_and_length: Array NFAState -> Array NFAState;
+    _sort_by_group0_begin_and_length = |states| (
+        let state_less_than: (NFAState, NFAState) -> Bool = |(a, b)| (
+            let a_group_begin = a.group_begin(0);
+            let b_group_begin = b.group_begin(0);
+            if a_group_begin < b_group_begin { true };
+            if a_group_begin > b_group_begin { false };
+            a.group_length(0) > b.group_length(0)            
+        );
+        states.sort_by(state_less_than)
+    );
+
 }
 
 // NFA state set, used for NFA state transition

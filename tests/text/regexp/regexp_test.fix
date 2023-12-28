@@ -18,12 +18,12 @@ impl [a:Eq, e:Eq] Result e a: Eq
 _NotMatch: String;
 _NotMatch = "NotMatch";
 
-test_regexp_match: (String, String, Result ErrMsg (Array String)) -> TestCase;
-test_regexp_match = |(pattern, target, expected)| (
-    let testname = "test_regexp_match(" + pattern + "," + target + ")";
+test_regexp_match_flags: (String, String, String, Result ErrMsg (Array String)) -> TestCase;
+test_regexp_match_flags = |(pattern, flags, target, expected)| (
+    let testname = "test_regexp_match_flags(" + pattern + "," + flags + "," + target + ")";
     make_test(testname) $ |_|
     let actual = do {
-        let regexp = *RegExp::compile(pattern, "");
+        let regexp = *RegExp::compile(pattern, flags);
         regexp.match(target)
     };
     let _ = *if expected.is_ok {
@@ -38,6 +38,11 @@ test_regexp_match = |(pattern, target, expected)| (
             check)
     };
     pure()
+);
+
+test_regexp_match: (String, String, Result ErrMsg (Array String)) -> TestCase;
+test_regexp_match = |(pattern, target, expected)| (
+    test_regexp_match_flags $ (pattern, "", target, expected)
 );
 
 test_empty: TestCase;
@@ -183,6 +188,16 @@ test_either = (
     ].run_tests
 );
 
+test_match_g: TestCase;
+test_match_g = (
+    [
+        test_regexp_match_flags $ ("[a-z]+", "g", "012 abc def ghi", ok $ ["abc", "def", "ghi"]),
+        test_regexp_match_flags $ ("[A-Z][a-z]+", "g", "abc Def ghi Jkl", ok $ ["Def", "Jkl"]),
+        test_regexp_match_flags $ ("[A-Z][a-z]+", "g", "abc def ghi jkl", err $ _NotMatch),
+        TestCase::empty
+    ].run_tests
+);
+
 main: IO ();
 main = (
     [
@@ -194,6 +209,7 @@ main = (
         test_quant,
         test_group,
         test_either,
+        test_match_g,
         TestCase::empty
     ]
     .run_test_driver

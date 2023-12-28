@@ -15,13 +15,19 @@ import StringEx;
 
 import RegExpPattern;
 
-// matched group `(begin, end)`. -1 is invalid position.
+// Type of a matched group.
+// The group is represented as two stream positions: `(begin, end)`. 
+// `-1` means that the stream position is undefined.
 type Group = (I64, I64);
 
-// The array of matched groups
+// Type of the array of matched groups
 type Groups = Array Group;
 
-// special quant ID
+// Type of special quantifiers ID.
+// Special quantifiers are quantifieres other than `X?` `X*` `X+`.
+// In other words, they are `X{n}` `X{n,}` `X{n,m}` etc.
+// Special quantifiers are hard to implement only using node transition,
+// so its iteration count are stored in the NFA state, and managed by `sa_quant_*` actions.
 type QuantID = I64;
 
 // NFA
@@ -84,14 +90,20 @@ namespace NFA {
     // `NFA::compile(pattern)` compiles a pattern to NFA.
     compile: Pattern -> NFA;
     compile = |pattern| (
+        // Creates an empty NFA
         let nfa = NFA::empty;
+        // Assigns group number to each group in the pattern. 
         let (group_count, pattern) = pattern._assign_group_number(0);
         let nfa = nfa.set_group_count(group_count);
+        // Compiles the pattern to a NFA fragment.
         let (nfa, frag) = nfa.compile_pattern(pattern);
+        // Sets the input of the fragment to the initial node
         let nfa = nfa.set_initial_node(frag.@input);
+        // Creates accepting node and set the output of the fragment to that node
         let (nfa, accept_id) = nfa.new_node;
         let nfa = nfa.set_accepting_node(accept_id);
         let nfa = nfa.set_frag_output(frag, accept_id);
+        // Returns the NFA
         eval nfa.debug(nfa.to_string);
         nfa
     );
@@ -122,11 +134,12 @@ impl NFA: ToString {
     );
 }
 
+// Actions that has to be performed before the state makes a transition to `node.@out_on_action`.
 type NFANodeAction = unbox union {
     sa_none: (),
-    sa_char_match: CharClass,
-    sa_assert: PAssertion,
-    sa_group_begin: I64,
+    sa_char_match: CharClass,               //  The input character must match to the character class
+    sa_assert: PAssertion,                  //  The assertion to be checked
+    sa_group_begin: I64,                    // The beginning of group
     sa_group_end: I64,
     sa_quant_begin: QuantID,
     sa_quant_loop: QuantID,

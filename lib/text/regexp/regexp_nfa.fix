@@ -469,6 +469,15 @@ namespace NFAState {
     transition: NodeID -> NFAState -> NFAState;
     transition = set_id;
 
+    // Gets specified group. If group index is out of range, returns (-1, -1).
+    get_group: I64 ->  NFAState -> Group;
+    get_group = |group_idx, state| (
+        if group_idx < 0 || state.@groups.get_size <= group_idx {
+            (-1, -1)
+        };
+        state.@groups.@(group_idx)
+    );
+
     // Modify specified group.
     mod_group: I64 -> (Group -> Group) -> NFAState -> NFAState;
     mod_group = |group_idx, f, state| (
@@ -501,16 +510,6 @@ namespace NFAState {
         true
     );
 
-    // Gets the beginning of specified group.
-    group_begin: I64 -> NFAState -> I64;
-    group_begin = |i, state| (
-        let groups = state.@groups;
-        if i < 0 || groups.get_size <= i { I64::maximum };
-        let group = groups.@(i);
-        let (begin, end) = group;
-        begin
-    );
-
     // Gets the length of specified group.
     group_length: I64 -> NFAState -> I64;
     group_length = |i, state| (
@@ -521,31 +520,15 @@ namespace NFAState {
         if begin < 0 || end < 0 || begin >= end { 0 };
         end - begin
     );
-    
-    // Gets the state whose length of group 0 is longest.
-    get_longest_match: Iterator NFAState -> Option NFAState;
-    get_longest_match = |state_iter| (
-        state_iter.fold(
-            none(),
-            |state1, state2|
-            state1.map_or(
-                some(state2),
-                |state1|
-                if state1.group_length(0) >= state2.group_length(0) {
-                    some(state1)
-                } else {
-                    some(state2)
-                }
-            )
-        )
-    );
 
+    // Collects first match.
     collect_first_match: Array NFAState -> Option NFAState;
     collect_first_match = |states| (
         let states = states._sort_by_group0_begin_and_length;
         states.get_first
     );
 
+    // Collects all non overlapping matches.
     collect_all_non_overlapping: Array NFAState -> Array NFAState;
     collect_all_non_overlapping = |states| (
         let states = states._sort_by_group0_begin_and_length;
@@ -567,15 +550,18 @@ namespace NFAState {
     _sort_by_group0_begin_and_length: Array NFAState -> Array NFAState;
     _sort_by_group0_begin_and_length = |states| (
         let state_less_than: (NFAState, NFAState) -> Bool = |(a, b)| (
-            let a_group_begin = a.group_begin(0);
-            let b_group_begin = b.group_begin(0);
-            if a_group_begin < b_group_begin { true };
-            if a_group_begin > b_group_begin { false };
-            a.group_length(0) > b.group_length(0)            
+            let (a_begin, a_end) = a.get_group(0);
+            let (b_begin, b_end) = b.get_group(0);
+            if a_begin == -1 || a_end == -1 { true };
+            if b_begin == -1 || b_end == -1 { false };
+            // compare begin (asc)
+            if a_begin < b_begin { true };
+            if a_begin > b_begin { false };
+            // compare length (desc)
+            a_end - a_begin > b_end - b_begin
         );
         states.sort_by(state_less_than)
     );
-
 }
 
 // NFA state set, used for NFA state transition
@@ -799,4 +785,81 @@ namespace NFAExecutor {
         let executor = executor.set_stack(Iterator::empty);
         executor
     );
+}
+
+// A replacement fragment
+type ReplaceFrag = unbox union {
+    rep_literal: U8,
+    rep_group: I64
+};
+
+namespace Replacement {
+
+    // Compiles a replacement string to fragments.
+    compile: String -> Array ReplaceFrag;
+    compile = |replacement| (
+        let res = _parse_replacement_seq.run_parser_str(replacement);
+        eval assert(|_|"_parse_replacement_seq failed", res.is_ok);
+        let (reps, _) = res.as_ok;
+        reps
+    );
+
+    // Calculates actual replacement string.
+    calc_replacement: String -> Array ReplaceFrag -> NFAState -> String;
+    calc_replacement = |target, rep_frags, state| (
+        let output: Array U8 = Array::empty(target.get_size + rep_frags.get_size);
+        let output = rep_frags.to_iter.fold(
+            output, |output, rep|
+            if rep.is_rep_literal {
+                output.push_back(rep.as_rep_literal)
+            };
+            if rep.is_rep_group {
+                let group_idx = rep.as_rep_group;
+                let (begin, end) = state.get_group(group_idx);
+                let str = target.substring(begin, end);
+                output.append(str.get_bytes.pop_back)
+            };
+            eval assert(|_|"err", false);
+            output
+        );
+        output._unsafe_to_string
+    );
+
+    _parse_replacement_seq: Parser (Array ReplaceFrag);
+    _parse_replacement_seq = do {
+        repeat(
+            _parse_dollar
+            .or_else(_parse_literal)
+        )
+    };
+
+    _parse_dollar: Parser ReplaceFrag;
+    _parse_dollar = do {
+        let _ = *match_char('$');
+        
+        let dollar = *match_char_if_exists('$');    // $$
+        if dollar.is_some {
+            pure $ rep_literal('$')
+        };
+
+        let ampasand = *match_char_if_exists('&');    // $&
+        if ampasand.is_some {
+            pure $ rep_group(0)
+        };
+
+        // TODO: support $`, $', $<Name>
+
+        let num = *match_integer.map(some).or_else(pure $ none());    // $n
+        if num.is_some {
+            pure $ rep_group(num.as_some)
+        };
+
+        //error_parser $ "invalid dollar"
+        not_match
+    };
+
+    _parse_literal: Parser ReplaceFrag;
+    _parse_literal = do {
+        match_any_char.map(rep_literal)
+    };
 }

@@ -18,14 +18,9 @@ impl [a:Eq, e:Eq] Result e a: Eq
 _NotMatch: String;
 _NotMatch = "NotMatch";
 
-test_regexp_match_flags: (String, String, String, Result ErrMsg (Array String)) -> TestCase;
-test_regexp_match_flags = |(pattern, flags, target, expected)| (
-    let testname = "test_regexp_match_flags(" + pattern + "," + flags + "," + target + ")";
-    make_test(testname) $ |_|
-    let actual = do {
-        let regexp = *RegExp::compile(pattern, flags);
-        regexp.match(target)
-    };
+
+assert_result: [a: Eq, a: ToString] Result ErrMsg a -> Result ErrMsg a -> IOFail ();
+assert_result = |expected, actual| (
     let _ = *if expected.is_ok {
         assert_equal("eq", expected, actual)
     } else {
@@ -40,10 +35,44 @@ test_regexp_match_flags = |(pattern, flags, target, expected)| (
     pure()
 );
 
+test_regexp_match_flags: (String, String, String, Result ErrMsg (Array String)) -> TestCase;
+test_regexp_match_flags = |(pattern, flags, target, expected)| (
+    let testname = "test_regexp_match_flags(" + pattern + "," + flags + "," + target + ")";
+    make_test(testname) $ |_|
+    let actual = do {
+        let regexp = *RegExp::compile(pattern, flags);
+        regexp.match(target)
+    };
+    assert_result(expected, actual)
+);
+
 test_regexp_match: (String, String, Result ErrMsg (Array String)) -> TestCase;
 test_regexp_match = |(pattern, target, expected)| (
     test_regexp_match_flags $ (pattern, "", target, expected)
 );
+
+test_regexp_match_all: (String, String, String, Result ErrMsg (Array (Array String))) -> TestCase;
+test_regexp_match_all = |(pattern, flags, target, expected)| (
+    let testname = "test_regexp_match_all(" + pattern + "," + flags + "," + target + ")";
+    make_test(testname) $ |_|
+    let actual = do {
+        let regexp = *RegExp::compile(pattern, flags);
+        pure $ regexp.match_all(target)
+    };
+    assert_result(expected, actual)
+);
+
+test_regexp_replace_all: (String, String, String, String, Result ErrMsg String) -> TestCase;
+test_regexp_replace_all = |(pattern, flags, target, replacement, expected)| (
+    let testname = "test_regexp_replace_all(" + pattern + "," + flags + "," + target + "," + replacement + ")";
+    make_test(testname) $ |_|
+    let actual = do {
+        let regexp = *RegExp::compile(pattern, flags);
+        pure $ regexp.replace_all(target, replacement)
+    };
+    assert_result(expected, actual)
+);
+
 
 test_empty: TestCase;
 test_empty = (
@@ -192,8 +221,35 @@ test_match_g: TestCase;
 test_match_g = (
     [
         test_regexp_match_flags $ ("[a-z]+", "g", "012 abc def ghi", ok $ ["abc", "def", "ghi"]),
+        test_regexp_match_flags $ ("^[a-z]+", "g", "abc def ghi", ok $ ["abc"]),
+        test_regexp_match_flags $ ("[a-z]+$", "g", "abc def ghi", ok $ ["ghi"]),
         test_regexp_match_flags $ ("[A-Z][a-z]+", "g", "abc Def ghi Jkl", ok $ ["Def", "Jkl"]),
         test_regexp_match_flags $ ("[A-Z][a-z]+", "g", "abc def ghi jkl", err $ _NotMatch),
+        TestCase::empty
+    ].run_tests
+);
+
+test_match_all: TestCase;
+test_match_all = (
+    [
+        test_regexp_match_all $ ("[a-z]([a-z])[a-z]", "", "012 abc def ghi", ok $ [["abc", "b"], ["def", "e"], ["ghi", "h"]]),
+        test_regexp_match_all $ ("^[a-z]+", "", "abc def ghi", ok $ [["abc"]]),
+        test_regexp_match_all $ ("[a-z]+$", "", "abc def ghi", ok $ [["ghi"]]),
+        test_regexp_match_all $ ("[A-Z]([a-z]+)", "", "abc Def ghi Jkl", ok $ [["Def", "ef"], ["Jkl", "kl"]]),
+        test_regexp_match_all $ ("[A-Z][a-z]+", "", "abc def ghi jkl", ok $ []),
+        TestCase::empty
+    ].run_tests
+);
+
+test_replace_all: TestCase;
+test_replace_all = (
+    [
+        test_regexp_replace_all $ ("", "", "", "", ok $ ""),
+        test_regexp_replace_all $ ("\\w+", "", "ab cd ef", "x", ok $ "x x x"),
+        test_regexp_replace_all $ ("\\w+", "", "ab cd ef", "x$$", ok $ "x$ x$ x$"),
+        test_regexp_replace_all $ ("\\w+", "", "ab cd ef", "x$&", ok $ "xab xcd xef"),
+        test_regexp_replace_all $ ("\\w+", "", "ab cd ef", "x$0", ok $ "xab xcd xef"),
+        test_regexp_replace_all $ ("(\\w\\w)(\\w)", "", "abc def ijk", "$2$1", ok $ "cab fde kij"),
         TestCase::empty
     ].run_tests
 );
@@ -210,6 +266,8 @@ main = (
         test_group,
         test_either,
         test_match_g,
+        test_match_all,
+        test_replace_all,
         TestCase::empty
     ]
     .run_test_driver

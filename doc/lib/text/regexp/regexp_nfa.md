@@ -2,6 +2,8 @@
 
 ## module RegExpNFA
 
+This is internal module of `RegExp`.
+
 NFA (Nondeterministic Finite Automaton)
 
 For details, see web pages below.
@@ -95,29 +97,32 @@ Actions that has to be performed before the state makes a transition to `node.@o
 ```
 type NFANodeAction = unbox union {
     sa_none: (),
-    sa_char_match: CharClass,               //  The input character must match to the character class
-    sa_assert: PAssertion,                  //  The assertion to be checked
-    sa_group_begin: I64,                    // The beginning of group
-    sa_group_end: I64,
-    sa_quant_begin: QuantID,
-    sa_quant_loop: QuantID,
-    sa_quant_end: (QuantID, I64, I64)
+    sa_char_match: CharClass,               // The input character must match to the character class
+    sa_assert: PAssertion,                  // The assertion to be checked
+    sa_group_begin: I64,                    // The beginning of a group
+    sa_group_end: I64,                      // The end of a group
+    sa_quant_begin: QuantID,                // The beginning of a special quantifier
+    sa_quant_loop: QuantID,                 // The loop of a special quantifier
+    sa_quant_end: (QuantID, I64, I64)       // The end of a special quantifier
 };
 ```
 #### `impl NFANodeAction: ToString`
 
 ### type NFANode
 
-An NFA node
+NFA node
+
+NFA node has one input (ID of this node) and three outputs
+(one output guarded by the action, and two outputs with no guard).
 
 ```
 type NFANode = unbox struct {
-    id: NodeID,                // node id
+    id: NodeID,                // ID of this node
     action: NFANodeAction,     // action
     output_on_action: NodeID,  // next node when the action succeeded
     output: NodeID,            // next node with empty string
     output2: NodeID,           // next node with empty string part 2
-    label: String               // a label to display
+    label: String              // a label to display
 };
 ```
 ### type NodeID
@@ -147,6 +152,11 @@ An empty node
 
 NFA Fragment
 
+NFA Fragment is a collection of nodes. It exports one input,
+And a function to set the output.
+Internally, the output of a fragment is a collection of outputs of one or more nodes.
+Calling `set_output()` will change them all.
+
 ```
 type NFAFrag = unbox struct {
     input: NodeID,                     // NodeID of input of this fragment
@@ -167,9 +177,9 @@ NFA state
 
 ```
 type NFAState = unbox struct {
-    id: NodeID, 
-    groups: Groups,
-    quants: Array I64   // special quant counter
+    id: NodeID,         // NodeID where this state currently stays
+    groups: Groups,     // Captured groups
+    quants: Array I64   // Special quantifier counters
 };
 ```
 #### `impl NFAState: Eq`

@@ -2,6 +2,8 @@
 
 ## module RegExpPattern
 
+This is internal module of `RegExp`.
+
 Character class and Pattern parser
 
 ### type CharClass

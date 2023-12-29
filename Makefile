@@ -61,7 +61,9 @@ document: examples/fixdoc.out
 		examples/fixdoc.out $$input -o doc/$${input%%.fix}.md && \
 		echo $$input; done
 
-examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out examples/fixdoc.out examples/sample_http_server.out
+examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out \
+		examples/fixdoc.out examples/sample_http_server.out \
+		examples/grep.out
 
 examples/json_cat.out: examples/json_cat.fix $(LIB_JSON) 
 	fix build -f $^ -o $@
@@ -80,3 +82,6 @@ examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fi
 
 http_server: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
 	fix run -f $^
+
+examples/grep.out: examples/grep.fix $(LIB_REGEXP) lib/clap.fix
+	fix build -f $^ -o $@

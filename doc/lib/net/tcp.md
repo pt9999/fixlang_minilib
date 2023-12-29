@@ -74,6 +74,10 @@ Creates a `SocketAddress` from an ip address and a port.
 
 #### resolve: String -> IOFail SocketAddress;
 
+Splits the first argument into a host name and a port number, then resolves the host
+name to an ip address, then creates a `SocketAddress` from the ip address and
+the port number.
+
 The first argument is `{host}:{port}`, where `{host}` is an IP Address (eg. `192.168.0.1`),
 or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. `8080`).
 If the port number is omitted, the default port number is 80.
@@ -187,6 +191,12 @@ or a FQDN host name (eg. `www.example.com`), and `{port}` is a port number (eg. 
 If the port number is omitted, the default port number is 80.
 
 #### listen_tcp_server: String -> I64 -> IOFail Socket;
+
+Listens at the specified address as a server.
+
+The first argument is `{host}:{port}`, where `{host}` is an IP Address (typically, `127.0.0.1`),
+or a FQDN host name (typically, `localhost`), and `{port}` is a port number (eg. `8080`).
+If the port number is omitted, the default port number is 80.
 
 The second argument (`backlog`) is the maximum length to which the queue of pending connections
 for the socket may grow.

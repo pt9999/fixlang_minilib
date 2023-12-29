@@ -29,6 +29,12 @@ namespace Stream {
         iter: Iterator::empty
     };
 
+    // Creates a stream from specified string.
+    make: String -> Stream;
+    make = |str| (
+        Stream::empty.set_iter(str.get_bytes.pop_back.to_iter)
+    );
+
     // `stream.advance` gets next character and increment the stream position.
     advance: Stream -> Option (Char, Stream);
     advance = |s| (
@@ -60,6 +66,12 @@ namespace Stream {
         )
     );
 
+    // `stream.read_string(n)` reads at most `n` characters and convert them to a string.
+    read_string: I64 -> Stream -> String;
+    read_string = |n, s| (
+        s.@iter.take(n).from_iter._unsafe_to_string
+    );
+
     // `stream.error(str)` reports an error along with where it occurred.
     error: String -> Stream -> Result ErrMsg a;
     error = |str, s| (
@@ -75,7 +87,7 @@ namespace Stream {
 // Creates a stream from a string.
 impl Stream: FromString {
     from_string = |str| (
-        pure $ Stream::empty.set_iter(str.get_bytes.pop_back.to_iter)
+        pure $ Stream::make(str) 
     );
 }
 
@@ -187,6 +199,8 @@ namespace Parser {
     );
 
     // If the first Parser raises a `_NotMatch` error, tries the second Parser.
+    // Note that `pa1.or_else(pa2)` is interpreted as `or_else(pa2, pa1)`, 
+    // and  that `pa1.or_else $ pa2` is interpreted as `or_else(pa1, pa2)`.
     or_else: Parser a -> Parser a -> Parser a;
     or_else = |pa2, pa1| parser $ |s| (
         let res = pa1.run_parser(s);
@@ -223,7 +237,9 @@ namespace Parser {
     );
 
     // Repeats matches as many as possible. The parse result is
-    // an array of successful matches.  Never raises an error.
+    // an array of successful matches.
+    // If a _NotMatch error is raised, returns as success.
+    // If an error other than _NotMatch is raised, reports that error.
     repeat: Parser a -> Parser (Array a);
     repeat = |p| parser $ |s| (
         let array = Array::empty(100);
@@ -232,6 +248,9 @@ namespace Parser {
             let old_position = s.@position;
             let res = p.run_parser(s);
             if res.is_err {
+                if res.as_err != _NotMatch {
+                    break $ err $ res.as_err
+                };
                 break $ pure $ (array, s)
             };
             let (a, s) = res.as_ok;
@@ -286,6 +305,21 @@ namespace Parser {
         )
     );
 
+    // Matches a single character if it exists.
+    // The parsed result is `some(c)` if it exists, 
+    // `none()` if it does not exist.
+    match_char_if_exists: U8 -> Parser (Option U8);
+    match_char_if_exists = |c| (
+        match_any_char.filter(|c1| c1 == c).map(some).or_else(pure $ none())
+    );
+    /*
+    match_char_if_exists = |c| (
+        let n: Option U8 = none();
+        let p: Parser (Option U8) = match_any_char.filter(|c1| c1 == c).map(some);
+        p.or_else(pure $ n)
+    );
+    */
+
     // Matches a character which is included in the specified string.
     // The parsed result is a string consisting of the single matched character.
     // If the match fails, a `_NotMatch` error is raised.
@@ -335,26 +369,22 @@ namespace Parser {
         .map(_unsafe_to_string)
     );
 
-    // Matches a zero-or-more-length string. Each character should satisfy the specified condition.
-    class: (Char -> Bool) -> Parser String;
-    class = match_str_class;
-
     // Matches a zero-or-more-length string of whitespace characters.
-    class_whitespace: Parser String;
-    class_whitespace = class(Character::is_space);
+    match_str_class_whitespace: Parser String;
+    match_str_class_whitespace = match_str_class(Character::is_space);
 
     // Matches a zero-or-more-length string of lowercase characters.
-    class_lower: Parser String;
-    class_lower = class(Character::is_lower);
+    match_str_class_lower: Parser String;
+    match_str_class_lower = match_str_class(Character::is_lower);
 
     // Matches a zero-or-more-length string of digit characters.
-    class_digit: Parser String;
-    class_digit = class(Character::is_digit);
+    match_str_class_digit: Parser String;
+    match_str_class_digit = match_str_class(Character::is_digit);
 
     // Matches an integer.
-    integer: Parser I64;
-    integer = (
-        class_digit
+    match_integer: Parser I64;
+    match_integer = (
+        match_str_class(is_digit)
         .filter(|str| str.get_size > 0)
         .map_result(|str| from_string(str))
     );

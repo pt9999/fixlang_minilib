@@ -19,6 +19,7 @@ This library is still work in progress.
 - File format
   - JSON encoding and decoding
 - Text handling
+  - Regular expressions
   - Simple parsers
   - String utility
   - UTF8/UTF16/UTF32 conversion

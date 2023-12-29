@@ -1,3 +1,4 @@
+// Character class and Pattern parser
 module RegExpPattern;
 
 import Character;
@@ -6,11 +7,11 @@ import Debug;
 import SimpleParser;
 import StringEx;
 
-// A type of a character class
+// Type of a character class.
 type CharClass = unbox struct {
-    // A label to be displayed
+    // A label that describes this class (for debugging only)
     label: String,
-    // A member
+    // A member function that judges whether a character is contained in this class or not
     f: U8 -> Bool
 };
 
@@ -26,25 +27,25 @@ namespace CharClass {
     make: String -> (U8 -> Bool) -> CharClass;
     make = |label, f| CharClass { label:label, f:f };
 
-    // Returns true if the character is in the class.
+    // Returns true if the character is a member of the class.
     contains: U8 -> CharClass -> Bool;
     contains = |c, cls| (cls.@f)(c);
 
-    // Creates a character class that consists of only single character.
+    // Creates a character class whose only member is the specified character.
     singleton: U8 -> CharClass;
     singleton = |c| CharClass {
         label: byte_to_string(c),
         f: |c1| c1 == c
     };
 
-    // Creates a character class that consists of characters from start to end.
+    // Creates a character class whose members are characters from start to end.
     range: U8 -> U8 -> CharClass;
     range = |start, end| CharClass {
         label: byte_to_string(start) + "-" + byte_to_string(end),
         f: |c| start <= c && c <= end
     };
 
-    // Creates a character class that consists of specified string.
+    // Creates a character class whose members are characters in the specified string.
     consists_of: String -> CharClass;
     consists_of = |str| CharClass {
         label: str,
@@ -77,8 +78,8 @@ namespace CharClass {
     add: U8 -> CharClass -> CharClass;
     add = |c, cls| cls.union(singleton(c));
 
-    // For optimization, converts a character class to a table, and create a new class
-    // that refers to the table.
+    // For optimization, creates a lookup table of same members, and returns a character class
+    // using that table.
     to_table: CharClass -> CharClass;
     to_table = |cls| (
         let table = Iterator::count_up(0).take(256).fold(
@@ -103,19 +104,24 @@ namespace CharClass {
     cls_non_digit: CharClass;
     cls_non_digit = cls_digit.negate.set_label("\\D");
 
+    // A character class of `\w`. (ie. `[A-Za-z0-9_]`)
     cls_word_char: CharClass;
     cls_word_char = CharClass::make("\\w") $ |c| is_alnum(c) || c == '_';
 
+    // A character class of `\W`. (ie. `[^A-Za-z0-9_]`)
     cls_non_word_char: CharClass;
     cls_non_word_char = cls_word_char.negate.set_label("\\W");
 
+    // A character class of `\s`. (whitespaces)
     cls_whitespace: CharClass;
     cls_whitespace = CharClass::make("\\s") $ is_space;
 
+    // A character class of `\S`. (non-whitespaces)
     cls_non_whitespace: CharClass;
     cls_non_whitespace = cls_whitespace.negate.set_label("\\S");
 }
 
+// Converts a character class to a string.
 impl CharClass: ToString {
     to_string = |cls| (
         if cls.@label.get_size <= 1 {
@@ -127,13 +133,13 @@ impl CharClass: ToString {
 }
 
 
-// A type that represents Assertion Pattern.
+// Type of an assertion for regular expressions, such as `^`, `$`.
 type PAssertion = unbox union {
     pa_begin: (),       // beginning of line, ie. '^'
     pa_end: ()          // end of line,       ie. '$'
 };
 
-// Converts a pattern to a string.
+// Converts an assertion to a string.
 impl PAssertion: ToString {
     to_string = |pa| (
         if pa.is_pa_begin { "^" };
@@ -143,7 +149,7 @@ impl PAssertion: ToString {
     );
 }
 
-// A type that represents Pattern of Regular Expression.
+// Type of a parsed regular expression.
 type Pattern = box union {
     // Character class pattern, eg. `a`, `[a-z]`, `\d` etc.
     pclass: CharClass,
@@ -159,8 +165,8 @@ type Pattern = box union {
     pgroup: (/* group_number:*/ I64, Pattern)
 };
 
+// Converts a pattern to a string.
 impl Pattern: ToString {
-    // Converts a pattern to a string.
     to_string = |pat| (
         if pat.is_pclass {
             "[" + pat.as_pclass.@label + "]"

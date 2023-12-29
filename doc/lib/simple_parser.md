@@ -31,6 +31,10 @@ and offset from the beginning of the file.
 
 An empty Stream.
 
+#### make: String -> Stream;
+
+Creates a stream from specified string.
+
 #### advance: Stream -> Option (Char, Stream);
 
 `stream.advance` gets next character and increment the stream position.
@@ -38,6 +42,10 @@ An empty Stream.
 #### read_all: Stream -> (Array Char, Stream);
 
 `stream.read_all` reads all characters to the end of stream.
+
+#### read_string: I64 -> Stream -> String;
+
+`stream.read_string(n)` reads at most `n` characters and convert them to a string.
 
 #### error: String -> Stream -> Result ErrMsg a;
 
@@ -112,6 +120,8 @@ Raises a `_NotMatch` error if the specified condition is not met.
 #### or_else: Parser a -> Parser a -> Parser a;
 
 If the first Parser raises a `_NotMatch` error, tries the second Parser.
+Note that `pa1.or_else(pa2)` is interpreted as `or_else(pa2, pa1)`,
+and  that `pa1.or_else $ pa2` is interpreted as `or_else(pa1, pa2)`.
 
 #### or_error: String -> Parser a -> Parser a;
 
@@ -129,7 +139,9 @@ Raises a `_NotMatch` error.
 #### repeat: Parser a -> Parser (Array a);
 
 Repeats matches as many as possible. The parse result is
-an array of successful matches.  Never raises an error.
+an array of successful matches.
+If a _NotMatch error is raised, returns as success.
+If an error other than _NotMatch is raised, reports that error.
 
 #### zero_or_more: Parser a -> Parser (Array a);
 
@@ -156,6 +168,12 @@ Matches a single character specified by the argument.
 The parsed result is nothing.
 If the match fails, a `_NotMatch` error is raised.
 
+#### match_char_if_exists: U8 -> Parser (Option U8);
+
+Matches a single character if it exists.
+The parsed result is `some(c)` if it exists,
+`none()` if it does not exist.
+
 #### match_one_of_char: String -> Parser String;
 
 Matches a character which is included in the specified string.
@@ -180,23 +198,19 @@ Matches a character satisfying the specified condition.
 
 Matches a zero-or-more-length string. Each character should satisfy the specified condition.
 
-#### class: (Char -> Bool) -> Parser String;
-
-Matches a zero-or-more-length string. Each character should satisfy the specified condition.
-
-#### class_whitespace: Parser String;
+#### match_str_class_whitespace: Parser String;
 
 Matches a zero-or-more-length string of whitespace characters.
 
-#### class_lower: Parser String;
+#### match_str_class_lower: Parser String;
 
 Matches a zero-or-more-length string of lowercase characters.
 
-#### class_digit: Parser String;
+#### match_str_class_digit: Parser String;
 
 Matches a zero-or-more-length string of digit characters.
 
-#### integer: Parser I64;
+#### match_integer: Parser I64;
 
 Matches an integer.
 

@@ -159,6 +159,23 @@ namespace NdArray {
         }
     );
 
+    arange: I64 -> I64 -> NdArray I64;
+    arange = |begin, end| (
+        if begin >= end { empty };
+        let n = end - begin;
+        let data = loop(
+            (Array::empty(n), begin), |(data, i)|
+            if i >= end { break $ data };
+            continue $ (data.push_back(i), i + 1)
+        );
+        NdArray {
+            data: data,
+            shape: [n],
+            strides: [1],
+            offset: 0
+        }
+    );
+
     get_size: NdArray a -> I64;
     get_size = |ndarray| ndarray.@shape.to_iter.fold(1, |size, n| size * n);
 
@@ -264,12 +281,20 @@ namespace NdArray {
         _copy_loop(src, dest, src.@shape, dest_shape, src.@offset, dest_offset, 0)
     );
 
+    ravel: NdArray a -> NdArray a;
+    ravel = |src| (
+        let data = src.to_array;
+        NdArray::make([data.get_size], data)
+    );
+
     _copy_new: NdArray a -> NdArray a;
     _copy_new = |src| (
         let (size, strides) = _calc_size_and_stride(src.@shape);
         let dest = NdArray {
-            data: if size == 0 { Array::empty(0) } else {
-               Array::fill(size, src.@data.@(src.@offset))
+            data: if size == 0 { 
+                Array::empty(0)
+            } else {
+                Array::fill(size, src.@data.@(src.@offset))
             },
             shape: src.@shape,
             strides: strides,
@@ -317,6 +342,8 @@ namespace NdArray {
         }
     );
 
+    // `src.get_positions(dest_shape)` gets positions (ie. indices of `src.@data`) of `src`
+    // as if `src` is broadcasted to `dest_shape`.
     get_positions: Array I64 -> NdArray a -> Array I64;
     get_positions = |dest_shape, src| (
         let positions: Array I64 = Array::empty(src.get_size);
@@ -395,8 +422,11 @@ namespace NdArray {
 
     reshape: Array I64 -> NdArray a -> NdArray a;
     reshape = |shape, ndarray| (
+        if ndarray.@shape == shape {
+            ndarray
+        };
         if ndarray.@offset != 0 {
-            ndarray._copy_new.reshape(shape)
+            ndarray.ravel.reshape(shape)
         };
         eval assert(|_|"shape is empty", shape.get_size > 0);
         // check that shape.@(i) >= 0 except for i == 0
@@ -424,6 +454,7 @@ namespace NdArray {
         }
     );
 
+    // `array._array_insert(i, v)` inserts `v` into `array` at position `i`.
     _array_insert: I64 -> a -> Array a -> Array a;
     _array_insert = |i, v, array| (
         let n = array.get_size;
@@ -440,6 +471,7 @@ namespace NdArray {
         )
     );
 
+    // `array._array_remove(i)` removes an element at position `i` from `array`.
     _array_remove: I64 -> Array a -> Array a;
     _array_remove = |i, array| (
         let n = array.get_size;
@@ -455,6 +487,8 @@ namespace NdArray {
         )
     );
 
+    // `a._array_zip(b)` zips two arrays.
+    // Same as `a.to_iter.zip(b.to_iter).to_array`, but runs 50 times faster.
     _array_zip: Array a -> Array b -> Array (a, b);
     _array_zip = |a, b| (
         let n = min(a.get_size, b.get_size);
@@ -468,25 +502,38 @@ namespace NdArray {
         )
     );
 
+    // Inserts a new axis to an NdArray.
     expand_dims: I64 -> NdArray a -> NdArray a;
     expand_dims = |axis, ndarray| (
         let size = ndarray.get_size;
         let shape = ndarray.@shape._array_insert(axis, 1);
         let strides = ndarray.@strides._array_insert(axis, size);
-        NdArray {
-            data: ndarray.@data,
-            shape: shape,
-            strides: strides,
-            offset: ndarray.@offset
-        }
+        ndarray.set_shape(shape).set_strides(strides)
     );
 
+    // Removes specified axis (of length any) from an NdArray.
+    shrink_dims: I64 -> NdArray a -> NdArray a;
+    shrink_dims = |axis, ndarray| (
+        let shape = ndarray.@shape._array_remove(axis);
+        let strides = ndarray.@strides._array_remove(axis);
+        ndarray.set_shape(shape).set_strides(strides)
+    );
+
+    // Removes specified axis of length one from an NdArray.
+    squeeze: I64 -> NdArray a -> NdArray a;
+    squeeze = |axis, ndarray| (
+        eval assert(|_| "squeeze: not length one", ndarray.@shape.@(axis) == 1);
+        ndarray.shrink_dims(axis)
+    );
+
+    // Transposes an NdArray.
     transpose: NdArray a -> NdArray a;
     transpose = |ndarray| (
         eval assert (|_| "transpose: dimension mismatch", ndarray.get_dim >= 2);
         ndarray.swapaxes(0, 1)
     );
 
+    // Swaps two axes of an NdArray.
     swapaxes: I64 -> I64 -> NdArray a -> NdArray a;
     swapaxes = |i, j, ndarray| (
         eval assert (|_| "swapaxes: dimension out of range",
@@ -496,6 +543,8 @@ namespace NdArray {
         ndarray.mod_shape(swap).mod_strides(swap)
     );
 
+    // Joins a sequence of NdArrays along a new axis.
+    // Each NdArray must have the same shape.
     stack: [a: ToString] I64 -> Array (NdArray a) -> NdArray a;
     stack = |axis, children| (
         //eval debug_println("stack children="+children.to_string);
@@ -625,6 +674,21 @@ impl [a: Rem] NdArray a: Rem {
     rem = |a,b| _map2(|(a,b)| a % b, a, b);
 }
 
+perf: String -> I64 -> (a -> b) -> a -> b;
+perf = |message, count,  f, a| (
+    let (res, consumed_time) = ().consumed_time_while(|_|
+        Iterator::count_up(0).take(count - 1).fold(
+            f(a), |_,_|
+            f(a)
+        )
+    );
+    eval debug_eprintln("=== " + message + " ===");
+    eval debug_eprintln("Total time: " + (1000.0 * consumed_time).to_string + " msec");
+    eval debug_eprintln("Time per loop: " + (1000.0 * consumed_time / count.to_F64).to_string + " msec");
+    res
+);
+
+
 main: IO ();
 main = (
     do {
@@ -651,6 +715,7 @@ main = (
         let _ = *println("base.reshape([-1])=" + base.reshape([-1]).to_string).lift;
         let base2 = base.set_sub((_All, _All), base.get_sub((1, _All)));  // base2 = base; base2[:,:] = base[1,:]
         let _ = *println("base.set_sub((_All, _All), base.get_sub((1, _All)))=" +base2.to_string).lift;
+        //let _ = *println("base.set_sub((1, _All), scalar(10))=" + base.set_sub((1, _All), scalar(10)).to_string).lift;
         let parent = stack(0, [base, base, base.transpose]);
         let _ = *println("stack(0, [base, base, base.transpose])="+parent.to_string).lift;
         let parent = stack(1, [base, base, base.transpose]);
@@ -658,7 +723,28 @@ main = (
         let parent = stack(2, [base, base, base.transpose]);
         let _ = *println("stack(2, [base, base, base.transpose])="+parent.to_string).lift;
         let _ = *println("stack(2, [base, base, base.transpose]).to_array="+parent.to_array.to_string).lift;
-
+        /*
+        let count = 10000;
+        let _ = perf("base + base", count, |_| base + base, ());
+        let _ = perf("base + scalar(3)", count, |_| base + scalar(3), ());
+        let _ = perf("stack(2, [base, base, base.transpose])", count, |_| stack(2, [base, base, base.transpose]), ());
+        */
+        /*
+        let count = 10;
+        let size = 1000;
+        let a = NdArray::arange(0, size*size).map(to_F64);
+        let a = a.reshape([size, size]);
+        let a = a.get_sub([(size/2,size), (size/2,size)]);
+        
+        let _ = perf("large", count, |_| 
+            let b = a.ravel;
+            let a = b.reshape([size/4, size]);
+            let a = a.ravel;
+            eval assert(|_| "differ", a == b);
+            //a * scalar(3.0), 
+            a,
+            ());
+        */
         pure()
     }.try(eprintln)
 );

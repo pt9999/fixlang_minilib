@@ -1,0 +1,77 @@
+module Main;
+
+import NdArray;
+
+perf: String -> I64 -> (a -> b) -> a -> b;
+perf = |message, count,  f, a| (
+    let (res, consumed_time) = ().consumed_time_while(|_|
+        Iterator::count_up(0).take(count - 1).fold(
+            f(a), |_,_|
+            f(a)
+        )
+    );
+    eval debug_eprintln("=== " + message + " ===");
+    eval debug_eprintln("Total time: " + (1000.0 * consumed_time).to_string + " msec");
+    eval debug_eprintln("Time per loop: " + (1000.0 * consumed_time / count.to_F64).to_string + " msec");
+    res
+);
+
+main: IO ();
+main = (
+    do {
+        let base = NdArray::make([3,3], [1,2,3,4,5,6,7,8,9]);
+        let _ = *println("base=" + base.to_string).lift;
+        let _ = *println("(base+base)=" + (base+base).to_string).lift;
+        let _ = *println("(base+(-base))=" + (base+(-base)).to_string).lift;
+        let _ = *println("(base*3)=" + (base*scalar(3)).to_string).lift;
+        let _ = *println("(base%3)=" + (base%scalar(3)).to_string).lift;
+        let _ = *println("(base.map(to_F64))=" + (base.map(to_F64)).to_string).lift;
+        let _ = *println("(base+base == base*2)=" + (base + base == base * scalar(2)).to_string).lift;
+        let _ = *println("base.transpose=" + base.transpose.to_string).lift;
+        let _ = *println("base.get((2, 1))=" + base.get((2, 1)).to_string).lift;
+        let _ = *println("base.get((-1, -1))=" + base.get((-1, -1)).to_string).lift;
+        let _ = *println("base.set((-1, -1), 100)=" + base.set((-1, -1), 100).to_string).lift;
+        let _ = *println("base.get_sub((1, _All))=" + base.get_sub((1, _All)).to_string).lift;
+        let _ = *println("base.get_sub((_All, -1))=" + base.get_sub((_All, -1)).to_string).lift;
+        let a = base.get_sub(([1,3], [1,3]));
+        let _ = *println("a=base.get_sub(([1,3], [1,3]))=" + a.to_string).lift;
+        let _ = *println("a.expand_dims(0)=" + a.expand_dims(0).to_string).lift;
+        let _ = *println("a.expand_dims(1)=" + a.expand_dims(1).to_string).lift;
+        let _ = *println("a.expand_dims(2)=" + a.expand_dims(2).to_string).lift;
+        let _ = *println("base.reshape([-1,4])=" + base.reshape([-1,4]).to_string).lift;
+        let _ = *println("base.reshape([-1])=" + base.reshape([-1]).to_string).lift;
+        let base2 = base.set_sub((_All, _All), base.get_sub((1, _All)));  // base2 = base; base2[:,:] = base[1,:]
+        let _ = *println("base.set_sub((_All, _All), base.get_sub((1, _All)))=" +base2.to_string).lift;
+        //let _ = *println("base.set_sub((1, _All), scalar(10))=" + base.set_sub((1, _All), scalar(10)).to_string).lift;
+        let parent = stack(0, [base, base, base.transpose]);
+        let _ = *println("stack(0, [base, base, base.transpose])="+parent.to_string).lift;
+        let parent = stack(1, [base, base, base.transpose]);
+        let _ = *println("stack(1, [base, base, base.transpose])="+parent.to_string).lift;
+        let parent = stack(2, [base, base, base.transpose]);
+        let _ = *println("stack(2, [base, base, base.transpose])="+parent.to_string).lift;
+        let _ = *println("stack(2, [base, base, base.transpose]).to_array="+parent.to_array.to_string).lift;
+        /*
+        let count = 10000;
+        let _ = perf("base + base", count, |_| base + base, ());
+        let _ = perf("base + scalar(3)", count, |_| base + scalar(3), ());
+        let _ = perf("stack(2, [base, base, base.transpose])", count, |_| stack(2, [base, base, base.transpose]), ());
+        */
+        /*
+        let count = 10;
+        let size = 1000;
+        let a = NdArray::arange(0, size*size).map(to_F64);
+        let a = a.reshape([size, size]);
+        let a = a.get_sub([(size/2,size), (size/2,size)]);
+        
+        let _ = perf("large", count, |_| 
+            let b = a.ravel;
+            let a = b.reshape([size/4, size]);
+            let a = a.ravel;
+            eval assert(|_| "differ", a == b);
+            //a * scalar(3.0), 
+            a,
+            ());
+        */
+        pure()
+    }.try(eprintln)
+);

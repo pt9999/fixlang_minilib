@@ -1,0 +1,395 @@
+
+/*
+    以下のように実行する。
+    $ fix run -d readline -f ndarray_calc.fix ndarray.fix ../lib/simple_parser.fix ../lib/string_ex.fix ../lib/monad/state_monad.fix
+
+    あらかじめ libreadline-dev をインストールしておく必要がある。
+    $ sudo apt install libreadline-dev
+*/
+
+module Main;
+
+import Character;
+import Debug;
+import HashMap;
+
+import StringEx;
+import SimpleParser;
+import NdArray;
+import StateMonad;
+
+_EOF: String;
+_EOF = "EOF";
+
+readline: String -> IOFail String;
+readline = |prompt| (
+    let ptr = prompt.borrow_c_str(|p_prompt|
+        CALL_C[Ptr readline(Ptr), p_prompt]
+    );
+    if ptr == nullptr {
+        throw $ _EOF
+    };
+    let str = String::_unsafe_from_c_str_ptr(ptr);
+    let _ = if str.get_size > 0 {
+        CALL_C[() add_history(Ptr), ptr]
+    } else {
+        ()
+    };
+    let _ = CALL_C[() free(Ptr), ptr];
+    pure $ str
+);
+
+is_all: (a -> Bool) -> Array a -> Bool;
+is_all = |f, array| (
+    array.to_iter.fold(
+        true, |b, x|
+        b && f(x)
+    )
+);
+
+type Term = box union {
+    t_none: (),
+    t_ident: String,
+    t_int: I64,
+    t_float: F64,
+    t_funcall: (String, Array Term),
+    t_array: Array Term,
+    t_subsc: (Term, Term),
+    t_ndarray: NdArray I64,
+    t_assign: (String, Term)
+};
+
+impl Term: ToString {
+    to_string = |t| (
+        if t.is_t_ident { t.as_t_ident };
+        if t.is_t_int { t.as_t_int.to_string };
+        if t.is_t_float { t.as_t_float.to_string };
+        if t.is_t_funcall {
+            let (name, args) = t.as_t_funcall;
+            name + "(" + args.to_iter.map(to_string).join(",") + ")"
+        };
+        if t.is_t_array {
+            "[" + t.as_t_array.to_iter.map(to_string).join(",") + "]"
+        };
+        if t.is_t_subsc {
+            let (a, b) = t.as_t_subsc;
+            a.to_string + "[" + b.to_string + "]"
+        };
+        if t.is_t_ndarray {
+            "#" + t.as_t_ndarray.to_string
+        };
+        if t.is_t_assign {
+            let (a, b) = t.as_t_assign;
+            a.to_string + "=" + b.to_string
+        };
+        ""
+    );
+}
+
+namespace Term {
+
+    parse_term: String -> Result ErrMsg Term;
+    parse_term = |line| (
+        let parser = do {
+            let t = *_parse_term;
+            let _ = *match_str_class_whitespace;
+            let _ = *match_end_of_stream;
+            pure $ t
+        };
+        parser.run_parser_str(line).map(@0)
+    );
+
+    _parse_term: Parser Term;
+    _parse_term = do {
+        _parse_assign
+    };
+
+    _parse_assign: Parser Term;
+    _parse_assign = do {
+        let lhs = *_parse_exp;
+        let _ = *match_str_class_whitespace;
+        let equal = *match_char_if_exists('=');
+        if equal.is_none {
+            pure $ lhs
+        };
+        let rhs = *_parse_exp;
+        if !lhs.is_t_ident {
+            error_parser $ "lhs must be an ident"
+        };
+        pure $ t_assign $ (lhs.as_t_ident, rhs)
+    };
+
+    _parse_exp: Parser Term;
+    _parse_exp = do {
+        let _ = *match_str_class_whitespace;
+        _parse_funcall
+        .or_else(_parse_ident_subsc)
+        .or_else(_parse_integer)
+        .or_else(_parse_array)
+    };
+
+    _parse_funcall: Parser Term;
+    _parse_funcall = do {
+        let _ = *match_str_class_whitespace;
+        let name = *_parse_ident;
+        let name = name.as_t_ident;
+        let _ = *match_str_class_whitespace;
+        let _ = *match_char('(');
+        let inner = do {
+            let a = *_parse_exp;
+            let rest = *repeat(do {
+                let _ = *match_str_class_whitespace;
+                let _ = *match_char(',');
+                _parse_exp
+            });
+            pure $ [a].append(rest)
+        };
+        let empty = do {
+            let _ = *match_str_class_whitespace;
+            pure $ []
+        };
+        let args = *inner.or_else(empty);
+        let _ = *match_char(')').or_error("')' is missing");
+        pure $ t_funcall $ (name, args)
+    };
+
+    _parse_array: Parser Term;
+    _parse_array = do {
+        let _ = *match_str_class_whitespace;
+        let _ = *match_char('[');
+        let inner = do {
+            let a = *_parse_exp;
+            let rest = *repeat(do {
+                let _ = *match_str_class_whitespace;
+                let _ = *match_char(',');
+                _parse_exp
+            });
+            pure $ [a].append(rest)
+        };
+        let empty = do {
+            let _ = *match_str_class_whitespace;
+            pure $ []
+        };
+        let array = *inner.or_else(empty);
+        let _ = *match_str_class_whitespace;
+        let _ = *match_char(']').or_error("']' is missing");
+        pure $ t_array(array)
+    };
+
+    _parse_ident_subsc: Parser Term;
+    _parse_ident_subsc = do {
+        let ident = *_parse_ident;
+        loop_m(
+            ident, |term|
+            let _ = *match_str_class_whitespace;
+            let array = *_parse_array.if_exists;
+            if array.is_none {
+                break_m $ term
+            };
+            let array = array.as_some;
+            continue_m $ t_subsc $ (term, array)
+        )
+    };
+
+    _parse_ident: Parser Term;
+    _parse_ident = do {
+        let c = *match_char_class(|c| is_alpha(c) || c == '_');
+        let rest = *repeat(match_char_class(is_alnum));
+        let str = [c].append(rest)._unsafe_to_string;
+        pure $ t_ident(str)
+    };
+ 
+    _parse_integer: Parser Term;
+    _parse_integer = do {
+        let val = *match_integer;
+        pure $ t_int(val)
+    };
+ 
+}
+
+type Func = Array Term -> AppStateIOF Term;
+
+namespace Builtin {
+
+    ndarray: Array Term -> AppStateIOF Term;
+    ndarray = |args| (
+        if args.get_size != 1 {
+            error $ "invalid arg count"
+        };
+        let term = args.@(0);
+        if term.is_t_ndarray {
+            pure $ term
+        };
+        if term.is_t_array {
+            let array = term.as_t_array;
+            if !array.is_all(is_t_int) {
+                error $ "not all int"
+            };
+            let ndarray = NdArray::from_array(array.map(as_t_int));
+            pure $ t_ndarray(ndarray)
+        };
+        error $ "invalid arg"
+    );
+
+    stack: Array Term -> AppStateIOF Term;
+    stack = |args| (
+        if args.get_size == 0 {
+            error $ "invalid arg count"
+        }; 
+        if !args.is_all(is_t_ndarray) {
+            error $ "type mismatch"
+        };
+        let children = args.map(as_t_ndarray);
+        let _ = Iterator::range(1, children.get_size).fold_m(
+            (), |_, i|
+            if children.@(i).@shape != children.@(0).@shape {
+                error $ "shape mismatch"
+            };
+            pure()
+        );
+        let parent = NdArray::stack(0, children);
+        pure $ t_ndarray $ parent
+    );
+}
+
+type AppState = struct {
+    funcs: HashMap String Func,
+    env: HashMap String Term
+};
+
+type AppStateIOF = StateIOF AppState;
+
+
+namespace AppState {
+    empty: AppState;
+    empty = AppState {
+        funcs: HashMap::empty(100),
+        env: HashMap::empty(100)
+    };
+
+    init: AppState -> AppState;
+    init = |app_state| (
+        app_state
+        .mod_funcs(insert("ndarray", Builtin::ndarray))
+        .mod_funcs(insert("stack", Builtin::stack))
+    );
+
+    error: String -> AppStateIOF a;
+    error = to_stateiof << throw;
+
+    evaluate: Term -> AppStateIOF Term;
+    evaluate = |term| (
+        if term.is_t_ident {
+            let name = term.as_t_ident;
+            let app_state: AppState = *get_state;
+            let opt = app_state.@env.find(name);
+            if opt.is_none {
+                error $ "not found: " + name
+            };
+            pure $ opt.as_some
+        };
+        if term.is_t_assign {
+            let (name, val) = term.as_t_assign;
+            let val = *evaluate(val);
+            let app_state = *get_state;
+            let app_state = app_state.mod_env(insert(name, val));
+            let _ = *put_state(app_state);
+            pure $ t_none()
+        };
+        if term.is_t_funcall {
+            let (name, args) = term.as_t_funcall;
+            let app_state = *get_state;
+            let opt = app_state.@funcs.find(name);
+            if opt.is_none {
+                error $ "not found: " + name
+            };
+            let func = opt.as_some;
+            let args = *args.to_iter.fold_m(
+                Array::empty(0), |output, t|
+                let t = *evaluate(t);
+                pure $ output.push_back(t)
+            );
+            func(args)
+        };
+        if term.is_t_array {
+            let output = *term.as_t_array.to_iter.fold_m(
+                Array::empty(0), |output, t|
+                let t = *evaluate(t);
+                pure $ output.push_back(t)
+            );
+            if output.is_all(is_t_int) {
+                //eval debug_eprintln("all t_int");
+                let ndarray = NdArray::from_array(output.map(as_t_int));
+                pure $ t_ndarray(ndarray)
+            };
+            //eval debug_eprintln("not all t_int");
+            pure $ t_array (output)
+        };
+        if term.is_t_subsc {
+            let (a, b) = term.as_t_subsc;
+            let a = *evaluate(a);
+            //let b = *evaluate(b);
+            //let _ = *println("a="+a.to_string).to_stateiof;
+            //let _ = *println("b="+b.to_string).to_stateiof;
+            if a.is_t_array && b.is_t_array {
+                let array = a.as_t_array;
+                let idx = b.as_t_array;
+                if idx.get_size != 1 {
+                    error $ "invalid subsc (idx size)"
+                };
+                let idx = idx.@(0);
+                if !idx.is_t_int {
+                    error $ "invalid subsc (idx type)"
+                };
+                let i = idx.as_t_int;
+                if !(0 <= i && i <= array.get_size) {
+                    error $ "invalid subsc (idx out of range)"
+                };
+                pure $ array.@(i)
+            };
+            if a.is_t_ndarray && b.is_t_array {
+                let ndarray = a.as_t_ndarray;
+                let idx = b.as_t_array;
+                if idx.get_size != ndarray.get_dim {
+                    error $ "invalid subsc (idx size)"
+                };
+                if !idx.is_all(is_t_int) {
+                    error $ "invalid subsc (idx type)"
+                };
+                let idx = idx.map(as_t_int);
+                let val = ndarray.get(idx);
+                pure $ t_int $ val
+            };
+            error $ "invalid subsc"
+        };
+        pure $ term
+    );
+
+    process_line: String -> AppState -> IO AppState;
+    process_line = |line, app_state| (
+        do {
+            //let _ = *println("process_line: " + line).lift;
+            let term = *parse_term(line).from_result;
+            let (term, app_state) = *evaluate(term).run_stateiof(app_state);
+            let _ = *println("--> " + term.to_string).lift;
+            pure $ app_state
+        }
+        .try(|err| 
+            let _ = *eprintln("ERROR: " + err);
+            pure $ app_state
+        )
+    );
+}
+
+
+main: IO ();
+main = (
+    do {
+        loop_m(
+            AppState::empty.init, |app_state|
+            let line = *readline("$ ");
+            let app_state = *app_state.process_line(line).lift;
+            continue_m $ app_state
+        )
+    }.try(eprintln)
+);

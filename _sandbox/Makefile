@@ -9,8 +9,11 @@ channel: channel.fix ../lib/string_ex.fix ../lib/net/io_ex.fix
 ndarray: ndarray_test.fix ndarray.fix ../lib/simple_parser.fix ../lib/string_ex.fix 
 	fix run -f $^
 
-ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix 
+ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix
 	fix run -f $^ -d readline
+
+build_ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix
+	fix build -f $^ -d readline
 
 test_state_monad:
 	fix run -f state_monad_test.fix state_monad.fix $(LIB_UNIT_TEST)

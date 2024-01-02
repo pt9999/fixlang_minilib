@@ -92,7 +92,7 @@ namespace Term {
     parse_term = |line| (
         let parser = do {
             let t = *_parse_term;
-            let _ = *match_str_class_whitespace;
+            let _ = *_skip_whitespaces;
             let _ = *match_end_of_stream;
             pure $ t
         };
@@ -107,7 +107,7 @@ namespace Term {
     _parse_assign: Parser Term;
     _parse_assign = do {
         let lhs = *_parse_exp;
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         let equal = *match_char_if_exists('=');
         if equal.is_none {
             pure $ lhs
@@ -121,7 +121,7 @@ namespace Term {
 
     _parse_exp: Parser Term;
     _parse_exp = do {
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         _parse_funcall
         .or_else(_parse_ident_subsc)
         .or_else(_parse_integer)
@@ -130,22 +130,22 @@ namespace Term {
 
     _parse_funcall: Parser Term;
     _parse_funcall = do {
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         let name = *_parse_ident;
         let name = name.as_t_ident;
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         let _ = *match_char('(');
         let inner = do {
             let a = *_parse_exp;
             let rest = *repeat(do {
-                let _ = *match_str_class_whitespace;
+                let _ = *_skip_whitespaces;
                 let _ = *match_char(',');
                 _parse_exp
             });
             pure $ [a].append(rest)
         };
         let empty = do {
-            let _ = *match_str_class_whitespace;
+            let _ = *_skip_whitespaces;
             pure $ []
         };
         let args = *inner.or_else(empty);
@@ -155,23 +155,23 @@ namespace Term {
 
     _parse_array: Parser Term;
     _parse_array = do {
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         let _ = *match_char('[');
         let inner = do {
             let a = *_parse_exp;
             let rest = *repeat(do {
-                let _ = *match_str_class_whitespace;
+                let _ = *_skip_whitespaces;
                 let _ = *match_char(',');
                 _parse_exp
             });
             pure $ [a].append(rest)
         };
         let empty = do {
-            let _ = *match_str_class_whitespace;
+            let _ = *_skip_whitespaces;
             pure $ []
         };
         let array = *inner.or_else(empty);
-        let _ = *match_str_class_whitespace;
+        let _ = *_skip_whitespaces;
         let _ = *match_char(']').or_error("']' is missing");
         pure $ t_array(array)
     };
@@ -181,7 +181,7 @@ namespace Term {
         let ident = *_parse_ident;
         loop_m(
             ident, |term|
-            let _ = *match_str_class_whitespace;
+            let _ = *_skip_whitespaces;
             let array = *_parse_array.if_exists;
             if array.is_none {
                 break_m $ term
@@ -205,6 +205,10 @@ namespace Term {
         pure $ t_int(val)
     };
  
+    _skip_whitespaces: Parser ();
+    _skip_whitespaces = do {
+        match_str_class_whitespace.map(|_|())
+    };
 }
 
 type Func = Array Term -> AppStateIOF Term;
@@ -248,13 +252,10 @@ namespace Builtin {
             error $ "type mismatch"
         };
         let children = args.map(as_t_ndarray);
-        let _ = Iterator::range(1, children.get_size).fold_m(
-            (), |_, i|
-            if children.@(i).@shape != children.@(0).@shape {
-                error $ "shape mismatch"
-            };
-            pure()
-        );
+        let first_child = children.@(0);
+        if !children.is_all(|child| child.@shape == first_child.@shape) {
+            error $ "shape mismatch"
+        };
         let parent = NdArray::stack(0, children);
         pure $ t_ndarray $ parent
     );

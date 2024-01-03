@@ -1,0 +1,57 @@
+module Main;
+
+import AsyncTask;
+
+impl Task: Functor {
+    map = |f, fa| AsyncTask::make(|_|
+        let a = fa.get;
+        f(a)
+    );
+}
+
+impl Task: Monad {
+    pure = |a| AsyncTask::make(|_| a);
+    bind = |f, ma| AsyncTask::make(|_|
+        let a = ma.get;
+        f(a).get
+    );
+}
+
+impl IOTask: Functor {
+    map = |f, fa| AsyncIOTask::make(do {
+        let a = *fa.get;
+        pure $ f(a)
+    });
+}
+
+impl IOTask: Monad {
+    pure = |a| AsyncIOTask::make(pure $ a);
+    bind = |f, ma| AsyncIOTask::make(do {
+        let a = *ma.get;
+        f(a).get
+    });
+}
+
+myTask: () -> Task I64;
+myTask = |_| (
+    let a = *pure(42);
+    let b = *pure(a*2);
+    pure $ b
+);
+
+myIOTask: () -> IOTask I64;
+myIOTask = |_| (
+    let a = *pure(42);
+    let _ = *(AsyncIOTask::make $ println("a="+a.to_string));
+    let b = *pure(a*2);
+    pure $ b
+);
+
+main: IO ();
+main = (
+    let x = myTask().map(|x| x + 2).get;
+    let _ = *println("x="+x.to_string);
+    let y = *myIOTask().map(|y| y + 2).get;
+    let _ = *println("y="+y.to_string);
+    pure()
+);

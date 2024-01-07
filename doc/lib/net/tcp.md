@@ -28,11 +28,11 @@ type HostEnt = unbox struct {
 ```
 ### namespace HostEnt
 
-#### get_h_length: HostEnt -> I64;
+#### get_h_length: HostEnt -> IOFail I64;
 
 get `h_length` field of the hostent.
 
-#### get_h_addr: I64 -> HostEnt -> IpAddress;
+#### get_h_addr: I64 -> HostEnt -> IOFail IpAddress;
 
 get `h_addr_list[index]` field of the hostent.
 

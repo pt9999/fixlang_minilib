@@ -1,6 +1,8 @@
 // IO extensions
 module IOEx;
 
+import StringEx;
+
 // Creates a new file or rewrites an existing one.
 // For details, see Linux manual page for [creat()](https://man7.org/linux/man-pages/man3/creat.3p.html).
 creat: String -> U32 -> IOFail I32;
@@ -27,6 +29,80 @@ unlink = |path| (
         throw("unlink failed!: some error occurred in unlink.")
     };
     pure()
+);
+
+type DirHandle = unbox struct {
+    dtor: Destructor Ptr
+};
+
+_opendir: String -> IOFail DirHandle;
+_opendir = |dir_path| (
+    let _ = *pure();    // make it lazy
+    let dirp = dir_path.borrow_c_str(|p_path|
+        CALL_C[Ptr opendir(Ptr), p_path]
+    );
+    if dirp == nullptr { 
+        throw("unlink failed!: some error occurred in unlink.")
+    };
+    pure $ DirHandle {
+        dtor: Destructor::make(dirp, |dirp|
+            //eval debug_eprintln ("closing dir handle");
+            eval CALL_C[I32 closedir(Ptr), dirp];
+            ()
+        )
+    }
+);
+
+
+_readdir: DirHandle -> IOFail String;
+_readdir = |dir_handle| (
+    let dirent: Ptr = dir_handle.@dtor.borrow(|dirp|
+        CALL_C[Ptr readdir(Ptr), dirp]
+    );
+    if dirent == nullptr {
+        // The end of directory stream is reached (`errno` is not changed),
+        // or an error occured (`errno` is set).
+        // We cannot get or set `errno`, so simply ignore errors.
+        pure $ ""
+    };
+
+    //   struct dirent {
+    //       ino_t          d_ino;       /* Inode number */
+    //       off_t          d_off;       /* Not an offset; see below */
+    //       unsigned short d_reclen;    /* Length of this record */
+    //       unsigned char  d_type;      /* Type of file; not supported
+    //                                      by all filesystem types */
+    //       char           d_name[256]; /* Null-terminated filename */
+    //   };
+    // (offset of d_name) = sizeof(ino_t) + sizeof(off_t) + 2 + 1
+    //                    = 8 + 8 + 2 + 1 = 19
+    let d_name: Ptr = dirent.add_offset(19);
+    let name = String::_unsafe_from_c_str_ptr(d_name);
+    pure $ name 
+);
+
+// Lists a directory.
+// Returns filenames in the specified directory.
+// The filenames will be sorted in lexicographical order.
+list_dir: String -> IOFail (Array String);
+list_dir = |dirpath| (
+    let _ = *pure();    // make it lazy
+    let dir_handle = *_opendir(dirpath);
+    let names: Array String = Array::empty(10);
+    let names = *loop_m(
+        names, |names|
+        let name = *_readdir(dir_handle);
+        if name == "" {
+            break_m $ names
+        };
+        if name == "." || name == ".." {
+            continue_m $ names
+        };
+        let names = names.push_back(name);
+        continue_m $ names
+    );
+    let names = names.sort_by(string_less_than);
+    pure $ names
 );
 
 // Flushes a file stream.

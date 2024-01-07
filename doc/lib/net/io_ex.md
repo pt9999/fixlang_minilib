@@ -14,6 +14,19 @@ For details, see Linux manual page for [creat()](https://man7.org/linux/man-page
 Deletes a name from the filesystem and possibly the file it refers to.
 For details, see Linux manual page for [unlink()](https://man7.org/linux/man-pages/man2/unlink.2.html).
 
+### type DirHandle
+
+```
+type DirHandle = unbox struct {
+    dtor: Destructor Ptr
+};
+```
+#### list_dir: String -> IOFail (Array String);
+
+Lists a directory.
+Returns filenames in the specified directory.
+The filenames will be sorted in lexicographical order.
+
 #### fflush : IOHandle -> IOFail ();
 
 Flushes a file stream.

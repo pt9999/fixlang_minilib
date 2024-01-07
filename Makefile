@@ -46,7 +46,7 @@ test_net: test_url test_io_ex test_request test_router test_html
 test_url:
 	fix run -f tests/net/url_test.fix $(LIB_URL) $(LIB_UNIT_TEST)
 test_io_ex:
-	fix run -f tests/net/io_ex_test.fix lib/net/io_ex.fix $(LIB_UNIT_TEST)
+	fix run -f tests/net/io_ex_test.fix lib/net/io_ex.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_request:
 	fix run -f tests/net/request_test.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
 test_router:

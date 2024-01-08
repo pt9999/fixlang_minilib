@@ -105,6 +105,100 @@ list_dir = |dirpath| (
     pure $ names
 );
 
+// Returns true if the specified file exists.
+file_exists: String -> IO Bool;
+file_exists = |file_path| (
+    let res = *stat(file_path).to_result;
+    if res.is_err {
+        pure $ false
+    };
+    let file_stat = res.as_ok;
+    pure $ file_stat.is_file
+);
+
+// Returns true if the specified directory exists.
+directory_exists: String -> IO Bool;
+directory_exists = |dir_path| (
+    let res = *stat(dir_path).to_result;
+    if res.is_err {
+        pure $ false
+    };
+    let file_stat = res.as_ok;
+    pure $ file_stat.is_dir
+);
+
+// Type of file status
+type FileStat = unbox struct {
+    data: Array U8  // struct stat
+};
+
+namespace FileStat {
+    // `stat(file_path)` retrieves information about the file pointed to by `file_path`.
+    stat: String -> IOFail FileStat;
+    stat = |file_path| (
+        let _ = *pure();    // make it lazy
+        let statbuf: Array U8 = Array::fill(144, 0_U8);
+        let res = statbuf.borrow_ptr(|p_stat|
+            file_path.borrow_c_str(|p_filepath|
+                    CALL_C[I32 stat(Ptr, Ptr), p_filepath, p_stat]
+            )
+        );
+        if res != 0_I32 {
+            throw("stat failed!: some error occurred in stat.")
+        };
+        pure $ FileStat { data: statbuf }
+    );
+
+    // Returns true if it is a regular file.
+    is_file: FileStat -> Bool;
+    is_file = |file_stat| file_stat.st_mode.bit_and(/* 0o0170000 = */ 61440_U32) == 
+                        /* 0o0100000 = */ 32768_U32;
+
+    // Returns true if it is a directory.
+    is_dir: FileStat -> Bool;
+    is_dir = |file_stat| file_stat.st_mode.bit_and(/* 0o0170000 = */ 61440_U32) == 
+                        /* 0o0040000 = */ 16384_U32;
+
+    st_dev: FileStat -> U64;
+    st_dev = |file_stat| decode_u64_le(file_stat.@data, 0);
+
+    st_ino: FileStat -> U64;
+    st_ino = |file_stat| decode_u64_le(file_stat.@data, 8);
+
+    st_nlink: FileStat -> U64;
+    st_nlink = |file_stat| decode_u64_le(file_stat.@data, 16);
+
+    st_mode: FileStat -> U32;
+    st_mode = |file_stat| decode_u32_le(file_stat.@data, 24);
+
+    st_uid: FileStat -> U32;
+    st_uid = |file_stat| decode_u32_le(file_stat.@data, 28);
+
+    st_gid: FileStat -> U32;
+    st_gid = |file_stat| decode_u32_le(file_stat.@data, 32);
+
+    st_rdev: FileStat -> U64;
+    st_rdev = |file_stat| decode_u64_le(file_stat.@data, 40);
+
+    st_size: FileStat -> I64;
+    st_size = |file_stat| decode_u64_le(file_stat.@data, 48).to_I64;
+
+    st_blksize: FileStat -> I64;
+    st_blksize = |file_stat| decode_u64_le(file_stat.@data, 56).to_I64;
+
+    st_blocks: FileStat -> U64;
+    st_blocks = |file_stat| decode_u64_le(file_stat.@data, 64);
+
+    st_atime: FileStat -> U64;
+    st_atime = |file_stat| decode_u64_le(file_stat.@data, 72);
+
+    st_mtime: FileStat -> U64;
+    st_mtime = |file_stat| decode_u64_le(file_stat.@data, 88);
+
+    st_ctime: FileStat -> U64;
+    st_ctime = |file_stat| decode_u64_le(file_stat.@data, 104);
+}
+
 // Flushes a file stream.
 // For details, see Linux manual page for [fflush()](https://man7.org/linux/man-pages/man3/fflush.3.html).
 fflush : IOHandle -> IOFail ();
@@ -171,4 +265,34 @@ usleep = |usec| (
         throw("usleep failed!: some error occurred in usleep.")
     };
     pure()
+);
+
+// Decodes U8 from `array` at position `i` with little endian.
+decode_u8_le: Array U8 -> I64 -> U8;
+decode_u8_le = |array, i| (
+    array.@(i)
+);
+
+// Decodes U16 from `array` at position `i` with little endian.
+decode_u16_le: Array U8 -> I64 -> U16;
+decode_u16_le = |array, i| (
+    decode_u8_le(array, i).to_U16.bit_or (
+        decode_u8_le(array, i + 1).to_U16.shift_left(8_U16)
+    )
+);
+
+// Decodes U32 from `array` at position `i` with little endian.
+decode_u32_le: Array U8 -> I64 -> U32;
+decode_u32_le = |array, i| (
+    decode_u16_le(array, i).to_U32.bit_or (
+        decode_u16_le(array, i + 2).to_U32.shift_left(16_U32)
+    )
+);
+
+// Decodes U64 from `array` at position `i` with little endian.
+decode_u64_le: Array U8 -> I64 -> U64;
+decode_u64_le = |array, i| (
+    decode_u32_le(array, i).to_U64.bit_or (
+        decode_u32_le(array, i + 4).to_U64.shift_left(32_U64)
+    )
 );

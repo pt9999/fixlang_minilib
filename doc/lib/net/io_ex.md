@@ -27,6 +27,63 @@ Lists a directory.
 Returns filenames in the specified directory.
 The filenames will be sorted in lexicographical order.
 
+#### file_exists: String -> IO Bool;
+
+Returns true if the specified file exists.
+
+#### directory_exists: String -> IO Bool;
+
+Returns true if the specified directory exists.
+
+### type FileStat
+
+Type of file status
+
+```
+type FileStat = unbox struct {
+    data: Array U8  // struct stat
+};
+```
+### namespace FileStat
+
+#### stat: String -> IOFail FileStat;
+
+`stat(file_path)` retrieves information about the file pointed to by `file_path`.
+
+#### is_file: FileStat -> Bool;
+
+Returns true if it is a regular file.
+
+#### is_dir: FileStat -> Bool;
+
+Returns true if it is a directory.
+
+#### st_dev: FileStat -> U64;
+
+#### st_ino: FileStat -> U64;
+
+#### st_nlink: FileStat -> U64;
+
+#### st_mode: FileStat -> U32;
+
+#### st_uid: FileStat -> U32;
+
+#### st_gid: FileStat -> U32;
+
+#### st_rdev: FileStat -> U64;
+
+#### st_size: FileStat -> I64;
+
+#### st_blksize: FileStat -> I64;
+
+#### st_blocks: FileStat -> U64;
+
+#### st_atime: FileStat -> U64;
+
+#### st_mtime: FileStat -> U64;
+
+#### st_ctime: FileStat -> U64;
+
 #### fflush : IOHandle -> IOFail ();
 
 Flushes a file stream.
@@ -53,4 +110,20 @@ For details, see Linux manual page for [pipe()](https://man7.org/linux/man-pages
 
 Sleeps for specified micro-seconds.
 For details, see Linux manual page for [usleep()](https://man7.org/linux/man-pages/man3/usleep.3.html).
+
+#### decode_u8_le: Array U8 -> I64 -> U8;
+
+Decodes U8 from `array` at position `i` with little endian.
+
+#### decode_u16_le: Array U8 -> I64 -> U16;
+
+Decodes U16 from `array` at position `i` with little endian.
+
+#### decode_u32_le: Array U8 -> I64 -> U32;
+
+Decodes U32 from `array` at position `i` with little endian.
+
+#### decode_u64_le: Array U8 -> I64 -> U64;
+
+Decodes U64 from `array` at position `i` with little endian.
 

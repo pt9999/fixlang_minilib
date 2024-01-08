@@ -129,3 +129,17 @@ Decodes U32 from `array` at position `i` with little endian.
 
 Decodes U64 from `array` at position `i` with little endian.
 
+#### find_files: String -> IOFail (Array String);
+
+#### mkdir: String -> Option U32 -> IOFail ();
+
+`mkdir(path, mode)` creates a directory.
+If `mode` is `none()`, octal 0777 is used as a mode.
+This mode is modified by the process's umask in the usual way.
+
+#### rmdir: String -> IOFail ();
+
+`rmdir(path)` deletes a directory, which must be empty.
+
+#### make_dirs: String -> Option U32 -> IOFail ();
+

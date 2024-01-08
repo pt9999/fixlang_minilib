@@ -53,4 +53,4 @@ To run test codes, type `make test`. It has been tested in the following environ
 
 ## Library Reference
 
-See `/doc` directory. (work in progress)
+See [Library Reference](doc/index.md). (work in progress)

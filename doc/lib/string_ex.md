@@ -49,9 +49,24 @@ Converts a byte (a character) to a string of length 1.
 Searches for the specified byte from the beginning of a string.
 If found, returns the index of that byte.
 
+#### find_last_byte: U8 -> String -> Option I64;
+
+Searches for the specified byte from the end of a string.
+If found, returns the index of that byte.
+
 #### replace_all: String -> String -> String -> String;
 
 Replaces all occurrences of `from` in the string with `to`.
+
+#### replace_suffix: String -> String -> String -> Result ErrMsg String;
+
+`str.replace_suffix(from, to)` replaces `from` at the end of `str` with `to`.
+if `str` does not end with `from`, an error occurs.
+Example:
+```
+"test.txt".replace_suffix(".txt", ".tmp")  ==> ok("test.tmp")
+"test.jpg".replace_suffix(".txt", ".tmp")  ==> err("suffix does not match: test.jpg")
+```
 
 #### split_first: String -> String -> (String, String);
 
@@ -68,6 +83,14 @@ Same as Std::String::split, except that `"foo".split_ex(",")` returns a singleto
 
 Returns a substring extracted from a specified range from a string.
 If the specified range exceeds the string, it will be truncated to fit within the string.
+
+#### starts_with: String -> String -> Bool;
+
+Checks if a string starts with the specified prefix.
+
+#### ends_with: String -> String -> Bool;
+
+Checks if a string ends with the specified suffix.
 
 #### string_less_than: (String, String) -> Bool;
 
@@ -94,4 +117,17 @@ Converts a 64bit number to a hex string.
 #### from_string_hex: String -> Result ErrMsg U64;
 
 Converts a hex string to a 64bit number.
+
+#### is_path_sep: U8 -> Bool;
+
+Checks if the byte is a path separator. Currently only '/' is supported.
+
+#### join_paths: Array String -> String;
+
+`join_paths(path_segments)` joins segments into a path.
+
+#### dirname: String -> String;
+
+`dirname(path)` returns the path with its last non-slash component and trailing slashes removed.
+if `path` contains no `/`s, returns `"."`.
 

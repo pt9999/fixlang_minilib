@@ -57,10 +57,7 @@ test_html:
 
 
 document: examples/fixdoc.out
-	find lib -name "*.fix" -print | while read input; do \
-		mkdir -pv $$(dirname doc/$$input) && \
-		examples/fixdoc.out $$input -o doc/$${input%%.fix}.md && \
-		echo $$input; done
+	examples/fixdoc.out -i lib -o doc
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out \
 		examples/fixdoc.out examples/sample_http_server.out \
@@ -75,7 +72,7 @@ examples/sample_client.out: examples/sample_client.fix $(LIB_TCP) $(LIB_CLAP)
 examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
 	fix build -f $^ -o $@
 
-examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix
+examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix lib/io_ex.fix
 	fix build -f $^ -o $@
 
 examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)

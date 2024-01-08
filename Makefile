@@ -13,10 +13,10 @@ LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_pa
 			lib/collection/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
-LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
+LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
 LIB_REGEXP := lib/text/regexp/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
 
-test: test_app_support test_collection test_file_format test_text test_net
+test: test_app_support test_collection test_file_format test_io_ex test_text test_net
 
 test_app_support: test_clap
 test_clap:
@@ -32,6 +32,9 @@ test_file_format: test_json
 test_json:
 	fix run -f tests/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
 
+test_io_ex:
+	fix run -f tests/io_ex_test.fix lib/io_ex.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:
 	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
@@ -42,13 +45,11 @@ test_parser:
 test_regexp:
 	fix run -f tests/text/regexp/regexp_test.fix $(LIB_REGEXP) $(LIB_UNIT_TEST)
 
-test_net: test_url test_io_ex test_request test_router test_html
+test_net: test_url test_request test_router test_html
 test_url:
 	fix run -f tests/net/url_test.fix $(LIB_URL) $(LIB_UNIT_TEST)
-test_io_ex:
-	fix run -f tests/net/io_ex_test.fix lib/net/io_ex.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_request:
-	fix run -f tests/net/request_test.fix lib/net/request.fix lib/net/url.fix lib/net/io_ex.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
+	fix run -f tests/net/request_test.fix lib/net/request.fix lib/net/url.fix lib/io_ex.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
 test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_html:

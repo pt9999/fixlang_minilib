@@ -109,6 +109,24 @@ find_byte = |c, str| (
     )
 );
 
+// Searches for the specified byte from the end of a string.
+// If found, returns the index of that byte.
+find_last_byte: U8 -> String -> Option I64;
+find_last_byte = |c, str| (
+    let array = str.get_bytes;
+    let n = str.get_size;
+    loop(
+        n - 1, |i|
+        if i < 0 {
+            break $ none()
+        };
+        if array.@(i) == c {
+            break $ some $ i
+        };
+        continue $ i - 1
+    )
+);
+
 // Replaces all occurrences of `from` in the string with `to`.
 replace_all: String -> String -> String -> String;
 replace_all = |from, to, str| (
@@ -129,6 +147,23 @@ replace_all = |from, to, str| (
         let find_start = pos + to.get_size;
         continue $ (str, find_start)
     )
+);
+
+
+// `str.replace_suffix(from, to)` replaces `from` at the end of `str` with `to`.
+// if `str` does not end with `from`, an error occurs.
+// Example:
+// ```
+// "test.txt".replace_suffix(".txt", ".tmp")  ==> ok("test.tmp")
+// "test.jpg".replace_suffix(".txt", ".tmp")  ==> err("suffix does not match: test.jpg")
+// ```
+replace_suffix: String -> String -> String -> Result ErrMsg String;
+replace_suffix = |from, to, str| (
+    if !str.ends_with(from) {
+        err $ "suffix does not match: " + str
+    };
+    let str = str.substring(0, str.get_size - from.get_size);
+    ok $ str + to
 );
 
 // `str.split_first(delim)` splits the string `str` into two parts with the delimiter `delim`.
@@ -169,11 +204,13 @@ substring = |s, e, str| (
     str.get_sub(s, e)
 );
 
+// Checks if a string starts with the specified prefix.
 starts_with: String -> String -> Bool;
 starts_with = |prefix, str| (
-    str.substring(0, prefix.get_size) == prei
+    str.substring(0, prefix.get_size) == prefix
 );
 
+// Checks if a string ends with the specified suffix.
 ends_with: String -> String -> Bool;
 ends_with = |suffix, str| (
     str.substring(str.get_size - suffix.get_size, str.get_size) == suffix
@@ -264,4 +301,48 @@ from_string_hex = |input| (
         let c = *decode_hex_char(c);
         pure $ output.shift_left(4_U64).bit_or(c.to_U64)
     )
+);
+
+//---------------------------------
+// File Path handling
+//---------------------------------
+
+// Checks if the byte is a path separator. Currently only '/' is supported.
+is_path_sep: U8 -> Bool;
+is_path_sep = |c| c == '/';
+
+// `join_paths(path_segments)` joins segments into a path.
+join_paths: Array String -> String;
+join_paths = |path_segments| (
+    path_segments.to_iter.fold(
+        "", |result, segment|
+        if result == "" {
+            segment
+        };
+        let result = result.strip_last_bytes(is_path_sep);
+        let segment = segment.strip_first_bytes(is_path_sep);
+        result + "/" + segment
+    )
+);
+
+// `dirname(path)` returns the path with its last non-slash component and trailing slashes removed.
+// if `path` contains no `/`s, returns `"."`.
+dirname: String -> String;
+dirname = |path| (
+    if path == "" {
+        "."
+    };
+    let path = path.strip_last_bytes(is_path_sep);
+    if path == "" {
+        "/"
+    };
+    let opt = path.find_last_byte('/');
+    if opt.is_none {
+        "."
+    };
+    if opt.as_some == 0 {
+        "/"
+    };
+    let parent_dir = path.substring(0, opt.as_some);
+    parent_dir
 );

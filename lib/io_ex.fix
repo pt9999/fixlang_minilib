@@ -317,3 +317,48 @@ find_files = |dir_path| (
         continue_m $ output
     )
 );
+
+
+// `mkdir(path, mode)` creates a directory.
+// If `mode` is `none()`, octal 0777 is used as a mode.
+// This mode is modified by the process's umask in the usual way.
+mkdir: String -> Option U32 -> IOFail ();
+mkdir = |path, mode| (
+    let _ = *pure();    // make it lazy
+    let mode = if mode.is_some { mode.as_some } else { /* 0777 = */ 511_U32 };
+    let res = path.borrow_c_str(|p_path|
+        CALL_C[I32 mkdir(Ptr, U32), p_path, mode]
+    );
+    if res != 0_I32 {
+        throw("mkdir failed!: some error occurred in mkdir.")
+    };
+    pure()
+);
+
+// `rmdir(path)` deletes a directory, which must be empty.
+rmdir: String -> IOFail ();
+rmdir = |path| (
+    let _ = *pure();    // make it lazy
+    let res = path.borrow_c_str(|p_path|
+        CALL_C[I32 rmdir(Ptr), p_path]
+    );
+    if res != 0_I32 {
+        throw("rmdir failed!: some error occurred in rmdir.")
+    };
+    pure()
+);
+
+make_dirs: String -> Option U32 -> IOFail ();
+make_dirs = |dir_path, mode| (
+    if *directory_exists(dir_path).lift {
+        pure()
+    };
+    let parent_dir = dirname(dir_path);
+    let _ = *if parent_dir == dir_path { 
+        pure()  // avoid infinite loop
+    } else {
+        make_dirs(parent_dir, mode)
+    };
+    mkdir(dir_path, mode)
+);
+

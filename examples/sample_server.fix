@@ -45,23 +45,26 @@ server_test = (
         let socket = *(listen_tcp_server(server_host_port, 10));
         let _ = *(lift $ eprintln ("Listening on " + server_host_port));
         loop_m(
-            Array::empty(0), |tasks|
+            (), |_|
             let _ = *(lift $ eprintln ("Accepting connections"));
             let (accepted_socket, addr) = *(socket.accept);
             let _ = *(lift $ eprintln ("Accepted new connection: addr=" + addr.to_string));
             //let _ = *echo(accepted_socket);
             if false {
                 let _ = *echo(accepted_socket);
-                continue_m $ tasks
+                continue_m $ ()
             } else {
-                //let _ = *(lift $ eprintln ("creating task"));
-                let task = AsyncIOTask::make(
+                let _ = *(lift $ eprintln ("creating task"));
+                let task_policy = TaskPolicy::run_after_destructed.bit_or(
+                    TaskPolicy::on_dedicated_thread
+                );
+                let task = *AsyncIOTask::make(
+                    task_policy,
                     echo(accepted_socket)
                     .try(|err| eprintln("error: " + err))
-                );
-                //let _ = *(lift $ eprintln ("creating task done"));
-                let tasks = tasks.push_back(task);
-                continue_m $ tasks
+                ).lift;
+                let _ = *(lift $ eprintln ("creating task done"));
+                continue_m $ ()
             }
         )
     }

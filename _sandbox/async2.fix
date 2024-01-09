@@ -3,33 +3,68 @@ module Main;
 import AsyncTask;
 
 impl Task: Functor {
-    map = |f, fa| AsyncTask::make(|_|
+    map = |f, fa| AsyncTask::make(
+        TaskPolicy::default,
+        |_|
         let a = fa.get;
         f(a)
     );
 }
 
 impl Task: Monad {
-    pure = |a| AsyncTask::make(|_| a);
-    bind = |f, ma| AsyncTask::make(|_|
+    pure = |a| AsyncTask::make(
+        TaskPolicy::default,
+        |_| a);
+    bind = |f, ma| AsyncTask::make(
+        TaskPolicy::default,
+        |_|
         let a = ma.get;
         f(a).get
     );
 }
 
-impl IOTask: Functor {
-    map = |f, fa| AsyncIOTask::make(do {
-        let a = *fa.get;
-        pure $ f(a)
-    });
+// IO (IOTask a) のラッパー
+type IOTaskM a = unbox struct {
+    data: IO (IOTask a)
+};
+
+namespace IOTaskM {
+    make: TaskPolicy -> IO a -> IOTaskM a;
+    make = |policy, io| IOTaskM {
+        data: AsyncIOTask::make(policy, io)
+    };
+
+    // この結果を perform した時点でタスクが作成される
+    // 何度もperformするとその都度タスクが作成される
+    get: IOTaskM a -> IO a;
+    get = |taskm| (
+        let task = *taskm.@data;        // この結果を perform した時点でタスクが作成される
+        task.get
+    );
 }
 
-impl IOTask: Monad {
-    pure = |a| AsyncIOTask::make(pure $ a);
-    bind = |f, ma| AsyncIOTask::make(do {
-        let a = *ma.get;
-        f(a).get
-    });
+impl IOTaskM: Functor {
+    map = |f, fa| IOTaskM::make(
+        TaskPolicy::default,
+        do {
+            let a = *fa.get;
+            pure $ f(a)
+        }
+    );
+}
+
+impl IOTaskM: Monad {
+    pure = |a| IOTaskM::make(
+        TaskPolicy::default,
+        pure $ a
+    );
+    bind = |f, ma| IOTaskM::make(
+        TaskPolicy::default,
+        do {
+            let a = *ma.get;    // これをperformした時点で1つ目のタスクが作成され、実行される
+            f(a).get            // これをperformした時点で2つ目のタスクが作成され、実行される
+        }
+    );
 }
 
 myTask: () -> Task I64;
@@ -39,10 +74,10 @@ myTask = |_| (
     pure $ b
 );
 
-myIOTask: () -> IOTask I64;
-myIOTask = |_| (
+myIOTaskM: () -> IOTaskM I64;
+myIOTaskM = |_| (
     let a = *pure(42);
-    let _ = *(AsyncIOTask::make $ println("a="+a.to_string));
+    let _ = *IOTaskM::make(TaskPolicy::default, println("a="+a.to_string));
     let b = *pure(a*2);
     pure $ b
 );
@@ -51,7 +86,7 @@ main: IO ();
 main = (
     let x = myTask().map(|x| x + 2).get;
     let _ = *println("x="+x.to_string);
-    let y = *myIOTask().map(|y| y + 2).get;
+    let y = *myIOTaskM().map(|y| y + 2).get;
     let _ = *println("y="+y.to_string);
     pure()
 );

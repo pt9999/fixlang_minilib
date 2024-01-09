@@ -1,6 +1,7 @@
 module Main;
 
 import AsyncTask;
+import Random;
 
 import Deque;
 
@@ -16,7 +17,10 @@ namespace Channel {
     );
 
     is_empty: Channel a -> IO Bool;
-    is_empty = |chan| chan.@data.lock(pure << is_empty);
+    is_empty = |chan| (
+        let deque = *chan.@data.get;
+        pure $ deque.is_empty
+    );
 
     send: a -> Channel a -> IO ();
     send = |a, chan| (
@@ -77,9 +81,25 @@ map_m = |f, array| array.to_iter.fold_m(
     pure $ output.push_back(b)
 );
 
+_usleep: I64 -> I64;
+_usleep = |usec| (
+    CALL_C[I32 usleep(U32), usec.to_U32].to_I64
+);
+
+
 test1: IO ();
 test1 = (
     let _ = *pure();
+    let rand_var = *Var::make(Random::init_by_seed(123_U64));
+    let sleep_random: IO () = (
+        let u64 = *rand_var.lock(|rand|
+            let (u64, rand) = rand.generate_U64;
+            let _ = *rand_var.Var::set(rand);
+            pure $ u64
+        );
+        eval _usleep((u64 % 100000_U64).to_I64);
+        pure()
+    );
     let n = 20;
     let indices = Iterator::range(0, n).to_array;
     let channels = *indices.map_m(|_| Channel::make(4));
@@ -87,12 +107,16 @@ test1 = (
     let task_func = |idx| (
         let _ = *eprintln(idx.to_string + ": 1st send to " + idx.to_string);
         let _ = *channels.@(idx).send(idx);
-        let _ = *eprintln(idx.to_string + ": 1st recv from " + ((idx+n/2)%n).to_string);
-        let val = *channels.@((idx+n/2)%n).recv;
+        let _ = *sleep_random;
+        let _ = *eprintln(idx.to_string + ": 1st recv from " + ((idx+n/3)%n).to_string);
+        let val = *channels.@((idx+n/3)%n).recv;
+        let _ = *sleep_random;
         let _ = *eprintln(idx.to_string + ": 2nd send to " + idx.to_string);
         let _ = *channels.@(idx).send(val);
-        let _ = *eprintln(idx.to_string + ": 2nd recv from " + ((idx+n/4)%n).to_string);
-        let val = *channels.@((idx+n/4)%n).recv;
+        let _ = *sleep_random;
+        let _ = *eprintln(idx.to_string + ": 2nd recv from " + ((idx+n*2/3)%n).to_string);
+        let val = *channels.@((idx+n*2/3)%n).recv;
+        let _ = *sleep_random;
         let _ = *eprintln(idx.to_string + ": final send to " + idx.to_string);
         let _ = *channels_result.@(idx).send(val);
         pure()
@@ -104,16 +128,18 @@ test1 = (
             task_func(idx)
         )
     );
-    /*
-    let (idx, val) = *channels_result.recv_any;
-    eprintln("idx=" + idx.to_string + " val="+val.to_string)
-    */
-    let _ = *indices.map_m(
-        |idx|
-        let val = *channels_result.@(idx).recv;
-        eprintln("final result " + idx.to_string + " = " + val.to_string)
-    );
-    pure()
+    if true {
+        let (idx, val) = *channels_result.recv_any;
+        let _ = *tasks.map_m(get);
+        eprintln("idx=" + idx.to_string + " val="+val.to_string)
+    } else {
+        let _ = *indices.map_m(
+            |idx|
+            let val = *channels_result.@(idx).recv;
+            eprintln("final result " + idx.to_string + " = " + val.to_string)
+        );
+        pure()
+    }
 );
 
 main: IO ();

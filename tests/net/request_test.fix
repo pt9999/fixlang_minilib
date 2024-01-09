@@ -14,25 +14,31 @@ type MyResponse = Request::Response ();
 open_string_reader: String -> IOFail (IOHandle, IOTask ());
 open_string_reader = |str| (
     let (read_fh, write_fh) = *open_pipe;
-    let writer_task = AsyncIOTask::make $ do {
-        let _ = *write_string(write_fh, str);
-        let _ = *close_file(write_fh).lift;
-        pure()
-    }.try(|err| eprintln("writer_task: "+ err));
+    let writer_task = *AsyncIOTask::make(
+        TaskPolicy::default,
+        do {
+            let _ = *write_string(write_fh, str);
+            let _ = *close_file(write_fh).lift;
+            pure()
+        }.try(|err| eprintln("writer_task: "+ err))
+    ).lift;
     pure $ (read_fh, writer_task)
 );
 
 open_string_writer: () -> IOFail (IOHandle, IOTask String);
 open_string_writer = |_| (
     let (read_fh, write_fh) = *open_pipe;
-    let reader_task = AsyncIOTask::make $ do {
-        let str = *read_string(read_fh);
-        let _ = *close_file(read_fh).lift;
-        pure $ str
-    }.try(|err| 
-        let _ = *eprintln("reader_task: "+ err);
-        pure $ ""
-    );
+    let reader_task = *AsyncIOTask::make(
+        TaskPolicy::default,
+        do {
+            let str = *read_string(read_fh);
+            let _ = *close_file(read_fh).lift;
+            pure $ str
+        }.try(|err| 
+            let _ = *eprintln("reader_task: "+ err);
+            pure $ ""
+        )
+    ).lift;
     pure $ (write_fh, reader_task)
 );
 

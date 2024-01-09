@@ -1,0 +1,31 @@
+module Main;
+
+import AsyncTask;
+
+parallel_map: (a -> b) -> Array a -> Array b;
+parallel_map = |f, arr| (
+    let tasks = *arr.to_iter.fold(
+        [], |tasks, a|
+        let task = *AsyncTask::make(TaskPolicy::default, |_| f(a));
+        pure $ tasks.push_back(task)
+    );
+    tasks.to_iter.fold(
+        [], |results, task|
+        let result = *task.get;
+        results.push_back(result)
+    )
+);
+
+parallel_map_m: (a -> IO b) -> Array (IO a) -> IO (Array b);
+parallel_map_m = |f, arr| (
+    let tasks = *arr.to_iter.fold_m(
+        [], |tasks, a|
+        let task = *AsyncIOTask::make(TaskPolicy::default, a.bind(f));
+        pure $ tasks.push_back(task)
+    );
+    tasks.to_iter.fold_m(
+        [], |results, task|
+        let result = *task.get;
+        pure $ results.push_back(result)
+    )
+);

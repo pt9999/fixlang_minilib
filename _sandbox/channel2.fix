@@ -1,0 +1,120 @@
+module Main;
+
+import AsyncTask;
+
+import Deque;
+
+namespace Channel {
+    type Channel a = unbox struct {
+        data: Var (Deque a)
+    };
+
+    make: I64 -> IO (Channel a);
+    make = |size| (
+        let var = *Var::make(Deque::empty(size));
+        pure $ Channel { data: var }
+    );
+
+    is_empty: Channel a -> IO Bool;
+    is_empty = |chan| chan.@data.lock(pure << is_empty);
+
+    send: a -> Channel a -> IO ();
+    send = |a, chan| (
+        chan.@data.mod(push_back(a))
+    );
+
+    recv: Channel a -> IO a;
+    recv = |chan| (
+        chan.@data.wait_and_lock(
+            |deque| !deque.is_empty,
+            |deque|
+            let a = deque.get_front.as_some;
+            let deque = deque.pop_front;
+            let _ = *chan.@data.Var::set(deque);
+            pure $ a
+        )
+    );
+
+    recv_any: Array (Channel a) -> IO (I64, a);
+    recv_any = |channels| (
+        let var = *Var::make(none());
+        let tasks = *channels.to_iter.zip(Iterator::count_up(0)).fold_m(
+            [], |tasks, (chan, idx)|
+            let recv_fun = |deque| (
+                var.lock(
+                    |opt|
+                    if opt.is_some { pure() };
+                    let a = deque.get_front.as_some;
+                    let deque = deque.pop_front;
+                    let _ = *chan.@data.Var::set(deque);
+                    let _ = *var.Var::set(some $ (idx, a));
+                    pure()
+                )
+            );
+            let task_fun: IO () = (
+                chan.@data.wait_and_lock(
+                    |deque| !deque.is_empty,
+                    recv_fun
+                )
+            );
+            let task = *AsyncIOTask::make(
+                TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread),
+                task_fun   
+            );
+            pure $ tasks.push_back(task)
+        );
+        var.wait_and_lock(
+            is_some,
+            |opt| pure $ opt.as_some
+        )
+    );
+}
+
+map_m: [m : Monad] (a -> m b) -> Array a -> m (Array b);
+map_m = |f, array| array.to_iter.fold_m(
+    Array::empty(array.get_size), |output, a|
+    let b = *f(a);
+    pure $ output.push_back(b)
+);
+
+test1: IO ();
+test1 = (
+    let _ = *pure();
+    let n = 20;
+    let indices = Iterator::range(0, n).to_array;
+    let channels = *indices.map_m(|_| Channel::make(4));
+    let channels_result = *indices.map_m(|_| Channel::make(4));
+    let task_func = |idx| (
+        let _ = *eprintln(idx.to_string + ": 1st send to " + idx.to_string);
+        let _ = *channels.@(idx).send(idx);
+        let _ = *eprintln(idx.to_string + ": 1st recv from " + ((idx+n/2)%n).to_string);
+        let val = *channels.@((idx+n/2)%n).recv;
+        let _ = *eprintln(idx.to_string + ": 2nd send to " + idx.to_string);
+        let _ = *channels.@(idx).send(val);
+        let _ = *eprintln(idx.to_string + ": 2nd recv from " + ((idx+n/4)%n).to_string);
+        let val = *channels.@((idx+n/4)%n).recv;
+        let _ = *eprintln(idx.to_string + ": final send to " + idx.to_string);
+        let _ = *channels_result.@(idx).send(val);
+        pure()
+    );
+    let tasks = *indices.map_m(
+        |idx|
+        AsyncIOTask::make(
+            TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread),
+            task_func(idx)
+        )
+    );
+    /*
+    let (idx, val) = *channels_result.recv_any;
+    eprintln("idx=" + idx.to_string + " val="+val.to_string)
+    */
+    let _ = *indices.map_m(
+        |idx|
+        let val = *channels_result.@(idx).recv;
+        eprintln("final result " + idx.to_string + " = " + val.to_string)
+    );
+    pure()
+);
+
+main: IO ();
+main = test1;

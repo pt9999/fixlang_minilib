@@ -69,7 +69,7 @@ examples/json_cat.out: examples/json_cat.fix $(LIB_JSON)
 examples/sample_client.out: examples/sample_client.fix $(LIB_TCP) $(LIB_CLAP)
 	fix build -f $^ -o $@
 
-examples/sample_server.out: examples/sample_server.fix $(LIB_TCP)
+examples/sample_server.out: examples/sample_server.fix $(LIB_TCP) lib/collection/deque.fix
 	fix build -f $^ -o $@
 
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix lib/io_ex.fix

@@ -1,3 +1,17 @@
+//  This program implements a chat server.
+//  The chat server listens on localhost:2525.
+//  Chat members can connect to the chat server using `nc` (netcat) command.
+//  Chat messages are broadcasted to all chat members.
+//
+//  Prerequisite:
+//  $ sudo apt install netcat
+//
+//  Start server:  (Ctrl+c to stop server)
+//  $ examples/sample_server.out
+//
+//  Start client:  (Ctrl+c to disconnect)
+//  $ nc localhost 2525
+//
 module Main;
 
 import Debug;
@@ -11,24 +25,35 @@ _usleep = |usec| (
     CALL_C[I32 usleep(U32), usec.to_U32].to_I64
 );
 
-type ChatMember = unbox struct {
-    addr: String,
-    messages: Deque String
-};
-
-namespace ChatMember {
-    make: String -> ChatMember;
-    make = |addr| ChatMember {
-        addr: addr,
-        messages: Deque::empty(0)
+namespace ChatEvent {
+    type ChatEvent = unbox union {
+        message: String,
+        disconnect: ()
     };
 }
 
-type ChatRoom = unbox struct {
-    members: Array ChatMember
-};
+namespace ChatMember {
+    type MemberId = String;
+
+    type ChatMember = unbox struct {
+        id: MemberId,
+        name: String,
+        events: Deque ChatEvent
+    };
+
+    make: MemberId -> String -> ChatMember;
+    make = |id, name| ChatMember {
+        id: id,
+        name: name,
+        events: Deque::empty(0)
+    };
+}
 
 namespace ChatRoom {
+    type ChatRoom = unbox struct {
+        members: Array ChatMember
+    };
+
     empty: ChatRoom;
     empty = ChatRoom {
         members: []
@@ -39,45 +64,73 @@ namespace ChatRoom {
         room.mod_members(push_back(member))
     );
 
-    remove_member: String -> ChatRoom -> ChatRoom;
-    remove_member = |addr, room| (
+    remove_member: MemberId -> ChatRoom -> ChatRoom;
+    remove_member = |id, room| (
         room.mod_members(|members| members.to_iter.filter(
-            |member| member.@addr == addr
+            |member| member.@id == id
         ).to_array)
     );
 
-    find_member: String -> ChatRoom -> Option ChatMember;
-    find_member = |addr, room| (
-        room.@members.to_iter.filter(|member| member.@addr == addr).get_first
+    find_member: MemberId -> ChatRoom -> Option ChatMember;
+    find_member = |id, room| (
+        room.@members.to_iter.filter(|member| member.@id == id).get_first
     );
 
-    send_message: String -> ChatRoom -> ChatRoom;
-    send_message = |message, room| (
-        room.mod_members(map(mod_messages(push_back(message))))
+    send_event_to_member: MemberId -> ChatEvent -> ChatRoom -> ChatRoom;
+    send_event_to_member = |id, event, room| (
+        room.mod_members(map(|member|
+            if member.@id != id { member };
+            member.mod_events(push_back(event))
+        ))
     );
 
-    receive_message: String -> ChatRoom -> (Option String, ChatRoom);
-    receive_message = |addr, room| (
-        let message: Option String = do {
-            let member = *room.find_member(addr);
-            member.@messages.get_front
+    send_event_to_all: ChatEvent -> ChatRoom -> ChatRoom;
+    send_event_to_all = |event, room| (
+        room.mod_members(map(mod_events(push_back(event))))
+    );
+
+    has_event: MemberId -> ChatRoom -> Bool;
+    has_event = |id, room| (
+        let member = room.find_member(id);
+        if member.is_none { false };
+        let member = member.as_some;
+        !member.@events.is_empty
+    );
+
+    receive_event: MemberId -> ChatRoom -> (Option ChatEvent, ChatRoom);
+    receive_event = |id, room| (
+        let event: Option ChatEvent = do {
+            let member = *room.find_member(id);
+            member.@events.get_front
         };
-        if message.is_none {
-            (message, room)
+        if event.is_none {
+            (event, room)
         };
         let room = room.mod_members(map(|member|
-            if member.@addr != addr { member };
-            member.mod_messages(pop_front)
+            if member.@id != id { member };
+            member.mod_events(pop_front)
         ));
-        (message, room)
+        (event, room)
     );     
 
-    receive_message_var: String -> Var ChatRoom -> IO (Option String);
-    receive_message_var = |addr, room_var| (
+    receive_event_var: MemberId -> Var ChatRoom -> IO (Option ChatEvent);
+    receive_event_var = |id, room_var| (
         room_var.lock(|room|
-            let (message, room) = room.receive_message(addr);
+            let (event, room) = room.receive_event(id);
+            if event.is_none { pure $ event };
             let _ = *room_var.Var::set(room);
-            pure $ message
+            pure $ event
+        )
+    );
+
+    wait_next_event: MemberId -> Var ChatRoom -> IO ChatEvent;
+    wait_next_event = |id, room_var| (
+        room_var.wait_and_lock(
+            has_event(id), |room|
+            let (event, room) = room.receive_event(id);
+            eval assert(|_|"event.is_some", event.is_some);
+            let _ = *room_var.Var::set(room);
+            pure $ event.as_some
         )
     );
 }
@@ -85,38 +138,64 @@ namespace ChatRoom {
 chat: Socket -> String -> Var ChatRoom -> IOFail ();
 chat = |socket, addr, room| (
     let _ = *eprintln("chat session start: socket=" + socket.to_string).lift;
-    let member = ChatMember::make(addr);
+    let member_id = addr;
+    let name = addr;
+    let member = ChatMember::make(member_id, name);
     let _ = *room.mod(add_member(member)).lift;
     let bufsock = BufferedSocket::make(socket);
-    let bufsock = *bufsock.write_str("> ");
+    let bufsock = *bufsock.write_str("SYSTEM: This is a chat room. Please type in your messages.\n");
     let bufsock = *bufsock.flush;
+    let input_task = *AsyncIOTask::make(TaskPolicy::default, chat_input_task(bufsock, member, room)).lift;
+    let send_message_task = *AsyncIOTask::make(TaskPolicy::default, chat_send_message_task(bufsock, member, room)).lift;
+    let _ = *input_task.get.lift;
+    let _ = *send_message_task.get.lift;
+    let _ = *room.mod(remove_member(member_id)).lift;    // TODO: use finally
+    pure()
+);
+
+chat_input_task: BufferedSocket -> ChatMember -> Var ChatRoom -> IO ();
+chat_input_task = |bufsock, member, room| (
+    let member_id = member.@id;
+    let name = member.@name;
+    let _ = *room.mod(send_event_to_all(ChatEvent::message("SYSTEM: " + name + " has logged in\n"))).lift;
     loop_m(
         bufsock, |bufsock|
+        //let bufsock = *bufsock.write_str("> ");     // TODO: writing prompt is safe?
+        //let bufsock = *bufsock.flush;
         //let _ = *eprintln("recv start").lift;
         let (line, bufsock) = *bufsock.read_line;
-        eval _usleep(1000);
+        //eval _usleep(1000);
         //let _ = *eprintln("read_line end: size=" + line.get_size.to_string).lift;
         if line.get_size == 0 {
             let _ = *eprintln("chat session end").lift;
-            let _ = *room.mod(remove_member(addr)).lift;    // TODO: use finally
+            let _ = *room.mod(send_event_to_all(ChatEvent::message("SYSTEM: " + name + " has logged out\n"))).lift;
+            let _ = *room.mod(send_event_to_member(member_id, ChatEvent::disconnect())).lift;
             break_m $ ()
         };
-        let _ = *eprint("> " + line).lift;
-        let _ = *room.mod(send_message(line)).lift;
-        let bufsock = *loop_m(
-            bufsock, |bufsock|
-            let message = *room.receive_message_var(addr).lift;
-            if message.is_none {
-                break_m $ bufsock
-            }; 
-            let bufsock = *bufsock.write_str(message.as_some);
-            continue_m $ bufsock
-        );
-        let bufsock = *bufsock.write_str("> ");
-        let bufsock = *bufsock.flush;
+        let message = "(" + name + "): " + line;
+        let _ = *eprint("> " + message).lift;
+        let _ = *room.mod(send_event_to_all(ChatEvent::message(message))).lift;
         continue_m $ bufsock
     )
-);
+).try(|err| eprintln (err));
+
+chat_send_message_task: BufferedSocket -> ChatMember -> Var ChatRoom -> IO ();
+chat_send_message_task = |bufsock, member, room| (
+    let member_id = member.@id;
+    loop_m(
+        bufsock, |bufsock|
+        let event: ChatEvent = *room.wait_next_event(member_id).lift;
+        if event.is_disconnect {
+            //let _ = *eprintln("got event: disconnect").lift;
+            break_m $ ()
+        }; 
+        //let _ = *eprintln("got event: message").lift;
+        let bufsock = *bufsock.write_str(event.as_message);
+        let bufsock = *bufsock.flush; // TODO: sharing bufsocket is safe?
+        continue_m $ bufsock
+    )
+).try(|err| eprintln (err));
+
 
 server_test: IO ();
 server_test = (

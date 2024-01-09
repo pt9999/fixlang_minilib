@@ -1,6 +1,7 @@
 module Main;
 
 import Debug;
+import AsyncTask;
 
 import HTML;
 import HttpServer;
@@ -60,25 +61,26 @@ namespace ChatBoard {
         html
     );
 
-    on_get: Request AppState -> Response AppState -> IOFail (Response AppState);
-    on_get = |req, res| (
-        let chat_board = req.@state.@chat_board;
+    on_get: Var AppState -> Request -> Response -> IOFail Response;
+    on_get = |app_state_var, req, res| (
+        let chat_board = *app_state_var.get.map(@chat_board).lift;
         let html = chat_board.render;
         res.content_type("html").write_str(html)
     );
 
-    on_post: Request AppState -> Response AppState -> IOFail (Response AppState);
-    on_post = |req, res| (
-        let chat_board = req.@state.@chat_board;
-        let name = req.find_query("name").map_or("", |s| s.unescape_html);
-        let message = req.find_query("message").map_or("", |s| s.unescape_html);
+    on_post: Var AppState -> Request -> Response -> IOFail Response;
+    on_post = |app_state_var, req, res| (
+        let name = req.find_query("name").map_or("", |s| s);
+        let message = req.find_query("message").map_or("", |s| s);
         eval debug_eprintln("name="+name+" message="+message);
-        let chat_board = if name != "" || message != "" {
-            chat_board.add_chat(Chat::make(name, message))
+        let _ = *if name == "" && message == "" {
+            pure()
         } else {
-            chat_board
+            app_state_var.mod(
+                mod_chat_board(add_chat(Chat::make(name, message)))
+            ).lift
         };
-        let res = res.mod_state(set_chat_board(chat_board));
+        let chat_board = *app_state_var.get.map(@chat_board).lift;
         let html = chat_board.render;
         res.content_type("html").write_str(html)
     );
@@ -90,34 +92,29 @@ type AppState = unbox struct {
 };
 
 namespace AppState {
-    empty: AppState;
-    empty = (
-        AppState {
+    initialize: IOFail (Var AppState);
+    initialize = (
+        let _ = *pure();    // make it lazy
+        let state = AppState {
             asset_dir: "./examples/sample_http_server/",
             chat_board: ChatBoard::empty
-        }
-    );
-
-    initialize: AppState -> IOFail AppState;
-    initialize = |state| (
+        };
         let chat_board = *state.@chat_board.read_template(
             Path::parse(state.@asset_dir + "chat_board.html").as_some
         );
         let state = state.set_chat_board(chat_board);
-        pure $ state
+        let state_var = *Var::make(state).lift;
+        pure $ state_var
     );
-
-    merge_state: AppState -> AppState -> AppState;
-    merge_state = |s1, s2| s2;
 }
 
 main: IO ();
 main = (
     do {
-        let state = *AppState::empty.initialize;
-        let app = App::make_with_state(state, merge_state);
-        let app = app.on("GET", "/", ChatBoard::on_get);
-        let app = app.on("POST", "/", ChatBoard::on_post);
+        let app_state_var = *AppState::initialize;
+        let app = App::make();
+        let app = app.on("GET", "/", ChatBoard::on_get(app_state_var));
+        let app = app.on("POST", "/", ChatBoard::on_post(app_state_var));
         let app = *app.listen("localhost:8080");
         pure()
     }

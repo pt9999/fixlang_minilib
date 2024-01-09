@@ -7,10 +7,6 @@ import IOEx;
 import Request;
 import UnitTest;
 
-type MyRequest = Request::Request ();
-type MyResponse = Request::Response ();
-
-
 open_string_reader: String -> IOFail (IOHandle, IOTask ());
 open_string_reader = |str| (
     let (read_fh, write_fh) = *open_pipe;
@@ -42,14 +38,14 @@ open_string_writer = |_| (
     pure $ (write_fh, reader_task)
 );
 
-create_simple_request: () -> IOFail MyRequest;
+create_simple_request: () -> IOFail Request;
 create_simple_request = |_| (
     let text = "GET /index.html HTTP/1.1\r\n"
     + "Accept: text/html\r\n"
     + "\r\n"
     ;
     let (read_fh, writer_task) = *open_string_reader(text);
-    let req = *Request::parse((), read_fh, "192.168.10.10:65432");
+    let req = *Request::parse(read_fh, "192.168.10.10:65432");
     let _ = *close_file(read_fh).lift;
     let _ = *writer_task.get.lift;
     pure $ req
@@ -69,9 +65,9 @@ test_request_simple = (
     pure()
 );
 
-type Handler = MyResponse -> IOFail MyResponse;
+type Handler = Response -> IOFail Response;
 
-get_response_output: MyRequest -> Handler -> IOFail String;
+get_response_output: Request -> Handler -> IOFail String;
 get_response_output = |req, handler| (
     let (write_fh, reader_task) = *open_string_writer();
     let req = req.set_connection(write_fh);
@@ -83,7 +79,7 @@ get_response_output = |req, handler| (
     pure $ output
 );
 
-assert_response_output_equal: MyRequest -> Handler -> String -> IOFail ();
+assert_response_output_equal: Request -> Handler -> String -> IOFail ();
 assert_response_output_equal = |req, handler, expected| (
     let actual = *get_response_output(req, handler);
     let _ = *assert_equal("output", expected, actual);

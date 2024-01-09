@@ -53,8 +53,7 @@ The field name is converted to lowercase.
 A type that represents an HTTP request.
 
 ```
-type Request s = unbox struct {
-    state: s,                   // Application state
+type Request = unbox struct {
     connection: IOHandle,       // An IOHandle of the socket
     remote_addr: String,        // The remote address, eg. "192.168.0.1:65432"
     method: String,             // eg. "GET"
@@ -66,24 +65,23 @@ type Request s = unbox struct {
     body: Array U8              // The body of the request
 };
 ```
-#### `impl Request s: ToString`
+#### `impl Request: ToString`
 
 ### namespace Request
 
-#### parse: s -> IOHandle -> String -> IOFail (Request s);
+#### parse: IOHandle -> String -> IOFail Request;
 
-`Request::parse(state, connection, remote_addr)` reads the HTTP request from `connection` and parse it.
+`Request::parse(connection, remote_addr)` reads the HTTP request from `connection` and parse it.
 
-#### find_query: String -> Request s -> Option String;
+#### find_query: String -> Request -> Option String;
 
 ### type Response
 
 A type that represents an HTTP response.
 
 ```
-type Response s = unbox struct {
-    state: s,                   // Application state
-    request: Request s,         // HTTP request
+type Response = unbox struct {
+    request: Request,         // HTTP request
     connection: IOHandle,       // An IOHandle of the socket 
     http_version: String,       // eg. "HTTP/1.1"
     status: I64,                // HTTP status (eg. 404)
@@ -94,31 +92,31 @@ type Response s = unbox struct {
 ```
 ### namespace Response
 
-#### make: Request s -> Response s;
+#### make: Request -> Response;
 
 `Response::make(request)` creates a basic HTTP response for an HTTP request.
 
-#### status: I64 -> Response s -> Response s;
+#### status: I64 -> Response -> Response;
 
 `response.status(code)` sets the HTTP status code. (eg. 404)
 It will also set the reason phrase (eg. "Not Found") of the status.
 
-#### content_type: String -> Response s -> Response s;
+#### content_type: String -> Response -> Response;
 
 `response.content_type(type)` sets the `Content-Type` header.
 You can specify an alias for the content type (e.g. "text", "json").
 See the definition of `_CONTENT_TYPE_ALIASES` for a list of available aliases.
 
-#### header: String -> String -> Response s -> Response s;
+#### header: String -> String -> Response -> Response;
 
 `response.header(name, value)` sets a response header.
 
-#### write_str: String -> Response s -> IOFail (Response s);
+#### write_str: String -> Response -> IOFail Response;
 
 `response.write_str(str)` sends headers with a status line if they have not already been sent.
 Then it sends the specified string.
 
-#### end: Response s -> IOFail (Response s);
+#### end: Response -> IOFail Response;
 
 Sends headers with a status line if they have not already been sent.
 Then flush the connection.

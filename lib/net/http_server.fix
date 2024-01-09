@@ -1,7 +1,7 @@
 module HttpServer;
 
 import Debug;
-//import AsyncTask;
+import AsyncTask;
 
 import Tcp;
 import IOEx;
@@ -10,22 +10,20 @@ import Request;
 import Router;
 
 // The request handler interprets an HTTP request and outputs an HTTP response to `response.@connection`.
-// It returns an HTTP response with (probably modified) application state.
-// `s` is the type of any application state.
-type RequestHandler s = Request s -> Response s -> IOFail (Response s);
+// It returns an HTTP response.
+type RequestHandler = Request -> Response -> IOFail Response;
 
 
 // The worker is responsible for processing a request. Specifically, 
 // it reads one request from the socket, processes it, and writes a response to the socket.
-// `s` is the type of any application state.
-type Worker s = unbox struct {
-    app: App s
+type Worker = unbox struct {
+    app: App
 };
 
 namespace Worker {
 
     // Creates a worker for the application.
-    make: App s -> Worker s;
+    make: App -> Worker;
     make = |app| (
         Worker {
             app: app
@@ -34,12 +32,12 @@ namespace Worker {
 
     // `worker.handle(connection, remote_addr)` receives an HTTP request from the socket connection,
     // then finds the request handler for the request, and call that handler.
-    handle: IOHandle -> String -> Worker s -> IO s;
+    handle: IOHandle -> String -> Worker -> IO ();
     handle = |connection, remote_addr, worker| (
         do {
             let app = worker.@app;
             eval debug_eprintln("parsing request");
-            let request = *Request::parse(app.@state, connection, remote_addr);
+            let request = *Request::parse(connection, remote_addr);
             
             eval debug_eprintln("request=" + request.to_string);
             let response = Response::make(request);
@@ -55,13 +53,10 @@ namespace Worker {
             let response = *handler(request, response);  
             let _ = *response.end;
             eval debug_eprintln("worker finished");
-            pure $ response.@state
+            pure()
         }
         ._finally(|_| close_file(connection))
-        .try(|err|
-            let _ = eprintln("ERROR: " + err);
-            pure $ worker.@app.@state        // app state is not changed when an error occured
-        )
+        .try(|err| eprintln("ERROR: " + err))
     );
 
     _finally: (() -> IO ()) -> IOFail a -> IOFail a;
@@ -72,36 +67,23 @@ namespace Worker {
         pure $ res.as_ok
     );
 
-    _not_found_handler: Request s -> Response s -> IOFail (Response s);
+    _not_found_handler: Request -> Response -> IOFail Response;
     _not_found_handler = |req, res| (
         res.status(404).write_str("Not Found")
     );
 }
 
-// This type represents an application. `s` is an application state.
-type App s = unbox struct {
-    state: s,                           // An application state
-    merge_state: s -> s -> s,           // A function that merges two application state
-    router: Router (RequestHandler s),  // An HTTP request router
+// This type represents an application.
+type App = unbox struct {
+    router: Router RequestHandler,      // An HTTP request router
     backlog: I64                        // Number of backlogs used for `listen()`
 };
 
 namespace App {
-    // `App::make()` creates an empty application with no state.
-    make: () -> App ();
+    // `App::make()` creates an empty application.
+    make: () -> App;
     make = |_| (
-        let state = ();
-        let merge_state = |_, _| ();
-        App::make_with_state(state, merge_state)
-    );
-
-    // `App::make_with_state(state, merge_state)` creates 
-    // an empty application with a state and a function to merge two states.
-    make_with_state: s -> (s -> s -> s) -> App s;
-    make_with_state = |state, merge_state| (
         App {
-            state: state,
-            merge_state: merge_state,
             router: Router::empty,
             backlog: 10
         }
@@ -109,7 +91,7 @@ namespace App {
 
     // `app.insert_handler(method, path, handler)` inserts a handler
     // at `path` for `method`.
-    insert_handler: String -> String -> RequestHandler s -> App s -> App s;
+    insert_handler: String -> String -> RequestHandler -> App -> App;
     insert_handler = |method, path, handler, app| (
         app.mod_router(|router|
             router.insert(method, path, handler)
@@ -117,12 +99,12 @@ namespace App {
     );
 
     // Alias of `insert_handler`.
-    on: String -> String -> RequestHandler s -> App s -> App s;
+    on: String -> String -> RequestHandler -> App -> App;
     on = insert_handler;
 
     // `app.listen(server_host_port)` listens for incoming requests,
     // and respond to accepted connections.
-    listen: String -> App s -> IOFail (App s);
+    listen: String -> App -> IOFail App;
     listen = |server_host_port, app| (
         let socket = *listen_tcp_server(server_host_port, app.@backlog);
         let _ = *eprintln ("Listening on " + server_host_port).lift;
@@ -134,12 +116,11 @@ namespace App {
             let connection = *fdopen(accepted_fd, "w+");
             let _ = *eprintln ("Accepted new connection: addr=" + addr.to_string).lift;
 
-            // currently only single thread is supported
-            let worker = Worker::make(app).handle(connection, addr.to_string);
-            let worker_state = *worker.lift;
+            eval *AsyncIOTask::make(
+                TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread),
+                Worker::make(app).handle(connection, addr.to_string)
+            ).lift;
 
-            let state = (app.@merge_state) (app.@state, worker_state);
-            let app = app.set_state(state);
             continue_m $ app
         )
     );

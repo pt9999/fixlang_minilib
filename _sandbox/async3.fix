@@ -1,17 +1,18 @@
 module Main;
 
 import AsyncTask;
+import Random;
 
 parallel_map: (a -> b) -> Array a -> Array b;
 parallel_map = |f, arr| (
-    let tasks = *arr.to_iter.fold(
+    let tasks = arr.to_iter.fold(
         [], |tasks, a|
-        let task = *AsyncTask::make(TaskPolicy::default, |_| f(a));
-        pure $ tasks.push_back(task)
+        let task = AsyncTask::make(TaskPolicy::default, |_| f(a));
+        tasks.push_back(task)
     );
     tasks.to_iter.fold(
         [], |results, task|
-        let result = *task.get;
+        let result = task.get;
         results.push_back(result)
     )
 );
@@ -29,3 +30,37 @@ parallel_map_m = |f, arr| (
         pure $ results.push_back(result)
     )
 );
+
+
+//---------------------------------------------------
+
+_usleep: I64 -> I64;
+_usleep = |usec| (
+    CALL_C[I32 usleep(U32), usec.to_U32].to_I64
+);
+
+test1: IO ();
+test1 = (
+    let _ = *pure();
+    let rand_var = *Var::make(Random::init_by_seed(123_U64));
+    let sleep_random: IO () = (
+        let u64 = *rand_var.lock(|rand|
+            let (u64, rand) = rand.generate_U64;
+            let _ = *rand_var.Var::set(rand);
+            pure $ u64
+        );
+        eval _usleep((u64 % 100000_U64).to_I64);
+        pure()
+    );
+    let arr: Array I64 = Iterator::range(0, 1000).to_array;
+    let arr: Array (IO String) = arr.parallel_map(to_string >> pure);
+    let _ = *arr.parallel_map_m(|str|
+        let _ = *sleep_random;
+        print(str + "\n")
+    );
+    pure()
+);
+
+main: IO ();
+main = test1;
+

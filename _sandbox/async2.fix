@@ -82,11 +82,28 @@ myIOTaskM = |_| (
     pure $ b
 );
 
-main: IO ();
-main = (
+test1: IO ();
+test1 = (
     let x = myTask().map(|x| x + 2).get;
     let _ = *println("x="+x.to_string);
     let y = *myIOTaskM().map(|y| y + 2).get;
     let _ = *println("y="+y.to_string);
     pure()
 );
+
+test2: IO ();
+test2 = (
+    let policy = TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread);
+    let loop = fix $ |loop, i| (
+        let _ = *println(i.to_string);
+        eval CALL_C[I32 sleep(U32), 1_U32];
+        let task = *AsyncIOTask::make(policy, loop(i + 1));
+        pure()
+    );
+    let task = *AsyncIOTask::make(policy, loop(0));
+    let forever = *Var::make(false);
+    forever.wait_and_lock(|b|b, |b|pure())
+);
+
+main: IO ();
+main = test2;

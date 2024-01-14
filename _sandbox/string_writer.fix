@@ -1,5 +1,7 @@
 module Main;
 
+import StringEx;
+
 //-------------------------------------------------------
 // State Monad
 //-------------------------------------------------------
@@ -62,14 +64,65 @@ namespace Tuple4 {
     concat_str = |(a,b,c,d)| a.to_string + b.to_string + c.to_string + d.to_string;
 }
 
-main: IO ();
-main = (
+
+test_string_writer: IO ();
+test_string_writer = (
     let text = collect_string $ do {
         let _ = *write("hello ");
         let _ = *write("world");
         let _ = *write(((" ", 1).concat_str, " ", 2.2, "\n").concat_str);
-        
         pure()
     };
     println (text)
+);
+
+
+//---------------------------------
+// Format
+//---------------------------------
+
+formatv: String -> Array String -> String;
+formatv = |str, args| (
+    let from = "{}";
+    let (result, pos) = args.to_iter.loop_iter(
+        (str, 0), |(str, find_start), to|
+        let pos = str.find(from, find_start);
+        if pos.is_none {
+            break $ (str, 0)
+        };
+        let pos = pos.as_some;
+        let str = (
+            str.substring(0, pos) +
+            to +
+            str.substring(pos + from.get_size, str.get_size)
+        );
+        let find_start = pos + to.get_size;
+        continue $ (str, find_start)
+    );
+    result
+);
+
+namespace Tuple1 {
+    format: [a: ToString] a -> String -> String;
+    format = |a, str| [a.to_string].formatv(str);
+}
+
+namespace Tuple2 {
+    format: [a: ToString, b: ToString] String -> (a,b) -> String;
+    format = |str, (a,b)| [a.to_string, b.to_string].formatv(str);
+}
+
+namespace Tuple3 {
+    format: [a: ToString, b: ToString, c:ToString] String -> (a,b,c) -> String;
+    format = |str, (a,b,c)| [a.to_string, b.to_string, c.to_string].formatv(str);
+}
+
+namespace Tuple4 {
+    format: [a: ToString, b: ToString, c:ToString, d:ToString] String -> (a,b,c,d) -> String;
+    format = |str, (a,b,c,d)| [a.to_string, b.to_string, c.to_string, d.to_string].formatv(str);
+}
+
+main: IO ();
+main = (
+    println((1, 2.2, 3_U16).format("hello {} world {} {}"))
 );

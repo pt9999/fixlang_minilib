@@ -81,48 +81,68 @@ test_string_writer = (
 // Format
 //---------------------------------
 
+// `array.formatv(str)` replaces each occurence of `{}` in the format string `str`
+// with each element of `array`.
+// Currently only supports `{}`.
 formatv: String -> Array String -> String;
 formatv = |str, args| (
     let from = "{}";
-    let (result, pos) = args.to_iter.loop_iter(
-        (str, 0), |(str, find_start), to|
+    let output = Array::empty(args.get_size * 2);
+    let (output, tail) = args.to_iter.loop_iter(
+        (output, 0), |(output, find_start), to|
         let pos = str.find(from, find_start);
         if pos.is_none {
-            break $ (str, 0)
+            break $ (output, find_start)
         };
         let pos = pos.as_some;
-        let str = (
-            str.substring(0, pos) +
-            to +
-            str.substring(pos + from.get_size, str.get_size)
-        );
-        let find_start = pos + to.get_size;
-        continue $ (str, find_start)
+        let output = output
+            .push_back(str.substring(find_start, pos))
+            .push_back(to)
+        ;
+        let find_start = pos + from.get_size;
+        continue $ (output, find_start)
     );
-    result
+    let output = output
+        .push_back(str.substring(tail, str.get_size));
+    output.to_iter.concat_iter
 );
 
-namespace Tuple1 {
-    format: [a: ToString] a -> String -> String;
-    format = |a, str| [a.to_string].formatv(str);
+namespace Array {
+    // `array.format(str)` replaces each occurence of `{}` in the format string `str`
+    // with each element of `array`.
+    // Currently only supports `{}`.
+    format: [a: ToString] String -> Array a -> String;
+    format = |str, arr| arr.map(to_string).formatv(str);
 }
 
 namespace Tuple2 {
+    // `(a, b).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`.
     format: [a: ToString, b: ToString] String -> (a,b) -> String;
     format = |str, (a,b)| [a.to_string, b.to_string].formatv(str);
 }
 
 namespace Tuple3 {
+    // `(a, b, c).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`, `c`.
     format: [a: ToString, b: ToString, c:ToString] String -> (a,b,c) -> String;
     format = |str, (a,b,c)| [a.to_string, b.to_string, c.to_string].formatv(str);
 }
 
 namespace Tuple4 {
+    // `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`, `c`, `d`.
     format: [a: ToString, b: ToString, c:ToString, d:ToString] String -> (a,b,c,d) -> String;
     format = |str, (a,b,c,d)| [a.to_string, b.to_string, c.to_string, d.to_string].formatv(str);
 }
 
 main: IO ();
 main = (
-    println((1, 2.2, 3_U16).format("hello {} world {} {}"))
+    let _ = *println([1].format("hello {}"));
+    let _ = *println([1, 2].format("hello {} {} {} world"));
+    let _ = *println(["foo"].format("hello {}"));
+    let _ = *println((1, 2.2).format("hello {} world {} end"));
+    let _ = *println((1, 2.2, 3_U16).format("hello {} world {} {}"));
+    let _ = *println((1, 2.2, 3_U16, ("foo", "bar")).format("{} hello world {} {} {} end"));
+    pure()
 );

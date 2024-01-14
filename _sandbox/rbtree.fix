@@ -5,48 +5,122 @@ Ported from Japanese translation of the book below:
 
 "Purely functional data structures" by Chris Okasaki, Cambridge University Press, 1998, ISBN 0-521-66350-4
 
+And for removal algorithm, ported from web site below.
+http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+
+
+日本語による説明:
+
 下記の日本語版の書籍の「3.3 赤黒木」のサンプルコードを移植した。
 
 「純粋関数型データ構造」
 Chris Okasaki 著
 稲葉一浩、遠藤侑介 訳
 ISBN：978-4-04-893056-7
+
+また、削除アルゴリズムについては下記のサイトを参考にした。
+http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
 */
 
 module Main;
 
 import Debug;
+import Random;
 
 namespace RBNode {
+    // A trait of the element. Currently `ToString` is required.
+    trait RBNodeElem = ToString;
 
+    // A type of red-black tree node.
     type RBNode a = box union {
         empty: (),
         red:  (RBNode a, a, RBNode a),
         black: (RBNode a, a, RBNode a)
     };
 
+    // A type of path component from the root node to any node.
     type RBPathComponent = unbox union {
         left: (),
         right: ()
     };
 
+    // A type of path from the root node to any node.
     type RBPath = Iterator RBPathComponent;
 
-    // Returns the number of black nodes below this node.
-    // An error is reported if the left and right nodes have different numbers of black nodes below them.
-    count_black: [a: ToString] RBNode a -> Result ErrMsg I64;
-    count_black = |node| (
-        if node.is_empty { ok $ 1 };
+    // Debug flag
+    _Debug: Bool;
+    _Debug = false;
+
+    // Prints to stderr if the debug flag is set.
+    _debug_eprintln_lazy: (() -> String) -> ();
+    _debug_eprintln_lazy = (
+        if _Debug { |f| debug_eprintln(f()) } else { |f| () }
+    );
+
+    // Returns the level of this node (ie. the number of black nodes from this node to any leaf).
+    // This function does not validate, so an unbalanced node can be specified.
+    level_nonvalidate: [a: RBNodeElem] RBNode a -> I64;
+    level_nonvalidate = |node| (
+        if node.is_empty { 1 };
         let this_count = if node.is_black { 1 } else { 0 };
-        let left_count = *node.get_left.count_black;
-        let right_count = *node.get_right.count_black;
-        if left_count != right_count {
-            err $ "The number of black nodes below the left and right nodes is different:"
-                + " left=" + left_count.to_string
-                + " right=" + right_count.to_string
-                + " node=" + node.to_string
-        };
-        pure $ left_count + this_count
+        let (left, elem, right) = node.get_triplet;
+        let left_level = left.level_nonvalidate;
+        let right_level = right.level_nonvalidate;
+        max(left_level, right_level) + this_count
+    );
+
+    // Returns the level of this node (ie. the number of black nodes from this node to any leaf).
+    // Panicks when the left and right nodes have different black count.
+    level: [a: RBNodeElem] RBNode a -> I64;
+    level = |node| (
+        if node.is_empty { 1 };
+        let this_count = if node.is_black { 1 } else { 0 };
+        let (left, elem, right) = node.get_triplet;
+        let left_level = left.level;
+        let right_level = right.level;
+        eval assert (|_| "The number of black nodes below the left and right nodes is different:"
+                + " left=" + left_level.to_string
+                + " right=" + right_level.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string, 
+            left_level == right_level
+        );
+        eval assert (|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red)));
+        left_level + this_count
+    );
+
+    // Returns `(level, min, max)`.
+    // Panicks when the left and right nodes have different black count.
+    validate: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (I64, Option a, Option a);
+    validate = |less_than, node| (
+        if node.is_empty { (1, none(), none()) };
+        let this_count = if node.is_black { 1 } else { 0 };
+        let (left, elem, right) = node.get_triplet;
+        let (left_level, left_min, left_max) = left.validate(less_than);
+        let (right_level, right_min, right_max) = right.validate(less_than);
+        eval assert (|_| "The number of black nodes below the left and right nodes is different:"
+                + " left=" + left_level.to_string
+                + " right=" + right_level.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string, 
+            left_level == right_level
+        );
+        eval assert (|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red)));
+        eval assert (|_| "not left_max < elem"
+                + "\nleft_max="+left_max.as_some.to_string + " elem="+elem.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string, 
+            left_max.is_none || less_than(left_max.as_some, elem));
+        eval assert (|_| "not elem < right_min"
+                + "\nright_min="+right_min.as_some.to_string + " elem="+elem.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string, 
+            right_min.is_none || less_than(elem, right_min.as_some));
+
+        let level = left_level + this_count;
+        let min = if left_min.is_some { left_min } else { some(elem) };
+        let max = if right_max.is_some { right_max } else { some(elem) };
+        (level, min, max)
     );
 
     // If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.
@@ -56,12 +130,30 @@ namespace RBNode {
         if node.is_red { node.as_red } else { node.as_black }
     );
 
+    set_triplet: (RBNode a, a, RBNode a) -> RBNode a -> RBNode a;
+    set_triplet = |triplet, node| (
+        if node.is_red { red $ triplet } else { black $ triplet }
+    );
+
+    get_color: RBNode a -> ((RBNode a, a, RBNode a) -> RBNode a);
+    get_color = |node| (
+        if node.is_black { black } else { red }
+    );
+
+    set_color: ((RBNode a, a, RBNode a) -> RBNode a) -> RBNode a -> RBNode a;
+    set_color = |color, node| (
+        color(node.get_triplet)
+    );
+
     get_left: RBNode a -> RBNode a;
     get_left = |node| node.get_triplet.@0;
 
     get_right: RBNode a -> RBNode a;
     get_right = |node| node.get_triplet.@2;
 
+    // `node.lookup(x, less_than)` lookups a node whose element `elem`
+    // holds the condition `!less_than(x, elem) && !less_than(elem, x)`.
+    // Returns `(path, found_node)` where `path` is the path from `node` to `found_node`.
     lookup: a -> (a -> a -> Bool) -> RBNode a -> (RBPath, RBNode a);
     lookup = |x, less_than, node| (
         if node.is_empty { (Iterator::empty, node) };
@@ -77,8 +169,8 @@ namespace RBNode {
         (Iterator::empty, node)
     );
 
-    balance: RBNode a -> RBNode a;
-    balance = |node| (
+    _balance: RBNode a -> RBNode a;
+    _balance = |node| (
         if node.is_empty || node.is_red { node };
         let (left, _, right) = node.as_black;
         if left.is_red && left.get_left.is_red {
@@ -108,81 +200,480 @@ namespace RBNode {
         node
     );
 
-    _insert1: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
-    _insert1 = |x, less_than, node| (
+    _insert_inner: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    _insert_inner = |x, less_than, node| (
         if node.is_empty { red $ (node, x, node) };
         let color = if node.is_red { red } else { black }; // constructor
         let (left, elem, right) = node.get_triplet;
         if less_than(x, elem) {  
-            let node = color $ (left._insert1(x, less_than), elem, right);
-            node.balance
+            let node = color $ (left._insert_inner(x, less_than), elem, right);
+            node._balance
         };
         if less_than(elem, x) {  
-            let node = color $ (left, elem, right._insert1(x, less_than));
-            node.balance
+            let node = color $ (left, elem, right._insert_inner(x, less_than));
+            node._balance
         };
         // If neither `x < elem` nor `elem < x` holds, replace `elem` to `x`.
         color $ (left, x, right)
     );
 
-    insert: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
-    insert = |x, less_than, node| (
-        let node = node._insert1(x, less_than);
-        black $ node.get_triplet
+    // `node.insert_lt(x, less_than)` inserts an element `x` to `node` using `less_than` ordering.
+    insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    insert_lt = |x, less_than, node| (
+        let inserted = node._insert_inner(x, less_than);
+        let inserted = black $ inserted.get_triplet;
+        let _ = if _Debug { eval inserted.validate(less_than); () } else { () };
+        inserted
     );
 
-    to_iter: RBNode a -> Iterator a;
+    // `node.insert(x)` inserts an element `x` to `node` using `|x,y| x < y` ordering.
+    insert: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
+    insert = |x, node| (
+        node.insert_lt(x, |x,y| x < y)
+    );
+
+    //====================================================================
+
+    // `node.remove(x)` removes an element `x` from `node` using `|x,y| x < y` ordering.
+    remove: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
+    remove = |x, node| (
+        node.remove_lt(x, |x,y| x < y)
+    );
+
+    // `node.remove_lt(x, less_than)` removes an element `x` from `node` using `less_than` ordering.
+    remove_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    remove_lt = |x, less_than, node| (
+        let (active, removed) = node._remove(x, less_than);
+        let _ = if _Debug { eval removed.validate(less_than); () } else { () };
+        removed
+    );
+
+    // `node._remove(x, less_than)` removes an element `elem` where neither
+    // `less_than(x, elem)` nor `less_than(elem, x)` holds.
+    // Returns `(active, removed)` where `removed` is the node after removal, 
+    // and `active` is true iff `removed.level == node.level - 1`.
+    _remove: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a);
+    _remove = |x, less_than, node| (
+        eval _debug_eprintln_lazy(|_| "_remove: node=" + node.to_string);
+        if node.is_empty { (false, node) };
+        let (left, elem, right) = node.get_triplet;
+        if less_than(x, elem) {
+            let (active, left) = left._remove(x, less_than);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_left $ (active, node);
+            (active, node)
+        };
+        if less_than(elem, x) {
+            let (active, right) = right._remove(x, less_than);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_right $ (active, node);
+            (active, node)
+        };
+        // remove this node
+        //eval _debug_eprintln_lazy(|_| "_remove this node: node="+node.to_string);
+        if !left.is_empty {
+            eval _debug_eprintln_lazy(|_| "left is nonempty");
+            let (active, left, max) = left._remove_max(less_than);
+            eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
+            let node = node.set_triplet((left, max, right));
+            let (active, node) = _remove_fix_left $ (active, node);
+            (active, node)
+        };
+        if !right.is_empty {
+            //eval _debug_eprintln_lazy(|_| "right is nonempty");
+            let (active, right, min) = right._remove_min(less_than);
+            let node = node.set_triplet((left, min, right));
+            let (active, node) = _remove_fix_right $ (active, node);
+            //eval _debug_eprintln_lazy(|_| "done");
+            (active, node)
+        };
+        //eval _debug_eprintln_lazy(|_| "both left and right is empty");
+        let node_was_black = node.is_black;
+        (node_was_black, empty())
+    );
+
+    // `node._remove_max(less_than)` removes an maximum element.
+    // Returns `(active, removed, max)` where `removed` is the node after removal,
+    // `max` is the maximum element,
+    // and `active` is true iff `removed.level == node.level - 1`.
+    _remove_max: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a, a);
+    _remove_max = |less_than, node| (
+        eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
+        eval assert (|_| "_remove_max: !node.is_empty", !node.is_empty);
+        let (left, elem, right) = node.get_triplet;
+        if !right.is_empty {
+            let (active, right, max) = right._remove_max(less_than);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_right $ (active, node);
+            (active, node, max)
+        };
+        // remove `node`
+        let max = elem;
+        let active = node.is_black;
+        (active, left, max)
+    );
+
+    // `node._remove_min(less_than)` removes an minimum element.
+    // Returns `(active, removed, min)` where `removed` is the node after removal,
+    // `min` is the minimum element,
+    // and `active` is true iff `removed.level == node.level - 1`.
+    _remove_min: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a, a);
+    _remove_min = |less_than, node| (
+        eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
+        eval assert (|_| "_remove_min: !node.is_empty", !node.is_empty);
+        let (left, elem, right) = node.get_triplet;
+        if !left.is_empty {
+            let (active, left, min) = left._remove_min(less_than);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_left $ (active, node);
+            (active, node, min)
+        };
+        // remove `node`
+        let min = elem;
+        let active = node.is_black;
+        (active, right, min)
+    );
+
+    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNode a -> String -> RBNode a -> I64 -> ();
+    _debug_assert_level_diff = |prefix, name1, node1, name2, node2, diff| (
+        if !_Debug { () };
+        let level1 = node1.level_nonvalidate;
+        let level2 = node2.level_nonvalidate;
+        assert (|_| prefix + ": " + 
+            name1 + ".level(" + level1.to_string + ") + " + diff.to_string + " != " +
+            name2 + ".level(" + level2.to_string + ")\n" + 
+            name1 + " = " + node1.to_string + "\n" +
+            name2 + " = " + node2.to_string
+            ,
+            level1 + diff == level2)
+    );
+
+    // Called when `node.left.level == node.right.level - 1`.
+    // Returns `(active, fixed)` where `fixed` is the fixed node, 
+    // and `active` is true iff `fixed.level = node.level - 1`.
+    _remove_fix_left: [a: RBNodeElem] (Bool, RBNode a) -> (Bool, RBNode a);
+    _remove_fix_left = |(active, node)| (
+        let (active, fixed) = _remove_fix_left_inner $ (active, node);
+        if fixed.is_empty {
+            (active, fixed)
+        };
+        let (left, elem, right) = node.get_triplet;
+        eval _debug_assert_level_diff("_remove_fix_left postcheck",
+            "fixed", fixed, "node", node,
+            if active { 1 } else { 0 }
+        );
+        eval _debug_eprintln_lazy(|_| "_remove_fix_left done: active="+active.to_string + " fixed="+fixed.to_string);
+        (active, fixed)
+    );
+
+    _remove_fix_left_inner: [a: RBNodeElem] (Bool, RBNode a) -> (Bool, RBNode a);
+    _remove_fix_left_inner = |(active, node)| (
+        // see http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+        if !active {
+            (active, node)
+        };
+        eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+node.to_string);
+        let u = node;
+        let u_was_black = u.is_black;
+        let u_color = u.get_color;
+        let (t1, u_elem, v) = u.get_triplet;
+        eval assert (|_| "v is empty", !v.is_empty);
+        eval _debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1);
+        if v.is_black {
+            if v.get_left.is_red {
+                // pattern L1
+                let (w, v_elem, t4) = v.get_triplet;
+                let (t2, w_elem, t3) = w.get_triplet;
+                eval _debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0);
+                eval _debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0);
+                let u = black $ (t1, u_elem, t2);
+                let v = black $ (t3, v_elem, t4);
+                let w = u_color $ (u, w_elem, v);
+                let active = false;
+                (active, w)
+            } else if v.get_right.is_red {
+                // pattern L2
+                let (t2, v_elem, w) = v.get_triplet;
+                let (t3, w_elem, t4) = w.get_triplet;
+                eval _debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0);
+                eval _debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0);
+                let u = black $ (t1, u_elem, t2);
+                let w = black $ (t3, w_elem, t4);
+                let v = u_color $ (u, v_elem, w);
+                let active = false;
+                (active, v)
+            } else {
+                // pattern L3
+                let (t2, v_elem, t3) = v.get_triplet;
+                let v = red $ (t2, v_elem, t3);
+                eval _debug_assert_level_diff("L3", "t1", t1, "v", v, 0);
+                let u = black $ (t1, u_elem, v);
+                let active = u_was_black;
+                (active, u)
+            }
+        } else {    // v.is_red
+            // pattern L4
+            eval assert (|_| "L4: u_was_black", u_was_black);
+            let (t2, v_elem, t3) = v.get_triplet;
+            let u = red $ (t1, u_elem, t2);
+            let active = true;
+            let (active, u) = _remove_fix_left $ (active, u);
+            eval _debug_assert_level_diff("L4", "u", u, "t3", t3, 0);
+            let v = black $ (u, v_elem, t3);
+            (active, v)
+        }
+    );
+
+    // Called when `node.right.level == node.level.level - 1`.
+    // Returns `(active, fixed)` where `fixed` is the fixed node, 
+    // and `active` is true iff `fixed.level = node.level - 1`.
+    _remove_fix_right: [a: RBNodeElem] (Bool, RBNode a) -> (Bool, RBNode a);
+    _remove_fix_right = |(active, node)| (
+        let (active, fixed) = _remove_fix_right_inner $ (active, node);
+        if fixed.is_empty {
+            (active, fixed)
+        };
+        let (left, elem, right) = node.get_triplet;
+        eval _debug_assert_level_diff("_remove_fix_right postcheck",
+            "fixed", fixed, "node", node,
+            if active { 1 } else { 0 }
+        );
+        (active, fixed)
+    );
+
+    _remove_fix_right_inner: [a: RBNodeElem] (Bool, RBNode a) -> (Bool, RBNode a);
+    _remove_fix_right_inner = |(active, node)| (
+        // see http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+        eval _debug_eprintln_lazy(|_| "_remove_fix_right: active="+active.to_string + " node="+node.to_string);
+        if !active {
+            (active, node)
+        };
+        let u = node;
+        let u_was_black = u.is_black;
+        let u_color = u.get_color;
+        let (v, u_elem, t4) = u.get_triplet;
+        eval assert (|_| "v is empty", !v.is_empty);
+        eval _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1);
+        if v.is_black {
+            if v.get_right.is_red {
+                eval _debug_eprintln_lazy(|_| "R1");
+                // pattern R1
+                let (t1, v_elem, w) = v.get_triplet;
+                let (t2, w_elem, t3) = w.get_triplet;
+                eval _debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0);
+                eval _debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0);
+                let v = black $ (t1, v_elem, t2);
+                let u = black $ (t3, u_elem, t4);
+                let w = u_color $ (v, w_elem, u);
+                let active = false;
+                (active, w)
+            } else if v.get_left.is_red {
+                eval _debug_eprintln_lazy(|_| "R2");
+                // pattern R2
+                let (w, v_elem, t3) = v.get_triplet;
+                let (t1, w_elem, t2) = w.get_triplet;
+                eval _debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0);
+                eval _debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0);
+                let w = black $ (t1, w_elem, t2);
+                let u = black $ (t3, u_elem, t4);
+                let v = u_color $ (w, v_elem, u);
+                let active = false;
+                (active, v)
+            } else {
+                eval _debug_eprintln_lazy(|_| "R3");
+                // pattern R3
+                let (t1, v_elem, t2) = v.get_triplet;
+                let t3 = t4;
+                let v = red $ (t1, v_elem, t2);
+                eval _debug_assert_level_diff("R3", "v", v, "t3", t3, 0);
+                let u = black $ (v, u_elem, t3);
+                let active = u_was_black;
+                (active, u)
+            }
+        } else {    // v.is_red
+            eval _debug_eprintln_lazy(|_| "R4");
+            // pattern R4
+            eval assert (|_| "R4: u_was_black", u_was_black);
+            let (t1, v_elem, t2) = v.get_triplet;
+            let t3 = t4;
+            let u = red $ (t2, u_elem, t3);
+            let active = true;
+            let (active, u) = _remove_fix_right $ (active, u);
+            eval _debug_assert_level_diff("R4", "t1", t1, "u", u, 0);
+            let v = black $ (t1, v_elem, u);
+            (active, v)
+        }
+    );
+
+    to_iter: [a: RBNodeElem] RBNode a -> Iterator a;
     to_iter = |node| (
         if node.is_empty { Iterator::empty };
         let (left, elem, right) = node.get_triplet;
         left.to_iter.append(right.to_iter.push_front(elem))
     );
 
-    from_iter_lt: (a -> a -> Bool) -> Iterator a -> RBNode a;
+    from_iter_lt: [a: RBNodeElem] (a -> a -> Bool) -> Iterator a -> RBNode a;
     from_iter_lt = |less_than, iter| (
         iter.fold(
             empty(), |node, x|
-            node.insert(x, less_than)
+            node.insert_lt(x, less_than)
         )
     );
 
-    from_iter: [a: LessThan] Iterator a -> RBNode a;
+    from_iter: [a: LessThan, a: RBNodeElem] Iterator a -> RBNode a;
     from_iter = |iter| (
         iter.from_iter_lt(|x,y| x < y)
     );
 
 }
 
-impl [a: ToString] RBNode a: ToString {
+impl [a: RBNodeElem, a: ToString] RBNode a: ToString {
     to_string = |node| (
         if node.is_empty { "E" };
-        if node.is_red { 
-            let (left, elem, right) = node.as_red;
-            "R(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
-        };
-        let (left, elem, right) = node.as_black;
-        "B(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
+        let level = node.level_nonvalidate;
+        let color = if node.is_black { "B" } else { "R" };
+        let (left, elem, right) = node.get_triplet;
+        color + "(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
     );
 }
 
+//=========================================================================
+// Test code
+//=========================================================================
 
 test1: IO ();
 test1 = (
     let node: RBNode I64 = [1,3,5,7,9,8,6,4,2,0].to_iter.from_iter;
-    let _ = *println(node.to_string);
-    let _ = *println(node.to_iter.map(to_string).join(","));
-    let res = node.count_black;
-    let _ = *if res.is_ok {
-        println("black_count=" + res.as_ok.to_string)
-    } else {
-        println(res.as_err)
+    let _ = *eprintln(node.to_string);
+    let _ = *eprintln(node.to_iter.map(to_string).join(","));
+    let bc = node.level;
+    eprintln("black_count=" + bc.to_string)
+);
+
+shuffle_array: Random -> Array a -> (Array a, Random);
+shuffle_array = |random, array| (
+    loop(
+        (array, random, array.get_size - 1), |(array, random, i)|
+        if i <= 0 {
+            break $ (array, random)
+        };
+        let (j, random) = random.generate_U64;
+        let j = (j % (i + 1).to_U64).to_I64;
+        let tmp = array.@(i);
+        let array = array.set(i, array.@(j));
+        let array = array.set(j, tmp);
+        continue $ (array, random, i - 1)
+    )
+);
+
+skip_array: I64 -> Array a -> Array a;
+skip_array = |m, array| (
+    let n = array.get_size;
+    let output = Array::empty(0);
+    let output = loop(
+        (output, 0), |(output, i)|
+        if i >= m { break $ output };
+        let output = loop(
+            (output, i), |(output, i)|
+            if i >= n { break $ output };
+            let output = output.push_back(array.@(i));
+            continue $ (output, i + m)
+        );
+        continue $ (output, i + 1)
+    );
+    eval assert (|_| "output.get_size == n", output.get_size == n);
+    output
+);
+
+type Reorder = unbox union {
+    ascending: (),
+    descending: (),
+    skip: I64,          // modulo
+    shuffle: I64        // seed
+};
+
+
+impl Reorder: ToString {
+    to_string = |reorder| (
+        if reorder.is_ascending { "ascending()" };
+        if reorder.is_descending { "descending()" };
+        if reorder.is_skip { "skip(" + reorder.as_skip.to_string + ")" };
+        if reorder.is_shuffle { "shuffle(" + reorder.as_shuffle.to_string + ")" };
+        eval assert (|_| "invalid reorder", false);
+        ""
+    );
+}
+
+reorder: Reorder -> Array a -> Array a;
+reorder = |reorder, array| (
+    if reorder.is_ascending {
+        array
     };
-    pure()
+    if reorder.is_descending {
+        array.to_iter.reverse.to_array
+    };
+    if reorder.is_skip {
+        array.skip_array(reorder.as_skip)
+    };
+    if reorder.is_shuffle {
+        let seed = reorder.as_shuffle;
+        let rand = Random::init_by_seed(seed.to_U64);
+        let (array, rand) = array.shuffle_array(rand);
+        array
+    };
+    eval assert (|_| "invalid reorder", false);
+    array
 );
 
 
+test_insert_remove: I64 -> Reorder -> Reorder -> IO ();
+test_insert_remove = |n, insert_reorder, remove_reorder| (
+    let _ = *eprintln("========================================================");
+    let _ = *eprintln("test_insert_remove("+ n.to_string + "," + insert_reorder.to_string + "," +
+                     remove_reorder.to_string+")");
+    let array = Iterator::range(0, n).to_array;
+
+    // test insert
+    let shuffled = array.reorder(insert_reorder);
+    let _ = *eprintln("shuffled="+ shuffled.to_iter.map(to_string).join(","));
+    let node: RBNode I64 = shuffled.to_iter.from_iter;
+    let sorted = node.to_iter.to_array;
+    let _ = *eprintln("sorted="+sorted.to_iter.map(to_string).join(","));
+    eval assert(|_| "array == sorted", array == sorted);
+
+    // test remove    
+    let shuffled = array.reorder(remove_reorder);
+    let node = shuffled.to_iter.zip(Iterator::count_up(0)).fold(
+        node, |node, (i, idx)| 
+        eval _debug_eprintln_lazy(|_| "removing: idx="+idx.to_string+" i="+i.to_string + " node="+node.to_string);
+        eval _debug_eprintln_lazy(|_| "node.level=" + node.level.to_string);
+        let node = node.remove(i);
+        let expect_size = shuffled.get_size - idx - 1;
+        let actual_size = node.to_iter.to_array.get_size;
+        eval assert(|_| "expect_size("+expect_size.to_string+") == actual_size("+actual_size.to_string + ")",
+            expect_size == actual_size);
+        node
+    );
+    let removed = node.to_iter.to_array;
+    let _ = *eprintln("removed="+removed.to_iter.map(to_string).join(","));
+    eval assert(|_| "removed.is_empty", removed.is_empty);
+    let _ = *eprintln("success");
+
+    pure()
+);
+
 main: IO ();
 main = (
-    test1
+    let ios = do {
+        let n = 30;
+        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
+        let remove_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
+        pure $ test_insert_remove(n, insert_reorder, remove_reorder)
+    };
+    let _ = *ios.to_iter.fold_m(
+        (), |_, io|
+        io
+    );
+    pure()
 );
 

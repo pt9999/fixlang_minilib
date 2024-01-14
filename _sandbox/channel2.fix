@@ -4,6 +4,7 @@ import AsyncTask;
 import Random;
 
 import Deque;
+import StringEx;
 
 namespace Channel {
     type Channel a = unbox struct {
@@ -39,37 +40,15 @@ namespace Channel {
         )
     );
 
-    recv_any: Array (Channel a) -> IO (I64, a);
-    recv_any = |channels| (
-        let var = *Var::make(none());
-        let tasks = *channels.to_iter.zip(Iterator::count_up(0)).fold_m(
-            [], |tasks, (chan, idx)|
-            let recv_fun = |deque| (
-                var.lock(
-                    |opt|
-                    if opt.is_some { pure() };
-                    let a = deque.get_front.as_some;
-                    let deque = deque.pop_front;
-                    let _ = *chan.@data.Var::set(deque);
-                    let _ = *var.Var::set(some $ (idx, a));
-                    pure()
-                )
-            );
-            let task_fun: IO () = (
-                chan.@data.wait_and_lock(
-                    |deque| !deque.is_empty,
-                    recv_fun
-                )
-            );
-            let task = *AsyncIOTask::make(
-                TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread),
-                task_fun   
-            );
-            pure $ tasks.push_back(task)
-        );
-        var.wait_and_lock(
-            is_some,
-            |opt| pure $ opt.as_some
+    try_recv: Channel a -> IO (Option a);
+    try_recv = |chan| (
+        chan.@data.lock(
+            |deque|
+            if deque.is_empty { pure $ none() };
+            let a = deque.get_front.as_some;
+            let deque = deque.pop_front;
+            let _ = *chan.@data.Var::set(deque);
+            pure $ some(a)
         )
     );
 }
@@ -103,7 +82,7 @@ test1 = (
     let n = 20;
     let indices = Iterator::range(0, n).to_array;
     let channels = *indices.map_m(|_| Channel::make(4));
-    let channels_result = *indices.map_m(|_| Channel::make(4));
+    let channel_result = *Channel::make(4);
     let task_func = |idx| (
         let _ = *eprintln(idx.to_string + ": 1st send to " + idx.to_string);
         let _ = *channels.@(idx).send(idx);
@@ -118,7 +97,7 @@ test1 = (
         let val = *channels.@((idx+n*2/3)%n).recv;
         let _ = *sleep_random;
         let _ = *eprintln(idx.to_string + ": final send to " + idx.to_string);
-        let _ = *channels_result.@(idx).send(val);
+        let _ = *channel_result.send((idx,val));
         pure()
     );
     let tasks = *indices.map_m(
@@ -128,18 +107,17 @@ test1 = (
             task_func(idx)
         )
     );
-    if true {
-        let (idx, val) = *channels_result.recv_any;
-        let _ = *tasks.map_m(get);
-        eprintln("idx=" + idx.to_string + " val="+val.to_string)
-    } else {
-        let _ = *indices.map_m(
-            |idx|
-            let val = *channels_result.@(idx).recv;
-            eprintln("final result " + idx.to_string + " = " + val.to_string)
-        );
-        pure()
-    }
+    let (idx, val) = *channel_result.recv;
+    let _ = *tasks.map_m(get);
+    let _ = *eprintln("idx=" + idx.to_string + " val="+val.to_string);
+    loop_m(
+        (), |_|
+        let opt = *channel_result.try_recv;
+        if opt.is_none { break_m $ () };
+        let (idx, val) = opt.as_some;
+        let _ = *eprintln("rest idx=" + idx.to_string + " val="+val.to_string);
+        continue_m $ ()
+    )
 );
 
 main: IO ();

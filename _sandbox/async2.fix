@@ -1,6 +1,7 @@
 module Main;
 
 import AsyncTask;
+import Random;
 
 impl Task: Functor {
     map = |f, fa| AsyncTask::make(
@@ -105,5 +106,54 @@ test2 = (
     forever.wait_and_lock(|b|b, |b|pure())
 );
 
+test3: IO ();
+test3 = (
+    let rand_var = *Var::make(Random::init_by_seed(1234_U64));
+    let next_u64 = rand_var.lock(|rand|
+            let (u64, rand) = rand.generate_U64;
+            let _ = *rand_var.Var::set(rand);
+            pure $ u64
+    );
+    let thread_count_var = *Var::make(0);
+    let policy = TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread);
+    let loop = fix $ |loop, i| (
+        let _ = *println(i.to_string);
+        let usec = (*next_u64 % 500000_U64).to_U32;
+        eval CALL_C[I32 usleep(U32), usec];
+        let nchild = (*next_u64 % 3_U64).to_I64;
+        let _ = *Iterator::range(0, nchild).fold_m(
+            (), |_, _|
+            let task = *AsyncIOTask::make(policy, loop(i + 1));
+            thread_count_var.mod(|n| n + 1)
+        );
+        thread_count_var.mod(|n| n - 1)
+    );
+    let task = *AsyncIOTask::make(policy, loop(0));
+    let _ = *thread_count_var.mod(|n| n + 1);
+    thread_count_var.wait_and_lock(|n|n == 0, |n|pure())
+);
+
+type Node = box struct {
+    val: Array U8,
+    next: Var (Option Node)
+};
+
+test4: IO ();
+test4 = (
+    let loop = fix $ |loop, i| (
+        if (false) { pure() };
+        let _ = *println(i.to_string);
+        eval CALL_C[I32 sleep(U32), 1_U32];
+        let next = *Var::make(none());
+        let node = Node {
+            val: Array::fill(10000000, 0_U8),
+            next: next
+        };
+        let _ = *next.Var::set(some(node)); // memory leak
+        loop(i+1)
+    );
+    loop(0)
+);
+
 main: IO ();
-main = test2;
+main = test3;

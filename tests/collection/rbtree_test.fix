@@ -3,6 +3,7 @@ module Main;
 import Debug;
 import Random;
 
+import StringEx;
 import RBTree;
 import UnitTest;
 import ArrayTestUtil;
@@ -13,7 +14,7 @@ test_simple = (
     make_test("test_simple") $ |_| 
     let node: RBNode I64 = [1,2,3].to_iter.from_iter;
     let node = node.remove(1);
-    let _ = *eprintln(node.to_string).lift;
+    //let _ = *eprintln(node.to_string).lift;
     let _ = *assert_equal("eq", 2, node.to_iter.to_array.get_size);
     pure()
 );
@@ -96,6 +97,27 @@ test_find_range = (
     }.run_tests
 );
 
+test_find_range_perf: TestCase;
+test_find_range_perf = (
+    let testname = "test_find_range_perf";
+    make_test(testname) $ |_|
+    let n = 1000000;
+    let array = Iterator::range(0, n).to_array;
+    let (shuffled, shuffled_time) = consumed_time_while(|_| array.reorder(shuffle(543)), ());
+    let (node, create_time) = consumed_time_while(|_| shuffled.to_iter.RBNode::from_iter, ());
+    let query = |begin, end| (
+        node.find_range(|x| x < begin, |x| x < end)
+    );
+    let (ans, ans_time) = consumed_time_while(|_| 
+        query((n.to_F64*0.1).to_I64, (n.to_F64*0.9).to_I64), ());
+    let (first, first_time) = consumed_time_while(|_| 
+        ans.get_first, ());
+    let (size, size_time) = consumed_time_while(|_| 
+        ans.fold(0, |i, _| i + 1), ());
+    let _ = *println("shuffled, create =" + (shuffled_time, create_time).to_string).lift;
+    let _ = *println("ans, first, size, total=" + (ans_time, first_time, size_time, ans_time + first_time + size_time).to_string).lift;
+    pure()
+);
 
 main: IO ();
 main = (
@@ -103,6 +125,7 @@ main = (
         test_simple,
         test_insert_remove,
         test_find_range,
+        //test_find_range_perf,
         TestCase::empty
     ]
     .run_test_driver

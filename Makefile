@@ -22,7 +22,7 @@ test_app_support: test_clap
 test_clap:
 	fix run -f tests/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)
 
-test_collection: test_ordered_map test_deque test_rbtree
+test_collection: test_ordered_map test_deque test_rbtree test_tree_map test_tree_set
 test_ordered_map:
 	fix run -f tests/collection/ordered_map_test.fix $(LIB_ORDERED_MAP) $(LIB_UNIT_TEST)
 test_deque:

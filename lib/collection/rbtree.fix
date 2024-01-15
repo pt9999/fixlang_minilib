@@ -163,16 +163,31 @@ namespace RBNode {
     find_range: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;
     find_range = |lt_begin, lt_end, node| (
         if node.is_empty { Iterator::empty };
-        let (left, elem, right) = node.get_triplet;
-        if elem.lt_begin {         // elem < begin
-            right.find_range(lt_begin, lt_end)
-        } else if elem.lt_end {    // begin <= elem && elem < end
-            left.find_range(lt_begin, lt_end) 
-            .append(right.find_range(lt_begin, lt_end)
-                    .push_front(elem))
-        } else {                    // end <= elem
-            left.find_range(lt_begin, lt_end) 
-        }
+        let next = |_| (
+            let (left, elem, right) = node.get_triplet;
+            if elem.lt_begin {         // elem < begin
+                right.find_range(lt_begin, lt_end)
+            } else if elem.lt_end {    // begin <= elem && elem < end
+                left.find_range(lt_begin, lt_end) 
+                ._fast_append(right.find_range(lt_begin, lt_end)
+                        .push_front(elem))
+            } else {                    // end <= elem
+                left.find_range(lt_begin, lt_end) 
+            }
+        ).advance;
+        Iterator { next: next }
+    );
+
+    // Same as `Iterator::append` but a little fast.
+    _fast_append : Iterator a -> Iterator a -> Iterator a;
+    _fast_append = |rhs, lhs| (
+        let next = |_| (
+            let opt = lhs.advance;
+            if opt.is_none { rhs.advance };
+            let (e, lhs) = opt.as_some;
+            some $ (e, lhs._fast_append(rhs))
+        );
+        Iterator { next : next }
     );
 
     _balance: RBNode a -> RBNode a;

@@ -1,3 +1,5 @@
+// This is an internal module of `TreeMap` and `TreeSet`.
+//
 // A Red-Black Tree implementation for FixLang.
 // 
 // Ported from Japanese translation of the book below:
@@ -147,8 +149,7 @@ namespace RBNode {
     get_right: RBNode a -> RBNode a;
     get_right = |node| node.get_triplet.@2;
 
-    // `node.find(x, less_than)` finds an element `elem`
-    // where `elem` is equivalent to `x`,
+    // `node.find(x, less_than)` finds an element `elem` that is equivalent to `x`,
     // ie. `!less_than(elem, x) && !less_than(x, elem)` is true.
     find: a -> (a -> a -> Bool) -> RBNode a -> Option a;
     find = |x, less_than, node| (
@@ -158,8 +159,10 @@ namespace RBNode {
         iter.get_first
     );
 
-    // `node.find_range(lt_begin, lt_end)` finds elements
-    // where `!elem.lt_begin && elem.lt_end` is true for each element `elem`.
+    // `node.find_range(lt_begin, lt_end)` finds all elements `elem`
+    // such that `!elem.lt_begin && elem.lt_end` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition: 
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
     find_range: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;
     find_range = |lt_begin, lt_end, node| (
         if node.is_empty { Iterator::empty };
@@ -234,11 +237,14 @@ namespace RBNode {
             let node = color $ (left, elem, right._insert_inner(x, less_than));
             node._balance
         };
-        // If neither `x < elem` nor `elem < x` holds, replace `elem` to `x`.
+        // If neither `x < elem` nor `elem < x` holds, replace `elem` with `x`.
         color $ (left, x, right)
     );
 
-    // `node.insert_lt(x, less_than)` inserts an element `x` to `node` using `less_than` ordering.
+    // `node.insert_lt(x, less_than)` inserts an element `x` using `less_than` ordering.
+    // If `node` already contains an element `y` equivalent to `x`, 
+    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // then `y` is replaced with `x`.
     insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
     insert_lt = |x, less_than, node| (
         let inserted = node._insert_inner(x, less_than);
@@ -247,7 +253,10 @@ namespace RBNode {
         inserted
     );
 
-    // `node.insert(x)` inserts an element `x` to `node` using default `LessThan` ordering.
+    // `node.insert(x)` inserts an element `x` using default `LessThan` ordering.
+    // If `node` already contains an element `y` equivalent to `x`, 
+    // ie. `!(x < y) && !(y < x)` is true,
+    // then `y` is replaced with `x`.
     insert: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
     insert = |x, node| (
         node.insert_lt(x, _less_than)
@@ -255,26 +264,28 @@ namespace RBNode {
 
     //====================================================================
 
-    // `node.remove(x)` removes an element `x` from `node` using default `LessThan` ordering.
+    // `node.remove(x)` removes any element `y` equivalent to `x`,
+    // ie. `!(x < y) && !(y < x)` is true.
     remove: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
     remove = |x, node| (
         node.remove_lt(x, _less_than)
     );
 
-    // `node.remove_lt(x, less_than)` removes an element `x` from `node` using `less_than` ordering.
+    // `node.remove_lt(x, less_than)` removes any element `y` equivalent to `x`,
+    // ie. ie. `!less_than(x,y) && !less_than(y,x)` is true.
     remove_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
     remove_lt = |x, less_than, node| (
         let lt_begin = |elem| less_than(elem, x);
         let lt_end   = |elem| !less_than(x, elem);
-        let opt = node._try_remove_range(lt_begin, lt_end);
-        if opt.is_none { node };
-        let (active, removed) = opt.as_some;
+        let removed = node.remove_range(lt_begin, lt_end);
         let _ = if _Debug { eval removed.validate(less_than); () } else { () };
         removed
     );
 
     // `node.remove_range(lt_begin, lt_end)` removes all elements `elem`
     // where `!elem.lt_begin && elem.lt_end` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition: 
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
     remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> RBNode a;
     remove_range = |lt_begin, lt_end, node| (
         let opt = node._try_remove_range(lt_begin, lt_end);

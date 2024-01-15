@@ -1,4 +1,4 @@
-module Main;
+module TreeMap;
 
 import RBTree;
 import StringEx;
@@ -6,29 +6,15 @@ import StringEx;
 namespace TreeMap {
     trait TreeMapKey = RBNodeElem;
 
-    // TODO: not to use Option
-    type Entry k v = (k, Option v);
-
-    namespace Entry {
-        make: k -> v -> Entry k v;
-        make = |k, v| (k, some(v));
-
-        from_key: k -> Entry k v;
-        from_key = |k| (k, none());
-
-        _less_than: [k: LessThan] Entry k v -> Entry k v -> Bool;
-        _less_than = _lift_lt(RBNode::_less_than);
-
-        _lift_lt: (k -> k -> Bool) -> Entry k v -> Entry k v -> Bool;
-        _lift_lt = |less_than, e1, e2| (
-            less_than(e1.@0, e2.@0)
-        );
-        
-    }
+    _lift_lt: (k -> k -> Bool) -> (k, v) -> (k, v) -> Bool;
+    _lift_lt = |key_less_than, (k1, v1), (k2, v2)| (
+        key_less_than(k1, k2)
+    );
 
     type TreeMap k v = unbox struct {
-        root: RBNode (Entry k v),
-        less_than: Entry k v -> Entry k v -> Bool
+        root: RBNode (k, v),
+        key_less_than: k -> k -> Bool,
+        entry_less_than: (k, v) -> (k, v) -> Bool
     };
 
     make: [k: LessThan, k: TreeMapKey] () -> TreeMap k v;
@@ -37,37 +23,25 @@ namespace TreeMap {
     );
 
     make_lt: [k: TreeMapKey] (k -> k -> Bool) -> TreeMap k v;
-    make_lt = |less_than| (
+    make_lt = |key_less_than| (
         TreeMap {
             root: RBNode::empty(),
-            less_than: _lift_lt(less_than)
+            key_less_than: key_less_than,
+            entry_less_than: _lift_lt(key_less_than)
         }
     );
     
     insert: [k: TreeMapKey] k -> v -> TreeMap k v -> TreeMap k v;
     insert = |k, v, ts| (
-       ts.mod_root(insert_lt((k, v), ts.@less_than))
-    );
-
-    insert_all: [k: TreeMapKey] Iterator (Entry k v) -> TreeMap k v -> TreeMap k v;
-    insert_all = |iter, ts| (
-        iter.fold(
-            ts, |ts, ent|
-            ts.mod_root(insert_lt(ent, ts.@less_than))
-        )
+       ts.mod_root(insert_lt((k, v), ts.@entry_less_than))
     );
 
     erase: [k: TreeMapKey] k -> TreeMap k v -> TreeMap k v;
     erase = |k, ts| (
-       ts.mod_root(remove_lt(Entry::from_key(k), ts.@less_than))
-    );
-
-    erase_all: [k: TreeMapKey] Iterator k -> TreeMap k v -> TreeMap k v;
-    erase_all = |iter, ts| (
-        iter.fold(
-            ts, |ts, k|
-            ts.erase(k)
-        )
+        let less_than = ts.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, k);
+        let lt_end   = |(ent_k,_)| !less_than(k, ent_k);
+        ts.mod_root(remove_range(lt_begin, lt_end))
     );
 
     is_empty: [k: TreeMapKey] TreeMap k v -> Bool;
@@ -77,31 +51,51 @@ namespace TreeMap {
 
     contains_key: [k: TreeMapKey] k -> TreeMap k v -> Bool;
     contains_key = |k, ts| (
-        let (path, node) = ts.lookup(Entry::from_key(k), ts.@less_than);
-        !node.is_empty
+        ts.find(k).is_some
+    );
+
+    keys: [k: TreeMapKey] TreeMap k v -> Iterator k;
+    keys = |ts| (
+        ts.to_iter.map(|e| e.@0)
     );
 
     find: [k: TreeMapKey] k -> TreeMap k v -> Option v;
     find = |k, ts| (
-        let (path, node) = ts.lookup(Entry::from_key(k), ts.@less_than);
-        if node.is_empty { none() };
-        let (left, elem, right) = node.get_triplet;
-        elem.@1     // must be some()
+        let less_than = ts.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, k);
+        let lt_end   = |(ent_k,_)| !less_than(k, ent_k);
+        let iter = ts.@root.find_range(lt_begin, lt_end);
+        iter.get_first.map(|entry| entry.@1)
+    );
+
+    // `ts.find_range(begin, end)` finds all entries `(k,v)`
+    // where `!less_than(k, begin) && less_than(k, end)` is true.
+    // In default `LessThan` ordering, that condition is same as `begin <= k && k < end`.
+    find_range: [k: TreeMapKey] k -> k -> TreeMap k v -> Iterator (k, v);
+    find_range = |begin, end, ts| (
+        let less_than = ts.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, begin);
+        let lt_end   = |(ent_k,_)| less_than(ent_k, end);
+        ts.@root.find_range(lt_begin, lt_end)
+    );
+
+    // `ts.find_raw_range(lt_begin, lt_end)` finds all entries `(k,v)`
+    // where `!lt_begin((k, v)) && lt_end((k, v))` is true.
+    find_raw_range: [k: TreeMapKey] ((k,v) -> Bool) -> ((k,v) -> Bool) -> TreeMap k v -> Iterator (k, v);
+    find_raw_range = |lt_begin, lt_end, ts| (
+        ts.@root.find_range(lt_begin, lt_end)
     );
 
     to_iter: [k: TreeMapKey] TreeMap k v -> Iterator (k, v);
     to_iter = |ts| (
-        ts.@root.to_iter.map(|e| (e.@0, e.@1.as_some))
+        ts.@root.to_iter.map(|entry| (entry.@0, entry.@1))
     );
 
     from_iter_lt: [k: TreeMapKey] (k -> k -> Bool) -> Iterator (k, v) -> TreeMap k v;
-    from_iter_lt = |less_than, iter| (
-        let iter = iter.map(|(k,v)| Entry::make(k, v));
-        let less_than = _lift_lt(less_than);
-        TreeMap {
-            root: RBNode::from_iter_lt(less_than, iter),
-            less_than: less_than
-        }
+    from_iter_lt = |key_less_than, iter| (
+        let ts = TreeMap::make_lt(key_less_than);
+        let root = RBNode::from_iter_lt(ts.@entry_less_than, iter);
+        ts.set_root(root)
     );
 
     from_iter: [k: LessThan, k: TreeMapKey] Iterator (k, v) -> TreeMap k v;
@@ -115,12 +109,3 @@ impl [k: TreeMapKey, v: ToString] TreeMap k v: ToString {
         "TreeMap{" + ts.to_iter.map(to_string).join(",") + "}"
     );
 }
-
-main: IO ();
-main = (
-    let ts = TreeMap::from_iter(Iterator::range(0, 10).map(|k| (k, k*2)));
-    let _ = *println(ts.to_string);
-    let ts = ts.erase_all(Iterator::range(0, 10));
-    let _ = *println(ts.to_string);
-    pure() 
-);

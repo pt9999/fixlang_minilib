@@ -1,0 +1,63 @@
+module Main;
+
+import TreeSet;
+import StringEx;
+import UnitTest;
+import ArrayTestUtil;
+
+test_insert_erase_ok: (I64, Reorder, Reorder) -> TestCase;
+test_insert_erase_ok = |(n, insert_reorder, erase_reorder)| (
+    let testname = "test_insert_erase_ok("+ n.to_string + "," + 
+                    insert_reorder.to_string + "," +
+                    erase_reorder.to_string + ")";
+    make_test(testname) $ |_|  
+    let keys_sorted = Iterator::range(0, n).to_array;
+
+    // insert with keys shuffled
+    let keys_shuffled = keys_sorted.reorder(insert_reorder);
+    let set: TreeSet I64 = TreeSet::make();
+    let set = keys_shuffled.to_iter.fold(
+        set, |set, k|
+        set.insert(k)
+    );
+
+    // assert that keys are sorted
+    let keys_current = set.to_iter.to_array;
+    let _ = *assert_equal("keys are sorted", keys_sorted, keys_current);
+
+    // assert that keys exist
+    let _ = *keys_sorted.to_iter.fold_m(
+        (), |_, k|
+        assert_equal("set.contains", true, set.contains(k))
+    );
+
+    // erase keys
+    let keys_shuffled = keys_sorted.reorder(erase_reorder);
+    let set = keys_shuffled.to_iter.fold(
+        set, |set, i|
+        set.erase(i)
+    );
+    let keys_current = set.to_iter.to_array;
+    let _ = *assert_equal("[] == keys_current", [], keys_current);
+    pure()      // success
+);
+
+test_insert_erase: TestCase;
+test_insert_erase = (
+    do {
+        let n = 30;
+        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
+        let erase_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
+        pure $ test_insert_erase_ok $ (n, insert_reorder, erase_reorder)
+    }.run_tests
+);
+
+
+main: IO ();
+main = (
+     [
+        test_insert_erase,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

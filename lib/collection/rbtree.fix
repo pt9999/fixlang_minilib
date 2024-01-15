@@ -38,16 +38,7 @@ namespace RBNode {
         black: (RBNode a, a, RBNode a)
     };
 
-    // A type of path component from the root node to any node.
-    type RBPathComponent = unbox union {
-        left: (),
-        right: ()
-    };
-
-    // A type of path from the root node to any node.
-    type RBPath = Iterator RBPathComponent;
-
-    // Debug flag
+    // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
     _Debug: Bool;
     _Debug = false;
 
@@ -89,8 +80,13 @@ namespace RBNode {
         left_level + this_count
     );
 
+    // Validates that:
+    // - the left and right nodes have same black count
+    // - children of a red node is not red
+    // - max of left node < elem
+    // - elem < min of right node
     // Returns `(level, min, max)`.
-    // Panicks when the left and right nodes have different black count.
+    // Panicks if validation failed.
     validate: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (I64, Option a, Option a);
     validate = |less_than, node| (
         if node.is_empty { (1, none(), none()) };
@@ -151,22 +147,15 @@ namespace RBNode {
     get_right: RBNode a -> RBNode a;
     get_right = |node| node.get_triplet.@2;
 
-    // `node.lookup(x, less_than)` lookups a node whose element `elem`
-    // holds the condition `!less_than(x, elem) && !less_than(elem, x)`.
-    // Returns `(path, found_node)` where `path` is the path from `node` to `found_node`.
-    lookup: a -> (a -> a -> Bool) -> RBNode a -> (RBPath, RBNode a);
-    lookup = |x, less_than, node| (
-        if node.is_empty { (Iterator::empty, node) };
-        let (left, elem, right) = node.get_triplet;
-        if less_than(x, elem) {
-            let (path, found_node) = left.lookup(x, less_than);
-            (path.push_front(left()), found_node)
-        };
-        if less_than(elem, x) {
-            let (path, found_node) = right.lookup(x, less_than);
-            (path.push_front(right()), found_node)
-        };
-        (Iterator::empty, node)
+    // `node.find(x, less_than)` finds an element `elem`
+    // where `elem` is equivalent to `x`,
+    // ie. `!less_than(elem, x) && !less_than(x, elem)` is true.
+    find: a -> (a -> a -> Bool) -> RBNode a -> Option a;
+    find = |x, less_than, node| (
+        let lt_begin = |elem| less_than(elem, x);
+        let lt_end   = |elem| !less_than(x, elem);
+        let iter = node.find_range(lt_begin, lt_end);
+        iter.get_first
     );
 
     // `node.find_range(lt_begin, lt_end)` finds elements
@@ -260,66 +249,110 @@ namespace RBNode {
     // `node.remove_lt(x, less_than)` removes an element `x` from `node` using `less_than` ordering.
     remove_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
     remove_lt = |x, less_than, node| (
-        let (active, removed) = node._remove(x, less_than);
+        let lt_begin = |elem| less_than(elem, x);
+        let lt_end   = |elem| !less_than(x, elem);
+        let opt = node._try_remove_range(lt_begin, lt_end);
+        if opt.is_none { node };
+        let (active, removed) = opt.as_some;
         let _ = if _Debug { eval removed.validate(less_than); () } else { () };
         removed
     );
 
-    // `node._remove(x, less_than)` removes an element `elem` where neither
-    // `less_than(x, elem)` nor `less_than(elem, x)` holds.
-    // Returns `(active, removed)` where `removed` is the node after removal, 
-    // and `active` is true iff `removed.level == node.level - 1`.
-    _remove: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a);
-    _remove = |x, less_than, node| (
-        eval _debug_eprintln_lazy(|_| "_remove: node=" + node.to_string);
-        if node.is_empty { (false, node) };
-        let (left, elem, right) = node.get_triplet;
-        if less_than(x, elem) {
-            let (active, left) = left._remove(x, less_than);
-            let node = node.set_triplet((left, elem, right));
-            let (active, node) = _remove_fix_left $ (active, node);
-            (active, node)
-        };
-        if less_than(elem, x) {
-            let (active, right) = right._remove(x, less_than);
-            let node = node.set_triplet((left, elem, right));
-            let (active, node) = _remove_fix_right $ (active, node);
-            (active, node)
-        };
-        // remove this node
-        //eval _debug_eprintln_lazy(|_| "_remove this node: node="+node.to_string);
-        if !left.is_empty {
-            eval _debug_eprintln_lazy(|_| "left is nonempty");
-            let (active, left, max) = left._remove_max(less_than);
-            eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
-            let node = node.set_triplet((left, max, right));
-            let (active, node) = _remove_fix_left $ (active, node);
-            (active, node)
-        };
-        if !right.is_empty {
-            //eval _debug_eprintln_lazy(|_| "right is nonempty");
-            let (active, right, min) = right._remove_min(less_than);
-            let node = node.set_triplet((left, min, right));
-            let (active, node) = _remove_fix_right $ (active, node);
-            //eval _debug_eprintln_lazy(|_| "done");
-            (active, node)
-        };
-        //eval _debug_eprintln_lazy(|_| "both left and right is empty");
-        let node_was_black = node.is_black;
-        (node_was_black, empty())
+    // `node.remove_range(lt_begin, lt_end)` removes all elements `elem`
+    // where `!elem.lt_begin && elem.lt_end` is true.
+    remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> RBNode a;
+    remove_range = |lt_begin, lt_end, node| (
+        let opt = node._try_remove_range(lt_begin, lt_end);
+        if opt.is_none { node };
+        let (active, removed) = opt.as_some;
+        removed.remove_range(lt_begin, lt_end)      // repeat recursively
     );
 
-    // `node._remove_max(less_than)` removes an maximum element.
+    // `node._try_remove_range(lt_begin, lt_end)` tries to remove single element `elem`
+    // where `!elem.lt_begin && elem.lt_end` is true.
+    // Even if there are several elements that holds the condition, only one of them 
+    // are removed.
+    // Returns `some((active, removed))` if removal is succeeded
+    // where `removed` is the node after removal, 
+    // and `active` is true iff `removed.level == node.level - 1`.
+    // Returns `none()` if removal is failed.
+    _try_remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> Option (Bool, RBNode a);
+    _try_remove_range = |lt_begin, lt_end, node| (
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + node.to_string);
+        let opt = node._try_remove_range_inner(lt_begin, lt_end);
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + opt.to_string);
+        opt
+    );
+
+    _try_remove_range_inner: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> Option (Bool, RBNode a);
+    _try_remove_range_inner = |lt_begin, lt_end, node| (
+        if node.is_empty { 
+            none() 
+        };
+        let (left, elem, right) = node.get_triplet;
+        let left_result = if !elem.lt_begin { 
+            let (active, left) = *left._try_remove_range(lt_begin, lt_end);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_left $ (active, node);
+            some $ (active, node)
+        } else {
+            none()
+        };
+        if left_result.is_some { 
+            left_result
+        };
+
+        let right_result = if elem.lt_end { 
+            let (active, right) = *right._try_remove_range(lt_begin, lt_end);
+            let node = node.set_triplet((left, elem, right));
+            let (active, node) = _remove_fix_right $ (active, node);
+            some $ (active, node)
+        } else {
+            none()
+        };
+        if right_result.is_some { 
+            right_result
+        };
+
+        let this_result = if !elem.lt_begin && elem.lt_end {
+            // remove this node
+            eval _debug_eprintln_lazy(|_| "remove this node: node="+node.to_string);
+            if !left.is_empty {
+                eval _debug_eprintln_lazy(|_| "left is nonempty");
+                let (active, left, max) = left._remove_max;
+                eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
+                let node = node.set_triplet((left, max, right));
+                let (active, node) = _remove_fix_left $ (active, node);
+                some $ (active, node)
+            };
+            if !right.is_empty {
+                eval _debug_eprintln_lazy(|_| "right is nonempty");
+                let (active, right, min) = right._remove_min;
+                let node = node.set_triplet((left, min, right));
+                let (active, node) = _remove_fix_right $ (active, node);
+                eval _debug_eprintln_lazy(|_| "done");
+                some $ (active, node)
+            };
+            eval _debug_eprintln_lazy(|_| "both left and right is empty");
+            let node_was_black = node.is_black;
+            some $ (node_was_black, empty())
+        } else {
+            none()
+        };
+        this_result
+    );
+
+    // `node._remove_max` removes an maximum element.
     // Returns `(active, removed, max)` where `removed` is the node after removal,
     // `max` is the maximum element,
     // and `active` is true iff `removed.level == node.level - 1`.
-    _remove_max: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a, a);
-    _remove_max = |less_than, node| (
+    _remove_max: [a: RBNodeElem] RBNode a -> (Bool, RBNode a, a);
+    _remove_max = |node| (
         eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
         eval assert (|_| "_remove_max: !node.is_empty", !node.is_empty);
         let (left, elem, right) = node.get_triplet;
         if !right.is_empty {
-            let (active, right, max) = right._remove_max(less_than);
+            let (active, right, max) = right._remove_max;
             let node = node.set_triplet((left, elem, right));
             let (active, node) = _remove_fix_right $ (active, node);
             (active, node, max)
@@ -330,17 +363,17 @@ namespace RBNode {
         (active, left, max)
     );
 
-    // `node._remove_min(less_than)` removes an minimum element.
+    // `node._remove_min` removes an minimum element.
     // Returns `(active, removed, min)` where `removed` is the node after removal,
     // `min` is the minimum element,
     // and `active` is true iff `removed.level == node.level - 1`.
-    _remove_min: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (Bool, RBNode a, a);
-    _remove_min = |less_than, node| (
+    _remove_min: [a: RBNodeElem] RBNode a -> (Bool, RBNode a, a);
+    _remove_min = |node| (
         eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
         eval assert (|_| "_remove_min: !node.is_empty", !node.is_empty);
         let (left, elem, right) = node.get_triplet;
         if !left.is_empty {
-            let (active, left, min) = left._remove_min(less_than);
+            let (active, left, min) = left._remove_min;
             let node = node.set_triplet((left, elem, right));
             let (active, node) = _remove_fix_left $ (active, node);
             (active, node, min)

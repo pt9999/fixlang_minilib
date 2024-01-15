@@ -1,4 +1,4 @@
-module Main;
+module TreeSet;
 
 import RBTree;
 
@@ -23,30 +23,14 @@ namespace TreeSet {
         }
     );
     
-    add: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
-    add = |x, ts| (
+    insert: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
+    insert = |x, ts| (
        ts.mod_root(insert_lt(x, ts.@less_than))
     );
 
-    add_all: [a: TreeSetElem] Iterator a -> TreeSet a -> TreeSet a;
-    add_all = |iter, ts| (
-        iter.fold(
-            ts, |ts, a|
-            ts.add(a)
-        )
-    );
-
-    remove: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
-    remove = |x, ts| (
+    erase: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
+    erase = |x, ts| (
        ts.mod_root(remove_lt(x, ts.@less_than))
-    );
-
-    remove_all: [a: TreeSetElem] Iterator a -> TreeSet a -> TreeSet a;
-    remove_all = |iter, ts| (
-        iter.fold(
-            ts, |ts, a|
-            ts.remove(a)
-        )
     );
 
     is_empty: [a: TreeSetElem] TreeSet a -> Bool;
@@ -56,8 +40,7 @@ namespace TreeSet {
 
     contains: [a: TreeSetElem] a -> TreeSet a -> Bool;
     contains = |x, ts| (
-        let (path, node) = ts.lookup(x, ts.@less_than);
-        !node.is_empty
+        ts.@root.find(x, ts.@less_than).is_some
     );
 
     to_iter: [a: TreeSetElem] TreeSet a -> Iterator a;
@@ -77,6 +60,26 @@ namespace TreeSet {
     from_iter = |iter| (
         TreeSet::from_iter_lt(RBNode::_less_than, iter) 
     );
+
+    intersect: [a : TreeSetElem] TreeSet k -> TreeSet k -> TreeSet k;
+    intersect = |ts1, ts2| (
+        ts1.to_iter.fold(
+            ts1, |ts1, x|
+            if ts2.contains(x) {
+                ts1
+            } else {
+                ts1.erase(x)
+            }
+        )
+    );
+
+    merge: [a : TreeSetElem] TreeSet k -> TreeSet k -> TreeSet k;
+    merge = |ts1, ts2| (
+        ts2.to_iter.fold(
+            ts1, |ts1, x|
+            ts1.insert(x)
+        )
+    );
 }
 
 impl [a: TreeSetElem] TreeSet a: ToString {
@@ -84,12 +87,3 @@ impl [a: TreeSetElem] TreeSet a: ToString {
         "TreeSet{" + ts.to_iter.map(to_string).join(",") + "}"
     );
 }
-
-main: IO ();
-main = (
-    let ts = TreeSet::from_iter(Iterator::range(0, 10));
-    let _ = *println(ts.to_string);
-    let ts = ts.remove_all(Iterator::range(0, 10));
-    let _ = *println(ts.to_string);
-    pure() 
-);

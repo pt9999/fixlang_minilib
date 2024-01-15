@@ -1,28 +1,24 @@
-/*
-A Red-Black Tree implementation for FixLang.
+// A Red-Black Tree implementation for FixLang.
+// 
+// Ported from Japanese translation of the book below:
+// 
+// "Purely functional data structures" by Chris Okasaki, Cambridge University Press, 1998, ISBN 0-521-66350-4
+// 
+// And for removal algorithm, ported from web site below.
+// http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+module RBTree;
 
-Ported from Japanese translation of the book below:
-
-"Purely functional data structures" by Chris Okasaki, Cambridge University Press, 1998, ISBN 0-521-66350-4
-
-And for removal algorithm, ported from web site below.
-http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
-
-
-日本語による説明:
-
-下記の日本語版の書籍の「3.3 赤黒木」のサンプルコードを移植した。
-
-「純粋関数型データ構造」
-Chris Okasaki 著
-稲葉一浩、遠藤侑介 訳
-ISBN：978-4-04-893056-7
-
-また、削除アルゴリズムについては下記のサイトを参考にした。
-http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
-*/
-
-module Main;
+// 上記の和訳:
+// 
+// 下記の日本語版の書籍の「3.3 赤黒木」のサンプルコードを移植した。
+// 
+// 「純粋関数型データ構造」
+// Chris Okasaki 著
+// 稲葉一浩、遠藤侑介 訳
+// ISBN：978-4-04-893056-7
+// 
+// また、削除アルゴリズムについては下記のサイトを参考にした。
+// http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
 
 import Debug;
 import Random;
@@ -536,144 +532,3 @@ impl [a: RBNodeElem, a: ToString] RBNode a: ToString {
         color + "(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")" 
     );
 }
-
-//=========================================================================
-// Test code
-//=========================================================================
-
-test1: IO ();
-test1 = (
-    let node: RBNode I64 = [1,3,5,7,9,8,6,4,2,0].to_iter.from_iter;
-    let _ = *eprintln(node.to_string);
-    let _ = *eprintln(node.to_iter.map(to_string).join(","));
-    let bc = node.level;
-    eprintln("black_count=" + bc.to_string)
-);
-
-shuffle_array: Random -> Array a -> (Array a, Random);
-shuffle_array = |random, array| (
-    loop(
-        (array, random, array.get_size - 1), |(array, random, i)|
-        if i <= 0 {
-            break $ (array, random)
-        };
-        let (j, random) = random.generate_U64;
-        let j = (j % (i + 1).to_U64).to_I64;
-        let tmp = array.@(i);
-        let array = array.set(i, array.@(j));
-        let array = array.set(j, tmp);
-        continue $ (array, random, i - 1)
-    )
-);
-
-skip_array: I64 -> Array a -> Array a;
-skip_array = |m, array| (
-    let n = array.get_size;
-    let output = Array::empty(0);
-    let output = loop(
-        (output, 0), |(output, i)|
-        if i >= m { break $ output };
-        let output = loop(
-            (output, i), |(output, i)|
-            if i >= n { break $ output };
-            let output = output.push_back(array.@(i));
-            continue $ (output, i + m)
-        );
-        continue $ (output, i + 1)
-    );
-    eval assert (|_| "output.get_size == n", output.get_size == n);
-    output
-);
-
-type Reorder = unbox union {
-    ascending: (),
-    descending: (),
-    skip: I64,          // modulo
-    shuffle: I64        // seed
-};
-
-
-impl Reorder: ToString {
-    to_string = |reorder| (
-        if reorder.is_ascending { "ascending()" };
-        if reorder.is_descending { "descending()" };
-        if reorder.is_skip { "skip(" + reorder.as_skip.to_string + ")" };
-        if reorder.is_shuffle { "shuffle(" + reorder.as_shuffle.to_string + ")" };
-        eval assert (|_| "invalid reorder", false);
-        ""
-    );
-}
-
-reorder: Reorder -> Array a -> Array a;
-reorder = |reorder, array| (
-    if reorder.is_ascending {
-        array
-    };
-    if reorder.is_descending {
-        array.to_iter.reverse.to_array
-    };
-    if reorder.is_skip {
-        array.skip_array(reorder.as_skip)
-    };
-    if reorder.is_shuffle {
-        let seed = reorder.as_shuffle;
-        let rand = Random::init_by_seed(seed.to_U64);
-        let (array, rand) = array.shuffle_array(rand);
-        array
-    };
-    eval assert (|_| "invalid reorder", false);
-    array
-);
-
-
-test_insert_remove: I64 -> Reorder -> Reorder -> IO ();
-test_insert_remove = |n, insert_reorder, remove_reorder| (
-    let _ = *eprintln("========================================================");
-    let _ = *eprintln("test_insert_remove("+ n.to_string + "," + insert_reorder.to_string + "," +
-                     remove_reorder.to_string+")");
-    let array = Iterator::range(0, n).to_array;
-
-    // test insert
-    let shuffled = array.reorder(insert_reorder);
-    let _ = *eprintln("shuffled="+ shuffled.to_iter.map(to_string).join(","));
-    let node: RBNode I64 = shuffled.to_iter.from_iter;
-    let sorted = node.to_iter.to_array;
-    let _ = *eprintln("sorted="+sorted.to_iter.map(to_string).join(","));
-    eval assert(|_| "array == sorted", array == sorted);
-
-    // test remove    
-    let shuffled = array.reorder(remove_reorder);
-    let node = shuffled.to_iter.zip(Iterator::count_up(0)).fold(
-        node, |node, (i, idx)| 
-        eval _debug_eprintln_lazy(|_| "removing: idx="+idx.to_string+" i="+i.to_string + " node="+node.to_string);
-        eval _debug_eprintln_lazy(|_| "node.level=" + node.level.to_string);
-        let node = node.remove(i);
-        let expect_size = shuffled.get_size - idx - 1;
-        let actual_size = node.to_iter.to_array.get_size;
-        eval assert(|_| "expect_size("+expect_size.to_string+") == actual_size("+actual_size.to_string + ")",
-            expect_size == actual_size);
-        node
-    );
-    let removed = node.to_iter.to_array;
-    let _ = *eprintln("removed="+removed.to_iter.map(to_string).join(","));
-    eval assert(|_| "removed.is_empty", removed.is_empty);
-    let _ = *eprintln("success");
-
-    pure()
-);
-
-main: IO ();
-main = (
-    let ios = do {
-        let n = 30;
-        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
-        let remove_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
-        pure $ test_insert_remove(n, insert_reorder, remove_reorder)
-    };
-    let _ = *ios.to_iter.fold_m(
-        (), |_, io|
-        io
-    );
-    pure()
-);
-

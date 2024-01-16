@@ -41,15 +41,6 @@ For details, see Linux manual page for [pipe()](https://man7.org/linux/man-pages
 Sleeps for specified micro-seconds.
 For details, see Linux manual page for [usleep()](https://man7.org/linux/man-pages/man3/usleep.3.html).
 
-### type DirHandle
-
-Type of a directory handle (private)
-
-```
-type DirHandle = unbox struct {
-    dtor: Destructor Ptr
-};
-```
 #### list_dir: String -> IOFail (Array String);
 
 Lists a directory.
@@ -142,4 +133,24 @@ This mode is modified by the process's umask in the usual way.
 `rmdir(path)` deletes a directory, which must be empty.
 
 #### make_dirs: String -> Option U32 -> IOFail ();
+
+### type UName
+
+A type of name and information of current kernel.
+
+```
+type UName = unbox struct {
+    sysname: String,
+    nodename: String,
+    release: String,
+    version: String,
+    machine: String
+};
+```
+#### uname: UName;
+
+The name and information of current kernel.
+Calls POSIX C function `uname()`, and split the result by null characters.
+NOTE: The system information does not change during program execution,
+so this variable is constant.
 

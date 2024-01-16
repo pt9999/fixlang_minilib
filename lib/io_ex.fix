@@ -1,6 +1,7 @@
 // IO extensions
 module IOEx;
 
+import Debug;
 import StringEx;
 
 // Creates a new file or rewrites an existing one.
@@ -99,7 +100,7 @@ usleep = |usec| (
     pure()
 );
 
-// Type of a directory handle (private)
+// [nofixdoc] Type of a directory handle
 type DirHandle = unbox struct {
     dtor: Destructor Ptr
 };
@@ -204,8 +205,8 @@ namespace FileStat {
     // `stat(file_path)` retrieves information about the file pointed to by `file_path`.
     stat: String -> IOFail FileStat;
     stat = |file_path| (
-        let _ = *pure();    // make it lazy
-        let statbuf: Array U8 = Array::fill(144, 0_U8);
+        let _ = *pure(); // make it lazy
+        let statbuf: Array U8 = Array::fill(_def_struct_stat.@sizeof_struct_stat, 0_U8);
         let res = statbuf.borrow_ptr(|p_stat|
             file_path.borrow_c_str(|p_filepath|
                     CALL_C[I32 stat(Ptr, Ptr), p_filepath, p_stat]
@@ -228,44 +229,111 @@ namespace FileStat {
                         /* 0o0040000 = */ 16384_U32;
 
     st_dev: FileStat -> U64;
-    st_dev = |file_stat| decode_u64_le(file_stat.@data, 0);
+    st_dev = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_dev);
 
     st_ino: FileStat -> U64;
-    st_ino = |file_stat| decode_u64_le(file_stat.@data, 8);
+    st_ino = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_ino);
 
     st_nlink: FileStat -> U64;
-    st_nlink = |file_stat| decode_u64_le(file_stat.@data, 16);
+    st_nlink = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_nlink);
 
     st_mode: FileStat -> U32;
-    st_mode = |file_stat| decode_u32_le(file_stat.@data, 24);
+    st_mode = |file_stat| decode_u32_le(file_stat.@data, _def_struct_stat.@offsetof_st_mode);
 
     st_uid: FileStat -> U32;
-    st_uid = |file_stat| decode_u32_le(file_stat.@data, 28);
+    st_uid = |file_stat| decode_u32_le(file_stat.@data, _def_struct_stat.@offsetof_st_uid);
 
     st_gid: FileStat -> U32;
-    st_gid = |file_stat| decode_u32_le(file_stat.@data, 32);
+    st_gid = |file_stat| decode_u32_le(file_stat.@data, _def_struct_stat.@offsetof_st_gid);
 
     st_rdev: FileStat -> U64;
-    st_rdev = |file_stat| decode_u64_le(file_stat.@data, 40);
+    st_rdev = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_rdev);
 
     st_size: FileStat -> I64;
-    st_size = |file_stat| decode_u64_le(file_stat.@data, 48).to_I64;
+    st_size = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_size).to_I64;
 
     st_blksize: FileStat -> I64;
-    st_blksize = |file_stat| decode_u64_le(file_stat.@data, 56).to_I64;
+    st_blksize = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_blksize).to_I64;
 
     st_blocks: FileStat -> U64;
-    st_blocks = |file_stat| decode_u64_le(file_stat.@data, 64);
+    st_blocks = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_blocks);
 
     st_atime: FileStat -> U64;
-    st_atime = |file_stat| decode_u64_le(file_stat.@data, 72);
+    st_atime = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_atime);
 
     st_mtime: FileStat -> U64;
-    st_mtime = |file_stat| decode_u64_le(file_stat.@data, 88);
+    st_mtime = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_mtime);
 
     st_ctime: FileStat -> U64;
-    st_ctime = |file_stat| decode_u64_le(file_stat.@data, 104);
+    st_ctime = |file_stat| decode_u64_le(file_stat.@data, _def_struct_stat.@offsetof_st_ctime);
 }
+
+
+// [nofixdoc] A type that represents size info of `struct stat`.
+type DefStructStat = unbox struct {
+    offsetof_st_dev: I64,
+    offsetof_st_ino: I64,
+    offsetof_st_nlink: I64,
+    offsetof_st_mode: I64,
+    offsetof_st_uid: I64,
+    offsetof_st_gid: I64,
+    offsetof_st_rdev: I64,
+    offsetof_st_size: I64,
+    offsetof_st_blksize: I64,
+    offsetof_st_blocks: I64,
+    offsetof_st_atime: I64,
+    offsetof_st_mtime: I64,
+    offsetof_st_ctime: I64,
+    sizeof_struct_stat: I64
+};
+
+// NOTE: the system information does not change during program execution,
+// so this variable is constant.
+_def_struct_stat: DefStructStat;
+_def_struct_stat = (
+    let uts = uname;
+    // aarch64-linux-gnu (ChromeBook, Debian 11)
+    if uts.@sysname == "Linux" && uts.@machine == "aarch64" {
+        // aarch64-linux-gnu
+        DefStructStat {
+            offsetof_st_dev: 0,
+            offsetof_st_ino: 8,
+            offsetof_st_nlink: 20,
+            offsetof_st_mode: 16,
+            offsetof_st_uid: 24,
+            offsetof_st_gid: 28,
+            offsetof_st_rdev: 32,
+            offsetof_st_size: 48,
+            offsetof_st_blksize: 56,
+            offsetof_st_blocks: 64,
+            offsetof_st_atime: 72,
+            offsetof_st_mtime: 88,
+            offsetof_st_ctime: 104,
+            sizeof_struct_stat: 128
+        }
+    };
+    eval assert (|_|
+        "Currently this platform is not supported: sysname="+uts.@sysname+" machine=" + uts.@machine,
+        uts.@sysname == "Linux" && uts.@machine == "x86_64"
+    );
+    // x86_64-linux-gnu (WSL 2, Ubuntu 22.04)
+    DefStructStat {
+        offsetof_st_dev: 0,
+        offsetof_st_ino: 8,
+        offsetof_st_nlink: 16,
+        offsetof_st_mode: 24,
+        offsetof_st_uid: 28,
+        offsetof_st_gid: 32,
+        offsetof_st_rdev: 40,
+        offsetof_st_size: 48,
+        offsetof_st_blksize: 56,
+        offsetof_st_blocks: 64,
+        offsetof_st_atime: 72,
+        offsetof_st_mtime: 88,
+        offsetof_st_ctime: 104,
+        sizeof_struct_stat: 144
+    }
+);
 
 // Decodes U8 from `array` at position `i` with little endian.
 decode_u8_le: Array U8 -> I64 -> U8;
@@ -354,11 +422,75 @@ make_dirs = |dir_path, mode| (
         pure()
     };
     let parent_dir = dirname(dir_path);
-    let _ = *if parent_dir == dir_path { 
+    let _ = *if parent_dir == dir_path {
         pure()  // avoid infinite loop
     } else {
         make_dirs(parent_dir, mode)
     };
     mkdir(dir_path, mode)
+);
+
+// A type of name and information of current kernel.
+type UName = unbox struct {
+    sysname: String,
+    nodename: String,
+    release: String,
+    version: String,
+    machine: String
+};
+
+// The name and information of current kernel.
+// Calls POSIX C function `uname()`, and split the result by null characters.
+// NOTE: The system information does not change during program execution,
+// so this variable is constant.
+uname: UName;
+uname = (
+    let buf = Array::fill(4096, 0_U8);
+    let res = buf.borrow_ptr(|p_buf|
+        CALL_C[I32 uname(Ptr), p_buf]
+    );
+    eval assert (|_| "uname failed!: some error occurred in uname.", res == 0_I32);
+    /*
+    let dump = buf.to_iter.zip(Iterator::count_up(0)).fold(
+        Array::empty(0), |dump, (b, i)|
+        let dump = dump.push_back(encode_hex_char(b.shift_left(4_U8).bit_and(15_U8)))
+            .push_back(encode_hex_char(b.bit_and(15_U8)));
+        if i % 16 == 15 { dump.push_back('\n') } else { dump }
+    )._unsafe_to_string;
+    eval debug_println(dump);
+    */
+    let find_from_start_by = |start, cond, arr| (
+        let len = arr.Array::get_size;
+        loop(start, |idx| (
+            if idx == len { break $ Option::none $ () };
+            if cond(arr.@(idx)) { break $ Option::some $ idx };
+            continue $ idx + 1
+        ))
+    );
+    let names = loop(
+        ([], 0), |(names, start)|
+        let start = buf.find_from_start_by(start, |b| b != 0_U8);
+        if start.is_none {
+            break $ names
+        };
+        let start = start.as_some;
+        let end = buf.find_from_start_by(start, |b| b == 0_U8).map_or(
+            buf.get_size,
+            |end| end
+        );
+        let name = buf.get_sub(start, end)._unsafe_to_string;
+        let names = names.push_back(name);
+        continue $ (names, end)
+    );
+    // Probably splitted to `[sysname, nodename, release, version, machine]`.
+    //eval debug_println("uname="+names.to_string);
+
+    UName {
+        sysname: names.@(0),
+        nodename: names.@(1),
+        release: names.@(2),
+        version: names.@(3),
+        machine: names.@(4)
+    }
 );
 

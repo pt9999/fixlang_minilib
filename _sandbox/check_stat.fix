@@ -1,0 +1,115 @@
+module Main;
+
+import Subprocess;
+
+// C source code to inspect struct.
+inspect_struct: String -> String -> String;
+inspect_struct = |name, fields| (
+    let print_fields = fields.split(" ").fold(
+        "", |text, field|
+        text + "\tprintf(\"offsetof_"+field+": %ld,\\n\", offsetof (struct "+name+","+field+"));\n"
+    );
+    let text = "
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/utsname.h>
+#include <stddef.h>
+#include <stdio.h>
+
+int main() {
+"+print_fields+"
+    printf(\"sizeof_struct_"+name+": %ld\\n\", sizeof (struct "+name+"));
+    return 0;
+}
+";
+    text 
+);
+
+// C source code to inspect `struct stat`.
+inspect_struct_stat: String;
+inspect_struct_stat = (
+    inspect_struct("stat", "st_dev st_ino st_nlink st_mode st_uid st_gid st_rdev st_size st_blksize st_blocks st_atime st_mtime st_ctime")
+);
+
+inspect_struct_utsname: String;
+inspect_struct_utsname = (
+    inspect_struct("utsname", "sysname nodename release version machine")
+);
+
+run_shell_command: String -> IOFail ();
+run_shell_command = |cmd| (
+    let ((stdout, stderr), exitstatus) = *run_string("/bin/bash", ["/bin/bash", "-c", cmd], "");
+    let _ = *println(stdout).lift;
+    let _ = *eprintln(stderr).lift;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+        //let text = inspect_struct_stat;
+        let text = inspect_struct_utsname;
+        let c_file_path = "/tmp/a.c";
+        let _ = *write_file_string(Path::parse(c_file_path).as_some, text);
+        let cmd = "cd /tmp && gcc a.c -o a.out && ./a.out && rm -f a.out a.c";
+        let _ = *run_shell_command(cmd);
+        pure()
+    }
+    .try(eprintln)
+);
+
+/*
+
+Mouse G-Tune, Windows 11, WSL 2, Ubuntu 22.04
+$ uname -a
+Linux G-Tune 5.15.133.1-microsoft-standard-WSL2 #1 SMP Thu Oct 5 21:02:42 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux
+
+$ gcc -dumpmachine
+x86_64-linux-gnu
+
+offsetof_st_dev: 0,
+offsetof_st_ino: 8,
+offsetof_st_nlink: 16,
+offsetof_st_mode: 24,
+offsetof_st_uid: 28,
+offsetof_st_gid: 32,
+offsetof_st_rdev: 40,
+offsetof_st_size: 48,
+offsetof_st_blksize: 56,
+offsetof_st_blocks: 64,
+offsetof_st_atime: 72,
+offsetof_st_mtime: 88,
+offsetof_st_ctime: 104,
+sizeof_struct_stat: 144
+
+offsetof_sysname: 0,
+offsetof_nodename: 65,
+offsetof_release: 130,
+offsetof_version: 195,
+offsetof_machine: 260,
+sizeof_struct_utsname: 390
+
+ASUS Chromebook Detachable CM3 (CM3000)
+$ uname -a
+Linux debian11 6.1.60-08594-g03a802b9a072 #1 SMP PREEMPT Mon Jan  1 18:13:23 PST 2024 aarch64 GNU/Linux
+
+$ gcc -dumpmachine
+aarch64-linux-gnu
+
+offsetof_st_dev: 0,
+offsetof_st_ino: 8,
+offsetof_st_nlink: 20,
+offsetof_st_mode: 16,
+offsetof_st_uid: 24,
+offsetof_st_gid: 28,
+offsetof_st_rdev: 32,
+offsetof_st_size: 48,
+offsetof_st_blksize: 56,
+offsetof_st_blocks: 64,
+offsetof_st_atime: 72,
+offsetof_st_mtime: 88,
+offsetof_st_ctime: 104,
+sizeof_struct_stat: 128
+
+*/
+

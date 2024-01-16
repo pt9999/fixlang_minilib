@@ -16,6 +16,21 @@ Ordered map.
 This is similar to HashMap except it preserves the order of entries.
 
 
+### [lib/collection/rbtree.fix](lib/collection/rbtree.md)
+
+A Red-Black Tree implementation for FixLang.
+(This is an internal module of `TreeMap` and `TreeSet`.)
+
+### [lib/collection/tree_map.fix](lib/collection/tree_map.md)
+
+TreeMap is a map that manages keys in sorted order.
+
+
+### [lib/collection/tree_set.fix](lib/collection/tree_set.md)
+
+TreeSet is a set that manages elements in sorted order.
+
+
 ### [lib/io_ex.fix](lib/io_ex.md)
 
 IO extensions
@@ -70,42 +85,13 @@ String extensions
 
 An implementation of simple regular expression.
 
-Currently it only supports patterns below:
-- Character classes: `[xyz]`, `[^xyz]`, `.`, `\d`, `\D`, `\w`, `\W`, `\s`,
-`\S`, `\t`, `\r`, `\n`, `\v`, `\f`, `[\b]`, `x|y`
-- Assertions: `^`, `$`
-- Groups: `(x)`
-- Quantifiers: `x*`, `x+`, `x?`, `x{n}`, `x{n,}`, `x{n,m}`
-
-For details, see
-[mdn web docs: Regular expressions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_expressions).
-
-LIMITATION:
-
-Currently, only single byte characters (U+0001..U+007F) can be specified in character classes.
-Non-ASCII characters (U+0080..U+10FFFF) are encoded to two or more bytes in UTF-8, so they cannot be specified in character classes.
-And the null character (U+0000) cannot be used in Fix strings.
-
-
-
 ### [lib/text/regexp/regexp_nfa.fix](lib/text/regexp/regexp_nfa.md)
 
 This is internal module of `RegExp`.
 
-NFA (Nondeterministic Finite Automaton)
-
-For details, see web pages below.
-- https://swtch.com/~rsc/regexp/regexp1.html
-- https://zenn.dev/canalun/articles/regexp_and_automaton
-
-
-
 ### [lib/text/regexp/regexp_pattern.fix](lib/text/regexp/regexp_pattern.md)
 
 This is internal module of `RegExp`.
-
-Character class and Pattern parser
-
 
 ### [lib/unicode.fix](lib/unicode.md)
 

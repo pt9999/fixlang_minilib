@@ -22,11 +22,17 @@ test_app_support: test_clap
 test_clap:
 	fix run -f tests/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)
 
-test_collection: test_ordered_map test_deque
+test_collection: test_ordered_map test_deque test_rbtree test_tree_map test_tree_set
 test_ordered_map:
 	fix run -f tests/collection/ordered_map_test.fix $(LIB_ORDERED_MAP) $(LIB_UNIT_TEST)
 test_deque:
 	fix run -f tests/collection/deque_test.fix lib/collection/deque.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+test_rbtree:
+	fix run -f tests/collection/rbtree_test.fix tests/collection/array_testutil.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+test_tree_map:
+	fix run -f tests/collection/tree_map_test.fix tests/collection/array_testutil.fix lib/collection/tree_map.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+test_tree_set:
+	fix run -f tests/collection/tree_set_test.fix tests/collection/array_testutil.fix lib/collection/tree_set.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_file_format: test_json
 test_json:

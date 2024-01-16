@@ -71,6 +71,8 @@ In default `LessThan` ordering, that condition is same as `begin <= k && k < end
 
 `tm.find_raw_range(lt_begin, lt_end)` finds all entries `(k,v)`
 where `!lt_begin((k, v)) && lt_end((k, v))` is true.
+NOTE: `lt_begin` and `lt_end` must meet following condition:
+for all `(k,v)`, `lt_begin((k,v))` is true then `lt_end((k,v))` must be true.
 
 #### to_iter: [k: TreeMapKey] TreeMap k v -> Iterator (k, v);
 

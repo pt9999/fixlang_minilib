@@ -50,6 +50,19 @@ Checks whether a TreeSet is empty.
 
 Checks whether a TreeSet contains an element.
 
+#### find_range: [a: TreeSetElem] a -> a -> TreeSet a -> Iterator a;
+
+`ts.find_range(begin, end)` finds all elements `x`
+where `!less_than(x, begin) && less_than(x, end)` is true.
+In default `LessThan` ordering, that condition is same as `begin <= x && x < end`.
+
+#### find_raw_range: [a: TreeSetElem] (a -> Bool) -> (a -> Bool) -> TreeSet a -> Iterator a;
+
+`ts.find_raw_range(lt_begin, lt_end)` finds all elements `x`
+where `!lt_begin(x) && lt_end(x)` is true.
+NOTE: `lt_begin` and `lt_end` must meet following condition:
+for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+
 #### to_iter: [a: TreeSetElem] TreeSet a -> Iterator a;
 
 Converts a TreeSet into an iterator in sorted order.

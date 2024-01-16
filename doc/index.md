@@ -17,10 +17,11 @@ This is an internal module of `TreeMap` and `TreeSet`.
 
 ### [lib/collection/tree_map.fix](lib/collection/tree_map.md)
 
+A tree map that preserves the order of keys.
 
 ### [lib/collection/tree_set.fix](lib/collection/tree_set.md)
 
-a set that preserves the order of elements
+TreeSet is a set that manages elements in sorted order.
 
 ### [lib/io_ex.fix](lib/io_ex.md)
 

@@ -2,9 +2,8 @@
 
 ## module RBTree
 
-This is an internal module of `TreeMap` and `TreeSet`.
-
 A Red-Black Tree implementation for FixLang.
+(This is an internal module of `TreeMap` and `TreeSet`.)
 
 Ported from Japanese translation of the book below:
 

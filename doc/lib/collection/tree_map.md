@@ -2,7 +2,7 @@
 
 ## module TreeMap
 
-A tree map that preserves the order of keys.
+TreeMap is a map that manages keys in sorted order.
 
 ### namespace TreeMap
 

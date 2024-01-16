@@ -1,0 +1,74 @@
+module Main;
+
+import Subprocess;
+
+make_c_source: String;
+make_c_source = (
+    let fields = "st_dev st_ino st_nlink st_mode st_uid st_gid st_rdev st_size st_blksize st_blocks st_atime st_mtime st_ctime";
+    let print_fields = fields.split(" ").fold(
+        "", |text, f|
+        text + "\tprintf(\"offsetof_"+f+" = %ld,\\n\", offsetof (struct stat,"+f+"));\n"
+    );
+    let text = "
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stddef.h>
+#include <stdio.h>
+
+int main() {
+"+print_fields+"
+    printf(\"sizeof_struct_stat = %ld\\n\", sizeof (struct stat));
+    return 0;
+}
+";
+    text 
+);
+
+run_shell_command: String -> IOFail ();
+run_shell_command = |cmd| (
+    let ((stdout, stderr), exitstatus) = *run_string("/bin/bash", ["/bin/bash", "-c", cmd], "");
+    let _ = *println(stdout).lift;
+    let _ = *eprintln(stderr).lift;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+        let c_file_path = "/tmp/a.c";
+        let text = make_c_source;
+        let _ = *write_file_string(Path::parse(c_file_path).as_some, text);
+        let cmd = "cd /tmp && gcc a.c -o a.out && ./a.out && rm -f a.out a.c";
+        let _ = *run_shell_command(cmd);
+        pure()
+    }
+    .try(eprintln)
+);
+
+/*
+
+ASUS Chromebook Detachable CM3 (CM3000)
+$ uname -a
+Linux debian11 6.1.60-08594-g03a802b9a072 #1 SMP PREEMPT Mon Jan  1 18:13:23 PST 2024 aarch64 GNU/Linux
+
+$ gcc -dumpmachine
+aarch64-linux-gnu
+
+offsetof_st_dev = 0,
+offsetof_st_ino = 8,
+offsetof_st_nlink = 20,
+offsetof_st_mode = 16,
+offsetof_st_uid = 24,
+offsetof_st_gid = 28,
+offsetof_st_rdev = 32,
+offsetof_st_size = 48,
+offsetof_st_blksize = 56,
+offsetof_st_blocks = 64,
+offsetof_st_atime = 72,
+offsetof_st_mtime = 88,
+offsetof_st_ctime = 104,
+sizeof_struct_stat = 128
+
+*/
+

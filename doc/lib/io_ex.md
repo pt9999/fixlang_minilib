@@ -41,15 +41,6 @@ For details, see Linux manual page for [pipe()](https://man7.org/linux/man-pages
 Sleeps for specified micro-seconds.
 For details, see Linux manual page for [usleep()](https://man7.org/linux/man-pages/man3/usleep.3.html).
 
-### type DirHandle
-
-Type of a directory handle (private)
-
-```
-type DirHandle = unbox struct {
-    dtor: Destructor Ptr
-};
-```
 #### list_dir: String -> IOFail (Array String);
 
 Lists a directory.
@@ -113,29 +104,6 @@ Returns true if it is a directory.
 
 #### st_ctime: FileStat -> U64;
 
-### type DefStructStat
-
-A type that represents size info of `struct stat`.
-(private)
-
-```
-type DefStructStat = unbox struct {
-    offsetof_st_dev: I64,
-    offsetof_st_ino: I64,
-    offsetof_st_nlink: I64,
-    offsetof_st_mode: I64,
-    offsetof_st_uid: I64,
-    offsetof_st_gid: I64,
-    offsetof_st_rdev: I64,
-    offsetof_st_size: I64,
-    offsetof_st_blksize: I64,
-    offsetof_st_blocks: I64,
-    offsetof_st_atime: I64,
-    offsetof_st_mtime: I64,
-    offsetof_st_ctime: I64,
-    sizeof_struct_stat: I64
-};
-```
 #### decode_u8_le: Array U8 -> I64 -> U8;
 
 Decodes U8 from `array` at position `i` with little endian.

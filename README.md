@@ -7,20 +7,23 @@ This library is still work in progress.
 ## Tested Platform
 - x86_64-linux-gnu
 - aarch64-linux-gnu
-- NOTE: Currently not tested on MacOS.
+- NOTE: Currently MacOS is not supported.
 
 ## Features
 
 - Application support
   - Clap (Command Line Argument Parser)
 - Collections
-  - Ordered maps
+  - Ordered map
   - Deque (double-ended queue)
+  - Tree map
+  - Tree set
+  - Red-Black tree
 - File format
   - JSON encoding and decoding
 - Text handling
-  - Regular expressions
-  - Simple parsers
+  - Regular expression
+  - Simple parser
   - String utility
   - UTF8/UTF16/UTF32 conversion
 - Networking
@@ -33,7 +36,7 @@ This library is still work in progress.
 
 To build example programs, type `make examples`.
 
-To run test codes, type `make test`. It has been tested in the following environment.
+To run test codes, type `make test`. It has been mainly tested in the following environment.
 
 - Ubuntu-22.04 on WSL 2
 - rustup 1.26.0

@@ -89,3 +89,6 @@ http_server: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(
 
 examples/grep.out: examples/grep.fix $(LIB_REGEXP) lib/clap.fix
 	fix build -f $^ -o $@
+
+examples/spell_checker.out: examples/spell_checker.fix lib/collection/tree_set.fix lib/collection/rbtree.fix lib/string_ex.fix lib/io_ex.fix 
+	fix build -f $^ -o $@

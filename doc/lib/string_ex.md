@@ -79,6 +79,11 @@ Returns `(str, "")` if the delimiter is not found.
 
 Same as Std::String::split, except that `"foo".split_ex(",")` returns a singleton iterator of "foo".
 
+#### split_by: (U8 -> Bool) -> String -> Iterator String;
+
+Splits a string by a function that checks whether a character is a delimiter or not.
+The result will not contain any empty string.
+
 #### substring: I64 -> I64 -> String -> String;
 
 Returns a substring extracted from a specified range from a string.

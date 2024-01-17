@@ -53,6 +53,51 @@ namespace Channel {
     );
 }
 
+impl Var a: Eq {
+    eq = |var1, var2| (
+        var1.@_dtor.borrow(|handle1|
+            var2.@_dtor.borrow(|handle2|
+                handle1 == handle2
+            )
+        )
+    );
+}
+
+impl Channel a: Eq {
+    eq = |chan1, chan2| (
+        chan1.@data == chan2.@data 
+    );
+}
+
+namespace Topic {
+    type Topic a = unbox struct {
+        subscribers: Iterator (Channel a)
+    };
+
+    empty: Topic a;
+    empty = Topic {
+        subscribers: []
+    };
+
+    subscribe: Channel a -> Topic a -> Topic a;
+    subscribe = |chan, topic| (
+        topic.mod_subscribers(push_front(chan))
+    );
+    
+    unsubscribe: Channel a -> Topic a -> Topic a;
+    unsubscribe = |chan, topic| (
+        topic.mod_subscribers(filter(|ch| ch != chan))
+    );
+
+    notify: a -> Topic a -> IO ();
+    notify = |value, topic| (
+        topic.@subscribers.fold_m(
+            (), |_, chan|
+            chan.send(value)
+        )
+    );
+}
+
 map_m: [m : Monad] (a -> m b) -> Array a -> m (Array b);
 map_m = |f, array| array.to_iter.fold_m(
     Array::empty(array.get_size), |output, a|

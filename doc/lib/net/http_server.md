@@ -2,6 +2,11 @@
 
 ## module HttpServer
 
+Simple HTTP server.
+The interface is similar to `express` of Node.js.
+- Insert a request handler on specific path
+- Listen for incoming requests
+
 ### type RequestHandler
 
 The request handler interprets an HTTP request and outputs an HTTP response to `response.@connection`.

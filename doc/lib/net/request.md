@@ -2,6 +2,11 @@
 
 ## module Request
 
+HTTP request and response.
+- Parses HTTP request headers and query strings, POST data
+(currently only `application/x-www-form-urlencoded` is supported)
+- Writes response back to client
+
 ### type Header
 
 A type that represents a header. The header is a tuple of field name and field value.

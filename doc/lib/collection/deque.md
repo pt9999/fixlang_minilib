@@ -2,7 +2,10 @@
 
 ## module Deque
 
-Double-ended queues
+Deque (double-ended queue).
+Deque can be used as a FIFO such as a message queue.
+When used as a FIFO, the amortized costs of `push_back()` and
+`pop_front()` are `O(1)`.
 
 ### type Deque
 

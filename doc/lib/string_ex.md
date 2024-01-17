@@ -2,7 +2,12 @@
 
 ## module StringEx
 
-String extensions
+String extensions, such as:
+- ToString for Tuple, Option, Result, Array, HashMap
+- Array U8 -> String conversion
+- Search, replace, split, comparison of String
+- Hexadecimal String
+- File Path handling
 
 #### `impl (): ToString`
 

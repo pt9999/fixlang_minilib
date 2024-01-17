@@ -2,6 +2,9 @@
 
 ## module Unicode
 
+Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
+
+
 #### utf8_to_utf32: Array U8 -> Array U32 -> Array U32;
 
 Convert UTF8 string to UTF32 string. Please specify the output destination buffer.

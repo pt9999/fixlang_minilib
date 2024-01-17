@@ -2,7 +2,7 @@
 
 ## module RBTree
 
-A Red-Black Tree implementation for FixLang.
+Red-Black Tree.
 (This is an internal module of `TreeMap` and `TreeSet`.)
 
 Ported from Japanese translation of the book below:

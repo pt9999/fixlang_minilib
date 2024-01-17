@@ -2,7 +2,13 @@
 
 ## module IOEx
 
-IO extensions
+IO extensions, such as:
+- Create or delete files and directories
+- Directory listing
+- Find files under directory
+- Checks if file or directory exists
+- Retrieve file information, such as file size and time stamps
+- Get kernel information such as system name, machine archtecture
 
 #### creat: String -> U32 -> IOFail I32;
 
@@ -122,6 +128,9 @@ Decodes U64 from `array` at position `i` with little endian.
 
 #### find_files: String -> IOFail (Array String);
 
+`find_files(dir_path)` finds all files under
+specified directory and its subdirectories.
+
 #### mkdir: String -> Option U32 -> IOFail ();
 
 `mkdir(path, mode)` creates a directory.
@@ -133,6 +142,12 @@ This mode is modified by the process's umask in the usual way.
 `rmdir(path)` deletes a directory, which must be empty.
 
 #### make_dirs: String -> Option U32 -> IOFail ();
+
+`make_dirs(dir_path, mode)` creates specified directory
+as well as its parent directories recursively.
+If the directory already exists, it does nothing.
+If `mode` is `none()`, octal 0777 is used as a mode.
+This mode is modified by the process's umask in the usual way.
 
 ### type UName
 

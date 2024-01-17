@@ -2,6 +2,16 @@
 
 ## module Tcp
 
+TCP operation, such as:
+- IP address, port number
+- Resolves IP address from hostname
+- IPv4 Socket address
+- IPv4 TCP Socket
+
+Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
+WARNING: IPv6 is not supported yet.
+
+
 #### get_sub_ex: I64 -> I64 -> Array a -> Array a;
 
 ### type IpAddress

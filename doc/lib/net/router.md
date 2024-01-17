@@ -2,6 +2,10 @@
 
 ## module Router
 
+HTTP request router.
+- Mounts a request handler to specific path and method
+- Finds a request handler from path and method of the HTTP request
+
 ### type RouterEntry
 
 `RouterEntry h` represents a map from method name to a request handler.

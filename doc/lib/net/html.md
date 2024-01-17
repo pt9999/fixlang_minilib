@@ -2,6 +2,10 @@
 
 ## module HTML
 
+HTML handling, such as:
+- Very simple DOM model (HTMLDocument, HTMLElement)
+- Escape/unescape HTML special characters
+
 ### namespace HTML
 
 #### html: HTMLDocument;

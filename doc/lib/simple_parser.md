@@ -2,7 +2,10 @@
 
 ## module SimpleParser
 
-A monadic text parser
+Simple text parser. Customizable by monadic operations.
+- Stream of characters
+- Basic parsers such as character matching
+- Create complex parsers with composition
 
 ### type Char
 

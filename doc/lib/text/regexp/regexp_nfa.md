@@ -2,9 +2,7 @@
 
 ## module RegExpNFA
 
-This is internal module of `RegExp`.
-
-NFA (Nondeterministic Finite Automaton)
+NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.
 
 For details, see web pages below.
 - https://swtch.com/~rsc/regexp/regexp1.html

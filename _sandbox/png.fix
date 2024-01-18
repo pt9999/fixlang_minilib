@@ -1,0 +1,141 @@
+/*
+    PNG file write test
+    $ fix run -f png.fix ../lib/io_ex.fix ../lib/string_ex.fix -d png -d z
+*/
+module Main;
+
+import IOEx;
+
+type PngImage = unbox struct {
+    data: Array U8
+};
+
+namespace PngImage {
+    empty: PngImage;
+    empty = (
+        let img = PngImage {
+            data: Array::fill(104, 0_U8)
+        };
+        img.set_version(1)
+    );
+
+    get_width: PngImage -> I64;
+    get_width = |img| img.@data.decode_u32_le(12).to_I64;
+
+    get_height: PngImage -> I64;
+    get_height = |img| img.@data.decode_u32_le(16).to_I64;
+
+    get_warning_or_error: PngImage -> I64;
+    get_warning_or_error = |img| img.@data.decode_u32_le(32).to_I64;
+
+    get_message: PngImage -> String;
+    get_message = |img| (
+        img.@data.borrow_ptr(|ptr|
+            String::_unsafe_from_c_str_ptr(ptr.add_offset(36))
+        )
+    );
+
+    set_version: I64 -> PngImage -> PngImage;
+    set_version = |n, img| img.mod_data(encode_u32_le(8, n.to_U32));
+
+    set_width: I64 -> PngImage -> PngImage;
+    set_width = |n, img| img.mod_data(encode_u32_le(12, n.to_U32));
+
+    set_height: I64 -> PngImage -> PngImage;
+    set_height = |n, img| img.mod_data(encode_u32_le(16, n.to_U32));
+
+    set_format: I64 -> PngImage -> PngImage;
+    set_format = |n, img| img.mod_data(encode_u32_le(20, n.to_U32));
+
+    set_flags: I64 -> PngImage -> PngImage;
+    set_flags = |n, img| img.mod_data(encode_u32_le(24, n.to_U32));
+
+    write_to_file: String -> Bool -> Array U8 -> I64 -> PngImage -> IOFail ();
+    write_to_file = |filepath, convert_to_8bit, buffer, row_stride, png_image| (
+        let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
+        let colormap = nullptr;
+        let res = 
+            png_image.@data.borrow_ptr(|p_png_image|
+              filepath.borrow_c_str(|p_filepath|
+                buffer.borrow_ptr(|p_buffer|
+                    CALL_C[I32 png_image_write_to_file(Ptr, Ptr, I32, Ptr, I32, Ptr),
+                        p_png_image, p_filepath, convert_to_8bit, 
+                        p_buffer, row_stride.to_I32, colormap]
+                )
+              )
+            );
+        let result = "PngImage::write_to_file: res=" + res.to_string;
+        let warning_or_error = png_image.get_warning_or_error;
+        let message = png_image.get_message;
+        if warning_or_error == 2 {  // error
+            throw $ result + " ERROR: " + message
+        };
+        if warning_or_error == 1 { // warning
+            eprintln(result + " WARNING: " + message).lift
+        } else if res != 0_I32 { 
+            // currently res = 1 is returned. why?
+            throw $ result
+        } else {
+            pure()
+        }
+    );
+
+    _PNG_FORMAT_FLAG_ALPHA: I64;
+    _PNG_FORMAT_FLAG_ALPHA = 1; /* format with an alpha channel */
+
+    _PNG_FORMAT_FLAG_COLOR: I64;
+    _PNG_FORMAT_FLAG_COLOR = 2; /* color format: otherwise grayscale */
+
+    _PNG_FORMAT_FLAG_LINEAR: I64;
+    _PNG_FORMAT_FLAG_LINEAR = 4; /* 2-byte channels else 1-byte */
+
+    _PNG_FORMAT_FLAG_COLORMAP: I64;
+    _PNG_FORMAT_FLAG_COLORMAP = 8; /* image data is color-mapped */
+
+    _PNG_FORMAT_FLAG_BGR: I64;
+    _PNG_FORMAT_FLAG_BGR = 16; /* BGR colors, else order is RGB */
+
+    _PNG_FORMAT_FLAG_AFIRST: I64;
+    _PNG_FORMAT_FLAG_AFIRST = 32; /* alpha channel comes first */
+
+    _PNG_FORMAT_FLAG_ASSOCIATED_ALPHA: I64;
+    _PNG_FORMAT_FLAG_ASSOCIATED_ALPHA = 64; /* alpha channel is associated */
+/*
+#define PNG_FORMAT_GRAY 0
+#define PNG_FORMAT_GA   PNG_FORMAT_FLAG_ALPHA
+#define PNG_FORMAT_AG   (PNG_FORMAT_GA|PNG_FORMAT_FLAG_AFIRST)
+#define PNG_FORMAT_RGB  PNG_FORMAT_FLAG_COLOR
+#define PNG_FORMAT_BGR  (PNG_FORMAT_FLAG_COLOR|PNG_FORMAT_FLAG_BGR)
+#define PNG_FORMAT_RGBA (PNG_FORMAT_RGB|PNG_FORMAT_FLAG_ALPHA)
+#define PNG_FORMAT_ARGB (PNG_FORMAT_RGBA|PNG_FORMAT_FLAG_AFIRST)
+#define PNG_FORMAT_BGRA (PNG_FORMAT_BGR|PNG_FORMAT_FLAG_ALPHA)
+#define PNG_FORMAT_ABGR (PNG_FORMAT_BGRA|PNG_FORMAT_FLAG_AFIRST)
+*/
+}
+
+main: IO ();
+main = (
+    do {
+        let width = 256;
+        let height = 256;
+        let buffer = Array::fill(width * height * 3, 255_U8);
+        let buffer = Iterator::range(0, height).fold(
+            buffer, |buffer, y|
+            Iterator::range(0, width).fold (
+                buffer, |buffer, x|
+                let i = (y * width + x) * 3;
+                buffer.set(i, x.to_U8)
+                    .set(i + 1, y.to_U8)
+                    .set(i + 2, 0_U8)
+            )
+        );
+        let format = _PNG_FORMAT_FLAG_COLOR;        
+        let img = PngImage::empty.set_width(width).set_height(height).set_format(format);
+        let row_stride = width * 3;
+        let filepath = "tmp.test.png";
+        let _ = *img.write_to_file(filepath, false, buffer, row_stride);
+        let _ = *println("success").lift;
+        pure()
+    }.try(eprintln)
+);
+

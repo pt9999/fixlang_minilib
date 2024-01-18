@@ -63,7 +63,7 @@ let groups = regexp.match("abc012 def345").as_ok;
 // groups == ["abc012", "def345"]
 ```
 
-If the match against the regular expression fails, a _NotMatch error is reported.
+If the match against the regular expression fails, an error `"NotMatch"` is reported.
 
 This function is similar to [String.match()](https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/String/match)
 function of JavaScript.

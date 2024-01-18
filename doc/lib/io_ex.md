@@ -110,21 +110,37 @@ Returns true if it is a directory.
 
 #### st_ctime: FileStat -> U64;
 
-#### decode_u8_le: Array U8 -> I64 -> U8;
+#### decode_u8_le: I64 -> Array U8 -> U8;
 
 Decodes U8 from `array` at position `i` with little endian.
 
-#### decode_u16_le: Array U8 -> I64 -> U16;
+#### decode_u16_le: I64 -> Array U8 -> U16;
 
 Decodes U16 from `array` at position `i` with little endian.
 
-#### decode_u32_le: Array U8 -> I64 -> U32;
+#### decode_u32_le: I64 -> Array U8 -> U32;
 
 Decodes U32 from `array` at position `i` with little endian.
 
-#### decode_u64_le: Array U8 -> I64 -> U64;
+#### decode_u64_le: I64 -> Array U8 -> U64;
 
 Decodes U64 from `array` at position `i` with little endian.
+
+#### encode_u8_le: I64 -> U8 -> Array U8 -> Array U8;
+
+Encodes U8 into `array` at position `i` with little endian.
+
+#### encode_u16_le: I64 -> U16 -> Array U8 -> Array U8;
+
+Encodes U16 into `array` at position `i` with little endian.
+
+#### encode_u32_le: I64 -> U32 -> Array U8 -> Array U8;
+
+Encodes U32 into `array` at position `i` with little endian.
+
+#### encode_u64_le: I64 -> U64 -> Array U8 -> Array U8;
+
+Encodes U64 into `array` at position `i` with little endian.
 
 #### find_files: String -> IOFail (Array String);
 

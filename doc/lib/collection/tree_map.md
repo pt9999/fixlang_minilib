@@ -35,6 +35,16 @@ where the key `k1` is equivalent to `k`,
 ie. `!less_than(k,k1) && !less_than(k1,k)` is true,
 then `(k1,v1)` is replaced with `(k,v)`.
 
+#### upsert: [k: TreeMapKey] k -> v -> (v -> v) -> TreeMap k v -> TreeMap k v;
+
+Inserts or updates an entry in a TreeMap.
+For example, `tm.upsert(k, v, updater)` inserts an entry `(k,v)` into `tm`.
+
+NOTE: If `tm` already contains an entry `(k1,v1)`
+where the key `k1` is equivalent to `k`,
+ie. `!less_than(k,k1) && !less_than(k1,k)` is true,
+then `(k1,v1)` is replaced with `(k, updater(v1))`.
+
 #### erase: [k: TreeMapKey] k -> TreeMap k v -> TreeMap k v;
 
 Erases an entry from a TreeMap.

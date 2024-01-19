@@ -72,6 +72,37 @@ such that `!elem.lt_begin && elem.lt_end` is true.
 NOTE: `lt_begin` and `lt_end` must meet following condition:
 for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
 
+#### find_range_descending: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;
+
+`node.find_range(lt_begin, lt_end)` finds all elements `elem`
+such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
+NOTE: `lt_begin` and `lt_end` must meet following condition:
+for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+
+#### get_first: RBNode a -> Option a;
+
+Gets the first element (that is, the smallest element) of the tree.
+
+#### get_last: RBNode a -> Option a;
+
+Gets the last element (that is, the largest element) of the tree.
+
+#### upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+
+`node.upsert_lt(x, less_than)` inserts or updates using `less_than` ordering.
+If `node` does not contain an element equivalent to `x`, `x` is inserted.
+If `node` already contains an element `y` equivalent to `x`,
+ie. `!less_than(x,y) && !less_than(y,x)` is true,
+then `y` is updated with `updater(y)`.
+
+#### upsert: [a: LessThan, a: RBNodeElem] a -> (a -> a) -> RBNode a -> RBNode a;
+
+`node.upsert(x, updater)` inserts or updates using default `LessThan` ordering.
+If `node` does not contain an element equivalent to `x`, `x` is inserted.
+If `node` already contains an element `y` equivalent to `x`,
+ie. `!(x < y) && !(y < x)` is true,
+then `y` is updated with `updater(y)`.
+
 #### insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
 
 `node.insert_lt(x, less_than)` inserts an element `x` using `less_than` ordering.

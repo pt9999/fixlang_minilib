@@ -155,6 +155,11 @@ Synonym for `repeat`.
 Same as `zero_or_more`, but raises a _NotMatch error
 if the array length is zero.
 
+#### if_exists: Parser a -> Parser (Option a);
+
+`p.if_exists` returns `some(x)` if `p` returns `x` as a parse result,
+or `none()` if `p` does not match.
+
 #### match_end_of_stream: Parser ();
 
 Matches zero-length string at the end of stream.

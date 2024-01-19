@@ -15,21 +15,17 @@ import Debug;
 import IOEx;
 import StringEx;
 import TreeSet;
+import TreeMap;
 
 namespace SpellChecker {
     type SpellChecker = unbox struct {
-        dict: TreeSet (String, String)
+        dict: TreeMap String (Array String)
     };
-
-    less_than: (String, String) -> (String, String) -> Bool;
-    less_than = |(deleted1, word1), (deleted2, word2)| (
-        deleted1 < deleted2 || (deleted1 == deleted2 && word1 < word2)
-    );
 
     empty: SpellChecker;
     empty = (
         SpellChecker {
-            dict: TreeSet::make_lt(less_than)
+            dict: TreeMap::make()
         }
     );
 
@@ -39,7 +35,16 @@ namespace SpellChecker {
         // IO::read_file_string() sometimes freezes
         let word_lists = (*IO::read_file_bytes(filepath))._unsafe_to_string;
         let _ = *eprintln("registering word list...").lift;
-        let checker = from_word_list_file_contents(word_lists);
+        let (checker, time) = consumed_time_while(|_|
+            from_word_list_file_contents(word_lists)
+        , ());
+        let _ = *eprintln("registering time=" + time.to_string).lift;
+        let _ = *eprintln("deleted count=" + checker.@dict.get_size.to_string).lift;
+        let (count, time) = consumed_time_while(|_|
+            checker.@dict.to_iter.fold(0, |n, (k, words)| n + words.get_size)
+        , ());
+        let _ = *eprintln("word count=" + count.to_string).lift;
+        let _ = *eprintln("word count time=" + time.to_string).lift;
         let _ = *eprintln("done.").lift;
         pure $ checker
     );
@@ -48,10 +53,11 @@ namespace SpellChecker {
     from_word_list_file_contents = |word_lists| (
         let checker = SpellChecker::empty;
         let words = word_lists.split_by(Character::is_space);
-        words.zip(Iterator::count_up(0)).fold(
+        words.zip(Iterator::count_up(0)).loop_iter(
             checker, |checker, (word, i)|
+            //if i >= 10000 { break $ checker };
             eval if i % 1000 == 0 { debug_eprintln(i.to_string) } else { () };
-            checker.add_word(word)
+            continue $ checker.add_word(word)
         )
     );
 
@@ -60,7 +66,7 @@ namespace SpellChecker {
         let k = _max_delete_char_count(word);
         _delete_chars(k, word).to_iter.fold(
             checker, |checker, deleted|
-            checker.mod_dict(insert((deleted, word)))
+            checker.mod_dict(upsert(deleted, [word], push_back(word)))
         )
     );
 
@@ -70,10 +76,8 @@ namespace SpellChecker {
         let candidates: Iterator String = (
             _delete_chars(k, typemiss_word).to_iter.map(
                 |typemiss_deleted|
-                let lt_begin = |(deleted, word)| string_less_than((deleted, typemiss_deleted));
-                let lt_end   = |(deleted, word)| !string_less_than((typemiss_deleted, deleted));
-                checker.@dict.find_raw_range(lt_begin, lt_end)
-                .map(|(deleted,word)| word)
+                checker.@dict.find(typemiss_deleted)
+                .map_or(Iterator::empty, to_iter)
             )
             .flatten
         );

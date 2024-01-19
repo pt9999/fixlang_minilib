@@ -3,19 +3,6 @@ module NdArray;
 import Debug;
 
 import StringEx;
-/*
-// Converts `Array a` to a string, for example `"[1,2,3]"` etc.
-impl [a: ToString] Array a: ToString {
-    to_string = |a| (
-        "[" +
-        a.to_iter.map(|x| x.to_string).join(",")
-        + "]"
-    );
-}
-*/
-
-_All: (I64, I64);
-_All = (0, I64::maximum);
 
 modulo: I64 -> I64 -> I64;
 modulo = |i, n| (
@@ -53,9 +40,36 @@ impl [a: ToCardinal, b: ToCardinal, c: ToCardinal, d: ToCardinal] (a, b, c, d): 
     to_nd_cardinal = |(a, b, c, d)| [a.to_cardinal, b.to_cardinal, c.to_cardinal, d.to_cardinal];
 }
 
+// The index range (begin, end) of one dimension.
+// ie. `begin <= index && index < end`
+type Range = unbox struct {
+    begin: I64,         // inclusive
+    end: I64            // exclusive
+};
+
+namespace Range {
+    // Creates an index range.
+    make: I64 -> I64 -> Range;
+    make = |begin, end| (
+        Range { begin: begin, end: end }
+    );
+
+    // `Range::single(n)` is an index range `n`.
+    single: I64 -> Range;
+    single = |n| Range::make(n, n + 1);
+
+    // `Range::all` is whole range.
+    all: Range;
+    all = Range::make(0, I64::maximum);
+}
+
+// `a.to_range` returns the range (begin, end) of one dimension.
 trait a: ToRange {
-    // `a.to_range` returns the range (begin, end) of one dimension.
     to_range: a -> (I64, I64);
+}
+
+impl Range: ToRange {
+    to_range = |r| (r.@begin, r.@end);
 }
 
 impl I64: ToRange {
@@ -70,6 +84,7 @@ impl Array I64: ToRange {
     to_range = |a| (a.@(0), a.@(1));
 }
 
+// range of n-dimension.
 trait a: ToNdRange {
     to_nd_range: a -> Array (I64, I64);
 }
@@ -90,6 +105,7 @@ impl [a: ToRange, b: ToRange, c: ToRange, d: ToRange] (a, b, c, d): ToNdRange {
     to_nd_range = |(a, b, c)| [a.to_range, b.to_range, c.to_range, d.to_range];
 }
 
+// N-dimensional array.
 type NdArray a = unbox struct {
     data: Array a,
     shape: Array I64,
@@ -109,27 +125,31 @@ trait [f: * -> *] f: ToNdArray {
     to_nd_array: f a -> NdArray a;
 }
 
-
 namespace NdArray {
+    // `NdArray::empty` is one-dimensional array with data `[]`.
     empty: NdArray a;
     empty = NdArray {
-        data: Array::empty(0),
-        shape: [],
-        strides: [],
+        data: [],
+        shape: [0],
+        strides: [1],
         offset: 0
     };
 
+    // `NdArray::make(shape, data)` creates an n-dimensional array with 
+    // specified shape and data.
     make: Array I64 -> Array a -> NdArray a;
-    make = |shape, array| (
+    make = |shape, data| (
         let ndarray = NdArray {
-            data: array,
-            shape: [array.get_size],
+            data: data,
+            shape: [data.get_size],
             strides: [1],
             offset: 0
         };
         ndarray.reshape(shape)
     );
 
+    // `NdArray::scalar` is one-dimensional array with data `[a]`.
+    // It can be used as a constant with broadcasting.
     scalar: a -> NdArray a;
     scalar = |a| (
         NdArray {
@@ -161,6 +181,11 @@ namespace NdArray {
             strides: strides,
             offset: offset
         }
+    );
+
+    zeros: [a: Zero] Array I64 -> NdArray a;
+    zeros = |shape| (
+        NdArray::fill(shape, zero)
     );
 
     arange: I64 -> I64 -> NdArray I64;
@@ -317,20 +342,20 @@ namespace NdArray {
         let is_last_dim = (dim == dest.get_dim - 1);
         if is_last_dim {
             let src_data = src.@data;
-            let dest_data = dest.@data;
-            let dest_data = loop(
-                (dest_data, src_begin, dest_begin), |(dest_data, src_pos, dest_pos)|
-                if dest_pos >= dest_end {
-                    break $ dest_data
-                };
-                // broadcasting
-                let src_pos = if src_pos < src_end { src_pos }
-                else { src_pos - src_end + src_begin };
-                // TODO loop-unrolling
-                let dest_data = dest_data.set(dest_pos, src_data.@(src_pos));
-                continue $ (dest_data, src_pos + src_stride, dest_pos + dest_stride)
-            );
-            dest.set_data(dest_data)
+            dest.mod_data(|dest_data|
+                loop(
+                    (dest_data, src_begin, dest_begin), |(dest_data, src_pos, dest_pos)|
+                    if dest_pos >= dest_end {
+                        break $ dest_data
+                    };
+                    // broadcasting
+                    let src_pos = if src_pos < src_end { src_pos }
+                    else { src_pos - src_end + src_begin };
+                    // TODO loop-unrolling
+                    let dest_data = dest_data.set(dest_pos, src_data.@(src_pos));
+                    continue $ (dest_data, src_pos + src_stride, dest_pos + dest_stride)
+                )
+            )
         } else {
             loop(
                 (dest, src_begin, dest_begin), |(dest, src_pos, dest_pos)|

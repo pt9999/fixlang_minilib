@@ -46,6 +46,10 @@ then `y` is removed.
 
 Checks whether a TreeSet is empty.
 
+#### get_size: TreeSet a -> I64;
+
+Gets the number of elements.
+
 #### contains: [a: TreeSetElem] a -> TreeSet a -> Bool;
 
 Checks whether a TreeSet contains an element.

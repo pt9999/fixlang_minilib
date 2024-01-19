@@ -59,6 +59,10 @@ then `(k1,v1)` is removed.
 
 Checks whether a TreeMap is empty.
 
+#### get_size: TreeMap k v -> I64;
+
+Gets the number of entries.
+
 #### contains_key: [k: TreeMapKey] k -> TreeMap k v -> Bool;
 
 Checks whether a TreeMap contains a key.

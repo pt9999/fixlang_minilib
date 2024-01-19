@@ -45,6 +45,10 @@ Validates that:
 Returns `(level, min, max)`.
 Panicks if validation failed.
 
+#### get_size: RBNode a -> I64;
+
+Gets the number of elements.
+
 #### get_triplet: RBNode a -> (RBNode a, a, RBNode a);
 
 If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.

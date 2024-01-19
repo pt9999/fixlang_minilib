@@ -67,7 +67,7 @@ document: examples/fixdoc.out
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out \
 		examples/fixdoc.out examples/sample_http_server.out \
-		examples/grep.out
+		examples/grep.out examples/spell_checker.out
 
 examples/json_cat.out: examples/json_cat.fix $(LIB_JSON) 
 	fix build -f $^ -o $@

@@ -1,12 +1,13 @@
 /*
     PNG file write test
-    $ fix run -f png.fix ../lib/io_ex.fix ../lib/string_ex.fix -d png -d z
+    $ fix run -f png.fix ndarray.fix ../lib/io_ex.fix ../lib/string_ex.fix -d png -d z
 */
 module Main;
 
 import Debug;
 
 import IOEx;
+import NdArray;
 
 namespace PngImageIO {
     type PngImageIO = unbox struct {
@@ -213,9 +214,28 @@ namespace Image {
     );
 }
 
+namespace NdArrayIO {
+    write_png_file: String -> String -> NdArray U8 -> IOFail ();
+    write_png_file = |filepath, format, image| (
+        let shape = image.@shape;
+        if shape.get_size != 3 {
+            throw $ "shape should be `[height, width, channels]`"
+        };
+        let height = shape.@(0);
+        let width = shape.@(1);
+        let channels = shape.@(2);
+        // TODO channels and format check
+        let imgio = PngImageIO::empty;
+        let imgio = imgio.set_width(width);
+        let imgio = imgio.set_height(height);
+        let imgio = imgio.set_format(PngImageIO::parse_format(format));
+        let row_stride = width * channels;
+        imgio.write_to_file(filepath, false, image.@data, row_stride)
+    );
+}
 
-main: IO ();
-main = (
+test_image: IO ();
+test_image = (
     do {
         let width = 512;
         let height = 512;
@@ -235,3 +255,31 @@ main = (
     }.try(eprintln)
 );
 
+test_ndarray: IO ();
+test_ndarray = (
+    do {
+        let width = 512;
+        let height = 512;
+        let image: NdArray U8 = NdArray::zeros([height, width, 3]);
+        let image = Iterator::range(0, height).fold(
+            image, |image, y|
+            Iterator::range(0, width).fold (
+                image, |image, x|
+                image.set((x, y, 0), x.to_U8)
+                    .set((x, y, 1), y.to_U8)
+                    .set((x, y, 2), 0_U8)
+            )
+        );
+        let color_pixel = |r,g,b| NdArray::make([1,1,3], [r.I64::to_U8, g.I64::to_U8, b.I64::to_U8]);
+        let white = color_pixel(255, 255, 255);
+        let image = image.set_sub(([20, 480], [10, 20], all), white);
+        let image = image.set_sub(([20, 480], [40, 50], all), white);
+        let filepath = "tmp.test_ndarray.png";
+        let _ = *image.write_png_file(filepath, "RGB");
+        let _ = *println("Wrote " + filepath).lift;
+        pure()
+    }.try(eprintln)
+);
+
+main: IO ();
+main = test_ndarray;

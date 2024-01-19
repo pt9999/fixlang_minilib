@@ -237,7 +237,7 @@ namespace RBNode {
     );
 
     //====================================================================
-    // Insertion
+    // Upsert
     //====================================================================
 
     _balance: RBNode a -> RBNode a;
@@ -271,22 +271,52 @@ namespace RBNode {
         node
     );
 
-    _insert_inner: a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
-    _insert_inner = |x, less_than, node| (
-        if node.is_empty { red $ (node, x, node) };
+    _upsert_inner: a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    _upsert_inner = |x, updater, less_than, node| (
+        if node.is_empty {
+            // if `x` is not found, insert `x`.
+            red $ (node, x, node) 
+        };
         let color = if node.is_red { red } else { black }; // constructor
         let (left, elem, right) = node.get_triplet;
         if less_than(x, elem) {
-            let node = color $ (left._insert_inner(x, less_than), elem, right);
+            let node = color $ (left._upsert_inner(x, updater, less_than), elem, right);
             node._balance
         };
         if less_than(elem, x) {
-            let node = color $ (left, elem, right._insert_inner(x, less_than));
+            let node = color $ (left, elem, right._upsert_inner(x, updater, less_than));
             node._balance
         };
-        // If neither `x < elem` nor `elem < x` holds, replace `elem` with `x`.
-        color $ (left, x, right)
+        // If neither `x < elem` nor `elem < x` holds, replace `elem` with `updater(elem)`.
+        color $ (left, updater(elem), right)
     );
+
+    // `node.upsert_lt(x, less_than)` inserts or updates using `less_than` ordering.
+    // If `node` does not contain an element equivalent to `x`, `x` is inserted.
+    // If `node` already contains an element `y` equivalent to `x`,
+    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // then `y` is updated with `updater(y)`.
+    upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+    upsert_lt = |x, updater, less_than, node| (
+        let inserted = node._upsert_inner(x, updater, less_than);
+        let inserted = black $ inserted.get_triplet;
+        let _ = if _Debug { eval inserted.validate(less_than); () } else { () };
+        inserted
+    );
+
+    // `node.upsert(x, updater)` inserts or updates using default `LessThan` ordering.
+    // If `node` does not contain an element equivalent to `x`, `x` is inserted.
+    // If `node` already contains an element `y` equivalent to `x`,
+    // ie. `!(x < y) && !(y < x)` is true,
+    // then `y` is updated with `updater(y)`.
+    upsert: [a: LessThan, a: RBNodeElem] a -> (a -> a) -> RBNode a -> RBNode a;
+    upsert = |x, updater, node| (
+        node.upsert_lt(x, updater, _less_than)
+    );
+
+    //====================================================================
+    // Insertion
+    //====================================================================
 
     // `node.insert_lt(x, less_than)` inserts an element `x` using `less_than` ordering.
     // If `node` already contains an element `y` equivalent to `x`,
@@ -294,10 +324,7 @@ namespace RBNode {
     // then `y` is replaced with `x`.
     insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
     insert_lt = |x, less_than, node| (
-        let inserted = node._insert_inner(x, less_than);
-        let inserted = black $ inserted.get_triplet;
-        let _ = if _Debug { eval inserted.validate(less_than); () } else { () };
-        inserted
+        node.upsert_lt(x, |_| x, less_than)
     );
 
     // `node.insert(x)` inserts an element `x` using default `LessThan` ordering.
@@ -308,6 +335,7 @@ namespace RBNode {
     insert = |x, node| (
         node.insert_lt(x, _less_than)
     );
+
 
     //====================================================================
     // Removal

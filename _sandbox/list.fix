@@ -1,0 +1,173 @@
+module Main;
+
+import Debug;
+
+namespace List {
+    type List a = box union {
+        nil: (),
+        cell: (a, List a)
+    };
+
+    empty: List a;
+    empty = nil();
+
+    is_empty: List a -> Bool;
+    is_empty = is_nil;
+
+    map_or: b -> ((a, List a) -> b) -> List a -> b;
+    map_or = |y, f, xs| (
+        if xs.is_empty {
+            y
+        };
+        f(xs.as_cell)
+    );
+
+    advance: List a -> Option (a, List a);
+    advance = |xs| (
+        xs.map_or(
+            none(), some
+        )
+    );
+
+    push_front: a -> List a -> List a;
+    push_front = |x, xs| (
+        cell $ (x, xs)
+    );
+
+    cons: a -> List a -> List a;
+    cons = push_front;
+
+    cons_flip: List a -> a -> List a;
+    cons_flip = |xs, x| cons(x, xs);
+
+    fold: b -> (b -> a -> b) -> List a -> b;
+    fold = |y, f, xs| (
+        if xs.is_empty {
+            y
+        };
+        let (x, xs) = xs.as_cell;
+        xs.fold(f(y, x), f)     // tail recursion
+    );
+
+    reverse: List a -> List a;
+    reverse = |xs| (
+        xs.fold(
+            List::empty, cons_flip
+        )
+    );
+
+    // `xs.append(ys)` puts `ys` after `xs`.
+    append: List a -> List a -> List a;
+    append = |ys, xs| (
+        xs.reverse.fold(
+            ys, cons_flip
+        )
+    );
+
+    from_iter: Iterator a -> List a;
+    from_iter = |iter| (
+        // not to stack overflow
+        iter.fold(
+            List::empty, cons_flip
+        ).reverse
+    );
+
+    to_iter: List a -> Iterator a;
+    to_iter = |xs| (
+        Iterator::generate(xs, List::advance)
+    );
+}
+
+impl [a: ToString] List a: ToString {
+    to_string = |xs| (
+        let iter = xs.to_iter.map(to_string);
+        let iter = iter.append(pure $ "nil");
+        iter.join(":")
+    );
+}
+
+impl List a: Add {
+    add = |xs, ys| xs.append(ys);
+}
+
+impl List: Functor {
+    map = |f, xs| (
+        // not to stack overflow
+        xs.reverse.fold(
+            empty, |ys, x|
+            cons(f(x), ys)
+        )
+    );
+}
+
+impl List: Monad {
+    pure = |x| cons(x, empty);
+    bind = |f, xs| (
+        xs.reverse.fold(
+            empty, |ys, x|
+            f(x).append(ys)
+        )
+    );
+}
+
+test_append: IO ();
+test_append = (
+    let xs: List I64 = cons(4, cons(3, nil()));
+    let ys: List I64 = cons(2, cons(1, nil()));
+    let zs = xs + ys;
+    let _ = *println("xs + ys = " + (xs + ys).to_string);
+    let _ = *println("xs.append(ys) = " + (xs.append(ys)).to_string);
+    pure()
+);
+
+test_reverse_map: IO ();
+test_reverse_map = (
+    let xs: List I64 = Iterator::range(0,5).from_iter;
+    let _ = *println(xs.to_string);
+    let xs = xs.reverse;
+    let _ = *println(xs.to_string);
+    let xs = xs.map(|x| x * 2);
+    let _ = *println(xs.to_string);
+    pure()
+);
+
+test_map_perf: IO ();
+test_map_perf = (
+    let iter = Iterator::range(0,100000);
+    let (sum, time) = consumed_time_while(|_|
+        let iter = iter.map(|x| x * 2);
+        iter.fold(0, |sum, x| sum + x)
+    , ());
+    let _ = *println("iter: sum = " + sum.to_string + " time="+time.to_string);
+    let (xs, time) = consumed_time_while(|_|
+        List::from_iter(iter)
+    , ());
+    let _ = *println("to_iter: time="+time.to_string);
+    let (sum, time) = consumed_time_while(|_|
+        let xs = xs.map(|x| x * 2);
+        xs.fold(0, |sum, x| sum + x)
+    , ());
+    let _ = *println("list: sum = " + sum.to_string + " time="+time.to_string);
+    pure()
+);
+
+test_bind: IO ();
+test_bind = (
+    let xs: List I64 = Iterator::range(1,4).from_iter;
+    let zs = do {
+        let x = *xs;
+        let y = *xs;
+        pure $ "a" + (x * y).to_string
+        //cons(2*x, cons(2*x+1, empty))
+    };
+    println(zs.to_string)
+);
+
+main: IO ();
+main = (
+    let _ = *test_append;
+    let _ = *test_reverse_map;
+    let _ = *test_map_perf;
+    let _ = *test_bind;
+    pure()
+);

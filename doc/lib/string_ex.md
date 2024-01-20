@@ -112,6 +112,41 @@ Returns True if and only if `str1` is less than `str2` in lexicographical order.
 `less_than(str1,str2) compares two strings.
 Returns True if and only if `str1` is less than `str2` in lexicographical order.
 
+#### formatv: String -> Array String -> String;
+
+`array.formatv(str)` replaces each occurence of `{}` in the format string `str`
+with each element of `array`.
+Currently only supports `{}`.
+
+### namespace Array
+
+#### format: [a: ToString] String -> Array a -> String;
+
+`array.format(str)` replaces each occurence of `{}` in the format string `str`
+with each element of `array`.
+Currently only supports `{}`.
+
+### namespace Tuple2
+
+#### format: [a: ToString, b: ToString] String -> (a,b) -> String;
+
+`(a, b).format(str)` replaces each occurence of `{}` in the format string `str`
+with `a`, `b`.
+
+### namespace Tuple3
+
+#### format: [a: ToString, b: ToString, c:ToString] String -> (a,b,c) -> String;
+
+`(a, b, c).format(str)` replaces each occurence of `{}` in the format string `str`
+with `a`, `b`, `c`.
+
+### namespace Tuple4
+
+#### format: [a: ToString, b: ToString, c:ToString, d:ToString] String -> (a,b,c,d) -> String;
+
+`(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
+with `a`, `b`, `c`, `d`.
+
 #### encode_hex_char: U8 -> U8;
 
 Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').

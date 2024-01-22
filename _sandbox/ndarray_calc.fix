@@ -47,122 +47,99 @@ is_all = |f, array| (
     )
 );
 
-type Term = box union {
-    t_none: (),
-    t_ident: String,
-    t_int: I64,
-    t_float: F64,
-    t_funcall: (String, Array Term),
-    t_array: Array Term,
-    t_subsc: (Term, Term),
-    t_ndarray: NdArray I64,
-    t_assign: (String, Term)
+type Expr = box union {
+    ex_none: (),
+    ex_ident: String,
+    ex_int: I64,
+    ex_float: F64,
+    ex_funcall: (String, Array Expr),
+    ex_array: Array Expr,
+    ex_subsc: (Expr, Expr),
+    ex_ndarray: NdArray I64,
+    ex_assign: (String, Expr),
+    ex_unary: (String, Expr),
+    ex_infix: (Expr, String, Expr)
 };
 
-impl Term: ToString {
-    to_string = |t| (
-        if t.is_t_ident { t.as_t_ident };
-        if t.is_t_int { t.as_t_int.to_string };
-        if t.is_t_float { t.as_t_float.to_string };
-        if t.is_t_funcall {
-            let (name, args) = t.as_t_funcall;
+impl Expr: ToString {
+    to_string = |ex| (
+        if ex.is_ex_ident { ex.as_ex_ident };
+        if ex.is_ex_int { ex.as_ex_int.to_string };
+        if ex.is_ex_float { ex.as_ex_float.to_string };
+        if ex.is_ex_funcall {
+            let (name, args) = ex.as_ex_funcall;
             name + "(" + args.to_iter.map(to_string).join(",") + ")"
         };
-        if t.is_t_array {
-            "[" + t.as_t_array.to_iter.map(to_string).join(",") + "]"
+        if ex.is_ex_array {
+            "[" + ex.as_ex_array.to_iter.map(to_string).join(",") + "]"
         };
-        if t.is_t_subsc {
-            let (a, b) = t.as_t_subsc;
+        if ex.is_ex_subsc {
+            let (a, b) = ex.as_ex_subsc;
             a.to_string + "[" + b.to_string + "]"
         };
-        if t.is_t_ndarray {
-            "#" + t.as_t_ndarray.to_string
+        if ex.is_ex_ndarray {
+            "#" + ex.as_ex_ndarray.to_string
         };
-        if t.is_t_assign {
-            let (a, b) = t.as_t_assign;
+        if ex.is_ex_assign {
+            let (a, b) = ex.as_ex_assign;
             a.to_string + "=" + b.to_string
+        };
+        if ex.is_ex_unary {
+            let (op, b) = ex.as_ex_unary;
+            "(" + op + a.to_string + ")"
+        };
+        if ex.is_ex_infix {
+            let (a, op, b) = ex.as_ex_infix;
+            "(" + a.to_string + " " + op + " " + b.to_string + ")"
         };
         ""
     );
 }
 
-namespace Term {
+namespace Expr {
 
-    parse_term: String -> Result ErrMsg Term;
-    parse_term = |line| (
+    parse_expr: String -> Result ErrMsg Expr;
+    parse_expr = |line| (
         let parser = do {
-            let t = *_parse_term;
+            let ex = *_parse_expr;
             let _ = *_skip_whitespaces;
             let _ = *match_end_of_stream;
-            pure $ t
+            pure $ ex
         };
         parser.run_parser_str(line).map(@0)
     );
 
-    _parse_term: Parser Term;
-    _parse_term = do {
-        _parse_assign
+    _parse_expr: Parser Expr;
+    _parse_expr = do {
+        let _ = *_skip_whitespaces;
+        let expr = *(
+            _parse_paren
+            .or_else(_parse_array)
+            .or_else(_parse_assign)
+            .or_else(_parse_add_sub)
+        );
+        pure $ expr
     };
 
-    _parse_assign: Parser Term;
-    _parse_assign = do {
-        let lhs = *_parse_exp;
-        let _ = *_skip_whitespaces;
-        let equal = *match_char_if_exists('=');
-        if equal.is_none {
-            pure $ lhs
-        };
-        let rhs = *_parse_exp;
-        if !lhs.is_t_ident {
-            error_parser $ "lhs must be an ident"
-        };
-        pure $ t_assign $ (lhs.as_t_ident, rhs)
-    };
-
-    _parse_exp: Parser Term;
-    _parse_exp = do {
-        let _ = *_skip_whitespaces;
-        _parse_funcall
-        .or_else(_parse_ident_subsc)
-        .or_else(_parse_integer)
-        .or_else(_parse_array)
-    };
-
-    _parse_funcall: Parser Term;
-    _parse_funcall = do {
-        let _ = *_skip_whitespaces;
-        let name = *_parse_ident;
-        let name = name.as_t_ident;
-        let _ = *_skip_whitespaces;
+    _parse_paren: Parser Expr;
+    _parse_paren = do {
         let _ = *match_char('(');
-        let inner = do {
-            let a = *_parse_exp;
-            let rest = *repeat(do {
-                let _ = *_skip_whitespaces;
-                let _ = *match_char(',');
-                _parse_exp
-            });
-            pure $ [a].append(rest)
-        };
-        let empty = do {
-            let _ = *_skip_whitespaces;
-            pure $ []
-        };
-        let args = *inner.or_else(empty);
-        let _ = *match_char(')').or_error("')' is missing");
-        pure $ t_funcall $ (name, args)
+        let expr = *_parse_expr;
+        let _ = *match_char(')');
+        pure $ expr
     };
 
-    _parse_array: Parser Term;
+    // ARRAY = "[" EXPR ("," EXPR)* "]"
+    _parse_array: Parser Expr;
     _parse_array = do {
         let _ = *_skip_whitespaces;
         let _ = *match_char('[');
         let inner = do {
-            let a = *_parse_exp;
+            let a = *_parse_expr;
             let rest = *repeat(do {
                 let _ = *_skip_whitespaces;
                 let _ = *match_char(',');
-                _parse_exp
+                _parse_expr
             });
             pure $ [a].append(rest)
         };
@@ -173,45 +150,395 @@ namespace Term {
         let array = *inner.or_else(empty);
         let _ = *_skip_whitespaces;
         let _ = *match_char(']').or_error("']' is missing");
-        pure $ t_array(array)
+        pure $ ex_array(array)
     };
 
-    _parse_ident_subsc: Parser Term;
-    _parse_ident_subsc = do {
-        let ident = *_parse_ident;
+    _parse_assign: Parser Expr;
+    _parse_assign = do {
+        let lhs = *_parse_ident;
+        let _ = *_skip_whitespaces;
+        let equal = *match_char('=');
+        let rhs = *_parse_expr;
+        pure $ ex_assign $ (lhs.as_ex_ident, rhs)
+    };
+
+    _parse_add_sub: Parser Expr;
+    _parse_add_sub = do {
+        let lhs = *_parse_mult_div;
         loop_m(
-            ident, |term|
+            lhs, |lhs|
             let _ = *_skip_whitespaces;
-            let array = *_parse_array.if_exists;
-            if array.is_none {
-                break_m $ term
+            let add = *match_char_if_exists('+');
+            let sub = *match_char_if_exists('-');
+            if add.is_none && sub.is_none {
+                break_m $ lhs
             };
-            let array = array.as_some;
-            continue_m $ t_subsc $ (term, array)
+            let rhs = *_parse_mult_div;
+            let op = if add.is_some { "+" } else { "-" };
+            continue_m $ ex_infix $ (lhs, op, rhs)
         )
     };
 
-    _parse_ident: Parser Term;
+    _parse_mult_div: Parser Expr;
+    _parse_mult_div = do {
+        let lhs = *_parse_neg;
+        loop_m(
+            lhs, |lhs|
+            let _ = *_skip_whitespaces;
+            let mul = *match_char_if_exists('*');
+            let div = *match_char_if_exists('/');
+            if mul.is_none && div.is_none {
+                break_m $ lhs
+            };
+            let rhs = *_parse_neg;
+            let op = if mul.is_some { "*" } else { "/" };
+            continue_m $ ex_infix $ (lhs, op, rhs)
+        )
+    };
+
+    _parse_neg: Parser Expr;
+    _parse_neg = do {
+        let _ = *_skip_whitespaces;
+        let neg = *match_char_if_exists('-');
+        let expr = *_parse_term;
+        let expr = if neg.is_some { ex_unary $ ("-", expr) } else { expr };
+        pure $ expr
+    };
+
+    _parse_term: Parser Expr;
+    _parse_term = do {
+        _parse_funcall
+        .or_else(_parse_subsc)
+        .or_else(_parse_number_lit)
+    };
+
+    _parse_funcall: Parser Expr;
+    _parse_funcall = do {
+        let _ = *_skip_whitespaces;
+        let name = *_parse_ident;
+        let name = name.as_ex_ident;
+        let _ = *_skip_whitespaces;
+        let _ = *match_char('(');
+        let inner = do {
+            let a = *_parse_expr;
+            let rest = *repeat(do {
+                let _ = *_skip_whitespaces;
+                let _ = *match_char(',');
+                _parse_expr
+            });
+            pure $ [a].append(rest)
+        };
+        let empty = do {
+            let _ = *_skip_whitespaces;
+            pure $ []
+        };
+        let args = *inner.or_else(empty);
+        let _ = *match_char(')').or_error("')' is missing");
+        pure $ ex_funcall $ (name, args)
+    };
+
+    _parse_subsc: Parser Expr;
+    _parse_subsc = do {
+        let ident = *_parse_ident;
+        loop_m(
+            ident, |expr|
+            let _ = *_skip_whitespaces;
+            let array = *_parse_array.if_exists;
+            if array.is_none {
+                break_m $ expr
+            };
+            let array = array.as_some;
+            continue_m $ ex_subsc $ (expr, array)
+        )
+    };
+
+    _parse_ident: Parser Expr;
     _parse_ident = do {
         let c = *match_char_class(|c| is_alpha(c) || c == '_');
         let rest = *repeat(match_char_class(is_alnum));
         let str = [c].append(rest)._unsafe_to_string;
-        pure $ t_ident(str)
+        pure $ ex_ident(str)
     };
  
-    _parse_integer: Parser Term;
-    _parse_integer = do {
-        let val = *match_integer;
-        pure $ t_int(val)
-    };
- 
+    _parse_number_lit: Parser Expr;
+    _parse_number_lit = (
+        let match_decimal_point = match_str(".");
+        let match_digit = match_any_char.filter(|c| '0' <= c && c <= '9');
+        let match_digit1_9 = match_any_char.filter(|c| '1' <= c && c <= '9');
+        let match_e = match_any_char.filter(|c| c == 'e' || c == 'E');
+        let match_minus = match_str("-");
+        let match_plus = match_str("+");
+        let match_zero = match_str("0");
+        let match_int = match_zero.or_else(
+            do {
+                let _ = *match_digit1_9;
+                let _ = *(repeat(match_digit));
+                pure $ ()
+            }
+        );
+        let match_exp = do {
+            let _ = *match_e;
+            let _ = *(match_minus.or_else(match_plus).or_else(unit));
+            let _ = *(one_or_more(match_digit));
+            pure $ ()
+        };
+        let match_frac = do {
+            let _ = *match_decimal_point;
+            let _ = *(repeat(match_digit));
+            pure $ ()
+        };
+        let match_number = do {
+            let _ = *(match_minus.or_else(unit));
+            let _ = *(match_int);
+            let _ = *(match_frac.or_else(unit));
+            let _ = *(match_exp.or_else(unit));
+            pure $ ()
+        };
+
+        do {
+            let stream_begin = *get_stream;
+            let _ = *match_number;
+            let stream_end = *get_stream;
+            let byte_count = stream_end.@position - stream_begin.@position;
+            eval assert(|_| "number byte count is negative", byte_count >= 0);
+            let number_str = stream_begin.read_string(byte_count);
+            if number_str.find_byte('.').is_some {
+                let res: Result ErrMsg F64 = from_string(number_str);
+                if res.is_err {
+                    error_parser(res.as_err)
+                };
+                pure $ ex_float $ res.as_ok
+            };
+            let res: Result ErrMsg I64 = from_string(number_str);
+            if res.is_err {
+                error_parser(res.as_err)
+            };
+            pure $ ex_int $ res.as_ok
+        }
+    );
+
     _skip_whitespaces: Parser ();
     _skip_whitespaces = do {
         match_str_class_whitespace.map(|_|())
     };
 }
 
-type Func = Array Term -> AppStateIOF Term;
+type Value = box union {
+    v_none: (),
+    v_err: String,
+    v_int: I64,
+    v_float: F64,
+    v_array: Array Value,
+    v_ndarray: NdArray I64
+};
+
+err_type: Value;
+err_type = v_err $ "TYPE";
+
+impl Value: ToString {
+    to_string = |v| (
+        if v.is_v_none { "" };
+        if v.is_v_err { "ERR:" + v.as_v_err };
+        if v.is_v_int { v.as_v_int.to_string };
+        if v.is_v_float { v.as_v_float.to_string };
+        if v.is_v_array {
+            "[" + v.as_v_array.to_iter.map(to_string).join(",") + "]"
+        };
+        if v.is_v_ndarray {
+            "#" + v.as_v_ndarray.to_string
+        };
+        ""
+    );
+}
+
+// Expr evaluator
+namespace Evaluator
+{
+    evaluate: Expr -> AppStateIOF Value;
+    evaluate = |expr| (
+        if expr.is_ex_ident {
+            _eval_ident $ expr.as_ex_ident
+        };
+        if expr.is_ex_assign {
+            _eval_assign $ expr.as_ex_assign
+        };
+        if expr.is_ex_funcall {
+            _eval_funcall $ expr.as_ex_funcall
+        };
+        if expr.is_ex_array {
+            _eval_array $ expr.as_ex_array
+        };
+        if expr.is_ex_subsc {
+            _eval_subsc $ expr.as_ex_subsc
+        };
+        if expr.is_ex_infix {
+            _eval_infix $ expr.as_ex_infix
+        };
+        if expr.is_ex_unary {
+            _eval_unary $ expr.as_ex_unary
+        };
+        if expr.is_ex_none {
+            pure $ v_none $ expr.as_ex_none
+        };
+        if expr.is_ex_int {
+            pure $ v_int $ expr.as_ex_int
+        };
+        if expr.is_ex_float {
+            pure $ v_float $ expr.as_ex_float
+        };
+        if expr.is_ex_ndarray {
+            pure $ v_ndarray $ expr.as_ex_ndarray
+        };
+        eval assert (|_| "unknown expr", false);
+        pure $ v_none()
+    );
+
+    _eval_ident: String -> AppStateIOF Value;
+    _eval_ident = |name| (
+        let app_state: AppState = *get_state;
+        let opt = app_state.@env.find(name);
+        if opt.is_none {
+            error $ "not found: " + name
+        };
+        pure $ opt.as_some
+    );
+    
+    _eval_assign: (String, Expr) -> AppStateIOF Value;
+    _eval_assign = |(name, expr)| (
+        let val = *evaluate(expr);
+        let app_state = *get_state;
+        let app_state = app_state.mod_env(insert(name, val));
+        let _ = *put_state(app_state);
+        pure $ v_none()
+    );
+
+    _eval_funcall: (String, Array Expr) -> AppStateIOF Value;
+    _eval_funcall = |(name, args)| (
+        let app_state = *get_state;
+        let opt = app_state.@funcs.find(name);
+        if opt.is_none {
+            error $ "not found: " + name
+        };
+        let func = opt.as_some;
+        let args = *args.to_iter.fold_m(
+            [], |args, expr|
+            let value = *evaluate(expr);
+            pure $ args.push_back(value)
+        );
+        func(args)
+    );
+    
+    _eval_infix: (Expr, String, Expr) -> AppStateIOF Value;
+    _eval_infix = |(lhs, op, rhs)| (
+        let lhs = *evaluate(lhs);
+        let rhs = *evaluate(rhs);
+        if lhs.is_v_int && rhs.is_v_int {
+            _eval_infix_op((lhs.as_v_int, op, rhs.as_v_int), v_int)
+        };
+        if lhs.is_v_float && rhs.is_v_float {
+            _eval_infix_op((lhs.as_v_float, op, rhs.as_v_float), v_float)
+        };
+        if lhs.is_v_ndarray && rhs.is_v_ndarray {
+            _eval_infix_op((lhs.as_v_ndarray, op, rhs.as_v_ndarray), v_ndarray)
+        };
+        if lhs.is_v_ndarray && rhs.is_v_int {
+            _eval_infix_op((lhs.as_v_ndarray, op, scalar(rhs.as_v_int)), v_ndarray)
+        };
+        if lhs.is_v_int && rhs.is_v_ndarray {
+            _eval_infix_op((scalar(lhs.as_v_int), op, rhs.as_v_ndarray), v_ndarray)
+        };
+        error $ "_eval_infix: type mismatch"
+    );
+
+    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_infix_op = |(lhs, op, rhs), to_value| (
+        if op == "+" { pure $ to_value $ lhs + rhs };
+        if op == "-" { pure $ to_value $ lhs - rhs };
+        if op == "*" { pure $ to_value $ lhs * rhs };
+        if op == "/" { pure $ to_value $ lhs / rhs };
+        error $ "invalid op: " + op
+    );
+
+    _eval_unary: (String, Expr) -> AppStateIOF Value;
+    _eval_unary = |(op, expr)| (
+        let value = *evaluate(expr);
+        
+        if value.is_v_int {
+            _eval_unary_op((op, value.as_v_int), v_int)
+        };
+        if value.is_v_float {
+            _eval_unary_op((op, value.as_v_float), v_float)
+        };
+        if value.is_v_ndarray {
+            _eval_unary_op((op, value.as_v_ndarray), v_ndarray)
+        };
+        error $ "_eval_unary: type mismatch"
+    );
+
+    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_unary_op = |(op, val), to_value| (
+        if op == "-" { pure $ to_value $ -val };
+        error $ "invalid op: " + op
+    );
+
+    _eval_array: Array Expr -> AppStateIOF Value;
+    _eval_array = |array_expr| (
+        let array_value = *array_expr.to_iter.fold_m(
+            [], |array_value, expr|
+            let value = *evaluate(expr);
+            pure $ array_value.push_back(value)
+        );
+        if array_value.is_all(is_v_int) {
+            //eval debug_eprintln("all v_int");
+            let ndarray = NdArray::from_array(array_value.map(as_v_int));
+            pure $ v_ndarray(ndarray)
+        };
+        //eval debug_eprintln("not all v_int");
+        pure $ v_array (array_value)
+    );
+
+    _eval_subsc: (Expr, Expr) -> AppStateIOF Value;
+    _eval_subsc = |(a, b)| (
+        let a = *evaluate(a);
+        //let b = *evaluate(b);
+        //let _ = *println("a="+a.to_string).to_stateiof;
+        //let _ = *println("b="+b.to_string).to_stateiof;
+        if a.is_v_array && b.is_ex_array {
+            let array = a.as_v_array;
+            let idx = b.as_ex_array;
+            if idx.get_size != 1 {
+                error $ "invalid subsc (idx size)"
+            };
+            let idx = idx.@(0);
+            if !idx.is_ex_int {
+                error $ "invalid subsc (idx type)"
+            };
+            let i = idx.as_ex_int;
+            if !(0 <= i && i <= array.get_size) {
+                error $ "invalid subsc (idx out of range)"
+            };
+            pure $ array.@(i)
+        };
+        if a.is_v_ndarray && b.is_ex_array {
+            let ndarray = a.as_v_ndarray;
+            let idx = b.as_ex_array;
+            if idx.get_size != ndarray.get_dim {
+                error $ "invalid subsc (idx size)"
+            };
+            if !idx.is_all(is_ex_int) {
+                error $ "invalid subsc (idx type)"
+            };
+            let idx = idx.map(as_ex_int);
+            let val = ndarray.get(idx);
+            pure $ v_int $ val
+        };
+        error $ "invalid subsc"
+    );
+
+}
+
+
+type Func = Array Value -> AppStateIOF Value;
 
 namespace Builtin {
 
@@ -223,163 +550,48 @@ namespace Builtin {
         .mod_funcs(insert("stack", Builtin::stack))
     );
 
-    ndarray: Array Term -> AppStateIOF Term;
+    ndarray: Array Value -> AppStateIOF Value;
     ndarray = |args| (
         if args.get_size != 1 {
             error $ "invalid arg count"
         };
-        let term = args.@(0);
-        if term.is_t_ndarray {
-            pure $ term
+        let expr = args.@(0);
+        if expr.is_v_ndarray {
+            pure $ expr
         };
-        if term.is_t_array {
-            let array = term.as_t_array;
-            if !array.is_all(is_t_int) {
+        if expr.is_v_array {
+            let array = expr.as_v_array;
+            if !array.is_all(is_v_int) {
                 error $ "not all int"
             };
-            let ndarray = NdArray::from_array(array.map(as_t_int));
-            pure $ t_ndarray(ndarray)
+            let ndarray = NdArray::from_array(array.map(as_v_int));
+            pure $ v_ndarray(ndarray)
         };
         error $ "invalid arg"
     );
 
-    stack: Array Term -> AppStateIOF Term;
+    stack: Array Value -> AppStateIOF Value;
     stack = |args| (
         if args.get_size == 0 {
             error $ "invalid arg count"
         }; 
-        if !args.is_all(is_t_ndarray) {
+        if !args.is_all(is_v_ndarray) {
             error $ "type mismatch"
         };
-        let children = args.map(as_t_ndarray);
+        let children = args.map(as_v_ndarray);
         let first_child = children.@(0);
         if !children.is_all(|child| child.@shape == first_child.@shape) {
             error $ "shape mismatch"
         };
         let parent = NdArray::stack(0, children);
-        pure $ t_ndarray $ parent
+        pure $ v_ndarray $ parent
     );
-}
-
-// Term evaluator
-namespace Evaluator
-{
-    evaluate: Term -> AppStateIOF Term;
-    evaluate = |term| (
-        if term.is_t_ident {
-            _eval_ident $ term.as_t_ident
-        };
-        if term.is_t_assign {
-            _eval_assign $ term.as_t_assign
-        };
-        if term.is_t_funcall {
-            _eval_funcall $ term.as_t_funcall
-        };
-        if term.is_t_array {
-            _eval_array $ term.as_t_array
-        };
-        if term.is_t_subsc {
-            _eval_subsc $ term.as_t_subsc
-        };
-        // none, int, float, ndarray
-        pure $ term
-    );
-
-    _eval_ident: String -> AppStateIOF Term;
-    _eval_ident = |name| (
-        let app_state: AppState = *get_state;
-        let opt = app_state.@env.find(name);
-        if opt.is_none {
-            error $ "not found: " + name
-        };
-        pure $ opt.as_some
-    );
-    
-    _eval_assign: (String, Term) -> AppStateIOF Term;
-    _eval_assign = |(name, val)| (
-        let val = *evaluate(val);
-        let app_state = *get_state;
-        let app_state = app_state.mod_env(insert(name, val));
-        let _ = *put_state(app_state);
-        pure $ t_none()
-    );
-
-    _eval_funcall: (String, Array Term) -> AppStateIOF Term;
-    _eval_funcall = |(name, args)| (
-        let app_state = *get_state;
-        let opt = app_state.@funcs.find(name);
-        if opt.is_none {
-            error $ "not found: " + name
-        };
-        let func = opt.as_some;
-        let args = *args.to_iter.fold_m(
-            Array::empty(0), |output, t|
-            let t = *evaluate(t);
-            pure $ output.push_back(t)
-        );
-        func(args)
-    );
-    
-    _eval_array: Array Term -> AppStateIOF Term;
-    _eval_array = |array| (
-        let output = *array.to_iter.fold_m(
-            Array::empty(0), |output, t|
-            let t = *evaluate(t);
-            pure $ output.push_back(t)
-        );
-        if output.is_all(is_t_int) {
-            //eval debug_eprintln("all t_int");
-            let ndarray = NdArray::from_array(output.map(as_t_int));
-            pure $ t_ndarray(ndarray)
-        };
-        //eval debug_eprintln("not all t_int");
-        pure $ t_array (output)
-    );
-
-    _eval_subsc: (Term, Term) -> AppStateIOF Term;
-    _eval_subsc = |(a, b)| (
-        let a = *evaluate(a);
-        //let b = *evaluate(b);
-        //let _ = *println("a="+a.to_string).to_stateiof;
-        //let _ = *println("b="+b.to_string).to_stateiof;
-        if a.is_t_array && b.is_t_array {
-            let array = a.as_t_array;
-            let idx = b.as_t_array;
-            if idx.get_size != 1 {
-                error $ "invalid subsc (idx size)"
-            };
-            let idx = idx.@(0);
-            if !idx.is_t_int {
-                error $ "invalid subsc (idx type)"
-            };
-            let i = idx.as_t_int;
-            if !(0 <= i && i <= array.get_size) {
-                error $ "invalid subsc (idx out of range)"
-            };
-            pure $ array.@(i)
-        };
-        if a.is_t_ndarray && b.is_t_array {
-            let ndarray = a.as_t_ndarray;
-            let idx = b.as_t_array;
-            if idx.get_size != ndarray.get_dim {
-                error $ "invalid subsc (idx size)"
-            };
-            if !idx.is_all(is_t_int) {
-                error $ "invalid subsc (idx type)"
-            };
-            let idx = idx.map(as_t_int);
-            let val = ndarray.get(idx);
-            pure $ t_int $ val
-        };
-        error $ "invalid subsc"
-    );
-
 }
 
 // Type of application state
 type AppState = struct {
     funcs: HashMap String Func,
-    env: HashMap String Term
+    env: HashMap String Value
 };
 
 // Type of State monad with IOFail for application state
@@ -402,9 +614,9 @@ namespace AppState {
     process_line = |line, app_state| (
         do {
             //let _ = *println("process_line: " + line).lift;
-            let term = *parse_term(line).from_result;
-            let (term, app_state) = *evaluate(term).run_stateiof(app_state);
-            let _ = *println("--> " + term.to_string).lift;
+            let expr = *parse_expr(line).from_result;
+            let (expr, app_state) = *evaluate(expr).run_stateiof(app_state);
+            let _ = *println("--> " + expr.to_string).lift;
             pure $ app_state
         }
         .try(|err| 

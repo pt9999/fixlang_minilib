@@ -97,14 +97,16 @@ impl Expr: ToString {
 
 // num_lit
 // ident
-// (expr)
+// "(" expr ")"
 // expr "(" (expr ("," expr)*)? ")"
 // "[" (expr ("," expr)*)? "]"
-// expr "[" (expr ("," expr)*)? "]"
+// expr ("[" (expr ("," expr)*)? "]")+
+// "-" expr
 // expr ( "*" | "/" ) expr
 // expr ( "+" | "-" ) expr
 // expr ":" expr
-// lhs = rhs
+// expr "=" expr
+// 
 
 namespace Expr {
 
@@ -341,6 +343,7 @@ type Value = box union {
     v_err: String,
     v_float: F64,
     v_range: (Option I64, Option I64),
+    v_func: (String, Value -> AppStateIOF Value),
     v_array: Array Value,
     v_ndarray: NdArray F64
 };
@@ -356,6 +359,10 @@ impl Value: ToString {
         if v.is_v_range { 
             let (lhs, rhs) = v.as_v_range;
             lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
+        };
+        if v.is_v_func {
+            let (name, _) = v.as_v_func;
+            "#{function " + name + "}"
         };
         if v.is_v_array {
             "[" + v.as_v_array.to_iter.map(to_string).join(",") + "]"
@@ -440,18 +447,17 @@ namespace Evaluator
 
     _eval_funcall: (String, Array Expr) -> AppStateIOF Value;
     _eval_funcall = |(name, args)| (
-        let app_state = *get_state;
-        let opt = app_state.@funcs.find(name);
-        if opt.is_none {
-            error $ "not found: " + name
-        };
-        let func = opt.as_some;
-        let args = *args.to_iter.fold_m(
-            [], |args, expr|
-            let value = *evaluate(expr);
-            pure $ args.push_back(value)
-        );
-        func(args)
+        let f = *_eval_ident(name);
+        args.to_iter.fold_m(
+            f, |f, arg|
+            if !f.is_v_func {
+                error $ "invalid func type: " + f.to_string
+            }; 
+            let (f_name, f) = f.as_v_func;
+            let arg = *evaluate(arg);
+            let value = *f(arg);
+            pure $ value
+        )
     );
     
     _eval_infix: (Expr, String, Expr) -> AppStateIOF Value;
@@ -578,7 +584,7 @@ namespace Evaluator
 }
 
 
-type Func = Array Value -> AppStateIOF Value;
+type Func = Value -> AppStateIOF Value;
 
 namespace Builtin {
 
@@ -586,39 +592,45 @@ namespace Builtin {
     init_builtin_funcs: AppState -> AppState;
     init_builtin_funcs = |app_state| (
         app_state
-        .mod_funcs(insert("ndarray", Builtin::ndarray))
-        .mod_funcs(insert("stack", Builtin::stack))
+        .add_builtin_func("ndarray", Builtin::ndarray)
+        .add_builtin_func("stack", Builtin::stack)
     );
 
-    ndarray: Array Value -> AppStateIOF Value;
-    ndarray = |args| (
-        if args.get_size != 1 {
-            error $ "invalid arg count"
+    add_builtin_func: String -> Func -> AppState -> AppState;
+    add_builtin_func = |name, f, app_state| (
+        let func = v_func $ (name, f);
+        app_state.mod_env(insert(name, func))
+    ); 
+
+    ndarray: Value -> AppStateIOF Value;
+    ndarray = |arg| (
+        if arg.is_v_ndarray {
+            pure $ arg
         };
-        let expr = args.@(0);
-        if expr.is_v_ndarray {
-            pure $ expr
-        };
-        if expr.is_v_array {
-            let array = expr.as_v_array;
+        if arg.is_v_array {
+            let array = arg.as_v_array;
             if !array.is_all(is_v_float) {
                 error $ "not all v_float"
             };
             let ndarray = NdArray::from_array(array.map(as_v_float));
             pure $ v_ndarray(ndarray)
         };
-        error $ "invalid arg"
+        error $ "invalid arg: arg=" + arg.to_string
     );
 
-    stack: Array Value -> AppStateIOF Value;
-    stack = |args| (
-        if args.get_size == 0 {
-            error $ "invalid arg count"
+    stack: Value -> AppStateIOF Value;
+    stack = |arg| (
+        if !arg.is_v_array {
+            error $ "invalid arg type"
         }; 
-        if !args.is_all(is_v_ndarray) {
+        let array = arg.as_v_array;
+        if array.get_size == 0 {
+            error $ "invalid arg count"
+        };
+        if !array.is_all(is_v_ndarray) {
             error $ "type mismatch"
         };
-        let children = args.map(as_v_ndarray);
+        let children = array.map(as_v_ndarray);
         let first_child = children.@(0);
         if !children.is_all(|child| child.@shape == first_child.@shape) {
             error $ "shape mismatch"
@@ -630,7 +642,6 @@ namespace Builtin {
 
 // Type of application state
 type AppState = struct {
-    funcs: HashMap String Func,
     env: HashMap String Value
 };
 
@@ -642,7 +653,6 @@ namespace AppState {
     // An empty application state
     empty: AppState;
     empty = AppState {
-        funcs: HashMap::empty(100),
         env: HashMap::empty(100)
     };
 

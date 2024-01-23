@@ -50,13 +50,12 @@ is_all = |f, array| (
 type Expr = box union {
     ex_none: (),
     ex_ident: String,
-    ex_int: I64,
     ex_float: F64,
     ex_funcall: (String, Array Expr),
     ex_array: Array Expr,
-    ex_subsc: (Expr, Expr),
-    ex_ndarray: NdArray I64,
-    ex_assign: (String, Expr),
+    ex_subsc: (Expr, Array Expr),
+    ex_range: (Option Expr, Option Expr),
+    ex_assign: (Expr, Expr),
     ex_unary: (String, Expr),
     ex_infix: (Expr, String, Expr)
 };
@@ -64,7 +63,6 @@ type Expr = box union {
 impl Expr: ToString {
     to_string = |ex| (
         if ex.is_ex_ident { ex.as_ex_ident };
-        if ex.is_ex_int { ex.as_ex_int.to_string };
         if ex.is_ex_float { ex.as_ex_float.to_string };
         if ex.is_ex_funcall {
             let (name, args) = ex.as_ex_funcall;
@@ -75,10 +73,11 @@ impl Expr: ToString {
         };
         if ex.is_ex_subsc {
             let (a, b) = ex.as_ex_subsc;
-            a.to_string + "[" + b.to_string + "]"
+            a.to_string + "[" + b.to_iter.map(to_string).join(",") + "]"
         };
-        if ex.is_ex_ndarray {
-            "#" + ex.as_ex_ndarray.to_string
+        if ex.is_ex_range {
+            let (a, b) = ex.as_ex_range;
+            a.map_or("", to_string) + ":" + b.map_or("", to_string)
         };
         if ex.is_ex_assign {
             let (a, b) = ex.as_ex_assign;
@@ -95,6 +94,17 @@ impl Expr: ToString {
         ""
     );
 }
+
+// num_lit
+// ident
+// (expr)
+// expr "(" (expr ("," expr)*)? ")"
+// "[" (expr ("," expr)*)? "]"
+// expr "[" (expr ("," expr)*)? "]"
+// expr ( "*" | "/" ) expr
+// expr ( "+" | "-" ) expr
+// expr ":" expr
+// lhs = rhs
 
 namespace Expr {
 
@@ -113,53 +123,38 @@ namespace Expr {
     _parse_expr = do {
         let _ = *_skip_whitespaces;
         let expr = *(
-            _parse_paren
-            .or_else(_parse_array)
-            .or_else(_parse_assign)
-            .or_else(_parse_add_sub)
+            _parse_assign
         );
         pure $ expr
     };
 
-    _parse_paren: Parser Expr;
-    _parse_paren = do {
-        let _ = *match_char('(');
-        let expr = *_parse_expr;
-        let _ = *match_char(')');
-        pure $ expr
-    };
-
-    // ARRAY = "[" EXPR ("," EXPR)* "]"
-    _parse_array: Parser Expr;
-    _parse_array = do {
-        let _ = *_skip_whitespaces;
-        let _ = *match_char('[');
-        let inner = do {
-            let a = *_parse_expr;
-            let rest = *repeat(do {
-                let _ = *_skip_whitespaces;
-                let _ = *match_char(',');
-                _parse_expr
-            });
-            pure $ [a].append(rest)
-        };
-        let empty = do {
-            let _ = *_skip_whitespaces;
-            pure $ []
-        };
-        let array = *inner.or_else(empty);
-        let _ = *_skip_whitespaces;
-        let _ = *match_char(']').or_error("']' is missing");
-        pure $ ex_array(array)
-    };
-
     _parse_assign: Parser Expr;
     _parse_assign = do {
-        let lhs = *_parse_ident;
+        let lhs = *_parse_range;
         let _ = *_skip_whitespaces;
-        let equal = *match_char('=');
-        let rhs = *_parse_expr;
-        pure $ ex_assign $ (lhs.as_ex_ident, rhs)
+        let equal = *match_char('=').if_exists;
+        if equal.is_none {
+            pure $ lhs
+        };
+        let rhs = *_parse_range;
+        pure $ ex_assign $ (lhs, rhs)
+    };
+
+    _parse_range: Parser Expr;
+    _parse_range = do {
+        let colon = *match_char(':').if_exists;
+        if colon.is_some {
+            let rhs = *_parse_add_sub.if_exists;
+            pure $ ex_range $ (none(), rhs)
+        };
+        let lhs = *_parse_add_sub;
+        let _ = *_skip_whitespaces;
+        let colon = *match_char(':').if_exists;
+        if colon.is_none {
+            pure $ lhs
+        };
+        let rhs = *_parse_add_sub.if_exists;
+        pure $ ex_range $ (some(lhs), rhs)
     };
 
     _parse_add_sub: Parser Expr;
@@ -208,8 +203,25 @@ namespace Expr {
     _parse_term: Parser Expr;
     _parse_term = do {
         _parse_funcall
+        .or_else(_parse_array)
         .or_else(_parse_subsc)
+        .or_else(_parse_paren)
         .or_else(_parse_number_lit)
+    };
+
+    _parse_expr_list: Parser (Array Expr);
+    _parse_expr_list = do {
+        let a = *_parse_expr.if_exists;
+        if a.is_none {
+            pure $ []
+        };
+        let a = a.as_some;
+        let rest = *repeat(do {
+            let _ = *_skip_whitespaces;
+            let _ = *match_char(',');
+            _parse_expr
+        });
+        pure $ [a].append(rest)
     };
 
     _parse_funcall: Parser Expr;
@@ -219,22 +231,20 @@ namespace Expr {
         let name = name.as_ex_ident;
         let _ = *_skip_whitespaces;
         let _ = *match_char('(');
-        let inner = do {
-            let a = *_parse_expr;
-            let rest = *repeat(do {
-                let _ = *_skip_whitespaces;
-                let _ = *match_char(',');
-                _parse_expr
-            });
-            pure $ [a].append(rest)
-        };
-        let empty = do {
-            let _ = *_skip_whitespaces;
-            pure $ []
-        };
-        let args = *inner.or_else(empty);
+        let args = *_parse_expr_list;
+        let _ = *_skip_whitespaces;
         let _ = *match_char(')').or_error("')' is missing");
         pure $ ex_funcall $ (name, args)
+    };
+
+    _parse_array: Parser Expr;
+    _parse_array = do {
+        let _ = *_skip_whitespaces;
+        let _ = *match_char('[');
+        let array = *_parse_expr_list;
+        let _ = *_skip_whitespaces;
+        let _ = *match_char(']').or_error("']' is missing");
+        pure $ ex_array(array)
     };
 
     _parse_subsc: Parser Expr;
@@ -243,13 +253,23 @@ namespace Expr {
         loop_m(
             ident, |expr|
             let _ = *_skip_whitespaces;
-            let array = *_parse_array.if_exists;
-            if array.is_none {
+            let lbracket = *match_char('[').if_exists;
+            if lbracket.is_none {
                 break_m $ expr
             };
-            let array = array.as_some;
-            continue_m $ ex_subsc $ (expr, array)
+            let indices = *_parse_expr_list;
+            let _ = *_skip_whitespaces;
+            let _ = *match_char(']').or_error("']' is missing");
+            continue_m $ ex_subsc $ (expr, indices)
         )
+    };
+
+    _parse_paren: Parser Expr;
+    _parse_paren = do {
+        let _ = *match_char('(');
+        let expr = *_parse_expr;
+        let _ = *match_char(')');
+        pure $ expr
     };
 
     _parse_ident: Parser Expr;
@@ -302,18 +322,11 @@ namespace Expr {
             let byte_count = stream_end.@position - stream_begin.@position;
             eval assert(|_| "number byte count is negative", byte_count >= 0);
             let number_str = stream_begin.read_string(byte_count);
-            if number_str.find_byte('.').is_some {
-                let res: Result ErrMsg F64 = from_string(number_str);
-                if res.is_err {
-                    error_parser(res.as_err)
-                };
-                pure $ ex_float $ res.as_ok
-            };
-            let res: Result ErrMsg I64 = from_string(number_str);
+            let res: Result ErrMsg F64 = from_string(number_str);
             if res.is_err {
                 error_parser(res.as_err)
             };
-            pure $ ex_int $ res.as_ok
+            pure $ ex_float $ res.as_ok
         }
     );
 
@@ -326,10 +339,10 @@ namespace Expr {
 type Value = box union {
     v_none: (),
     v_err: String,
-    v_int: I64,
     v_float: F64,
+    v_range: (Option I64, Option I64),
     v_array: Array Value,
-    v_ndarray: NdArray I64
+    v_ndarray: NdArray F64
 };
 
 err_type: Value;
@@ -339,8 +352,11 @@ impl Value: ToString {
     to_string = |v| (
         if v.is_v_none { "" };
         if v.is_v_err { "ERR:" + v.as_v_err };
-        if v.is_v_int { v.as_v_int.to_string };
         if v.is_v_float { v.as_v_float.to_string };
+        if v.is_v_range { 
+            let (lhs, rhs) = v.as_v_range;
+            lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
+        };
         if v.is_v_array {
             "[" + v.as_v_array.to_iter.map(to_string).join(",") + "]"
         };
@@ -362,6 +378,9 @@ namespace Evaluator
         if expr.is_ex_assign {
             _eval_assign $ expr.as_ex_assign
         };
+        if expr.is_ex_range {
+            _eval_range $ expr.as_ex_range
+        };
         if expr.is_ex_funcall {
             _eval_funcall $ expr.as_ex_funcall
         };
@@ -380,17 +399,20 @@ namespace Evaluator
         if expr.is_ex_none {
             pure $ v_none $ expr.as_ex_none
         };
-        if expr.is_ex_int {
-            pure $ v_int $ expr.as_ex_int
-        };
         if expr.is_ex_float {
             pure $ v_float $ expr.as_ex_float
         };
-        if expr.is_ex_ndarray {
-            pure $ v_ndarray $ expr.as_ex_ndarray
-        };
         eval assert (|_| "unknown expr", false);
         pure $ v_none()
+    );
+
+    _evaluate_array: Array Expr -> AppStateIOF (Array Value);
+    _evaluate_array = |array_expr| (
+        array_expr.to_iter.fold_m(
+            [], |array_value, expr|
+            let value = *evaluate(expr);
+            pure $ array_value.push_back(value)
+        )
     );
 
     _eval_ident: String -> AppStateIOF Value;
@@ -403,13 +425,17 @@ namespace Evaluator
         pure $ opt.as_some
     );
     
-    _eval_assign: (String, Expr) -> AppStateIOF Value;
-    _eval_assign = |(name, expr)| (
-        let val = *evaluate(expr);
-        let app_state = *get_state;
-        let app_state = app_state.mod_env(insert(name, val));
-        let _ = *put_state(app_state);
-        pure $ v_none()
+    _eval_assign: (Expr, Expr) -> AppStateIOF Value;
+    _eval_assign = |(lhs, rhs)| (
+        if lhs.is_ex_ident {
+            let lhs = lhs.as_ex_ident;
+            let rhs = *evaluate(rhs);
+            let app_state = *get_state;
+            let app_state = app_state.mod_env(insert(lhs, rhs));
+            let _ = *put_state(app_state);
+            pure $ v_none()
+        };
+        error $ "assign type mismatch"
     );
 
     _eval_funcall: (String, Array Expr) -> AppStateIOF Value;
@@ -432,20 +458,17 @@ namespace Evaluator
     _eval_infix = |(lhs, op, rhs)| (
         let lhs = *evaluate(lhs);
         let rhs = *evaluate(rhs);
-        if lhs.is_v_int && rhs.is_v_int {
-            _eval_infix_op((lhs.as_v_int, op, rhs.as_v_int), v_int)
-        };
         if lhs.is_v_float && rhs.is_v_float {
             _eval_infix_op((lhs.as_v_float, op, rhs.as_v_float), v_float)
         };
         if lhs.is_v_ndarray && rhs.is_v_ndarray {
             _eval_infix_op((lhs.as_v_ndarray, op, rhs.as_v_ndarray), v_ndarray)
         };
-        if lhs.is_v_ndarray && rhs.is_v_int {
-            _eval_infix_op((lhs.as_v_ndarray, op, scalar(rhs.as_v_int)), v_ndarray)
+        if lhs.is_v_ndarray && rhs.is_v_float {
+            _eval_infix_op((lhs.as_v_ndarray, op, scalar(rhs.as_v_float)), v_ndarray)
         };
-        if lhs.is_v_int && rhs.is_v_ndarray {
-            _eval_infix_op((scalar(lhs.as_v_int), op, rhs.as_v_ndarray), v_ndarray)
+        if lhs.is_v_float && rhs.is_v_ndarray {
+            _eval_infix_op((scalar(lhs.as_v_float), op, rhs.as_v_ndarray), v_ndarray)
         };
         error $ "_eval_infix: type mismatch"
     );
@@ -463,9 +486,6 @@ namespace Evaluator
     _eval_unary = |(op, expr)| (
         let value = *evaluate(expr);
         
-        if value.is_v_int {
-            _eval_unary_op((op, value.as_v_int), v_int)
-        };
         if value.is_v_float {
             _eval_unary_op((op, value.as_v_float), v_float)
         };
@@ -483,58 +503,78 @@ namespace Evaluator
 
     _eval_array: Array Expr -> AppStateIOF Value;
     _eval_array = |array_expr| (
-        let array_value = *array_expr.to_iter.fold_m(
-            [], |array_value, expr|
-            let value = *evaluate(expr);
-            pure $ array_value.push_back(value)
-        );
-        if array_value.is_all(is_v_int) {
-            //eval debug_eprintln("all v_int");
-            let ndarray = NdArray::from_array(array_value.map(as_v_int));
+        let array_value = *_evaluate_array(array_expr);
+        if array_value.is_all(is_v_float) {
+            //eval debug_eprintln("all v_float");
+            let ndarray = NdArray::from_array(array_value.map(as_v_float));
             pure $ v_ndarray(ndarray)
         };
-        //eval debug_eprintln("not all v_int");
+        //eval debug_eprintln("not all v_float");
         pure $ v_array (array_value)
     );
 
-    _eval_subsc: (Expr, Expr) -> AppStateIOF Value;
-    _eval_subsc = |(a, b)| (
-        let a = *evaluate(a);
-        //let b = *evaluate(b);
-        //let _ = *println("a="+a.to_string).to_stateiof;
-        //let _ = *println("b="+b.to_string).to_stateiof;
-        if a.is_v_array && b.is_ex_array {
-            let array = a.as_v_array;
-            let idx = b.as_ex_array;
+    _eval_subsc: (Expr, Array Expr) -> AppStateIOF Value;
+    _eval_subsc = |(lhs, rhs)| (
+        let lhs = *evaluate(lhs);
+        let rhs = *_evaluate_array(rhs);
+        if lhs.is_v_array {
+            let array = lhs.as_v_array;
+            let idx = rhs;
             if idx.get_size != 1 {
                 error $ "invalid subsc (idx size)"
             };
             let idx = idx.@(0);
-            if !idx.is_ex_int {
+            if !idx.is_v_float {
                 error $ "invalid subsc (idx type)"
             };
-            let i = idx.as_ex_int;
+            let i = idx.as_v_float.to_I64;
             if !(0 <= i && i <= array.get_size) {
                 error $ "invalid subsc (idx out of range)"
             };
             pure $ array.@(i)
         };
-        if a.is_v_ndarray && b.is_ex_array {
-            let ndarray = a.as_v_ndarray;
-            let idx = b.as_ex_array;
+        if lhs.is_v_ndarray {
+            let ndarray = lhs.as_v_ndarray;
+            let idx = rhs;
             if idx.get_size != ndarray.get_dim {
                 error $ "invalid subsc (idx size)"
             };
-            if !idx.is_all(is_ex_int) {
-                error $ "invalid subsc (idx type)"
-            };
-            let idx = idx.map(as_ex_int);
-            let val = ndarray.get(idx);
-            pure $ v_int $ val
+            let tuple2_array = *idx.to_iter.fold_m(
+                [], |tuple2_array, i|
+                if i.is_v_float {
+                    let i = i.as_v_float.to_I64;
+                    pure $ tuple2_array.push_back((i, i + 1))
+                };
+                if i.is_v_range {
+                    let (begin, end) = i.as_v_range;
+                    let begin = begin.as_some_or(0);
+                    let end = end.as_some_or(I64::maximum);
+                    pure $ tuple2_array.push_back((begin, end))
+                };
+                error $ "invalid subsc (idx type): " + i.to_string
+            );
+            let val = ndarray.get_sub(tuple2_array);
+            pure $ v_ndarray $ val
         };
-        error $ "invalid subsc"
+        error $ "invalid subsc: lhs="+lhs.to_string + " rhs="+rhs.to_string
     );
 
+    _eval_range: (Option Expr, Option Expr) -> AppStateIOF Value;
+    _eval_range = |(lhs, rhs)| (
+        let inner: Option Expr -> AppStateIOF (Option I64) = |expr| (
+            if expr.is_none {
+                pure $ none ()
+            };
+            let v = *evaluate(expr.as_some);
+            if !v.is_v_float {
+                error $ "invalid range type: " + v.to_string
+            };
+            pure $ some(v.as_v_float.to_I64)
+        );
+        let lhs = *inner(lhs);
+        let rhs = *inner(rhs);
+        pure $ v_range $ (lhs, rhs)
+    );
 }
 
 
@@ -561,10 +601,10 @@ namespace Builtin {
         };
         if expr.is_v_array {
             let array = expr.as_v_array;
-            if !array.is_all(is_v_int) {
-                error $ "not all int"
+            if !array.is_all(is_v_float) {
+                error $ "not all v_float"
             };
-            let ndarray = NdArray::from_array(array.map(as_v_int));
+            let ndarray = NdArray::from_array(array.map(as_v_float));
             pure $ v_ndarray(ndarray)
         };
         error $ "invalid arg"

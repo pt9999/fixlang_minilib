@@ -8,7 +8,9 @@
 module IOEx;
 
 import Debug;
+
 import StringEx;
+import Binary;
 
 // Creates a new file or rewrites an existing one.
 // For details, see Linux manual page for [creat()](https://man7.org/linux/man-pages/man3/creat.3p.html).
@@ -204,7 +206,7 @@ directory_exists = |dir_path| (
 
 // Type of file status
 type FileStat = unbox struct {
-    data: Array U8  // struct stat
+    data: ByteBuffer  // struct stat
 };
 
 namespace FileStat {
@@ -212,7 +214,7 @@ namespace FileStat {
     stat: String -> IOFail FileStat;
     stat = |file_path| (
         let _ = *pure(); // make it lazy
-        let statbuf: Array U8 = Array::fill(_def_struct_stat.@sizeof_struct_stat, 0_U8);
+        let statbuf = ByteBuffer::fill(_def_struct_stat.@sizeof_struct_stat, 0_U8, Platform::byte_order);
         let res = statbuf.borrow_ptr(|p_stat|
             file_path.borrow_c_str(|p_filepath|
                     CALL_C[I32 stat(Ptr, Ptr), p_filepath, p_stat]
@@ -235,43 +237,43 @@ namespace FileStat {
                         /* 0o0040000 = */ 16384_U32;
 
     st_dev: FileStat -> U64;
-    st_dev = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_dev);
+    st_dev = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_dev);
 
     st_ino: FileStat -> U64;
-    st_ino = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_ino);
+    st_ino = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_ino);
 
     st_nlink: FileStat -> U64;
-    st_nlink = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_nlink);
+    st_nlink = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_nlink);
 
     st_mode: FileStat -> U32;
-    st_mode = |file_stat| file_stat.@data.decode_u32_le(_def_struct_stat.@offsetof_st_mode);
+    st_mode = |file_stat| file_stat.@data.get_u32(_def_struct_stat.@offsetof_st_mode);
 
     st_uid: FileStat -> U32;
-    st_uid = |file_stat| file_stat.@data.decode_u32_le(_def_struct_stat.@offsetof_st_uid);
+    st_uid = |file_stat| file_stat.@data.get_u32(_def_struct_stat.@offsetof_st_uid);
 
     st_gid: FileStat -> U32;
-    st_gid = |file_stat| file_stat.@data.decode_u32_le(_def_struct_stat.@offsetof_st_gid);
+    st_gid = |file_stat| file_stat.@data.get_u32(_def_struct_stat.@offsetof_st_gid);
 
     st_rdev: FileStat -> U64;
-    st_rdev = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_rdev);
+    st_rdev = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_rdev);
 
     st_size: FileStat -> I64;
-    st_size = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_size).to_I64;
+    st_size = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_size).to_I64;
 
     st_blksize: FileStat -> I64;
-    st_blksize = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_blksize).to_I64;
+    st_blksize = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_blksize).to_I64;
 
     st_blocks: FileStat -> U64;
-    st_blocks = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_blocks);
+    st_blocks = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_blocks);
 
     st_atime: FileStat -> U64;
-    st_atime = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_atime);
+    st_atime = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_atime);
 
     st_mtime: FileStat -> U64;
-    st_mtime = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_mtime);
+    st_mtime = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_mtime);
 
     st_ctime: FileStat -> U64;
-    st_ctime = |file_stat| file_stat.@data.decode_u64_le(_def_struct_stat.@offsetof_st_ctime);
+    st_ctime = |file_stat| file_stat.@data.get_u64(_def_struct_stat.@offsetof_st_ctime);
 }
 
 
@@ -297,7 +299,7 @@ type DefStructStat = unbox struct {
 // so this variable is constant.
 _def_struct_stat: DefStructStat;
 _def_struct_stat = (
-    let uts = uname;
+    let uts = Platform::uname;
     // aarch64-linux-gnu (ChromeBook, Debian 11)
     if uts.@sysname == "Linux" && uts.@machine == "aarch64" {
         // aarch64-linux-gnu
@@ -339,63 +341,6 @@ _def_struct_stat = (
         offsetof_st_ctime: 104,
         sizeof_struct_stat: 144
     }
-);
-
-// Decodes U8 from `array` at position `i` with little endian.
-decode_u8_le: I64 -> Array U8 -> U8;
-decode_u8_le = |i, array| (
-    array.@(i)
-);
-
-// Decodes U16 from `array` at position `i` with little endian.
-decode_u16_le: I64 -> Array U8 -> U16;
-decode_u16_le = |i, array| (
-    array.decode_u8_le(i).to_U16.bit_or(
-        array.decode_u8_le(i + 1).to_U16.shift_left(8_U16)
-    )
-);
-
-// Decodes U32 from `array` at position `i` with little endian.
-decode_u32_le: I64 -> Array U8 -> U32;
-decode_u32_le = |i, array| (
-    array.decode_u16_le(i).to_U32.bit_or(
-        array.decode_u16_le(i + 2).to_U32.shift_left(16_U32)
-    )
-);
-
-// Decodes U64 from `array` at position `i` with little endian.
-decode_u64_le: I64 -> Array U8 -> U64;
-decode_u64_le = |i, array| (
-    array.decode_u32_le(i).to_U64.bit_or(
-        array.decode_u32_le(i + 4).to_U64.shift_left(32_U64)
-    )
-);
-
-// Encodes U8 into `array` at position `i` with little endian.
-encode_u8_le: I64 -> U8 -> Array U8 -> Array U8;
-encode_u8_le = |i, val, array| (
-    array.set(i, val)
-);
-
-// Encodes U16 into `array` at position `i` with little endian.
-encode_u16_le: I64 -> U16 -> Array U8 -> Array U8;
-encode_u16_le = |i, val, array| (
-    array.encode_u8_le(i, val.to_U8)
-         .encode_u8_le(i + 1, val.shift_right(8_U16).to_U8)
-);
-
-// Encodes U32 into `array` at position `i` with little endian.
-encode_u32_le: I64 -> U32 -> Array U8 -> Array U8;
-encode_u32_le = |i, val, array| (
-    array.encode_u16_le(i, val.to_U16)
-         .encode_u16_le(i + 2, val.shift_right(16_U32).to_U16)
-);
-
-// Encodes U64 into `array` at position `i` with little endian.
-encode_u64_le: I64 -> U64 -> Array U8 -> Array U8;
-encode_u64_le = |i, val, array| (
-    array.encode_u32_le(i, val.to_U32)
-         .encode_u32_le(i + 4, val.shift_right(32_U64).to_U32)
 );
 
 // `find_files(dir_path)` finds all files under
@@ -469,67 +414,88 @@ make_dirs = |dir_path, mode| (
     mkdir(dir_path, mode)
 );
 
-// A type of name and information of current kernel.
-type UName = unbox struct {
-    sysname: String,
-    nodename: String,
-    release: String,
-    version: String,
-    machine: String
-};
+namespace Platform {
+    // A type of name and information of current kernel.
+    type UName = unbox struct {
+        sysname: String,
+        nodename: String,
+        release: String,
+        version: String,
+        machine: String
+    };
 
-// The name and information of current kernel.
-// Calls POSIX C function `uname()`, and split the result by null characters.
-// NOTE: The system information does not change during program execution,
-// so this variable is constant.
-uname: UName;
-uname = (
-    let buf = Array::fill(4096, 0_U8);
-    let res = buf.borrow_ptr(|p_buf|
-        CALL_C[I32 uname(Ptr), p_buf]
-    );
-    eval assert (|_| "uname failed!: some error occurred in uname.", res == 0_I32);
-    /*
-    let dump = buf.to_iter.zip(Iterator::count_up(0)).fold(
-        Array::empty(0), |dump, (b, i)|
-        let dump = dump.push_back(encode_hex_char(b.shift_left(4_U8).bit_and(15_U8)))
-            .push_back(encode_hex_char(b.bit_and(15_U8)));
-        if i % 16 == 15 { dump.push_back('\n') } else { dump }
-    )._unsafe_to_string;
-    eval debug_println(dump);
-    */
-    let find_from_start_by = |start, cond, arr| (
-        let len = arr.Array::get_size;
-        loop(start, |idx| (
-            if idx == len { break $ Option::none $ () };
-            if cond(arr.@(idx)) { break $ Option::some $ idx };
-            continue $ idx + 1
-        ))
-    );
-    let names = loop(
-        ([], 0), |(names, start)|
-        let start = buf.find_from_start_by(start, |b| b != 0_U8);
-        if start.is_none {
-            break $ names
-        };
-        let start = start.as_some;
-        let end = buf.find_from_start_by(start, |b| b == 0_U8).map_or(
-            buf.get_size,
-            |end| end
+    // The name and information of current kernel.
+    // Calls POSIX C function `uname()`, and split the result by null characters.
+    // NOTE: The system information does not change during program execution,
+    // so this variable is constant.
+    uname: UName;
+    uname = (
+        let buf = Array::fill(4096, 0_U8);
+        let res = buf.borrow_ptr(|p_buf|
+            CALL_C[I32 uname(Ptr), p_buf]
         );
-        let name = buf.get_sub(start, end)._unsafe_to_string;
-        let names = names.push_back(name);
-        continue $ (names, end)
-    );
-    // Probably splitted to `[sysname, nodename, release, version, machine]`.
-    //eval debug_println("uname="+names.to_string);
+        eval assert (|_| "uname failed!: some error occurred in uname.", res == 0_I32);
+        /*
+        let dump = buf.to_iter.zip(Iterator::count_up(0)).fold(
+            Array::empty(0), |dump, (b, i)|
+            let dump = dump.push_back(encode_hex_char(b.shift_left(4_U8).bit_and(15_U8)))
+                .push_back(encode_hex_char(b.bit_and(15_U8)));
+            if i % 16 == 15 { dump.push_back('\n') } else { dump }
+        )._unsafe_to_string;
+        eval debug_println(dump);
+        */
+        let find_from_start_by = |start, cond, arr| (
+            let len = arr.Array::get_size;
+            loop(start, |idx| (
+                if idx == len { break $ Option::none $ () };
+                if cond(arr.@(idx)) { break $ Option::some $ idx };
+                continue $ idx + 1
+            ))
+        );
+        let names = loop(
+            ([], 0), |(names, start)|
+            let start = buf.find_from_start_by(start, |b| b != 0_U8);
+            if start.is_none {
+                break $ names
+            };
+            let start = start.as_some;
+            let end = buf.find_from_start_by(start, |b| b == 0_U8).map_or(
+                buf.get_size,
+                |end| end
+            );
+            let name = buf.get_sub(start, end)._unsafe_to_string;
+            let names = names.push_back(name);
+            continue $ (names, end)
+        );
+        // Probably splitted to `[sysname, nodename, release, version, machine]`.
+        //eval debug_println("uname="+names.to_string);
 
-    UName {
-        sysname: names.@(0),
-        nodename: names.@(1),
-        release: names.@(2),
-        version: names.@(3),
-        machine: names.@(4)
-    }
-);
+        UName {
+            sysname: names.@(0),
+            nodename: names.@(1),
+            release: names.@(2),
+            version: names.@(3),
+            machine: names.@(4)
+        }
+    );
+
+    // The byte order of platform.
+    byte_order: ByteOrder;
+    byte_order = (
+        let uts = Platform::uname;
+        // aarch64-linux-gnu (ChromeBook, Debian 11)
+        if uts.@sysname == "Linux" && uts.@machine == "aarch64" {
+            ByteOrder::little_endian()
+        };
+        // x86_64-linux-gnu (WSL 2, Ubuntu 22.04)
+        if uts.@sysname == "Linux" && uts.@machine == "x86_64" {
+            ByteOrder::little_endian()
+        };
+        eval assert (|_|
+            "Currently this platform is not supported: sysname="+uts.@sysname+" machine=" + uts.@machine,
+            false
+        );
+        ByteOrder::little_endian()
+    );
+}
 

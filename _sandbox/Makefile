@@ -15,7 +15,7 @@ ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.
 build_ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix
 	fix build -f $^ -d readline
 
-png: png.fix ndarray.fix ../lib/io_ex.fix ../lib/string_ex.fix
+png: png.fix ndarray.fix ../lib/io_ex.fix ../lib/string_ex.fix ../lib/encoding/binary.fix
 	fix run -f $^ -d png -d z
 
 test_state_monad:

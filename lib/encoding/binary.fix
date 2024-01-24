@@ -1,4 +1,9 @@
+// Binary utility, such as:
+// - Byte order
+// - Byte buffer
 module Binary;
+
+import Debug;
 
 type ByteOrder = unbox union {
     little_endian: (),
@@ -6,8 +11,8 @@ type ByteOrder = unbox union {
 };
 
 type ByteBuffer = unbox struct {
-    array: Array U8,
-    byte_order: ByteOrder
+    array: Array U8,            // internal byte array
+    byte_order: ByteOrder       // byte order
 };
 
 namespace ByteBuffer {
@@ -20,6 +25,15 @@ namespace ByteBuffer {
             array: array,
             byte_order: byte_order
         }
+    );
+
+    // `ByteBuffer::empty(capacity, byte_order)` creates new byte buffer such that:
+    // - The internal byte array is an empty array with capacity `capacity`
+    // - The byte order is `byte_order`
+    empty: I64 -> ByteOrder -> ByteBuffer;
+    empty = |capacity, byte_order| (
+        let array = Array::empty(capacity);
+        ByteBuffer::make(array, byte_order)
     );
 
     // `ByteBuffer::fill(size, value, byte_order)` creates new byte buffer such that:
@@ -37,7 +51,11 @@ namespace ByteBuffer {
         buf.@array.borrow_ptr(f)
     );
 
-    // Gets the byte array in the byte buffer.
+    // Gets the size of internal byte array.
+    get_size: ByteBuffer -> I64;
+    get_size = |buf| buf.@array.get_size;
+
+    // Gets the internal byte array.
     get_bytes: ByteBuffer -> Array U8;
     get_bytes = @array;
 
@@ -119,6 +137,39 @@ namespace ByteBuffer {
         } else {
             buf.mod_array(set_u64_be(i, val))
         }
+    );
+
+    to_u8_array: ByteBuffer -> Array U8;
+    to_u8_array = @array;
+
+    to_u32_array: ByteBuffer -> Array U32;
+    to_u32_array = |buf| (
+        let n = buf.get_size;
+        eval assert(|_| "invalid size", n.bit_and(3) == 0);
+        let u32array = Array::empty(n.shift_right(2));
+        loop(
+            (u32array, 0), |(u32array, i)|
+            if i >= n {
+                break $ u32array
+            };
+            let u32array = u32array.push_back(buf.get_u32(i));
+            continue $ (u32array, i + 4)
+        )
+    );
+
+    from_u32_array: Array U32 -> ByteOrder -> ByteBuffer;
+    from_u32_array = |u32array, byte_order| (
+        let n = u32array.get_size;
+        let buf = ByteBuffer::fill(n.shift_left(2), 0_U8, byte_order);
+        loop(
+            (buf, 0), |(buf, i)|
+            if i >= n {
+                break $ buf
+            };
+            let u32 = u32array.@(i);
+            let buf = buf.set_u32(i * 4, u32);
+            continue $ (buf, i + 1)
+        )
     );
 }
 
@@ -244,112 +295,3 @@ set_u64_be = |i, val, array| (
     array.set_u32_be(i, val.shift_right(32_U64).to_U32)
          .set_u32_be(i + 4, val.to_U32)
 );
-
-//-----------------------------------------------------------
-// Endian
-//-----------------------------------------------------------
-
-trait a: Endian {
-    // Gets U8 from the byte array at position `i`.
-    get_u8: I64 -> Array U8 -> a -> U8;
-    // Gets U16 from the byte array at position `i`.
-    get_u16: I64 -> Array U8 -> a -> U16;
-    // Gets U32 from the byte array at position `i`.
-    get_u32: I64 -> Array U8 -> a -> U32;
-    // Gets U64 from the byte array at position `i`.
-    get_u64: I64 -> Array U8 -> a -> U64;
-    // Sets U8 into the byte array at position `i`.
-    set_u8: I64 -> U8 -> Array U8 -> a -> Array U8;
-    // Sets U16 into the byte array at position `i`.
-    set_u16: I64 -> U16 -> Array U8 -> a -> Array U8;
-    // Sets U32 into the byte array at position `i`.
-    set_u32: I64 -> U32 -> Array U8 -> a -> Array U8;
-    // Sets U64 into the byte array at position `i`.
-    set_u64: I64 -> U64 -> Array U8 -> a -> Array U8;
-}
-
-type LittleEndian = unbox struct {
-    data: ()
-};
-
-_little_endian: LittleEndian;
-_little_endian = LittleEndian { data: () };
-
-impl LittleEndian: Endian {
-    get_u8 = |i, array, le| (
-        array.@(i)
-    );
-    get_u16 = |i, array, le| (
-        le.get_u8(i, array).to_U16.bit_or(
-            le.get_u8(i + 1, array).to_U16.shift_left(8_U16)
-        )
-    );
-    get_u32 = |i, array, le| (
-        le.get_u16(i, array).to_U32.bit_or(
-            le.get_u16(i + 2, array).to_U32.shift_left(16_U32)
-        )
-    );
-    get_u64 = |i, array, le| (
-        le.get_u32(i, array).to_U64.bit_or(
-            le.get_u32(i + 4, array).to_U64.shift_left(32_U64)
-        )
-    );
-    set_u8 = |i, val, array, le| (
-        array.set(i, val)
-    );
-    set_u16 = |i, val, array, le| (
-        let array = le.set_u8(i, val.to_U8, array);
-        le.set_u8(i + 1, val.shift_right(8_U16).to_U8, array)
-    );
-    set_u32 = |i, val, array, le| (
-        let array = le.set_u16(i, val.to_U16, array);
-        le.set_u16(i + 2, val.shift_right(16_U32).to_U16, array)
-    );
-    set_u64 = |i, val, array, le| (
-        let array = le.set_u32(i, val.to_U32, array);
-        le.set_u32(i + 4, val.shift_right(32_U64).to_U32, array)
-    );
-}
-
-type BigEndian = unbox struct {
-    data: ()
-};
-
-_big_endian: BigEndian;
-_big_endian = BigEndian { data: () };
-
-impl BigEndian: Endian {
-    get_u8 = |i, array, be| (
-        array.@(i)
-    );
-    get_u16 = |i, array, be| (
-        be.get_u8(i, array).to_U16.shift_left(8_U16).bit_or(
-            be.get_u8(i + 1, array).to_U16
-        )
-    );
-    get_u32 = |i, array, be| (
-        be.get_u16(i, array).to_U32.shift_left(16_U32).bit_or(
-            be.get_u16(i + 2, array).to_U32
-        )
-    );
-    get_u64 = |i, array, be| (
-        be.get_u32(i, array).to_U64.shift_left(32_U64).bit_or(
-            be.get_u32(i + 4, array).to_U64
-        )
-    );
-    set_u8 = |i, val, array, be| (
-        array.set(i, val)
-    );
-    set_u16 = |i, val, array, be| (
-        let array = be.set_u8(i, val.shift_right(8_U16).to_U8, array);
-        be.set_u8(i + 1, val.to_U8, array)
-    );
-    set_u32 = |i, val, array, be| (
-        let array = be.set_u16(i, val.shift_right(16_U32).to_U16, array);
-        be.set_u16(i + 2, val.to_U16, array)
-    );
-    set_u64 = |i, val, array, be| (
-        let array = be.set_u32(i, val.shift_right(32_U64).to_U32, array);
-        be.set_u32(i + 4, val.to_U32, array)
-    );
-}

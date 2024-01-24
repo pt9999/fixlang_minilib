@@ -38,6 +38,12 @@ SHA-1 secure hash function.
 
 SHA-256 secure hash function.
 
+### [lib/encoding/binary.fix](lib/encoding/binary.md)
+
+Binary utility, such as:
+- Byte order
+- Byte buffer
+
 ### [lib/io_ex.fix](lib/io_ex.md)
 
 IO extensions, such as:

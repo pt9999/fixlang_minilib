@@ -67,7 +67,7 @@ Type of file status
 
 ```
 type FileStat = unbox struct {
-    data: Array U8  // struct stat
+    data: ByteBuffer  // struct stat
 };
 ```
 ### namespace FileStat
@@ -110,38 +110,6 @@ Returns true if it is a directory.
 
 #### st_ctime: FileStat -> U64;
 
-#### decode_u8_le: I64 -> Array U8 -> U8;
-
-Decodes U8 from `array` at position `i` with little endian.
-
-#### decode_u16_le: I64 -> Array U8 -> U16;
-
-Decodes U16 from `array` at position `i` with little endian.
-
-#### decode_u32_le: I64 -> Array U8 -> U32;
-
-Decodes U32 from `array` at position `i` with little endian.
-
-#### decode_u64_le: I64 -> Array U8 -> U64;
-
-Decodes U64 from `array` at position `i` with little endian.
-
-#### encode_u8_le: I64 -> U8 -> Array U8 -> Array U8;
-
-Encodes U8 into `array` at position `i` with little endian.
-
-#### encode_u16_le: I64 -> U16 -> Array U8 -> Array U8;
-
-Encodes U16 into `array` at position `i` with little endian.
-
-#### encode_u32_le: I64 -> U32 -> Array U8 -> Array U8;
-
-Encodes U32 into `array` at position `i` with little endian.
-
-#### encode_u64_le: I64 -> U64 -> Array U8 -> Array U8;
-
-Encodes U64 into `array` at position `i` with little endian.
-
 #### find_files: String -> IOFail (Array String);
 
 `find_files(dir_path)` finds all files under
@@ -165,18 +133,20 @@ If the directory already exists, it does nothing.
 If `mode` is `none()`, octal 0777 is used as a mode.
 This mode is modified by the process's umask in the usual way.
 
+### namespace Platform
+
 ### type UName
 
 A type of name and information of current kernel.
 
 ```
-type UName = unbox struct {
-    sysname: String,
-    nodename: String,
-    release: String,
-    version: String,
-    machine: String
-};
+    type UName = unbox struct {
+        sysname: String,
+        nodename: String,
+        release: String,
+        version: String,
+        machine: String
+    };
 ```
 #### uname: UName;
 
@@ -184,4 +154,8 @@ The name and information of current kernel.
 Calls POSIX C function `uname()`, and split the result by null characters.
 NOTE: The system information does not change during program execution,
 so this variable is constant.
+
+#### byte_order: ByteOrder;
+
+The byte order of platform.
 

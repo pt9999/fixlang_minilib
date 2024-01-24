@@ -7,6 +7,8 @@ module SHA1;
 
 import Debug;
 
+import Binary;
+
 // `SHA1::digest(bytes)` computes SHA-1 secure hash function of `bytes`.
 digest: Array U8 -> Array U8;
 digest = |bytes| (
@@ -53,7 +55,8 @@ _update_inner = |input, msglen_inc, sha1| (
         if sha1.@msgbuf.get_size < n_msgbuf {
             continue $ (sha1, i_input)
         };
-        let message = sha1.@msgbuf._u8_array_to_u32_array_be;
+        let message = ByteBuffer::make(sha1.@msgbuf, ByteOrder::big_endian()).to_u32_array;
+        //let message = U32_U8::convert(sha1.@msgbuf, ByteOrder::big_endian());
         let sha1 = sha1.mod_hash(_update_hash(message));
         let sha1 = sha1.mod_msgbuf(truncate(0));
         continue $ (sha1, i_input)    
@@ -75,11 +78,14 @@ finalize = |sha1| (
         continue $ sha1._update_inner([0x00_U8], 0_U64)
     );
     let msglen_bits: U64 = sha1.@msglen * 8_U64;
-    let sha1 = sha1._update_inner(msglen_bits._u64_to_u8_array_be, 0_U64);
+    let buf = ByteBuffer::fill(8, 0_U8, ByteOrder::big_endian());
+    let buf = buf.set_u64(0, msglen_bits);
+    let sha1 = sha1._update_inner(buf.to_u8_array, 0_U64);
 
     eval assert(|_| "padding failed", sha1.@msgbuf.get_size == 0);
 
-    let digest = sha1.@hash._u32_array_to_u8_array_be;
+    let digest = ByteBuffer::from_u32_array(sha1.@hash, ByteOrder::big_endian()).to_u8_array;
+    //let digest = U8_U32::convert(sha1.@hash, ByteOrder::big_endian());
     digest
 );
 
@@ -188,60 +194,4 @@ _update_hash = |message, hash| (
         .set(3, d + hash.@(3))
         .set(4, e + hash.@(4));
     hash
-);
-
-// Converts `Array U8` to `Array U32` with big endian.
-// The size of `Array U8` must be multiple of 8.
-_u8_array_to_u32_array_be: Array U8 -> Array U32;
-_u8_array_to_u32_array_be = |u8array| (
-    let n = u8array.get_size;
-    eval assert(|_| "invalid size", n.bit_and(3) == 0);
-    let u32array = Array::empty(n.shift_right(2));
-    loop(
-        (u32array, 0), |(u32array, i)|
-        if i >= n {
-            break $ u32array
-        };
-        let x = u8array.@(i+0).to_U32.shift_left(24_U32);
-        let x = u8array.@(i+1).to_U32.shift_left(16_U32).bit_or(x);
-        let x = u8array.@(i+2).to_U32.shift_left( 8_U32).bit_or(x);
-        let x = u8array.@(i+3).to_U32.shift_left( 0_U32).bit_or(x);
-        let u32array = u32array.push_back(x);
-        continue $ (u32array, i + 4)
-    )
-);
-
-// Converts `Array U32` to `Array U8` with big endian.
-_u32_array_to_u8_array_be: Array U32 -> Array U8;
-_u32_array_to_u8_array_be = |u32array| (
-    let n = u32array.get_size;
-    let u8array = Array::empty(n.shift_left(2));
-    loop(
-        (u8array, 0), |(u8array, i)|
-        if i >= n {
-            break $ u8array
-        };
-        let u32 = u32array.@(i);
-        let u8array = u8array
-            .push_back(u32.shift_right(24_U32).bit_and(255_U32).to_U8)
-            .push_back(u32.shift_right(16_U32).bit_and(255_U32).to_U8)
-            .push_back(u32.shift_right( 8_U32).bit_and(255_U32).to_U8)
-            .push_back(u32.shift_right( 0_U32).bit_and(255_U32).to_U8);
-        continue $ (u8array, i + 1)
-    )
-);
-
-// Converts `U64` to `Array U8` with big endian.
-_u64_to_u8_array_be: U64 -> Array U8;
-_u64_to_u8_array_be = |u64| (
-    let u8array = Array::empty(8);
-    loop(
-        (u8array, 0), |(u8array, i)|
-        if i >= 8 {
-            break $ u8array
-        };
-        let u8 = u64.shift_right(((7-i)*8).to_U64).bit_and(255_U64).to_U8;
-        let u8array = u8array.push_back(u8);
-        continue $ (u8array, i + 1)
-    )
 );

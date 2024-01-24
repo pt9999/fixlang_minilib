@@ -37,9 +37,9 @@ test_tree_set:
 
 test_crypto: test_sha1 test_sha256
 test_sha1:
-	fix run -f tests/crypto/sha1_test.fix lib/crypto/sha1.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/crypto/sha1_test.fix lib/crypto/sha1.fix lib/encoding/binary.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_sha256:
-	fix run -f tests/crypto/sha256_test.fix lib/crypto/sha256.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/crypto/sha256_test.fix lib/crypto/sha256.fix lib/encoding/binary.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_encoding: test_binary
 test_binary:

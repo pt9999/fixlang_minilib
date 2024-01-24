@@ -19,6 +19,8 @@ This library is still work in progress.
   - Tree map
   - Tree set
   - Red-Black tree
+- Cryptography
+  - Secure hash function (SHA-1, SHA-256)
 - File format
   - JSON encoding and decoding
 - Text handling

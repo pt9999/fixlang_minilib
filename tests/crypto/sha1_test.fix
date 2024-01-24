@@ -1,0 +1,54 @@
+module Main;
+
+import Debug;
+import Random;
+
+import SHA1;
+import StringEx;
+import UnitTest;
+
+bytes_to_string_hex: Array U8 -> String;
+bytes_to_string_hex = |u8array| (
+    u8array.to_iter.fold(
+        [], |output, u8|
+        output.push_back(u8.shift_right(4_U8).bit_and(15_U8).encode_hex_char)
+              .push_back(u8.shift_right(0_U8).bit_and(15_U8).encode_hex_char)
+    ).push_back(0_U8)._unsafe_from_c_str.to_lower
+);
+
+make_random_bytes: I64 -> I64 -> Array U8;
+make_random_bytes = |size, seed| (
+    let random = Random::init_by_seed(seed.to_U64);
+    let iter = Iterator::generate(random, generate_U64 >> some);
+    iter.map(to_U8).take(size).to_array
+);
+
+test_digest_ok : (String, Array U8, String) -> TestCase;
+test_digest_ok = |(name, bytes, expected)| (
+    let testname = "test_digest_ok (" + name + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let _ = *write_file_bytes(Path::parse("tmp." + name).as_some, bytes);
+    let actual = SHA1::digest(bytes).bytes_to_string_hex;
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_digest: TestCase;
+test_digest = (
+    [
+        test_digest_ok $ ("empty", [], "da39a3ee5e6b4b0d3255bfef95601890afd80709"),
+        test_digest_ok $ ("abcdefg", "abcdefg".get_bytes.pop_back, "2fb5e13419fc89246865e7a324f476ec624e8740"),
+        test_digest_ok $ ("0-255", Array::from_map(256, |i| i.to_U8), "4916d6bdb7f78e6803698cab32d1586ea457dfc8"),
+        test_digest_ok $ ("random_567", make_random_bytes(100000, 567), "1c3256edf0d5e66cbf4971b4134725e0b0652b76"),
+        TestCase::empty
+    ].run_tests
+);
+
+main: IO ();
+main = (
+    [
+        test_digest,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

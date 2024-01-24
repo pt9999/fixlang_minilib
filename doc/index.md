@@ -30,6 +30,14 @@ TreeMap is a map that manages keys in sorted order.
 
 TreeSet is a set that manages elements in sorted order.
 
+### [lib/crypto/sha1.fix](lib/crypto/sha1.md)
+
+SHA-1 secure hash function.
+
+### [lib/crypto/sha256.fix](lib/crypto/sha256.md)
+
+SHA-256 secure hash function.
+
 ### [lib/io_ex.fix](lib/io_ex.md)
 
 IO extensions, such as:

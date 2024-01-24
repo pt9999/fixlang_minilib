@@ -16,7 +16,7 @@ LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix lib/io_ex.fix $(LIB_TCP) $(LIB_STRING_EX)
 LIB_REGEXP := lib/text/regexp/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
 
-test: test_app_support test_collection test_file_format test_io_ex test_text test_net
+test: test_app_support test_collection test_crypto test_file_format test_io_ex test_text test_net
 
 test_app_support: test_clap
 test_clap:
@@ -33,6 +33,12 @@ test_tree_map:
 	fix run -f tests/collection/tree_map_test.fix tests/collection/array_testutil.fix lib/collection/tree_map.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_tree_set:
 	fix run -f tests/collection/tree_set_test.fix tests/collection/array_testutil.fix lib/collection/tree_set.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+
+test_crypto: test_sha1 test_sha256
+test_sha1:
+	fix run -f tests/crypto/sha1_test.fix lib/crypto/sha1.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+test_sha256:
+	fix run -f tests/crypto/sha256_test.fix lib/crypto/sha256.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_file_format: test_json
 test_json:

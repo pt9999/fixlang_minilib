@@ -1,11 +1,93 @@
-// SHA-256
+// SHA-256 secure hash function.
+//
+// Implemented from specification of FIPS PUB 180-4:
 // https://csrc.nist.gov/files/pubs/fips/180-4/final/docs/fips180-4.pdf
-module Main;
+//
+module SHA256;
 
 import Debug;
 
-// 2.2.2 Symbols and Operations 
+// `SHA256::digest(bytes)` computes SHA-256 secure hash function of `bytes`.
+digest: Array U8 -> Array U8;
+digest = |bytes| (
+    SHA256::empty.update(bytes).finalize
+);
 
+// SHA-256 hasher.
+// Usually it is sufficient to simply call `SHA256:digest(bytes)` without using this structure.
+type SHA256 = unbox struct {
+    hash: Array U32,
+    msglen: U64,
+    msgbuf: Array U8
+};
+
+// An empty SHA-256 hasher.
+empty: SHA256;
+empty = SHA256 {
+    hash: _init_hash,
+    msglen: 0_U64,
+    msgbuf: Array::empty(64)
+};
+
+// `sha256.update(bytes)` processes `bytes`, and updates its internal state.
+update: Array U8 -> SHA256 -> SHA256;
+update = |bytes, sha256| (
+    sha256._update_inner(bytes, bytes.get_size.to_U64)
+);
+
+// `sha256._update_inner(input, msglen_inc)` updates the message buffer with input.
+// And it increments the message length by `msglen_inc`.
+// When the message buffer is full (64 bytes), it updates hash with the message
+// and clears the messsage buffer.
+_update_inner: Array U8 -> U64 -> SHA256 -> SHA256;
+_update_inner = |input, msglen_inc, sha256| (
+    let n_input = input.get_size;
+    let n_msgbuf = 64;
+    let sha256 = loop(
+        (sha256, 0), |(sha256, i_input)|
+        if i_input >= n_input {
+            break $ sha256
+        };
+        let sha256 = sha256.mod_msgbuf(push_back(input.@(i_input)));
+        let i_input = i_input + 1;
+        if sha256.@msgbuf.get_size < n_msgbuf {
+            continue $ (sha256, i_input)
+        };
+        let message = sha256.@msgbuf._u8_array_to_u32_array_be;
+        let sha256 = sha256.mod_hash(_update_hash(message));
+        let sha256 = sha256.mod_msgbuf(truncate(0));
+        continue $ (sha256, i_input)    
+    );
+    let sha256 = sha256.mod_msglen(|len| len + msglen_inc);
+    sha256
+);
+
+// `sha256.finalize` retrieves a final SHA-256 hash value.
+finalize: SHA256 -> Array U8;
+finalize = |sha256| (
+    // 5.1 Padding the Message 
+    let sha256 = sha256._update_inner([0x80_U8], 0_U64);
+    let sha256 = loop(
+        sha256, |sha256|
+        if sha256.@msgbuf.get_size == 448/8 {
+            break $ sha256
+        };
+        continue $ sha256._update_inner([0x00_U8], 0_U64)
+    );
+    let msglen_bits: U64 = sha256.@msglen * 8_U64;
+    let sha256 = sha256._update_inner(msglen_bits._u64_to_u8_array_be, 0_U64);
+
+    eval assert(|_| "padding failed", sha256.@msgbuf.get_size == 0);
+
+    let digest = sha256.@hash._u32_array_to_u8_array_be;
+    digest
+);
+
+//---------------------------------------------------------------
+// implementation details
+//---------------------------------------------------------------
+
+// 2.2.2 Symbols and Operations 
 // bitwise complement
 _bit_not: U32 -> U32;
 _bit_not = |x| x.bit_xor(0xFFFFFFFF_U32);
@@ -155,6 +237,8 @@ _update_hash = |message, hash| (
     hash
 );
 
+// Converts `Array U8` to `Array U32` with big endian.
+// The size of `Array U8` must be multiple of 8.
 _u8_array_to_u32_array_be: Array U8 -> Array U32;
 _u8_array_to_u32_array_be = |u8array| (
     let n = u8array.get_size;
@@ -174,6 +258,7 @@ _u8_array_to_u32_array_be = |u8array| (
     )
 );
 
+// Converts `Array U32` to `Array U8` with big endian.
 _u32_array_to_u8_array_be: Array U32 -> Array U8;
 _u32_array_to_u8_array_be = |u32array| (
     let n = u32array.get_size;
@@ -205,98 +290,4 @@ _u64_to_u8_array_be = |u64| (
         let u8array = u8array.push_back(u8);
         continue $ (u8array, i + 1)
     )
-);
-
-type SHA256 = unbox struct {
-    hash: Array U32,
-    msglen: U64,
-    msgbuf: Array U8
-};
-
-namespace SHA256 {
-    empty: SHA256;
-    empty = SHA256 {
-        hash: _init_hash,
-        msglen: 0_U64,
-        msgbuf: Array::empty(64)
-    };
-
-    update: Array U8 -> SHA256 -> SHA256;
-    update = |input, sha256| (
-        sha256._update_inner(input, input.get_size.to_U64)
-    );
-
-    _update_inner: Array U8 -> U64 -> SHA256 -> SHA256;
-    _update_inner = |input, msglen_inc, sha256| (
-        let n_input = input.get_size;
-        let n_msgbuf = 64;
-        let sha256 = loop(
-            (sha256, 0), |(sha256, i_input)|
-            if i_input >= n_input {
-                break $ sha256
-            };
-            let sha256 = sha256.mod_msgbuf(push_back(input.@(i_input)));
-            let i_input = i_input + 1;
-            if sha256.@msgbuf.get_size < n_msgbuf {
-                continue $ (sha256, i_input)
-            };
-            //eval debug_eprintln("msgbuf="+sha256.@msgbuf.bytes_to_string_hex);
-            let message = sha256.@msgbuf._u8_array_to_u32_array_be;
-            let sha256 = sha256.mod_hash(_update_hash(message));
-            let sha256 = sha256.mod_msgbuf(truncate(0));
-            continue $ (sha256, i_input)    
-        );
-        let sha256 = sha256.mod_msglen(|len| len + msglen_inc);
-        sha256
-    );
-
-    finalize: SHA256 -> Array U8;
-    finalize = |sha256| (
-        // 5.1 Padding the Message 
-        let sha256 = sha256._update_inner([0x80_U8], 0_U64);
-        let sha256 = loop(
-            sha256, |sha256|
-            if sha256.@msgbuf.get_size == 448/8 {
-                break $ sha256
-            };
-            continue $ sha256._update_inner([0x00_U8], 0_U64)
-        );
-        let msglen_bits: U64 = sha256.@msglen * 8_U64;
-        let sha256 = sha256._update_inner(msglen_bits._u64_to_u8_array_be, 0_U64);
-
-        eval assert(|_| "padding failed", sha256.@msgbuf.get_size == 0);
-
-        let digest = sha256.@hash._u32_array_to_u8_array_be;
-        digest
-    );
-
-    digest: Array U8 -> Array U8;
-    digest = |bytes| (
-        SHA256::empty.update(bytes).finalize
-    );
-}
-
-// Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').
-encode_hex_char: U8 -> U8;
-encode_hex_char =
-    let hex_chars = "0123456789ABCDEF".get_bytes.pop_back
-    in |c| hex_chars.@(c.bit_and(15_U8).to_I64);
-
-bytes_to_string_hex: Array U8 -> String;
-bytes_to_string_hex = |u8array| (
-    u8array.to_iter.fold(
-        [], |output, u8|
-        output.push_back(u8.shift_right(4_U8).bit_and(15_U8).encode_hex_char)
-              .push_back(u8.shift_right(0_U8).bit_and(15_U8).encode_hex_char)
-    ).push_back(0_U8)._unsafe_from_c_str
-);
-
-
-main: IO ();
-main = (
-    //let bytes = "abcdefg".get_bytes.pop_back;
-    let bytes = Array::from_map(256, |i| i.to_U8);
-    let _ = *write_file_bytes(Path::parse("tmp.dat").as_some, bytes).to_result;
-    let hash = SHA256::digest(bytes);
-    println(hash.bytes_to_string_hex)
 );

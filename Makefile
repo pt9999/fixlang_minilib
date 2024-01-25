@@ -10,14 +10,15 @@ LIB_UNICODE := lib/unicode.fix $(LIB_STRING_EX)
 LIB_CLAP := lib/clap.fix $(LIB_STRING_EX)
 LIB_ORDERED_MAP := lib/collection/ordered_map.fix $(LIB_STRING_EX)
 LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
-LIB_JSON := lib/json.fix lib/json_encoder.fix lib/json_decoder.fix lib/simple_parser.fix \
+LIB_JSON := lib/encoding/json.fix lib/encoding/json/json_encoder.fix lib/encoding/json/json_decoder.fix \
+			lib/simple_parser.fix \
 			lib/collection/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix $(LIB_IO_EX) $(LIB_TCP) $(LIB_STRING_EX)
 LIB_REGEXP := lib/text/regexp/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
 
-test: test_app_support test_collection test_crypto test_encoding test_file_format test_io_ex test_text test_net
+test: test_app_support test_collection test_crypto test_encoding test_io_ex test_text test_net
 
 test_app_support: test_clap
 test_clap:
@@ -41,13 +42,11 @@ test_sha1:
 test_sha256:
 	fix run -f tests/crypto/sha256_test.fix lib/crypto/sha256.fix lib/encoding/binary.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
-test_encoding: test_binary
+test_encoding: test_binary test_json
 test_binary:
 	fix run -f tests/encoding/binary_test.fix lib/encoding/binary.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
-
-test_file_format: test_json
 test_json:
-	fix run -f tests/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
+	fix run -f tests/encoding/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
 
 test_io_ex:
 	fix run -f tests/io_ex_test.fix $(LIB_IO_EX) $(LIB_STRING_EX) $(LIB_UNIT_TEST)

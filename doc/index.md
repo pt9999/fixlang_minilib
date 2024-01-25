@@ -44,6 +44,18 @@ Binary utility, such as:
 - Byte order
 - Byte buffer
 
+### [lib/encoding/json/json_decoder.fix](lib/encoding/json/json_decoder.md)
+
+Decodes a JSON value from a string.
+
+### [lib/encoding/json/json_encoder.fix](lib/encoding/json/json_encoder.md)
+
+Encodes a JSON value to a string.
+
+### [lib/encoding/json.fix](lib/encoding/json.md)
+
+Definition of the structure of a JSON value.
+
 ### [lib/io_ex.fix](lib/io_ex.md)
 
 IO extensions, such as:
@@ -53,18 +65,6 @@ IO extensions, such as:
 - Checks if file or directory exists
 - Retrieve file information, such as file size and time stamps
 - Get kernel information such as system name, machine archtecture
-
-### [lib/json.fix](lib/json.md)
-
-Definition of the structure of a JSON value.
-
-### [lib/json_decoder.fix](lib/json_decoder.md)
-
-Decodes a JSON value from a string.
-
-### [lib/json_encoder.fix](lib/json_encoder.md)
-
-Encodes a JSON value to a string.
 
 ### [lib/net/html.fix](lib/net/html.md)
 

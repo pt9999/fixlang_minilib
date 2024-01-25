@@ -5,7 +5,7 @@ clean:
 
 LIB_UNIT_TEST := lib/unit_test.fix
 LIB_STRING_EX := lib/text/string_ex.fix
-LIB_IO_EX := lib/io_ex.fix lib/encoding/binary.fix
+LIB_IO_EX := lib/io/io_ex.fix lib/encoding/binary.fix
 LIB_UNICODE := lib/text/unicode.fix $(LIB_STRING_EX)
 LIB_CLAP := lib/app/clap.fix $(LIB_STRING_EX)
 LIB_ORDERED_MAP := lib/collection/ordered_map.fix $(LIB_STRING_EX)
@@ -49,7 +49,7 @@ test_json:
 	fix run -f tests/encoding/json_test.fix $(LIB_JSON) $(LIB_UNIT_TEST)
 
 test_io_ex:
-	fix run -f tests/io_ex_test.fix $(LIB_IO_EX) $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/io/io_ex_test.fix $(LIB_IO_EX) $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:

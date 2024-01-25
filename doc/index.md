@@ -56,7 +56,7 @@ Encodes a JSON value to a string.
 
 Definition of the structure of a JSON value.
 
-### [lib/io_ex.fix](lib/io_ex.md)
+### [lib/io/io_ex.fix](lib/io/io_ex.md)
 
 IO extensions, such as:
 - Create or delete files and directories

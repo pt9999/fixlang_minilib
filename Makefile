@@ -3,7 +3,7 @@ all: examples
 clean:
 	rm -f examples/*.out
 
-LIB_UNIT_TEST := lib/unit_test.fix
+LIB_UNIT_TEST := lib/testing/unit_test.fix
 LIB_STRING_EX := lib/text/string_ex.fix
 LIB_IO_EX := lib/io/io_ex.fix lib/encoding/binary.fix
 LIB_UNICODE := lib/text/unicode.fix $(LIB_STRING_EX)

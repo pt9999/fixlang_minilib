@@ -104,6 +104,10 @@ TCP operation, such as:
 
 URL and URI parsing
 
+### [lib/testing/unit_test.fix](lib/testing/unit_test.md)
+
+Unit Test Framework
+
 ### [lib/text/regexp/regexp.fix](lib/text/regexp/regexp.md)
 
 Simple regular expression.
@@ -135,8 +139,4 @@ String extensions, such as:
 ### [lib/text/unicode.fix](lib/text/unicode.md)
 
 Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
-
-### [lib/unit_test.fix](lib/unit_test.md)
-
-Unit Test Framework
 

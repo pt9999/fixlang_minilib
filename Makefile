@@ -4,15 +4,15 @@ clean:
 	rm -f examples/*.out
 
 LIB_UNIT_TEST := lib/unit_test.fix
-LIB_STRING_EX := lib/string_ex.fix
+LIB_STRING_EX := lib/text/string_ex.fix
 LIB_IO_EX := lib/io_ex.fix lib/encoding/binary.fix
-LIB_UNICODE := lib/unicode.fix $(LIB_STRING_EX)
+LIB_UNICODE := lib/text/unicode.fix $(LIB_STRING_EX)
 LIB_CLAP := lib/app/clap.fix $(LIB_STRING_EX)
 LIB_ORDERED_MAP := lib/collection/ordered_map.fix $(LIB_STRING_EX)
-LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
+LIB_PARSER := lib/text/simple_parser.fix $(LIB_STRING_EX)
 LIB_JSON := lib/encoding/json.fix lib/encoding/json/json_encoder.fix lib/encoding/json/json_decoder.fix \
-			lib/simple_parser.fix \
-			lib/collection/ordered_map.fix lib/unicode.fix $(LIB_STRING_EX)
+			lib/text/simple_parser.fix \
+			lib/collection/ordered_map.fix lib/text/unicode.fix $(LIB_STRING_EX)
 LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix $(LIB_IO_EX) $(LIB_TCP) $(LIB_STRING_EX)
@@ -53,11 +53,11 @@ test_io_ex:
 
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:
-	fix run -f tests/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/text/string_ex_test.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_unicode:
-	fix run -f tests/unicode_test.fix $(LIB_UNICODE) $(LIB_UNIT_TEST)
+	fix run -f tests/text/unicode_test.fix $(LIB_UNICODE) $(LIB_UNIT_TEST)
 test_parser:
-	fix run -f tests/simple_parser_test.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
+	fix run -f tests/text/simple_parser_test.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
 test_regexp:
 	fix run -f tests/text/regexp/regexp_test.fix $(LIB_REGEXP) $(LIB_UNIT_TEST)
 
@@ -69,7 +69,7 @@ test_request:
 test_router:
 	fix run -f tests/net/router_test.fix lib/net/router.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_html:
-	fix run -f tests/net/html_test.fix lib/net/html.fix lib/unicode.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/net/html_test.fix lib/net/html.fix $(LIB_UNICODE) $(LIB_UNIT_TEST)
 
 
 document: examples/fixdoc.out
@@ -91,15 +91,15 @@ examples/sample_server.out: examples/sample_server.fix $(LIB_TCP) lib/collection
 examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/app/clap.fix $(LIB_IO_EX)
 	fix build -f $^ -o $@
 
-examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
+examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix lib/text/unicode.fix $(LIB_HTTP_SERVER)
 	fix build -f $^ -o $@
 
-http_server: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
+http_server: examples/sample_http_server.fix lib/net/html.fix lib/text/unicode.fix $(LIB_HTTP_SERVER)
 	fix run -f $^
 
 examples/grep.out: examples/grep.fix $(LIB_REGEXP) lib/app/clap.fix
 	fix build -f $^ -o $@
 
 examples/spell_checker.out: examples/spell_checker.fix lib/collection/tree_map.fix lib/collection/tree_set.fix \
-							lib/collection/rbtree.fix lib/string_ex.fix $(LIB_IO_EX)
+							lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_IO_EX)
 	fix build -f $^ -o $@

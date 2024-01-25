@@ -104,22 +104,6 @@ TCP operation, such as:
 
 URL and URI parsing
 
-### [lib/simple_parser.fix](lib/simple_parser.md)
-
-Simple text parser. Customizable by monadic operations.
-- Stream of characters
-- Basic parsers such as character matching
-- Create complex parsers with composition
-
-### [lib/string_ex.fix](lib/string_ex.md)
-
-String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
-- Array U8 -> String conversion
-- Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
-
 ### [lib/text/regexp/regexp.fix](lib/text/regexp/regexp.md)
 
 Simple regular expression.
@@ -132,7 +116,23 @@ NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.
 
 Character class and Pattern parser. This is internal module of `RegExp`.
 
-### [lib/unicode.fix](lib/unicode.md)
+### [lib/text/simple_parser.fix](lib/text/simple_parser.md)
+
+Simple text parser. Customizable by monadic operations.
+- Stream of characters
+- Basic parsers such as character matching
+- Create complex parsers with composition
+
+### [lib/text/string_ex.fix](lib/text/string_ex.md)
+
+String extensions, such as:
+- ToString for Tuple, Option, Result, Array, HashMap
+- Array U8 -> String conversion
+- Search, replace, split, comparison of String
+- Hexadecimal String
+- File Path handling
+
+### [lib/text/unicode.fix](lib/text/unicode.md)
 
 Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
 

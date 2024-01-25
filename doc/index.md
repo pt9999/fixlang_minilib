@@ -1,6 +1,6 @@
 # Index
 
-### [lib/clap.fix](lib/clap.md)
+### [lib/app/clap.fix](lib/app/clap.md)
 
 Command line argument parser.
 Inspired by [`clap` crate of Rust](https://docs.rs/clap/3.2.0/clap/index.html).

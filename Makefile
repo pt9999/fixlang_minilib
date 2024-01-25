@@ -7,7 +7,7 @@ LIB_UNIT_TEST := lib/unit_test.fix
 LIB_STRING_EX := lib/string_ex.fix
 LIB_IO_EX := lib/io_ex.fix lib/encoding/binary.fix
 LIB_UNICODE := lib/unicode.fix $(LIB_STRING_EX)
-LIB_CLAP := lib/clap.fix $(LIB_STRING_EX)
+LIB_CLAP := lib/app/clap.fix $(LIB_STRING_EX)
 LIB_ORDERED_MAP := lib/collection/ordered_map.fix $(LIB_STRING_EX)
 LIB_PARSER := lib/simple_parser.fix $(LIB_STRING_EX)
 LIB_JSON := lib/encoding/json.fix lib/encoding/json/json_encoder.fix lib/encoding/json/json_decoder.fix \
@@ -18,11 +18,11 @@ LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix $(LIB_IO_EX) $(LIB_TCP) $(LIB_STRING_EX)
 LIB_REGEXP := lib/text/regexp/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
 
-test: test_app_support test_collection test_crypto test_encoding test_io_ex test_text test_net
+test: test_app test_collection test_crypto test_encoding test_io_ex test_text test_net
 
-test_app_support: test_clap
+test_app: test_clap
 test_clap:
-	fix run -f tests/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)
+	fix run -f tests/app/clap_test.fix $(LIB_CLAP) $(LIB_UNIT_TEST)
 
 test_collection: test_ordered_map test_deque test_rbtree test_tree_map test_tree_set
 test_ordered_map:
@@ -88,7 +88,7 @@ examples/sample_client.out: examples/sample_client.fix $(LIB_TCP) $(LIB_CLAP)
 examples/sample_server.out: examples/sample_server.fix $(LIB_TCP) lib/collection/deque.fix
 	fix build -f $^ -o $@
 
-examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/clap.fix $(LIB_IO_EX)
+examples/fixdoc.out: examples/fixdoc.fix $(LIB_PARSER) lib/app/clap.fix $(LIB_IO_EX)
 	fix build -f $^ -o $@
 
 examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
@@ -97,7 +97,7 @@ examples/sample_http_server.out: examples/sample_http_server.fix lib/net/html.fi
 http_server: examples/sample_http_server.fix lib/net/html.fix lib/unicode.fix $(LIB_HTTP_SERVER)
 	fix run -f $^
 
-examples/grep.out: examples/grep.fix $(LIB_REGEXP) lib/clap.fix
+examples/grep.out: examples/grep.fix $(LIB_REGEXP) lib/app/clap.fix
 	fix build -f $^ -o $@
 
 examples/spell_checker.out: examples/spell_checker.fix lib/collection/tree_map.fix lib/collection/tree_set.fix \

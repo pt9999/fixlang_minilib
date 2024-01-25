@@ -4,6 +4,8 @@ Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
 This library is still work in progress.
 
+NOTE: I am currently undergoing a major restructuring.
+
 ## Tested Platform
 - x86_64-linux-gnu
 - aarch64-linux-gnu
@@ -11,7 +13,7 @@ This library is still work in progress.
 
 ## Features
 
-- Application support
+- Application
   - Clap (Command Line Argument Parser)
 - Collections
   - Ordered map
@@ -24,16 +26,19 @@ This library is still work in progress.
 - Encoding
   - Binary (byte order, byte buffer)
   - JSON
-- Text handling
-  - Regular expression
-  - Simple parser
-  - String utility
-  - UTF8/UTF16/UTF32 conversion
+- IO
+  - IO extension
 - Networking
-  - TCP/IP Socket (WARNING: IPv6 is not supported yet)
+  - TCP/IP Socket (IPv4 only)
   - URL, URI
   - Simple HTTP Server
-- Unit testing
+- Testing
+  - Unit test
+- Text
+  - Simple parser
+  - String extension
+  - Regular expression
+  - Unicode (UTF8/UTF16/UTF32 conversion)
 
 ## How to use
 

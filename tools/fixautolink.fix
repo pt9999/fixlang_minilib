@@ -1,0 +1,360 @@
+module Main;
+
+import Character;
+import Debug;
+import HashMap;
+import HashSet;
+import Subprocess;
+
+import Minilib.IO.IOEx;
+import Minilib.Text.StringEx;
+
+matches_decl: String -> String -> Result ErrMsg String;
+matches_decl = |decl, line| (
+    let line = line.strip_spaces;
+    let (left, right) = line.split_first(" ");
+    if left != decl {
+        err $ "NotMatch"
+    };
+    let line = right.strip_spaces;
+    let name = line.get_bytes.pop_back.to_iter.take_while(
+        |c| c.is_alnum || c == '_' || c == '.'
+    ).to_array._unsafe_to_string;
+    if name == "" {
+        err $ "NotMatch"
+    };
+    ok $ name
+);
+
+type Module = unbox struct {
+    name: String,
+    path: String,
+    imports: Array String
+};
+
+namespace Module {
+    read: String -> IOFail Module;
+    read = |path| (
+        let module = Module {
+            name: "",
+            path: path,
+            imports: []
+        };
+        let contents = *read_file_bytes(Path::parse(path).as_some);
+        let contents = contents._unsafe_to_string;
+        let module = *contents.split("\n").loop_iter_m(
+            module, |module, line|
+            let line = line.strip_spaces;
+            if line == "" {
+                continue_m $ module
+            };
+            let is_comment = line.substring(0, 2) == "//";
+            if is_comment {
+                continue_m $ module
+            };
+            let module_decl = matches_decl("module", line);
+            if module_decl.is_ok {
+                let module = module.set_name(module_decl.as_ok);
+                continue_m $ module
+            };
+            let import_decl = matches_decl("import", line);
+            if import_decl.is_ok {
+                let module = module.mod_imports(push_back(import_decl.as_ok));
+                continue_m $ module
+            };
+            break_m $ module
+        );
+        if module.@name == "" {
+            throw $ "not found module name: " + path
+        };
+        pure $ module
+    );
+}
+
+type Linker = unbox struct {
+    lib_dirs: Array String,
+    lib_files: Array String,
+    modules: HashMap String Module,
+    main_files: Array String,
+    required_files: Array String,
+    imported: HashSet String,
+    needed: Iterator String
+};
+
+namespace Linker {
+    empty: Linker;
+    empty = Linker {
+        lib_dirs: [],
+        lib_files: [],
+        modules: HashMap::empty(0),
+        main_files: [],
+        required_files: [],
+        imported: HashSet::empty(0),
+        needed: Iterator::empty
+    };
+
+    find_library_files: Array String -> Linker -> IOFail Linker;
+    find_library_files = |lib_dirs, linker| (
+        let linker = linker.set_lib_dirs(lib_dirs);
+        linker.@lib_dirs.to_iter.fold_m(
+            linker, |linker, lib_dir|
+            let file_paths = *find_files(lib_dir);
+            let fix_file_paths = (
+                file_paths.to_iter.filter(|path|
+                    path.ends_with(".fix") &&
+                    path.find("/.fixlang/", 0).is_none
+                ).to_array
+            );
+            pure $ linker.mod_lib_files(append(fix_file_paths))
+        )
+    );
+
+    read_modules: Linker -> IOFail Linker;
+    read_modules = |linker| (
+        linker.@lib_files.to_iter.fold_m(
+            linker, |linker, lib_file|
+            let module = *Module::read(lib_file);
+            pure $ linker.mod_modules(insert(module.@name, module))
+        )
+    );
+
+    print_modules: Linker -> IO ();
+    print_modules = |linker| (
+        linker.@modules.to_iter.fold_m(
+            (), |_, (name, module)|
+            println("name=" + name + ": path="+ module.@path + " imports: " + module.@imports.to_string)
+        )
+    );
+
+    read_main_files: Array String -> Linker -> IOFail Linker;
+    read_main_files = |main_files, linker| (
+        let linker = linker.set_main_files(main_files);
+        let linker = linker.set_required_files(main_files);
+        let main_modules = *main_files.to_iter.fold_m(
+            [], |main_modules, main_file|
+            let module = *Module::read(main_file);
+            pure $ main_modules.push_back(module)
+        );
+        let linker = main_modules.to_iter.reverse.fold(
+            linker, |linker, module|
+            let linker = linker.mod_modules(insert(module.@name, module));
+            let linker = linker.mod_imported(insert(module.@name));
+            let linker = linker.mod_needed(|needed| module.@imports.to_iter.append(needed));
+            linker
+        );
+        pure $ linker
+    );
+
+    calc_required_files: Linker -> Linker;
+    calc_required_files = |linker| (
+        loop(
+            linker, |linker|
+            let opt = linker.@needed.advance;
+            if opt.is_none {
+                break $ linker
+            };
+            let (name, needed) = opt.as_some;
+            let linker = linker.set_needed(needed);
+            if linker.@imported.contains(name) {
+                continue $ linker
+            };
+            let module = linker.@modules.find(name);
+            if module.is_none {
+                continue $ linker
+            };
+            let module = module.as_some;
+            let linker = linker.mod_required_files(push_back(module.@path));
+            let linker = linker.mod_imported(insert(name));
+            let linker = linker.mod_needed(|needed| module.@imports.to_iter.append(needed));
+            continue $ linker
+        )
+    );
+
+    print_required_files: Linker -> IO ();
+    print_required_files = |linker| (
+        println(linker.@required_files.to_iter.join(" "))
+    );
+
+}
+
+
+type App = unbox struct {
+    original_args: Array String,
+    source_files: Array String,
+    output_file: String,
+    lib_dirs: Array String,
+    before_source_args: Array String,
+    after_source_args: Array String,
+    args: Array String,
+    linker: Linker
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        original_args: [],
+        before_source_args: [],
+        source_files: [],
+        output_file: "",
+        lib_dirs: [],
+        after_source_args: [],
+        args: [],
+        linker: Linker::empty
+    };
+
+    parse_args: App -> IOFail App;
+    parse_args = |app| (
+        let args = *IO::get_args.lift;
+        if args.get_size == 1 || args.@(1) == "--help" {
+            throw $ print_usage
+        };
+        let app = app.set_original_args(args);
+        let args = args.set(0, "fix");      // set fix program
+
+        // Find output file
+        let opt = args.find_by(|arg| arg == "-o");
+        let app = if opt.is_some && opt.as_some + 1 < args.get_size {
+            app.set_output_file(args.@(opt.as_some + 1))
+        } else { app };
+
+        // Extract lib dirs (`-L LIB_DIR`)
+        let (args, lib_dirs, _) = args.to_iter.fold(
+            ([], [], false), |(args, lib_dirs, found_lib_opt), arg|
+            if found_lib_opt {
+                (args, lib_dirs.push_back(arg), false)
+            };
+            if arg == "-L" {
+                (args, lib_dirs, true)
+            };
+            (args.push_back(arg), lib_dirs, false)
+        );
+        let app = app.set_lib_dirs(lib_dirs);
+
+        // Find first source file
+        let pos = *args.find_by(|arg| arg.ends_with(".fix")).map_or(
+            throw $ "*.fix is not specified",
+            pure
+        );
+        // Split befor first source file
+        let app = app.set_before_source_args(args.get_sub_ex(0, pos));
+        let args = args.get_sub_ex(pos, args.get_size);
+        // remove source files
+        let app = args.to_iter.loop_iter(
+            app, |app, arg|
+            if arg.ends_with(".fix") {
+                continue $ app.mod_source_files(push_back(arg))
+            };
+            let app = app.mod_after_source_args(push_back(arg));
+            continue $ app
+        );
+        pure $ app
+    );
+
+    get_sub_ex: I64 -> I64 -> Array a -> Array a;
+    get_sub_ex = |begin, end, array| (
+        if begin == 0 && end == array.get_size {
+            array
+        };
+        array.get_sub(begin, end)
+    );
+
+    link_files: App -> IOFail App;
+    link_files = |app| (
+        let linker = Linker::empty;
+        let linker = *linker.find_library_files(app.@lib_dirs);
+        let linker = *linker.read_modules;
+        let linker = *linker.read_main_files(app.@source_files);
+        let linker = linker.calc_required_files;
+        pure $ app.set_linker(linker)
+    );
+
+    reconstruct_args: App -> IOFail App;
+    reconstruct_args = |app| (
+        let args = app.@before_source_args;
+        let args = args.append(app.@linker.@required_files);
+        let args = args.append(app.@after_source_args);
+        pure $ app.set_args(args)
+    );
+
+    update_depends_file: App -> IOFail App;
+    update_depends_file = |app| (
+        if app.@output_file == "" {
+            pure $ app
+        };
+        let target = app.@output_file;
+        let dependencies = app.@linker.@required_files;
+        let depends_file = ".depend";
+
+        let depends_file = Path::parse(depends_file).as_some;
+        let contents = *read_file_bytes(depends_file).to_result.lift;
+        let contents = if contents.is_err {
+            ""
+        } else {
+            contents.as_ok._unsafe_to_string
+        };
+        let contents = contents.split("\n").filter(|line| 
+            !line.starts_with(target + ":")
+        ).map(|line| line.strip_spaces + "\n").concat_iter;
+        let line = target + ": " + dependencies.to_iter.join(" ") + "\n";
+        let contents = contents + line;
+        let _ = *write_file_string(depends_file, contents);
+        pure $ app
+    );
+
+    execute_fix_command: App -> IOFail ();
+    execute_fix_command = |app| (
+        let cmd = "fix";
+        let args = app.@args;
+        execute_command(cmd, args)
+    );
+
+    execute_command: String -> Array String -> IOFail ();
+    execute_command = |cmd, args| (
+        let command_line = args.to_iter.join(" ");
+        let _ = *eprintln("executing: " + command_line).lift;
+        let ((output, error), exit_status) = *Subprocess::run_string(cmd, args, "");
+        let _ = *print(output).lift;
+        let _ = *eprint(error).lift;
+        if exit_status.is_exit && exit_status.as_exit != 0_U8 {
+            throw $ "program exited with exit code " + exit_status.as_exit.to_string
+        };
+        if exit_status.is_signaled {
+            throw $ "program exited with signal " + exit_status.as_signaled.to_string
+        };
+        if exit_status.is_wait_failed {
+            throw $ "waiting for program failed!"
+        };
+        let _ = *println("").lift;
+        pure()
+    );
+
+    print_usage: String;
+    print_usage = (
+        "fixautolink ver 0.1.0\n" +
+        "- Scan library files under the library directories specified by `-L`.\n" +
+        "- Parse source files and analyze required modules to be imported.\n" +
+        "- Update `.depend` file if output file option (`-o`) is specified.\n" +
+        "- Run fix command with source files and required library files.\n" +
+        "\n" +
+        "Example:\n" +
+        "   fixautolink run -f main.fix sub.fix -L ./lib/\n" +
+        "   fixautolink build -o main_exe -f main.fix sub.fix -L ./lib/ -d lib --emit-llvm\n"
+    );
+}
+
+
+main: IO ();
+main = (
+    do {
+        let app = App::empty;
+        let app = *app.parse_args;
+        let app = *app.link_files;
+        let app = *app.reconstruct_args;
+        let app = *app.update_depends_file;
+        let _ = *app.execute_fix_command;
+        IO::exit(0).lift
+    }.try(|err|
+        let _ = *eprintln(err);
+        IO::exit(1)
+    )
+);

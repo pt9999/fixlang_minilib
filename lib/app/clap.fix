@@ -156,13 +156,15 @@ impl Arg: ToString {
 // ---------------------------------
 
 // A structure representing a command (ie. application).
-type Command = unbox struct {
+type Command = box struct {
     name: String,           // The name of the command.
     bin_name: String,       // The name of the executable binary of the command.
     display_name: String,   // The display name of the command.
+    subcommand_path: String, // The subcommands that invokes this command.
     version: String,        // The version of the command.
     author: String,         // Author of the command.
     about: String,          // Description about the command.
+    subcommands: Array Command, // Array of subcommands.
     args: Array Arg,        // Argument definitions of the command.
     help_template: HelpTemplate,    // A help template of the command.
     version_template: HelpTemplate  // A version template of the command.
@@ -176,9 +178,11 @@ namespace Command {
             name: name,
             bin_name: name,
             display_name: name,
+            subcommand_path: "",
             version: "",
             author: "",
             about: "",
+            subcommands: [],
             args: _default_args,
             help_template: HelpTemplate::_default_help,
             version_template: HelpTemplate::_default_version
@@ -230,6 +234,16 @@ namespace Command {
         command.mod_args(|args| args.push_back(arg))
     );
 
+    // Add a subcommand to the command.
+    subcommand: Command -> Command -> Command;
+    subcommand = |subcommand, command| (
+        let subcommand = subcommand.set_bin_name(command.@bin_name);
+        let subcommand = subcommand.set_subcommand_path(
+            command.@subcommand_path + " " + subcommand.@name
+        );
+        command.mod_subcommands(push_back(subcommand))
+    );
+
     // Generates a help string based on the help template.
     render_help: Command -> String;
     render_help = |command| (
@@ -254,11 +268,35 @@ namespace Command {
     // If `--help` or `--version` is specified, the help string or version string will be returned as the error message.
     get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
     get_matches_from = |inputs, command| (
+        if command.@subcommands.get_size > 0 {
+            let (name, submatches) = *command._get_submatches_from(inputs);
+            let matches = ArgMatches::empty.set_subcommand(some $ (name, submatches));
+            ok $ matches
+        };
         let parser = ArgParser::make(inputs, command);
         let parser = *parser.parse_args;
         let parser = *parser.check_required_args_present;
         let parser = *parser.set_default_if_not_present;
         ok $ parser.@matches
+    );
+
+    _get_submatches_from: Array String -> Command -> Result ErrMsg (String, ArgMatches);
+    _get_submatches_from = |inputs, command| (
+        // drop first argument as it is the executable name
+        let inputs = inputs.to_iter.get_tail.map_or(Iterator::empty, |a|a).to_array;
+        if inputs.get_size == 0 {
+            err $ command.render_help
+        };
+        let subcommand_name = inputs.@(0);
+        let subcommand = command.@subcommands.to_iter
+            .filter(|subcommand| subcommand.@name == subcommand_name)
+            .get_first;
+        if subcommand.is_none {
+            err $ command.render_help
+        };
+        let subcommand = subcommand.as_some;
+        let submatches = *subcommand.get_matches_from(inputs);
+        ok $ (subcommand.@name, submatches)
     );
 }
 
@@ -278,7 +316,7 @@ namespace ArgParser
     // Creates an `ArgParser` based on the input array and command.
     make: Array String -> Command -> ArgParser;
     make = |inputs, command| (
-        // drop first argument as it is the executable name
+        // drop first argument as it is the executable name (or subcommand name)
         let inputs = inputs.to_iter.get_tail.map_or(Iterator::empty, |a|a);
         ArgParser {
             command: command,
@@ -464,14 +502,23 @@ namespace ArgParser
 // ---------------------------------
 
 // A structure representing the result of parsing command line arguments.
-type ArgMatches = unbox struct {
+type ArgMatches = box struct {
+    subcommand: Option (String, ArgMatches),
     map: HashMap String (Array String)
 };
 
 namespace ArgMatches {
     // An empty `ArgMatches` structure.
     empty: ArgMatches;
-    empty = ArgMatches { map: HashMap::empty(0) };
+    empty = ArgMatches {
+        subcommand: none(),
+        map: HashMap::empty(0) 
+    };
+
+    subcommand: ArgMatches -> Option (String, ArgMatches);
+    subcommand = |matches| (
+        matches.@subcommand
+    );
 
     // Gets the array of argument values with the specified ID.
     get_many: String -> ArgMatches -> Option (Array String);
@@ -554,9 +601,10 @@ namespace HelpTemplate {
     _format_usage = |command, help_template| (
         let args = command.@args.to_iter.filter(_is_positional).to_array;
         let options = command.@args.to_iter.filter(_is_option).to_array;
+        let subcommands = command.@subcommands;
         let usage = "USAGE:\n";
         let usage = usage + (
-            "    " + command.@bin_name + "[EXE]"
+            "    " + command.@bin_name + command.@subcommand_path
         );
         let usage = usage + (
             if options.get_size == 0 { "" } else { " [OPTIONS]" }
@@ -566,6 +614,9 @@ namespace HelpTemplate {
                 args.to_iter.map(|arg| " " + arg.to_string).concat_iter
             }
         );
+        let usage = usage + (
+            if subcommands.get_size == 0 { "" } else { " [SUBCOMMAND]" }
+        );
         usage + "\n"
     );
 
@@ -573,8 +624,9 @@ namespace HelpTemplate {
     _format_all_args = |command, help_template| (
         let args = command.@args.to_iter.filter(_is_positional).to_array;
         let options = command.@args.to_iter.filter(_is_option).to_array;
+        let subcommands = command.@subcommands;
 
-        let output: Array String = Array::empty(2);
+        let output: Array String = Array::empty(3);
         let output = if args.get_size == 0 { output } else {
             output.push_back(
                 "ARGS:\n" +
@@ -585,6 +637,12 @@ namespace HelpTemplate {
             output.push_back(
                 "OPTIONS:\n" +
                 options.to_iter.map(_format_option).concat_iter
+            )
+        };
+        let output = if subcommands.get_size == 0 { output } else {
+            output.push_back(
+                "SUBCOMMANDS:\n" +
+                subcommands.to_iter.map(_format_subcommand).concat_iter
             )
         };
         output.to_iter.join("\n")
@@ -624,6 +682,16 @@ namespace HelpTemplate {
             line + Array::fill(32 - line.get_size, ' ')._unsafe_to_string
         };
         let line = line + arg.@help;
+        line + "\n"
+    );
+
+    _format_subcommand: Command -> String;
+    _format_subcommand = |command| (
+        let line = "    " + command.@name;
+        let line = if line.get_size >= 15 { line } else {
+            line + Array::fill(15 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + command.@about;
         line + "\n"
     );
 }

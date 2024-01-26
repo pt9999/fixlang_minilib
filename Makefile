@@ -5,6 +5,7 @@ clean:
 	rm -f bin/fixautolink
 
 bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/io_ex.fix lib/text/simple_parser.fix lib/text/string_ex.fix
+	mkdir -p bin
 	fix build -o $@ -f $^
 
 -include .depends

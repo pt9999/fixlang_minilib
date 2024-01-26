@@ -104,6 +104,10 @@ TCP operation, such as:
 
 URL and URI parsing
 
+### [module Minilib.Testing.TestUtilArray (lib/testing/test_util_array.fix)](lib/testing/test_util_array.md)
+
+Array utility functions for testing.
+
 ### [module Minilib.Testing.UnitTest (lib/testing/unit_test.fix)](lib/testing/unit_test.md)
 
 Unit Test Framework

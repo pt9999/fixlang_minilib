@@ -30,11 +30,11 @@ test_ordered_map:
 test_deque:
 	fix run -f tests/collection/deque_test.fix lib/collection/deque.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_rbtree:
-	fix run -f tests/collection/rbtree_test.fix tests/collection/array_testutil.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/collection/rbtree_test.fix lib/testing/test_util_array.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_tree_map:
-	fix run -f tests/collection/tree_map_test.fix tests/collection/array_testutil.fix lib/collection/tree_map.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/collection/tree_map_test.fix lib/testing/test_util_array.fix lib/collection/tree_map.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 test_tree_set:
-	fix run -f tests/collection/tree_set_test.fix tests/collection/array_testutil.fix lib/collection/tree_set.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
+	fix run -f tests/collection/tree_set_test.fix lib/testing/test_util_array.fix lib/collection/tree_set.fix lib/collection/rbtree.fix $(LIB_STRING_EX) $(LIB_UNIT_TEST)
 
 test_crypto: test_sha1 test_sha256
 test_sha1:

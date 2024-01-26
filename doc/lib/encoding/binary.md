@@ -1,6 +1,6 @@
 # binary.fix
 
-## module Binary
+## module Minilib.Encoding.Binary
 
 Binary utility, such as:
 - Byte order

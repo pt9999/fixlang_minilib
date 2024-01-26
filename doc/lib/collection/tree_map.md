@@ -1,6 +1,6 @@
 # tree_map.fix
 
-## module TreeMap
+## module Minilib.Collection.TreeMap
 
 TreeMap is a map that manages keys in sorted order.
 

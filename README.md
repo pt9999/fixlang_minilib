@@ -2,7 +2,7 @@
 
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
-This library is still work in progress.
+This library is still in alpha stage.
 
 ## Tested Platform
 - x86_64-linux-gnu
@@ -11,28 +11,32 @@ This library is still work in progress.
 
 ## Features
 
-- Application support
-  - Clap (Command Line Argument Parser)
+- Application
+  - Command Line Argument Parser
 - Collections
   - Ordered map
-  - Deque (double-ended queue)
+  - Double-ended queue
   - Tree map
   - Tree set
   - Red-Black tree
 - Cryptography
-  - Secure hash function (SHA-1, SHA-256)
-- File format
-  - JSON encoding and decoding
-- Text handling
-  - Regular expression
-  - Simple parser
-  - String utility
-  - UTF8/UTF16/UTF32 conversion
+  - Secure hash function (SHA-1/SHA-256)
+- Encoding
+  - Binary
+  - JSON
+- IO
+  - IO extension
 - Networking
-  - TCP/IP Socket (WARNING: IPv6 is not supported yet)
+  - TCP/IP Socket (IPv4 only)
   - URL, URI
   - Simple HTTP Server
-- Unit testing
+- Testing
+  - Unit test
+- Text
+  - Simple parser
+  - String extension
+  - Regular expression
+  - Unicode (UTF8/UTF16/UTF32) conversion
 
 ## How to use
 
@@ -58,4 +62,4 @@ To run test codes, type `make test`. It has been mainly tested in the following 
 
 ## Library Reference
 
-See [Library Reference](doc/index.md). (work in progress)
+See [Library Reference](doc/index.md).

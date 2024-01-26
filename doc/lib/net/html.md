@@ -1,6 +1,6 @@
 # html.fix
 
-## module HTML
+## module Minilib.Net.HTML
 
 HTML handling, such as:
 - Very simple DOM model (HTMLDocument, HTMLElement)

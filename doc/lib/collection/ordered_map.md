@@ -1,6 +1,6 @@
 # ordered_map.fix
 
-## module OrderedMap
+## module Minilib.Collection.OrderedMap
 
 Ordered map.
 This is similar to HashMap except it preserves the order of entries.

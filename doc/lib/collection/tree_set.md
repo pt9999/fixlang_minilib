@@ -1,6 +1,6 @@
 # tree_set.fix
 
-## module TreeSet
+## module Minilib.Collection.TreeSet
 
 TreeSet is a set that manages elements in sorted order.
 

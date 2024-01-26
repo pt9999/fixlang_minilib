@@ -1,0 +1,241 @@
+// Encodes a JSON value to a string.
+module Minilib.Encoding.Json.JsonEncoder;
+
+import Debug;
+
+import Minilib.Collection.OrderedMap;
+import Minilib.Encoding.Json;
+import Minilib.Text.StringEx;
+
+impl Json: ToString {
+    to_string = encode;
+}
+
+// Encodes JSON and converts it to a string.
+encode: Json -> String;
+encode = |json| (
+    encode_with_param(EncodeParam::default, json)
+);
+
+// Encodes JSON and converts it to a string. (pretty-printing)
+encode_pretty: Json -> String;
+encode_pretty = |json| (
+    encode_with_param(EncodeParam::pretty_print, json)
+);
+
+// Encodes JSON and converts it to a string using the specified parameter.
+encode_with_param: EncodeParam -> Json -> String;
+encode_with_param = |param, json| (
+    let output = Array::empty(1000);
+    let output = _encode(param, output, json);
+    output.to_iter.concat_iter
+);
+
+type EncodeParam = unbox struct {
+    space: String,
+    newline: String,
+    indent: String,
+    indent_incr: String,
+    number_prec: U8
+};
+
+namespace EncodeParam {
+    default: EncodeParam;
+    default = EncodeParam {
+        space: "",
+        newline: "",
+        indent: "",
+        indent_incr: "",
+        number_prec: 6_U8
+    };
+
+    pretty_print: EncodeParam;
+    pretty_print = EncodeParam {
+        space: " ",
+        newline: "\n",
+        indent: "",
+        indent_incr: "  ",
+        number_prec: 6_U8
+    };
+
+    increment_indent: EncodeParam -> EncodeParam;
+    increment_indent = |param| (
+        param.set_indent(
+            param.@indent +
+            param.@indent_incr
+        )
+    );
+}
+
+//=============================================================
+// The definitions below are private, so users of this module do not
+// need to worry about them.
+
+_encode_number: EncodeParam -> F64 -> String;
+_encode_number = |param, num| (
+    let s = num.to_string_precision(param.@number_prec);
+    if s.find(".", 0).is_none {
+        s
+    };
+    // Trim trailing zeros of fractional number.
+    let a = s.get_bytes;
+    loop(
+        s.get_size - 1, |i|
+        if i < 1 {
+            break $ s.substring(0, i + 1)
+        };
+        if a.@(i) != '0' {
+            if a.@(i) == '.' {
+                // Trim the trailing decimal point.
+                break $ s.substring(0, i)
+            } else {
+                break $ s.substring(0, i + 1)
+            }
+        };
+        continue $ i - 1
+    )
+);
+
+_encode_string: String -> String;
+_encode_string = |str| (
+    let _DOUBLEQUOTE = 34_U8; // '\"'
+    let input: Array U8 = str.get_bytes.pop_back;
+    let input_size = input.get_size;
+    let output: Array U8 = Array::empty(input_size * 2);
+    let output = output.push_back(_DOUBLEQUOTE);
+    let output = loop (
+        (0, output), |(i, output)|
+        if i >= input_size {
+            break $ output
+        };
+        let c = input.@(i);
+        let output = do {
+            let escape_char = _escape_table.@(c.to_I64);
+            if escape_char != 0_U8 {
+                output.push_back('\\').push_back(escape_char)
+            };
+            if c <= 31_U8 {
+                output.push_back('\\').push_back('u')
+                .push_back(_hex_table.@(0))
+                .push_back(_hex_table.@(0))
+                .push_back(_hex_table.@(c.to_I64.shift_right(4)))
+                .push_back(_hex_table.@(c.to_I64.bit_and(15)))
+            };
+            output.push_back(c)
+        };
+        continue $ (i + 1, output)
+    );
+    let output = output.push_back(_DOUBLEQUOTE);
+    _unsafe_from_c_str(output.push_back(0_U8))
+);
+
+_escape_table: Array U8;
+_escape_table = (
+    let escape_from = "\"\\\n\r\t".get_bytes.pop_back;
+    let escape_to = "\"\\nrt".get_bytes.pop_back;
+    Iterator::count_up(0).take(256)
+    .map(|i|
+        escape_from.find_by(|x| x == i.to_U8)
+        .map_or(0_U8,
+            |pos| escape_to.@(pos)
+        )
+    )
+    .to_array
+);
+
+_hex_table: Array U8;
+_hex_table = (
+    Iterator::count_up(0).take(16)
+    .map(|i|
+        if i < 10 { '0' + i.to_U8 }
+        else { 'a' + (i - 10).to_U8 }
+    )
+    .to_array
+);
+
+
+_encode_object: EncodeParam -> Array String -> OrderedMap String Json -> Array String;
+_encode_object = |param, output, ordered_map| (
+    let array = ordered_map.to_iter.to_array;
+    let array_size = array.get_size;
+    if array_size == 0 {
+        output.push_back ("{}")
+    };
+    let output = output
+        .push_back("{")
+        .push_back(param.@newline);
+    let param_inner = param.increment_indent;
+    let output = loop (
+        (0, output), |(i, output)|
+        if i >= array_size {
+            break $ output
+        };
+        let (k, v) = array.@(i);
+        let output = output
+            .push_back(param_inner.@indent)
+            .push_back(k._encode_string)
+            .push_back(":")
+            .push_back(param_inner.@space);
+        let output = v._encode(param_inner, output);
+        let output = if i < array_size - 1 { output.push_back (",") } else { output };
+        let output = output.push_back (param.@newline);
+        continue $ (i + 1, output)
+    );
+    let output = output
+            .push_back(param.@indent)
+            .push_back("}");
+    output
+);
+
+_encode_array: EncodeParam -> Array String -> Array Json -> Array String;
+_encode_array = |param, output, array| (
+    let array_size = array.get_size;
+    if array_size == 0 {
+        output.push_back("[]")
+    };
+    let output = output
+        .push_back("[")
+        .push_back(param.@newline);
+    let param_inner = param.increment_indent;
+    let output = loop (
+        (0, output), |(i, output)|
+        if i >= array_size {
+            break $ output
+        };
+        let item = array.@(i);
+        let output = output
+            .push_back(param_inner.@indent);
+        let output = item._encode(param_inner, output);
+        let output = output
+            .push_back(if i < array_size - 1 { "," } else { "" })
+            .push_back(param_inner.@newline);
+        continue $ (i + 1, output)
+    );
+    let output = output
+            .push_back(param.@indent)
+            .push_back("]");
+    output
+);
+
+_encode: EncodeParam -> Array String -> Json -> Array String;
+_encode = |param, output, json| (
+    if json.is_null {
+        output.push_back ("null")
+    };
+    if json.is_bool {
+        output.push_back (if json.as_bool { "true" } else { "false" })
+    };
+    if json.is_number {
+        output.push_back (json.as_number._encode_number(param))
+    };
+    if json.is_string {
+        output.push_back (json.as_string._encode_string)
+    };
+    if json.is_object {
+        json.as_object._encode_object(param, output)
+    };
+    if json.is_array {
+        json.as_array._encode_array(param, output)
+    };
+    output // abort?
+);

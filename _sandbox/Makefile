@@ -3,19 +3,19 @@
 
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out fix_func.out fork_exec.out
 
-channel: channel.fix ../lib/string_ex.fix ../lib/net/io_ex.fix
+channel: channel.fix ../lib/text/string_ex.fix ../lib/io/io_ex.fix ../lib/encoding/binary.fix
 	fix run -f $^
 
-ndarray: ndarray_test.fix ndarray.fix ../lib/simple_parser.fix ../lib/string_ex.fix 
+ndarray: ndarray_test.fix ndarray.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix 
 	fix run -f $^
 
-ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix
+ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix
 	fix run -f $^ -d readline
 
-build_ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/simple_parser.fix ../lib/string_ex.fix
+build_ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix
 	fix build -f $^ -d readline
 
-png: png.fix ndarray.fix ../lib/io_ex.fix ../lib/string_ex.fix ../lib/encoding/binary.fix
+png: png.fix ndarray.fix ../lib/io_ex.fix ../lib/text/string_ex.fix ../lib/encoding/binary.fix
 	fix run -f $^ -d png -d z
 
 test_state_monad:

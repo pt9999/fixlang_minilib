@@ -1,6 +1,6 @@
 # regexp_pattern.fix
 
-## module RegExpPattern
+## module Minilib.Text.RegExp.RegExpPattern
 
 Character class and Pattern parser. This is internal module of `RegExp`.
 

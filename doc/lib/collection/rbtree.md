@@ -1,6 +1,6 @@
 # rbtree.fix
 
-## module RBTree
+## module Minilib.Collection.RBTree
 
 Red-Black Tree.
 (This is an internal module of `TreeMap` and `TreeSet`.)

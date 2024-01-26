@@ -1,6 +1,6 @@
 # url.fix
 
-## module URL
+## module Minilib.Net.URL
 
 URL and URI parsing
 

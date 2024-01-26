@@ -1,3 +1,4 @@
+// An automatic link tool to make using the library easier.
 module Main;
 
 import Character;
@@ -9,6 +10,23 @@ import Subprocess;
 import Minilib.IO.IOEx;
 import Minilib.Text.StringEx;
 
+help_message: String;
+help_message = (
+    "fixautolink ver 0.1.0\n" +
+    "An automatic link tool to make using the library easier.\n" +
+    "It does:\n" +
+    "- Check for modules that are imported from source files.\n" +
+    "- Search for modules from library directories and add them to source file list.\n" +
+    "- Search for modules that are imported from added files recursively.\n" +
+    "- Run the Fix command.\n" +
+    "- Updates the dependency file (`.depend`) if an output file is specified.\n" +
+    "\n" +
+    "Example:\n" +
+    "   fixautolink run -f main.fix sub.fix -L ./lib/\n" +
+    "   fixautolink build -o main_exe -f main.fix sub.fix -L ./lib/ -d lib\n"
+);
+
+// Matches against declarations, such as `module ModuleName`, `import ModuleName`
 matches_decl: String -> String -> Result ErrMsg String;
 matches_decl = |decl, line| (
     let line = line.strip_spaces;
@@ -26,13 +44,15 @@ matches_decl = |decl, line| (
     ok $ name
 );
 
+// Module information
 type Module = unbox struct {
-    name: String,
-    path: String,
-    imports: Array String
+    name: String,               // module name
+    path: String,               // module file path (*.fix)
+    imports: Array String       // imports
 };
 
 namespace Module {
+    // Read *.fix file and extract module information.
     read: String -> IOFail Module;
     read = |path| (
         let module = Module {
@@ -48,6 +68,7 @@ namespace Module {
             if line == "" {
                 continue_m $ module
             };
+            // TODO: support for /* ... */ style comment
             let is_comment = line.substring(0, 2) == "//";
             if is_comment {
                 continue_m $ module
@@ -65,20 +86,21 @@ namespace Module {
             break_m $ module
         );
         if module.@name == "" {
-            throw $ "not found module name: " + path
+            throw $ "module declaration not found: " + path
         };
         pure $ module
     );
 }
 
+// Automatic linker
 type Linker = unbox struct {
-    lib_dirs: Array String,
-    lib_files: Array String,
-    modules: HashMap String Module,
-    main_files: Array String,
-    required_files: Array String,
-    imported: HashSet String,
-    needed: Iterator String
+    lib_dirs: Array String,             // library directory
+    lib_files: Array String,            // library files
+    modules: HashMap String Module,     // map from module name to module
+    main_files: Array String,           // main source files
+    required_files: Array String,       // required source files
+    imported: HashSet String,           // set of imported modules
+    needed: Iterator String             // needed modules
 };
 
 namespace Linker {
@@ -93,6 +115,7 @@ namespace Linker {
         needed: Iterator::empty
     };
 
+    // find library files under `lib_dirs`, and store them to @lib_files
     find_library_files: Array String -> Linker -> IOFail Linker;
     find_library_files = |lib_dirs, linker| (
         let linker = linker.set_lib_dirs(lib_dirs);
@@ -109,6 +132,7 @@ namespace Linker {
         )
     );
 
+    // Read each @lib_files and insert it to @modules
     read_modules: Linker -> IOFail Linker;
     read_modules = |linker| (
         linker.@lib_files.to_iter.fold_m(
@@ -126,6 +150,7 @@ namespace Linker {
         )
     );
 
+    // Read main source files and store them to @modules, @imported, @needed
     read_main_files: Array String -> Linker -> IOFail Linker;
     read_main_files = |main_files, linker| (
         let linker = linker.set_main_files(main_files);
@@ -145,6 +170,7 @@ namespace Linker {
         pure $ linker
     );
 
+    // Resolve imports and store them to @required_files recursively
     calc_required_files: Linker -> Linker;
     calc_required_files = |linker| (
         loop(
@@ -174,19 +200,18 @@ namespace Linker {
     print_required_files = |linker| (
         println(linker.@required_files.to_iter.join(" "))
     );
-
 }
 
-
+// Application
 type App = unbox struct {
-    original_args: Array String,
-    source_files: Array String,
-    output_file: String,
-    lib_dirs: Array String,
-    before_source_args: Array String,
-    after_source_args: Array String,
-    args: Array String,
-    linker: Linker
+    original_args: Array String,            // original command line arguments
+    source_files: Array String,             // main source files (*.fix)
+    output_file: String,                    // output file (`-o`)
+    lib_dirs: Array String,                 // lib directories (`-L`)
+    before_source_args: Array String,       // arguments before source files
+    after_source_args: Array String,        // arguments after source_files
+    args: Array String,                     // final arguments
+    linker: Linker                          // the linker
 };
 
 namespace App {
@@ -202,11 +227,12 @@ namespace App {
         linker: Linker::empty
     };
 
+    // parse command line arguments, and extract `-o`, `-L`, `*.fix`.
     parse_args: App -> IOFail App;
     parse_args = |app| (
         let args = *IO::get_args.lift;
         if args.get_size == 1 || args.@(1) == "--help" {
-            throw $ print_usage
+            throw $ help_message
         };
         let app = app.set_original_args(args);
         let args = args.set(0, "fix");      // set fix program
@@ -235,10 +261,10 @@ namespace App {
             throw $ "*.fix is not specified",
             pure
         );
-        // Split befor first source file
+        // Split before first source file
         let app = app.set_before_source_args(args.get_sub_ex(0, pos));
         let args = args.get_sub_ex(pos, args.get_size);
-        // remove source files
+        // Filter out source files
         let app = args.to_iter.loop_iter(
             app, |app, arg|
             if arg.ends_with(".fix") {
@@ -258,6 +284,7 @@ namespace App {
         array.get_sub(begin, end)
     );
 
+    // resolve imports from @source_files and @lib_dirs, and store the result to @required_files
     link_files: App -> IOFail App;
     link_files = |app| (
         let linker = Linker::empty;
@@ -268,6 +295,7 @@ namespace App {
         pure $ app.set_linker(linker)
     );
 
+    // reconstruct final arguments
     reconstruct_args: App -> IOFail App;
     reconstruct_args = |app| (
         let args = app.@before_source_args;
@@ -276,6 +304,7 @@ namespace App {
         pure $ app.set_args(args)
     );
 
+    // update `.depend` file
     update_depends_file: App -> IOFail App;
     update_depends_file = |app| (
         if app.@output_file == "" {
@@ -292,8 +321,8 @@ namespace App {
         } else {
             contents.as_ok._unsafe_to_string
         };
-        let contents = contents.split("\n").filter(|line| 
-            !line.starts_with(target + ":")
+        let contents = contents.split("\n").map(strip_spaces).filter(|line| 
+            line != "" && !line.starts_with(target + ":")
         ).map(|line| line.strip_spaces + "\n").concat_iter;
         let line = target + ": " + dependencies.to_iter.join(" ") + "\n";
         let contents = contents + line;
@@ -327,21 +356,7 @@ namespace App {
         let _ = *println("").lift;
         pure()
     );
-
-    print_usage: String;
-    print_usage = (
-        "fixautolink ver 0.1.0\n" +
-        "- Scan library files under the library directories specified by `-L`.\n" +
-        "- Parse source files and analyze required modules to be imported.\n" +
-        "- Update `.depend` file if output file option (`-o`) is specified.\n" +
-        "- Run fix command with source files and required library files.\n" +
-        "\n" +
-        "Example:\n" +
-        "   fixautolink run -f main.fix sub.fix -L ./lib/\n" +
-        "   fixautolink build -o main_exe -f main.fix sub.fix -L ./lib/ -d lib --emit-llvm\n"
-    );
 }
-
 
 main: IO ();
 main = (

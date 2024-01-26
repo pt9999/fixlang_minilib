@@ -1,6 +1,6 @@
 # unit_test.fix
 
-## module UnitTest
+## module Minilib.Testing.UnitTest
 
 Unit Test Framework
 

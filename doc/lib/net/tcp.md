@@ -1,6 +1,6 @@
 # tcp.fix
 
-## module Tcp
+## module Minilib.Net.Tcp
 
 TCP operation, such as:
 - IP address, port number

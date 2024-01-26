@@ -16,7 +16,7 @@ LIB_JSON := lib/encoding/json.fix lib/encoding/json/json_encoder.fix lib/encodin
 LIB_TCP := lib/net/tcp.fix
 LIB_URL := lib/net/url.fix $(LIB_STRING_EX)
 LIB_HTTP_SERVER = lib/net/http_server.fix lib/net/router.fix lib/net/request.fix lib/net/url.fix $(LIB_IO_EX) $(LIB_TCP) $(LIB_STRING_EX)
-LIB_REGEXP := lib/text/regexp/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
+LIB_REGEXP := lib/text/regexp.fix lib/text/regexp/regexp_nfa.fix lib/text/regexp/regexp_pattern.fix $(LIB_PARSER)
 
 test: test_app test_collection test_crypto test_encoding test_io_ex test_text test_net
 
@@ -59,7 +59,7 @@ test_unicode:
 test_parser:
 	fix run -f tests/text/simple_parser_test.fix $(LIB_PARSER) $(LIB_UNIT_TEST)
 test_regexp:
-	fix run -f tests/text/regexp/regexp_test.fix $(LIB_REGEXP) $(LIB_UNIT_TEST)
+	fix run -f tests/text/regexp_test.fix $(LIB_REGEXP) $(LIB_UNIT_TEST)
 
 test_net: test_url test_request test_router test_html
 test_url:

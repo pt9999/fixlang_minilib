@@ -1,6 +1,6 @@
 # regexp.fix
 
-## module RegExp
+## module Minilib.Text.RegExp
 
 Simple regular expression.
 

@@ -1,6 +1,6 @@
 # simple_parser.fix
 
-## module SimpleParser
+## module Minilib.Text.SimpleParser
 
 Simple text parser. Customizable by monadic operations.
 - Stream of characters

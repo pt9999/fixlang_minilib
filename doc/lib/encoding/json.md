@@ -1,6 +1,6 @@
 # json.fix
 
-## module Json
+## module Minilib.Encoding.Json
 
 Definition of the structure of a JSON value.
 

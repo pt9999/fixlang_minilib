@@ -1,6 +1,6 @@
 # string_ex.fix
 
-## module StringEx
+## module Minilib.Text.StringEx
 
 String extensions, such as:
 - ToString for Tuple, Option, Result, Array, HashMap

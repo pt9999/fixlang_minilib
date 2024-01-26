@@ -1,6 +1,6 @@
 # http_server.fix
 
-## module HttpServer
+## module Minilib.Net.HttpServer
 
 Simple HTTP server.
 The interface is similar to `express` of Node.js.

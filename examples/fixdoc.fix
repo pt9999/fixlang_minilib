@@ -3,17 +3,17 @@ module Main;
 
 import Character;
 
-import StringEx;
-import IOEx;
-import SimpleParser;
-import Clap;
+import Minilib.App.Clap;
+import Minilib.IO.IOEx;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
 
 // Matches `/^module\s+(\w+)/`.
 match_module: Parser String;
 match_module = do {
     let _ = *match_str("module");
     let _ = *one_or_more(match_char_class(is_space));
-    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
+    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_' || c == '.'));
     pure $ chars._unsafe_to_string
 };
 
@@ -64,6 +64,7 @@ matches = |str, parser| (
 // The state of parsing FixLang source code.
 type State = unbox struct {
     output: IOHandle,   // output file handle
+    module_name: String, // module name
     module_summary: String, // module summary
     doc: String,        // document (function comment etc.)
     type_name: String,  // name of type declaration
@@ -76,6 +77,7 @@ namespace State {
     make = |output| (
         State{
             output: output,
+            module_name: "",
             module_summary: "",
             doc: "",
             type_name: "",
@@ -135,6 +137,7 @@ namespace State {
             pure $ state.set_doc("")
         };
         let _ = *state.println("## module " + module_name + "\n");
+        let state = state.set_module_name(module_name);
         let state = state.set_module_summary(state.@doc);
         let state = *state.print_doc;
         pure $ state
@@ -251,6 +254,7 @@ namespace State {
 
 // Type of module summary information
 type ModuleInfo = unbox struct {
+    name: String,
     file_path: String,
     summary: String
 };
@@ -259,6 +263,7 @@ namespace ModuleInfo {
     // An empty module summary information.
     empty: ModuleInfo;
     empty = ModuleInfo {
+        name: "",
         file_path: "",
         summary: ""
     };
@@ -294,7 +299,8 @@ namespace IndexInfo
             (), |_, module|
             let fix_path = module.@file_path;
             let doc_path = *fix_path.replace_suffix(".fix", ".md").from_result;
-            let link = "[" + fix_path + "](" + doc_path + ")";
+            let link_title = "module " + module.@name + " (" + fix_path + ")";
+            let link = "[" + link_title + "](" + doc_path + ")";
             let _ = *println("### " + link);
             let summary = module.@summary;
             let (summary, _) = summary.split_first("\n\n");
@@ -339,7 +345,7 @@ namespace BatchMode
             let output_file_path = *join_paths([output_dir, input_file_path]).replace_suffix(".fix", ".md").from_result;
             let state = *process_file(input_file_path, output_file_path);
             let module = ModuleInfo::empty;
-            let module = module.set_file_path(input_file_path).set_summary(state.@module_summary);
+            let module = module.set_name(state.@module_name).set_file_path(input_file_path).set_summary(state.@module_summary);
             let index = index.add_module(module);
             continue_m $ index
         );

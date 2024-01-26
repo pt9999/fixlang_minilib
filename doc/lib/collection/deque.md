@@ -1,6 +1,6 @@
 # deque.fix
 
-## module Deque
+## module Minilib.Collection.Deque
 
 Deque (double-ended queue).
 Deque can be used as a FIFO such as a message queue.

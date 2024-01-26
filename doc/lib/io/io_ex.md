@@ -1,6 +1,6 @@
 # io_ex.fix
 
-## module IOEx
+## module Minilib.IO.IOEx
 
 IO extensions, such as:
 - Create or delete files and directories

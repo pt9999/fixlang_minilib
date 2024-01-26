@@ -1,6 +1,6 @@
 # sha1.fix
 
-## module SHA1
+## module Minilib.Crypto.SHA1
 
 SHA-1 secure hash function.
 

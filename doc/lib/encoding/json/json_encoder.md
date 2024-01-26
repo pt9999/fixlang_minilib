@@ -1,6 +1,6 @@
 # json_encoder.fix
 
-## module JsonEncoder
+## module Minilib.Encoding.Json.JsonEncoder
 
 Encodes a JSON value to a string.
 

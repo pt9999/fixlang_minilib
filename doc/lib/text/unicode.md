@@ -1,6 +1,6 @@
 # unicode.fix
 
-## module Unicode
+## module Minilib.Text.Unicode
 
 Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
 

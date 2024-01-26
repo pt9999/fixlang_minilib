@@ -1,6 +1,6 @@
 # request.fix
 
-## module Request
+## module Minilib.Net.Request
 
 HTTP request and response.
 - Parses HTTP request headers and query strings, POST data

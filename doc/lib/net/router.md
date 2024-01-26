@@ -1,6 +1,6 @@
 # router.fix
 
-## module Router
+## module Minilib.Net.Router
 
 HTTP request router.
 - Mounts a request handler to specific path and method

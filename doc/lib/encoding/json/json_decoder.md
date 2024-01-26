@@ -1,6 +1,6 @@
 # json_decoder.fix
 
-## module JsonDecoder
+## module Minilib.Encoding.Json.JsonDecoder
 
 Decodes a JSON value from a string.
 

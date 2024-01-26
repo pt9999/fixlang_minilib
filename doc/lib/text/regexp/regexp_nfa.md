@@ -1,6 +1,6 @@
 # regexp_nfa.fix
 
-## module RegExpNFA
+## module Minilib.Text.RegExp.RegExpNFA
 
 NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.
 

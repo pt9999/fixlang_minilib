@@ -1,25 +1,34 @@
 %.out: %.fix
-	fix build -f $< -o $@
+	../bin/fixautolink build -o $@ -L ../lib -f $<
 
-all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out fix_func.out fork_exec.out
+all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
+	channel.out png.out ndarray_calc.out
 
-channel: channel.fix ../lib/text/string_ex.fix ../lib/io/io_ex.fix ../lib/encoding/binary.fix
-	fix run -f $^
+channel: 
+	../bin/fixautolink run -L ../lib -f channel.fix
 
-ndarray: ndarray_test.fix ndarray.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix 
-	fix run -f $^
+ndarray:
+	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix
 
-ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix
-	fix run -f $^ -d readline
+ndarray_calc:
+	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
 
-build_ndarray_calc: ndarray_calc.fix ndarray.fix state_monad.fix ../lib/text/simple_parser.fix ../lib/text/string_ex.fix
-	fix build -f $^ -d readline
+ndarray_calc.out:
+	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
 
-png: png.fix ndarray.fix ../lib/io_ex.fix ../lib/text/string_ex.fix ../lib/encoding/binary.fix
-	fix run -f $^ -d png -d z
+png: 
+	../bin/fixautolink run -L ../lib -f png.fix ndarray.fix -d png -d z
+
+png.out: 
+	../bin/fixautolink build -o $@ -L ../lib -f png.fix ndarray.fix -d png -d z
 
 test_state_monad:
-	fix run -f state_monad_test.fix state_monad.fix $(LIB_UNIT_TEST)
+	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
 
 clean:
 	rm -f *.out
+
+veryclean: clean
+	rm -f .depend
+
+-include .depend

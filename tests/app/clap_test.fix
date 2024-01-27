@@ -28,6 +28,28 @@ typical_command = (
     .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
 );
 
+rich_command: Command;
+rich_command = (
+    Command::new("rich_tool")
+    .bin_name("rich")
+    .display_name("RichTool")
+    .version("1.0.0")
+    .author("somebody <somebody@example.com>")
+    .subcommand(
+        Command::new("run")
+        .display_name("rich run")
+        .about("Run a program")
+        .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+    )
+    .subcommand(
+        Command::new("build")
+        .display_name("rich build")
+        .about("Build an executable")
+        .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+        .arg(Arg::new("dynamic_lib").short('d').help("Dynamic library").takes_value.value_name("LIB"))
+    )
+);
+
 test_help_empty: TestCase;
 test_help_empty = make_test("test_help_empty") $ |_| (
     let command = empty_command;
@@ -35,7 +57,7 @@ test_help_empty = make_test("test_help_empty") $ |_| (
         "cmd\n" +
         "\n" +
         "USAGE:\n" +
-        "    cmd[EXE] [OPTIONS]\n" + 
+        "    cmd [OPTIONS]\n" + 
         "\n" +
         "OPTIONS:\n" +
         "    -h, --help                  Print help information\n" +
@@ -55,7 +77,7 @@ test_help_typical = make_test("test_help_typical") $ |_| (
         "somebody <somebody@example.com>\n" +
         "\n" +
         "USAGE:\n" +
-        "    typical[EXE] [OPTIONS] <TARGET> [FILE]...\n" + 
+        "    typical [OPTIONS] <TARGET> [FILE]...\n" + 
         "\n" +
         "ARGS:\n" +
         "    <TARGET>   Target\n" +
@@ -70,6 +92,83 @@ test_help_typical = make_test("test_help_typical") $ |_| (
         "        --verbose               Verbose mode\n"
     );
     let res = command.get_matches_from(["typical", "--help"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich: TestCase;
+test_help_rich = make_test("test_help_rich") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "RichTool 1.0.0\n" +
+        "somebody <somebody@example.com>\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich [OPTIONS] [SUBCOMMAND]\n" + 
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "\n" +
+        "SUBCOMMANDS:\n" +
+        "    run        Run a program\n" +
+        "    build      Build an executable\n"
+    );
+    let res = command.get_matches_from(["rich"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich_run: TestCase;
+test_help_rich_run = make_test("test_help_rich_run") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "rich run\n" +
+        "Run a program\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich run [OPTIONS] [FILE]...\n" + 
+        "\n" +
+        "ARGS:\n" +
+        "    [FILE]...  Input files\n" +
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n"
+    );
+    let res = command.get_matches_from(["rich", "run", "--help"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich_build: TestCase;
+test_help_rich_build = make_test("test_help_rich_build") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "rich build\n" +
+        "Build an executable\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich build [OPTIONS] [FILE]...\n" + 
+        "\n" +
+        "ARGS:\n" +
+        "    [FILE]...  Input files\n" +
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "    -d   <LIB>                  Dynamic library\n"
+    );
+    let res = command.get_matches_from(["rich", "build", "--help"]);
     let _ = *(assert_true("err", res.is_err));
     //let _ = *write_file_string(Path::parse(",1").as_some, expected);
     //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
@@ -119,6 +218,20 @@ test_matches_typical2 = make_test("test_matches_typical2") $ |_| (
     pure()
 );
 
+test_matches_rich_build: TestCase;
+test_matches_rich_build = make_test("test_matches_rich_build") $ |_| (
+    let command = rich_command;
+    let inputs = "rich build in1.txt in2.txt -d mylib".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let opt = matches.subcommand;
+    let _ = *(assert_true("subcommand", opt.is_some));
+    let (name, submatches) = opt.as_some;
+    let _ = *(assert_equal("name", "build", name));
+    let _ = *(assert_equal("FILE", some(["in1.txt", "in2.txt"]), submatches.get_many("FILE")));
+    let _ = *(assert_equal("dynamic_lib", some("mylib"), submatches.get_one("dynamic_lib")));
+    pure()
+);
+
 test_error: Command -> String -> String -> TestCase;
 test_error = |command, cmdline, expected| (
     let testname = "test_error(" + cmdline + ")";
@@ -143,15 +256,18 @@ test_errors = (
     .run_tests
 );
 
-
 main: IO ();
 main = (
     [
         test_help_empty,
         test_help_typical,
+        test_help_rich,
+        test_help_rich_run,
+        test_help_rich_build,
         test_version_typical,
         test_matches_typical,
         test_matches_typical2,
+        test_matches_rich_build,
         test_errors,
         TestCase::empty
     ]

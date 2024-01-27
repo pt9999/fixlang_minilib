@@ -54,10 +54,12 @@ To run test codes, type `make test`. It has been mainly tested in the following 
 
 ```
 /_sandbox   ... Experimental source code (Not included in the library itself)
+/bin        ... Tools executable
 /doc        ... Library Reference documentation
 /examples   ... Example code using this library
 /lib        ... Library code
 /tests      ... Test code
+/tools      ... Tools code
 ```
 
 ## Library Reference

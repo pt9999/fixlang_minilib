@@ -87,13 +87,15 @@ Sets `@help`.
 A structure representing a command (ie. application).
 
 ```
-type Command = unbox struct {
+type Command = box struct {
     name: String,           // The name of the command.
     bin_name: String,       // The name of the executable binary of the command.
     display_name: String,   // The display name of the command.
+    subcommand_path: String, // The subcommands that invokes this command.
     version: String,        // The version of the command.
     author: String,         // Author of the command.
     about: String,          // Description about the command.
+    subcommands: Array Command, // Array of subcommands.
     args: Array Arg,        // Argument definitions of the command.
     help_template: HelpTemplate,    // A help template of the command.
     version_template: HelpTemplate  // A version template of the command.
@@ -132,6 +134,10 @@ Sets the description about the command.
 #### arg: Arg -> Command -> Command;
 
 Add an argument definition to the command.
+
+#### subcommand: Command -> Command -> Command;
+
+Add a subcommand to the command.
 
 #### render_help: Command -> String;
 
@@ -209,7 +215,8 @@ If no value is set for the argument, set the default value.
 A structure representing the result of parsing command line arguments.
 
 ```
-type ArgMatches = unbox struct {
+type ArgMatches = box struct {
+    subcommand: Option (String, ArgMatches),
     map: HashMap String (Array String)
 };
 ```
@@ -218,6 +225,8 @@ type ArgMatches = unbox struct {
 #### empty: ArgMatches;
 
 An empty `ArgMatches` structure.
+
+#### subcommand: ArgMatches -> Option (String, ArgMatches);
 
 #### get_many: String -> ArgMatches -> Option (Array String);
 

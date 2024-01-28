@@ -9,3 +9,4 @@ mkdir -p .local
 cp -pui ~/.cargo/bin/fix .local/fix
 docker build . -t ${IMAGE}:latest
 docker tag ${IMAGE}:latest ${IMAGE}:${DATE}
+docker push ${IMAGE}:latest

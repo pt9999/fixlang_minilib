@@ -5,7 +5,6 @@ import Random;
 
 impl Task: Functor {
     map = |f, fa| AsyncTask::make(
-        TaskPolicy::default,
         |_|
         let a = fa.get;
         f(a)
@@ -14,10 +13,8 @@ impl Task: Functor {
 
 impl Task: Monad {
     pure = |a| AsyncTask::make(
-        TaskPolicy::default,
         |_| a);
     bind = |f, ma| AsyncTask::make(
-        TaskPolicy::default,
         |_|
         let a = ma.get;
         f(a).get
@@ -30,9 +27,9 @@ type IOTaskM a = unbox struct {
 };
 
 namespace IOTaskM {
-    make: TaskPolicy -> IO a -> IOTaskM a;
-    make = |policy, io| IOTaskM {
-        data: AsyncIOTask::make(policy, io)
+    make: IO a -> IOTaskM a;
+    make = |io| IOTaskM {
+        data: AsyncIOTask::make(io)
     };
 
     // この結果を perform した時点でタスクが作成される
@@ -46,7 +43,6 @@ namespace IOTaskM {
 
 impl IOTaskM: Functor {
     map = |f, fa| IOTaskM::make(
-        TaskPolicy::default,
         do {
             let a = *fa.get;
             pure $ f(a)
@@ -56,11 +52,9 @@ impl IOTaskM: Functor {
 
 impl IOTaskM: Monad {
     pure = |a| IOTaskM::make(
-        TaskPolicy::default,
         pure $ a
     );
     bind = |f, ma| IOTaskM::make(
-        TaskPolicy::default,
         do {
             let a = *ma.get;    // これをperformした時点で1つ目のタスクが作成され、実行される
             f(a).get            // これをperformした時点で2つ目のタスクが作成され、実行される
@@ -78,7 +72,7 @@ myTask = |_| (
 myIOTaskM: () -> IOTaskM I64;
 myIOTaskM = |_| (
     let a = *pure(42);
-    let _ = *IOTaskM::make(TaskPolicy::default, println("a="+a.to_string));
+    let _ = *IOTaskM::make(println("a="+a.to_string));
     let b = *pure(a*2);
     pure $ b
 );
@@ -94,16 +88,19 @@ test1 = (
 
 test2: IO ();
 test2 = (
-    let policy = TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread);
+    let complete = *Var::make(false);
     let loop = fix $ |loop, i| (
         let _ = *println(i.to_string);
-        eval CALL_C[I32 sleep(U32), 1_U32];
-        let task = *AsyncIOTask::make(policy, loop(i + 1));
+        let usec = 500000_U32;
+        eval CALL_C[I32 usleep(U32), usec];
+        if i >= 10 {
+            complete.set(true)
+        };
+        let task = *AsyncIOTask::make(loop(i + 1));
         pure()
     );
-    let task = *AsyncIOTask::make(policy, loop(0));
-    let forever = *Var::make(false);
-    forever.wait_and_lock(|b|b, |b|pure())
+    let task = *AsyncIOTask::make(loop(0));
+    complete.wait_and_lock(|b|b, |b|pure())
 );
 
 test3: IO ();
@@ -115,7 +112,6 @@ test3 = (
             pure $ u64
     );
     let thread_count_var = *Var::make(0);
-    let policy = TaskPolicy::run_after_destructed.bit_or(TaskPolicy::on_dedicated_thread);
     let loop = fix $ |loop, i| (
         let _ = *println(i.to_string);
         let usec = (*next_u64 % 500000_U64).to_U32;
@@ -123,12 +119,12 @@ test3 = (
         let nchild = (*next_u64 % 3_U64).to_I64;
         let _ = *Iterator::range(0, nchild).fold_m(
             (), |_, _|
-            let task = *AsyncIOTask::make(policy, loop(i + 1));
+            let task = *AsyncIOTask::make(loop(i + 1));
             thread_count_var.mod(|n| n + 1)
         );
         thread_count_var.mod(|n| n - 1)
     );
-    let task = *AsyncIOTask::make(policy, loop(0));
+    let task = *AsyncIOTask::make(loop(0));
     let _ = *thread_count_var.mod(|n| n + 1);
     thread_count_var.wait_and_lock(|n|n == 0, |n|pure())
 );
@@ -144,10 +140,11 @@ test4 = (
         if (false) { pure() };
         let _ = *println(i.to_string);
         eval CALL_C[I32 sleep(U32), 1_U32];
+        if i >= 100 { pure() };
         let next = *Var::make(none());
         let node = Node {
             val: Array::fill(10000000, 0_U8),
-            next: next
+            next: next      // loop reference
         };
         let _ = *next.Var::set(some(node)); // memory leak
         loop(i+1)
@@ -156,4 +153,14 @@ test4 = (
 );
 
 main: IO ();
-main = test3;
+main = (
+    let _ = *println("test1");
+    let _ = *test1;
+    let _ = *println("test2");
+    let _ = *test2;
+    let _ = *println("test3");
+    let _ = *test3;
+    let _ = *println("test4");
+    let _ = *test4;
+    pure()
+);

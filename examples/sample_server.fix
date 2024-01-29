@@ -145,8 +145,8 @@ chat = |socket, addr, room| (
     let bufsock = BufferedSocket::make(socket);
     let bufsock = *bufsock.write_str("SYSTEM: This is a chat room. Please type in your messages.\n");
     let bufsock = *bufsock.flush;
-    let input_task = *AsyncIOTask::make(TaskPolicy::default, chat_input_task(bufsock, member, room)).lift;
-    let send_message_task = *AsyncIOTask::make(TaskPolicy::default, chat_send_message_task(bufsock, member, room)).lift;
+    let input_task = *AsyncIOTask::make(chat_input_task(bufsock, member, room)).lift;
+    let send_message_task = *AsyncIOTask::make(chat_send_message_task(bufsock, member, room)).lift;
     let _ = *input_task.get.lift;
     let _ = *send_message_task.get.lift;
     let _ = *room.mod(remove_member(member_id)).lift;    // TODO: use finally
@@ -216,11 +216,7 @@ server_test = (
                 continue_m $ ()
             } else {
                 let _ = *(lift $ eprintln ("creating task"));
-                let task_policy = TaskPolicy::run_after_destructed.bit_or(
-                    TaskPolicy::on_dedicated_thread
-                );
                 let task = *AsyncIOTask::make(
-                    task_policy,
                     chat(accepted_socket, addr, room)
                     .try(|err| eprintln("error: " + err))
                 ).lift;

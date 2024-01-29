@@ -23,6 +23,8 @@ A type of set that manages elements in sorted order.
 #### make_lt: [a: TreeSetElem] (a -> a -> Bool) -> TreeSet a;
 
 `TreeSet::make_lt(less_than)` creates an empty `TreeSet` using specified ordering.
+NOTE: `less_than` function must meet specific conditions. For details, see documentation of
+[`RBTree`](./rbtree.md).
 
 #### insert: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
 

@@ -12,6 +12,13 @@ Ported from Japanese translation of the book below:
 And for removal algorithm, ported from web site below.
 http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
 
+NOTE: `less_than()` function must meet following conditions.
+- Irreflexivity: for all `x`, `less_than(x,x)` must be false.
+- Asymmetry:     for all `x, y`, if `less_than(x,y)` is true, then `less_than(y,x)` must be false.
+- Transitivity:  for all `x, y, z`, if `less_than(x,y)` is true and `less_than(y,z)` is true,
+then `less_than(x,z)` must be true.
+
+
 ### namespace RBNode
 
 ### type RBNode

@@ -24,6 +24,8 @@ TreeMap is a map that manages keys in sorted order.
 #### make_lt: [k: TreeMapKey] (k -> k -> Bool) -> TreeMap k v;
 
 `TreeMap::make_lt(less_than)` creates an empty `TreeMap` using specified ordering.
+NOTE: `less_than` function must meet specific conditions. For details, see documentation of
+[`RBTree`](./rbtree.md).
 
 #### insert: [k: TreeMapKey] k -> v -> TreeMap k v -> TreeMap k v;
 

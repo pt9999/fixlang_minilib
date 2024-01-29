@@ -1,0 +1,63 @@
+module Main;
+
+import Debug;
+
+loop_loop: I64 -> I64;
+loop_loop = |n| (
+    loop(
+        (0, 0), |(sum, i)|
+        if i >= n { break $ sum };
+        continue $ (sum + i, i + 1)
+    )
+);
+
+loop_rec: I64 -> I64 -> I64;
+loop_rec = |sum, n| (
+    if n <= 0 { sum };
+    loop_rec(sum + (n - 1), n - 1)
+);
+
+loop_fix: I64 -> I64;
+loop_fix = |n| (
+    let f = fix $ |f, sum, n| (
+        if n <= 0 { sum };
+        f(sum + (n - 1), n - 1)
+    );
+    f(0, n)
+);
+
+loop_fold: I64 -> I64;
+loop_fold = |n| (
+    Iterator::range(0, n).fold(0, |sum, i| sum + i)
+);
+
+bench: String -> I64 -> I64 -> (I64 -> I64) -> IO ();
+bench = |name, times, n, f| (
+    let (result, time) = consumed_time_while(|_|
+        loop(
+            (f(n), 0), |(sum, i)|
+            if i >= times - 1 { break $ sum };
+            continue $ (f(n), i + 1)
+        )
+    , ());
+    println(name + ": result="+result.to_string+" time="+time.to_string)
+);
+
+main: IO ();
+main = (
+    let times = 100;
+    let n = 1000000;
+    let _ = *bench("loop_loop", times, n, loop_loop);
+    let _ = *bench("loop_rec", times, n, loop_rec(0));
+    let _ = *bench("loop_fix", times, n, loop_fix);
+    let _ = *bench("loop_fold", times, n, loop_fold);
+    pure()
+);
+
+/*
+    times = 100, n = 1000000
+    loop_loop: result=499999500000 time=0.464619
+    loop_rec: result=499999500000 time=0.000002
+    loop_fix: result=499999500000 time=3.820138
+    loop_fold: result=499999500000 time=3.706885
+*/

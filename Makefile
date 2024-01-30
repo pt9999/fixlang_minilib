@@ -16,11 +16,13 @@ test_app: test_clap
 test_clap:
 	bin/fixautolink run -f tests/app/clap_test.fix -L ./lib
 
-test_collection: test_ordered_map test_deque test_rbtree test_tree_map test_tree_set
+test_collection: test_ordered_map test_deque test_queue test_rbtree test_tree_map test_tree_set
 test_ordered_map:
 	bin/fixautolink run -f tests/collection/ordered_map_test.fix -L ./lib
 test_deque:
 	bin/fixautolink run -f tests/collection/deque_test.fix -L ./lib
+test_queue:
+	bin/fixautolink run -f tests/collection/queue_test.fix -L ./lib
 test_rbtree:
 	bin/fixautolink run -f tests/collection/rbtree_test.fix -L ./lib
 test_tree_map:

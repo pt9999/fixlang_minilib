@@ -1,0 +1,45 @@
+// Simple queue (FIFO).
+module Minilib.Collection.Queue;
+
+// A type that represents a queue.
+type Queue a = unbox struct {
+    iter: Iterator a
+};
+
+namespace Queue {
+    // Creates an empty queue.
+    empty: Queue a;
+    empty = Queue {
+        iter: Iterator::empty
+    };
+
+    // Checks whether the queue is empty.
+    is_empty: Queue a -> Bool;
+    is_empty = |q| q.@iter.is_empty;
+
+    // Pushes an element to the back of the queue.
+    push: a -> Queue a -> Queue a;
+    push = |x, q| q.mod_iter(_fast_append(Iterator::empty.push_front(x)));
+
+    // Same as `Iterator::append` but a little fast.
+    _fast_append : Iterator a -> Iterator a -> Iterator a;
+    _fast_append = |rhs, lhs| (
+        let next = |_| (
+            let opt = lhs.advance;
+            if opt.is_none { rhs.advance };
+            let (e, lhs) = opt.as_some;
+            some $ (e, lhs._fast_append(rhs))
+        );
+        Iterator { next : next }
+    );
+
+    // Pops an element from the front of the queue. If the queue is empty, `none()` is returned.
+    pop: Queue a -> Option (a, Queue a);
+    pop = |q| (
+        let opt = q.@iter.advance;
+        if opt.is_none { none() };
+        let (x, iter) = opt.as_some;
+        some $ (x, q.set_iter(iter))
+    );
+}
+

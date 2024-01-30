@@ -17,6 +17,10 @@ When used as a FIFO, the amortized costs of `push_back()` and
 Ordered map.
 This is similar to HashMap except it preserves the order of entries.
 
+### [module Minilib.Collection.Queue (lib/collection/queue.fix)](lib/collection/queue.md)
+
+Simple queue (FIFO).
+
 ### [module Minilib.Collection.RBTree (lib/collection/rbtree.fix)](lib/collection/rbtree.md)
 
 Red-Black Tree.

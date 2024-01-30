@@ -7,51 +7,55 @@ import Minilib.Collection.Deque;
 import Minilib.Text.StringEx;
 
 namespace Channel {
-    _ErrShutdown: ErrMsg;
-    _ErrShutdown = "Shutdown";
-
     type ChannelData a = unbox struct {
         deque: Deque a,
-        shutdown: Bool
+        closed: Bool
     };
 
     type Channel a = unbox struct {
         var: Var (ChannelData a)
     };
 
-    make: I64 -> IO (Channel a);
-    make = |size| (
+    // `Channel::make` creates a new channel.
+    make: IO (Channel a);
+    make = (
+        let _ = *pure();        // make it lazy
         let chan_data = ChannelData {
-            deque: Deque::empty(size),
-            shutdown: false
+            deque: Deque::empty(0),
+            closed: false
         };
         let var = *Var::make(chan_data);
         pure $ Channel { var: var }
     );
 
-    shutdown: Channel a -> IO ();
-    shutdown = |chan| (
+    // `channel.close` closes a channel.
+    close: Channel a -> IO ();
+    close = |chan| (
         chan.@var.mod(set_shutdown(true))
     );
 
-    is_shutdown: Channel a -> IO Bool;
-    is_shutdown = |chan| (
+    // `channel.is_empty` checks whether the channel is closed.
+    is_closed: Channel a -> IO Bool;
+    is_closed = |chan| (
         let data = *chan.@var.get;
-        pure $ data.@shutdown
+        pure $ data.@closed
     );
 
+    // `channel.is_empty` checks whether the queue of the channel is empty.
     is_empty: Channel a -> IO Bool;
     is_empty = |chan| (
         let data = *chan.@var.get;
         pure $ data.@deque.is_empty
     );
 
+    // `channel.send(a)` sends a data to a channel.
+    // If the channel is closed, it throws `closed_error`.
     send: a -> Channel a -> IOFail ();
     send = |a, chan| (
         chan.@var.lock(
             |data|
-            if data.@shutdown {
-                pure $ err $ _ErrShutdown
+            if data.@closed {
+                pure $ err $ closed_error
             };
             let data = data.mod_deque(push_back(a));
             let _ = *chan.@var.Var::set(data);
@@ -59,13 +63,16 @@ namespace Channel {
         ).lift.bind(from_result)
     );
 
+    // `channel.recv` receives a data from a channel.
+    // If there is no data, it waits until any data is sent, or the channel is closed.
+    // If the channel is closed, it throws `closed_error`.
     recv: Channel a -> IOFail a;
     recv = |chan| (
         chan.@var.wait_and_lock(
-            |data| data.@shutdown || !data.@deque.is_empty,
+            |data| data.@closed || !data.@deque.is_empty,
             |data|
-            if data.@shutdown {
-                pure $ err $ _ErrShutdown
+            if data.@closed {
+                pure $ err $ closed_error
             };
             let a = data.@deque.get_front.as_some;
             let data = data.mod_deque(pop_front);
@@ -74,12 +81,15 @@ namespace Channel {
         ).lift.bind(from_result)
     );
 
+    // `channel.recv` tries to receive a data from a channel.
+    // If there is no data, `none` is returned.
+    // If the channel is closed, it throws `closed_error`.
     try_recv: Channel a -> IOFail (Option a);
     try_recv = |chan| (
         chan.@var.lock(
             |data|
-            if data.@shutdown {
-                pure $ err $ _ErrShutdown
+            if data.@closed {
+                pure $ err $ closed_error
             };
             if data.@deque.is_empty {
                 pure $ ok $ none()
@@ -90,6 +100,10 @@ namespace Channel {
             pure $ ok $ some(a)
         ).lift.bind(from_result)
     );
+
+    // An error message which is reported when the channel is closed.
+    closed_error: ErrMsg;
+    closed_error = "Closed";
 }
 
 
@@ -98,6 +112,8 @@ type Future a = unbox struct {
 };
 
 namespace Future {
+    // `Future::make(pool, io) creates a Future.
+    // `io` is performed in a task function of a TaskPool.
     make: TaskPool -> IO a -> IO (Future a);
     make = |pool, io| (
         let var = *Var::make(none());
@@ -111,6 +127,8 @@ namespace Future {
         }
     );
 
+    // Gets the result of the Future.
+    // If the `io` is not performed yet, wait until `io` is performed.
     get: Future a -> IO a;
     get = |future| (
         future.@var.wait_and_lock(
@@ -125,9 +143,11 @@ type TaskPool = unbox struct {
 };
 
 namespace TaskPool {
+
+    // `TaskPool::make(task_count)` creates a TaskPool.
     make: I64 -> IO TaskPool;
     make = |task_count| (
-        let chan = *Channel::make(0);
+        let chan = *Channel::make;
         let tasks = *loop_m(
             ([], 0), |(tasks, i)|
             if i >= task_count {
@@ -148,9 +168,10 @@ namespace TaskPool {
         .try(eprintln)
     );
 
+    // Shutdowns a taskpool.
     shutdown: TaskPool -> IO ();
     shutdown = |pool| (
-        let _ = *pool.@chan.shutdown;
+        let _ = *pool.@chan.close;
         pool.@tasks.to_iter.fold_m(
             (), |_, task|
             task.get
@@ -166,7 +187,7 @@ namespace TaskPool {
             continue_m $ ()
         )
         .try(|err|
-            if err == Channel::_ErrShutdown {
+            if err == Channel::closed_error {
                 pure()    
             };
             eprintln(err)

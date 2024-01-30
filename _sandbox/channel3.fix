@@ -92,120 +92,138 @@ namespace Channel {
     );
 }
 
-impl Var a: Eq {
-    eq = |var1, var2| (
-        var1.@_dtor.borrow(|handle1|
-            var2.@_dtor.borrow(|handle2|
-                handle1 == handle2
-            )
+
+type Future a = unbox struct {
+    var: Var (Option a)
+};
+
+namespace Future {
+    make: TaskPool -> IO a -> IO (Future a);
+    make = |pool, io| (
+        let var = *Var::make(none());
+        let io = (
+            let a = *io;
+            var.Var::set(some $ a)
+        );
+        let _ = *pool._send(io);
+        pure $ Future {
+            var: var
+        }
+    );
+
+    get: Future a -> IO a;
+    get = |future| (
+        future.@var.wait_and_lock(
+            is_some, as_some >> pure
         )
     );
 }
 
-impl Channel a: Eq {
-    eq = |chan1, chan2| (
-        chan1.@var == chan2.@var
-    );
-}
+type TaskPool = unbox struct {
+    chan: Channel (IO ()),
+    tasks: Array (IOTask ())
+};
 
-namespace Topic {
-    type Topic a = unbox struct {
-        subscribers: Iterator (Channel a)
-    };
-
-    empty: Topic a;
-    empty = Topic {
-        subscribers: []
-    };
-
-    subscribe: Channel a -> Topic a -> Topic a;
-    subscribe = |chan, topic| (
-        topic.mod_subscribers(push_front(chan))
-    );
-    
-    unsubscribe: Channel a -> Topic a -> Topic a;
-    unsubscribe = |chan, topic| (
-        topic.mod_subscribers(filter(|ch| ch != chan))
+namespace TaskPool {
+    make: I64 -> IO TaskPool;
+    make = |task_count| (
+        let chan = *Channel::make(0);
+        let tasks = *loop_m(
+            ([], 0), |(tasks, i)|
+            if i >= task_count {
+                break_m $ tasks 
+            };
+            let task = *AsyncIOTask::make(_task_func(chan));
+            continue_m $ (tasks.push_back(task), i + 1)
+        );
+        pure $ TaskPool {
+            chan: chan,
+            tasks: tasks
+        }
     );
 
-    notify: a -> Topic a -> IO ();
-    notify = |value, topic| (
-        topic.@subscribers.fold_m(
-            (), |_, chan|
-            chan.send(value)
+    _send: IO () -> TaskPool -> IO ();
+    _send = |io, pool| (
+        pool.@chan.send(io)
+        .try(eprintln)
+    );
+
+    shutdown: TaskPool -> IO ();
+    shutdown = |pool| (
+        let _ = *pool.@chan.shutdown;
+        pool.@tasks.to_iter.fold_m(
+            (), |_, task|
+            task.get
+        )
+    );
+
+    _task_func: Channel (IO ()) -> IO ();
+    _task_func = |chan| (
+        loop_m(
+            (), |_|
+            let io = *chan.recv;
+            let _ = *io.lift;
+            continue_m $ ()
+        )
+        .try(|err|
+            if err == Channel::_ErrShutdown {
+                pure()    
+            };
+            eprintln(err)
         )
     );
 }
 
-map_m: [m : Monad] (a -> m b) -> Array a -> m (Array b);
-map_m = |f, array| array.to_iter.fold_m(
-    Array::empty(array.get_size), |output, a|
-    let b = *f(a);
-    pure $ output.push_back(b)
+
+parallel_map_m: TaskPool -> (a -> IO b) -> Array a -> IO (Array b);
+parallel_map_m = |pool, f, arr| (
+    let tasks = *arr.to_iter.fold_m(
+        [], |tasks, a|
+        let task = *Future::make(pool, pure(a).bind(f));
+        pure $ tasks.push_back(task)
+    );
+    tasks.to_iter.fold_m(
+        [], |results, task|
+        let result = *task.get;
+        pure $ results.push_back(result)
+    )
 );
+
+
+//---------------------------------------------------
 
 _usleep: I64 -> I64;
 _usleep = |usec| (
     CALL_C[I32 usleep(U32), usec.to_U32].to_I64
 );
 
+sleep_random: Var Random -> IO ();
+sleep_random = |rand_var| (
+    let u64 = *rand_var.lock(|rand|
+        let (u64, rand) = rand.generate_U64;
+        let _ = *rand_var.Var::set(rand);
+        pure $ u64
+    );
+    eval _usleep((u64 % 500000_U64).to_I64);
+    pure()
+);
 
 test1: IO ();
 test1 = (
-    let _ = *pure();
-    let rand_var = *Var::make(Random::init_by_seed(123_U64));
-    let sleep_random: IO () = (
-        let u64 = *rand_var.lock(|rand|
-            let (u64, rand) = rand.generate_U64;
-            let _ = *rand_var.Var::set(rand);
-            pure $ u64
-        );
-        eval _usleep((u64 % 100000_U64).to_I64);
-        pure()
+    let _ = *eprintln("start");
+    let rand_var: Var Random = *Var::make(Random::init_by_seed(123_U64));
+    let pool = *TaskPool::make(5);
+    let arr: Array I64 = Iterator::range(0, 1000).to_array;
+    let _ = *arr.parallel_map_m(pool, |i|
+        let _ = *sleep_random(rand_var);
+        eprintln(i.to_string)
     );
-    let n = 20;
-    let indices = Iterator::range(0, n).to_array;
-    let channels = *indices.map_m(|_| Channel::make(4));
-    let channel_result = *Channel::make(4);
-    let task_func = |idx| (
-        let _ = *eprintln(idx.to_string + ": 1st send to " + idx.to_string).lift;
-        let _ = *channels.@(idx).send(idx);
-        let _ = *sleep_random.lift;
-        let _ = *eprintln(idx.to_string + ": 1st recv from " + ((idx+n/3)%n).to_string).lift;
-        let val = *channels.@((idx+n/3)%n).recv;
-        let _ = *sleep_random.lift;
-        let _ = *eprintln(idx.to_string + ": 2nd send to " + idx.to_string).lift;
-        let _ = *channels.@(idx).send(val);
-        let _ = *sleep_random.lift;
-        let _ = *eprintln(idx.to_string + ": 2nd recv from " + ((idx+n*2/3)%n).to_string).lift;
-        let val = *channels.@((idx+n*2/3)%n).recv;
-        let _ = *sleep_random.lift;
-        let _ = *eprintln(idx.to_string + ": final send to " + idx.to_string).lift;
-        let _ = *channel_result.send((idx,val));
-        pure()
-    );
-    let tasks = *indices.map_m(
-        |idx|
-        AsyncIOTask::make(
-            task_func(idx)
-            .try(eprintln)
-        )
-    );
-    do {
-        let (idx, val) = *channel_result.recv;
-        let _ = *tasks.map_m(get).lift;
-        let _ = *eprintln("idx=" + idx.to_string + " val="+val.to_string).lift;
-        loop_m(
-            (), |_|
-            let opt = *channel_result.try_recv;
-            if opt.is_none { break_m $ () };
-            let (idx, val) = opt.as_some;
-            let _ = *eprintln("rest idx=" + idx.to_string + " val="+val.to_string).lift;
-            continue_m $ ()
-        )
-    }
-    .try(eprintln)
+    let _ = *pool.shutdown;
+    let _ = *eprintln("end");
+    pure()
 );
 
 main: IO ();
-main = test1;
+main = (
+    test1
+);

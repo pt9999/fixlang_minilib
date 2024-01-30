@@ -4,8 +4,8 @@
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
 	channel.out png.out ndarray_calc.out
 
-channel: 
-	../bin/fixautolink run -L ../lib -f channel.fix
+channel3: 
+	../bin/fixautolink build -L ../lib -f channel3.fix
 
 ndarray:
 	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix

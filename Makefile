@@ -43,6 +43,10 @@ test_json:
 test_io_ex:
 	bin/fixautolink run -f tests/io/io_ex_test.fix -L ./lib
 
+test_monad: test_functor_m
+test_functor_m:
+	bin/fixautolink run -f tests/monad/functor_m_test.fix -L ./lib
+
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:
 	bin/fixautolink run -f tests/text/string_ex_test.fix -L ./lib

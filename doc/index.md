@@ -66,6 +66,10 @@ IO extensions, such as:
 - Retrieve file information, such as file size and time stamps
 - Get kernel information such as system name, machine archtecture
 
+### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
+
+`map_m`, `foreach_m` for Array and Iterator.
+
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
 HTML handling, such as:

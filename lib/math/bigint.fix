@@ -50,6 +50,17 @@ namespace BigNat {
         )
     );
 
+    // Converts `a` to U64. If overflow, it produces unexpected result.
+    _to_u64: Array U32 -> U64;
+    _to_u64 = |a| (
+        loop(
+            (0_U64, a.get_size - 1), |(sum, i)|
+            if i < 0 { break $ sum };
+            let sum = sum * _base + a.@(i).to_U64;
+            continue $ (sum, i - 1)
+        )
+    );
+
     // Calculates `sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)`.
     _cmp: (Array U32, I64) -> (Array U32, I64) -> I64;
     _cmp = |(a0, offset0), (a1, offset1)| (
@@ -358,6 +369,13 @@ namespace BigInt {
         BigInt::make(sign, BigNat::_from_u64(u64))
     );
 
+    // Converts BigInt to I64. If overflow, it produces unexpected result.
+    to_I64: BigInt -> I64;
+    to_I64 = |a| (
+        let u64 = a.@nat._to_u64;
+        u64.to_I64 * a.@sign
+    );
+
     // `BigInt::cmp(a,b)` returns 1 if `a > b`, -1 if `a < b`, 0 if `a == b`.
     cmp: BigInt -> BigInt -> I64;
     cmp = |a, b| (
@@ -368,6 +386,24 @@ namespace BigInt {
             -1
         }
     );
+
+    // `BigInt::divmod(a,b)` Returns `(a/b, a%b)`.
+    // NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
+    divmod: BigInt -> BigInt -> (BigInt, BigInt);
+    divmod = |a, b| (
+        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+        let quo = BigInt::make(a.@sign * b.@sign, quo);
+        let rem = BigInt::make(a.@sign, rem);
+        (quo, rem)
+    );
+
+    // BigInt constant representing 1.
+    one: BigInt;
+    one = BigInt::from_I64(1);
+
+    // BigInt constant representing 2.
+    two: BigInt;
+    two = BigInt::from_I64(2);
 }
 
 // Converts BigInt from a decimal string.
@@ -447,15 +483,15 @@ impl BigInt: Mul {
 // NOTE: -8 / 3 == -2, as with the Fix language.
 impl BigInt: Div {
     div = |a, b| (
-        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
-        BigInt::make(a.@sign * b.@sign, quo)
+        let (quo, rem) = BigInt::divmod(a, b);
+        quo
     );
 }
 
 // NOTE: -8 % 3 == -2, as with the Fix language.
 impl BigInt: Rem {
     rem = |a, b| (
-        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
-        BigInt::make(a.@sign, rem)
+        let (quo, rem) = BigInt::divmod(a, b);
+        rem
     );
 }

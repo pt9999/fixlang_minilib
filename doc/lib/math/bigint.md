@@ -30,9 +30,26 @@ type BigInt = unbox struct {
 
 `BigInt::from_I64(i64)` creates new BigInt object from `i64`.
 
+#### to_I64: BigInt -> I64;
+
+Converts BigInt to I64. If overflow, it produces unexpected result.
+
 #### cmp: BigInt -> BigInt -> I64;
 
 `BigInt::cmp(a,b)` returns 1 if `a > b`, -1 if `a < b`, 0 if `a == b`.
+
+#### divmod: BigInt -> BigInt -> (BigInt, BigInt);
+
+`BigInt::divmod(a,b)` Returns `(a/b, a%b)`.
+NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
+
+#### one: BigInt;
+
+BigInt constant representing 1.
+
+#### two: BigInt;
+
+BigInt constant representing 2.
 
 #### `impl BigInt: FromString`
 

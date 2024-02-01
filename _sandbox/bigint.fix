@@ -1,0 +1,334 @@
+module Main;
+
+import Debug;
+
+import Minilib.Text.StringEx;
+
+// natural numbers, ie. n >= 0
+// digits are ordered from least significant to most significant
+type BigNat = Array U32;
+
+namespace BigNat {
+    _base: U64;
+    //_base = U32::maximum.to_U64 + 1_U64;
+    _base = 100_U64;
+
+    _divmod_base: U64 -> (U64, U64);
+    _divmod_base = |x| (
+        (x / _base, x % _base)
+    );
+
+    _remove_last_zeros: Array U32 -> Array U32;
+    _remove_last_zeros = |a| (
+        let n = a.get_size;
+        if n <= 1 { a };
+        if a.@(n-1) != 0_U32 { a };
+        let a = a.pop_back;
+        a._remove_last_zeros      // tail recursion
+    );
+
+    // returns sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)
+    _cmp: (Array U32, I64) -> (Array U32, I64) -> I64;
+    _cmp = |(a0, offset0), (a1, offset1)| (
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        if n0 < n1 { -1 };
+        if n0 > n1 {  1 };
+        loop(
+            n0-1, |i|
+            if i < offset0 && i < offset1 { break $ 0 };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            if d0 < d1 { break $ -1 };
+            if d0 > d1 { break $  1 };
+            continue $ i - 1
+        )
+    );
+
+    _add: Array U32 -> Array U32 -> Array U32;
+    _add = |a0, a1| (
+        let (a2, _) = _add_with_offset((a0,0), (a1,0));
+        a2
+    );
+
+    _add_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
+    _add_with_offset = |(a0, offset0), (a1, offset1)| (
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1) + 1;
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let a2 = loop(
+            (a2, offset2, 0_U64), |(a2, i, carry)|
+            if i >= n0 && i >= n1 && carry == 0_U64 {
+                break $ a2
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, carry)
+        );
+        (a2, offset2)
+    );
+
+    // should be: a0 >= a1
+    _sub: Array U32 -> Array U32 -> Array U32;
+    _sub = |a0, a1| (
+        let (a2, _) = _sub_with_offset((a0, 0), (a1, 0));
+        a2
+    );
+
+    _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
+    _sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        eval assert(|_| "not a0 >= a1", _cmp((a0, offset0), (a1, offset1)) >= 0);
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let a2 = loop(
+            (a2, offset2, 0_U64), |(a2, i, borrow)|
+            if i >= n0 && i >= n1  {
+                break $ a2
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d0: U64 = d0.to_U64;
+            let d1: U64 = d1.to_U64 + borrow;
+            let (borrow, d2) = if d0 >= d1 {
+                (0_U64, d0 - d1)
+            } else {
+                (1_U64, _base + d0 - d1)
+            };                
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, borrow)
+        );
+        (a2, offset2)
+    );
+
+    _mul_u32: U32 -> Array U32 -> Array U32;
+    _mul_u32 = |d0, a1| (
+        let n1 = a1.get_size;
+        let n2 = n1 + 1;
+        let a2 = Array::empty(n2);
+        let a2 = loop(
+            (a2, 0, 0_U64), |(a2, i, carry)|
+            if i >= n1 && carry == 0_U64 {
+                break $ a2
+            };
+            let d1: U32 = if 0 <= i && i < n1 { a1.@(i) } else { 0_U32 };
+            let d2: U64 = d0.to_U64 * d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, carry)
+        );
+        a2
+    );
+
+    _mul: Array U32 -> Array U32 -> Array U32;
+    _mul = |a0, a1| (
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        let n2 = n0 + n1 + 1;
+        let a2 = loop(
+            ([0_U32], 0), |(a2, i)|
+            if i >= n0 {
+                break $ a2
+            };
+            let d0 = a0.@(i);
+            let (a2, e2) = _add_with_offset((a2, 0), (_mul_u32(d0, a1), i));
+            // e2 == 0
+            continue $ (a2, i + 1)
+        );
+        a2
+    );
+
+    _divmod: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod = |a0, a1| (
+        let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        let _debug: Lazy String -> () = |_| ();
+
+        let a0 = a0._remove_last_zeros;
+        let a1 = a1._remove_last_zeros;
+        if a1 == [ 0_U32 ] {
+            err $ "Divide by zero"
+        };
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        if n0 <= 0 || n1 <= 0 {
+            err $ "Invalid array"
+        };
+        if n0 < n1 {
+            ok $ ([0_U32], a0)
+        };
+        let n2 = n0;
+        let a2 = Array::fill(n2, 0_U32);
+
+        // calc quotient(a2) and reminder(a0)
+        let (a0, a2) = *loop_m(
+            (a0, a2, n2 - 1, 0_U64), |(a0, a2, i, carry)|
+            eval _debug(|_| "(a0, a2, i, carry)="+(a0, a2, i, carry).to_string);
+            let offset1 = i - (n1 - 1);
+            if offset1 < 0 {
+                break_m $ (a0, a2)
+            };
+            let offset0 = 0;
+            let d0 = a0.@(i).to_U64 + carry * _base;
+            let d1: U64 = if offset1 <= i && i < n1 + offset1 { a1.@(i - offset1).to_U64 } else { 0_U64 };
+            eval _debug(|_| "(a1)="+(a1).to_string);
+            eval _debug(|_| "(offset1, i, n1, d1)="+(offset1, i, n1, d1).to_string);
+            let (a0, offset0, d2) = *(
+                if d0 >= d1 * _base {
+                    err $ "d0 too large: d0=" + d0.to_string + " d1=" + d1.to_string
+                };
+                let d2 = (d0 / d1).to_U32;
+                let (a3, offset3) = (_mul_u32(d2, a1), offset1);
+                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
+                if _cmp((a0, offset0), (a3, offset3)) >= 0 {
+                    let (a0, offset0) = _sub_with_offset((a0, offset0), (a3, offset3));
+                    ok $ (a0, offset0, d2)
+                };
+                let d2 = d2 - 1_U32;
+                let (a3, offset3) = (_mul_u32(d2, a1), offset1);
+                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
+                if _cmp((a0, offset0), (a3, offset3)) >= 0 {
+                    let (a0, offset0) = _sub_with_offset((a0, offset0), (a3, offset3));
+                    ok $ (a0, offset0, d2)
+                };
+                err $ "cannot div"
+            );
+            let carry = a0.@(i).to_U64;
+            let a0 = a0._remove_last_zeros;
+            let a2 = a2.set(offset1, d2);
+            continue_m $ (a0, a2, i - 1, carry)
+        );
+        let a2 = a2._remove_last_zeros;
+        ok $ (a2, a0)
+    );
+    
+    _zero: Array U32;
+    _zero = [0_U32];
+
+    _ten: Array U32;
+    _ten = [10_U32];
+
+    _to_string: Array U32 -> String;
+    _to_string = |a| (
+        let a = a._remove_last_zeros;
+        let output = _to_string_inner(a, Iterator::empty);
+        let output = if output.is_empty { output.push_front('0') } else { output };
+        output.to_array._unsafe_to_string
+    );
+
+    _to_string_inner: Array U32 -> Iterator U8 -> Iterator U8;
+    _to_string_inner = |a, output| (
+        if a.get_size == 0 { output };
+        if a.get_size == 1 && a.@(0) == 0_U32 { output };
+        let res = _divmod(a, BigNat::_ten);
+        if res.is_err {
+            eval assert(|_| "err: " + res.as_err, false);
+            abort()
+        }; 
+        let (quo,rem) = res.as_ok;
+        let output = output.push_front('0' + rem.@(0).to_U8);
+        _to_string_inner(quo, output)
+    );
+    
+    _from_string_inner: Array U8 -> I64 -> Array U32 -> Result ErrMsg (Array U32);
+    _from_string_inner = |bytes, i, a| (
+        if i >= bytes.get_size { ok $ a };
+        let c = bytes.@(i);
+        if !('0' <= c && c <= '9') { err $ "invalid character" };
+        let c = (c - '0').to_U32;
+        let a = _add(_mul(a, _ten), [c]);
+        _from_string_inner(bytes, i + 1, a)
+    );
+}
+
+type BigInt = unbox struct {
+    sign: I64,
+    nat: BigNat
+};
+
+namespace BigInt {
+    make: I64 -> BigNat -> BigInt;
+    make = |sign, nat| BigNat {
+        sign: sign,
+        nat: nat
+    };
+
+}
+
+impl BigInt: FromString {
+    from_string = |str| (
+        if str == "" { err $ "empty string" };
+        let bytes = str.get_bytes.pop_back;
+        let (bytes, sign) = if bytes.@(0) == '-' {
+            (bytes.get_sub(1, bytes.get_size), -1)
+        } else { (bytes, 1) };
+        let nat = *BigNat::_from_string_inner(bytes, 0, BigNat::_zero);
+        ok $ BigInt { sign: sign, nat: nat }
+    );
+}
+
+impl BigInt: ToString {
+    to_string = |a| (
+        let sign = if a.@sign < 0 { "-" } else { "" };
+        sign + a.@nat._to_string
+    );
+}
+
+impl BigInt: Zero {
+    zero = BigInt { sign: 1, nat: BigNat::_zero };
+}
+
+impl BigInt: Neg {
+    neg = |a| BigInt { sign: -a.@sign, nat: a.@nat };
+}
+
+impl BigInt: Add {
+    add = |a, b| (
+        if a.@sign == b.@sign {
+            let nat = BigNat::_add(a.@nat, b.@nat);
+            BigInt { sign: a.@sign, nat: nat } 
+        };
+        let cmp = BigNat::_cmp((a.@nat,0), (b.@nat,0));
+        if cmp > 0 {
+            let nat = BigNat::_sub(a.@nat, b.@nat);
+            BigInt { sign: a.@sign, nat: nat }
+        };
+        if cmp < 0 {
+            let nat = BigNat::_sub(b.@nat, a.@nat);
+            BigInt { sign: b.@sign, nat: nat }
+        };
+        zero
+    );
+}
+
+impl BigInt: Sub {
+    sub = |a, b| add(a, neg(b));
+}
+
+test_div: IO ();
+test_div = (
+    let a0 = [ 3_U32, 5_U32, 2_U32, 1_U32];
+    let a1 = [ 3_U32, 3_U32];
+    eprintln(_divmod(a0, a1).to_string)
+    //let (a2, e2) = _sub_with_offset((a0, 2), (a1, 2));
+    //println(e2.to_string+":" +a2.map(to_string).to_iter.join(","))
+);
+
+main: IO ();
+main = (
+    let a: Result ErrMsg BigInt = from_string("123456789012345678901234567890");
+    if a.is_err {
+        eprintln(a.as_err)
+    };
+    let a = a.as_ok;
+    let _ = *println(a.@nat.to_string);
+    let a = a.to_string;
+    let _ = *println(a);
+    pure()
+);

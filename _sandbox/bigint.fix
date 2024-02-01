@@ -4,14 +4,14 @@ import Debug;
 
 import Minilib.Text.StringEx;
 
-// natural numbers, ie. n >= 0
-// digits are ordered from least significant to most significant
-type BigNat = Array U32;
-
 namespace BigNat {
+    // natural numbers, ie. n >= 0
+    // digits are ordered from least significant to most significant
+    //type BigNat = Array U32;
+
     _base: U64;
-    //_base = U32::maximum.to_U64 + 1_U64;
-    _base = 100_U64;
+    _base = U32::maximum.to_U64 + 1_U64;
+    //_base = 100_U64;
 
     _divmod_base: U64 -> (U64, U64);
     _divmod_base = |x| (
@@ -45,12 +45,14 @@ namespace BigNat {
         )
     );
 
+    // Calculates `a0 + a1`.
     _add: Array U32 -> Array U32 -> Array U32;
     _add = |a0, a1| (
         let (a2, _) = _add_with_offset((a0,0), (a1,0));
         a2
     );
 
+    // Calculates `a0 * pow(_base, offset0) + a1 * pow(_base, offset1)`.
     _add_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
     _add_with_offset = |(a0, offset0), (a1, offset1)| (
         let n0 = a0.get_size + offset0;
@@ -73,6 +75,7 @@ namespace BigNat {
         (a2, offset2)
     );
 
+    // Calculates `a0 - a1`.
     // should be: a0 >= a1
     _sub: Array U32 -> Array U32 -> Array U32;
     _sub = |a0, a1| (
@@ -80,6 +83,7 @@ namespace BigNat {
         a2
     );
 
+    // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
     _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
     _sub_with_offset = |(a0, offset0), (a1, offset1)| (
         eval assert(|_| "not a0 >= a1", _cmp((a0, offset0), (a1, offset1)) >= 0);
@@ -108,6 +112,7 @@ namespace BigNat {
         (a2, offset2)
     );
 
+    // Calculates `d0 * a1`.
     _mul_u32: U32 -> Array U32 -> Array U32;
     _mul_u32 = |d0, a1| (
         let n1 = a1.get_size;
@@ -127,6 +132,7 @@ namespace BigNat {
         a2
     );
 
+    // Calculates `a0 * a1`.
     _mul: Array U32 -> Array U32 -> Array U32;
     _mul = |a0, a1| (
         let n0 = a0.get_size;
@@ -145,9 +151,23 @@ namespace BigNat {
         a2
     );
 
-    _divmod: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
     _divmod = |a0, a1| (
-        let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        let res = _divmod_or_err(a0, a1);
+        if res.is_err {
+            eval debug_eprintln(res.as_err);
+            abort()
+        };
+        res.as_ok 
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Returns err if any error occured.
+    _divmod_or_err: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod_or_err = |a0, a1| (
+        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
         let _debug: Lazy String -> () = |_| ();
 
         let a0 = a0._remove_last_zeros;
@@ -208,12 +228,15 @@ namespace BigNat {
         ok $ (a2, a0)
     );
     
+    // 0 in BigNat.
     _zero: Array U32;
     _zero = [0_U32];
 
+    // 10 in BigNat.
     _ten: Array U32;
     _ten = [10_U32];
 
+    // ToString of BigNat.
     _to_string: Array U32 -> String;
     _to_string = |a| (
         let a = a._remove_last_zeros;
@@ -226,39 +249,35 @@ namespace BigNat {
     _to_string_inner = |a, output| (
         if a.get_size == 0 { output };
         if a.get_size == 1 && a.@(0) == 0_U32 { output };
-        let res = _divmod(a, BigNat::_ten);
-        if res.is_err {
-            eval assert(|_| "err: " + res.as_err, false);
-            abort()
-        }; 
-        let (quo,rem) = res.as_ok;
+        let (quo, rem) = _divmod(a, BigNat::_ten);
         let output = output.push_front('0' + rem.@(0).to_U8);
         _to_string_inner(quo, output)
     );
     
+    // FromString of BigNat.
     _from_string_inner: Array U8 -> I64 -> Array U32 -> Result ErrMsg (Array U32);
     _from_string_inner = |bytes, i, a| (
         if i >= bytes.get_size { ok $ a };
         let c = bytes.@(i);
         if !('0' <= c && c <= '9') { err $ "invalid character" };
-        let c = (c - '0').to_U32;
-        let a = _add(_mul(a, _ten), [c]);
+        let digit = (c - '0').to_U32;
+        let a = _add(_mul(a, _ten), [digit]);
         _from_string_inner(bytes, i + 1, a)
     );
 }
 
+// Integer with arbitrary precision.
 type BigInt = unbox struct {
-    sign: I64,
-    nat: BigNat
+    sign: I64,          // sign
+    nat: Array U32      // natural number (>= 0)
 };
 
 namespace BigInt {
-    make: I64 -> BigNat -> BigInt;
-    make = |sign, nat| BigNat {
+    make: I64 -> Array U32 -> BigInt;
+    make = |sign, nat| BigInt {
         sign: sign,
         nat: nat
     };
-
 }
 
 impl BigInt: FromString {
@@ -311,24 +330,61 @@ impl BigInt: Sub {
     sub = |a, b| add(a, neg(b));
 }
 
+impl BigInt: Mul {
+    mul = |a, b| (
+        let nat = BigNat::_mul(a.@nat, b.@nat);
+        BigInt { sign: a.@sign * b.@sign, nat: nat }
+    );
+}
+
+impl BigInt: Div {
+    div = |a, b| (
+        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+        BigInt { sign: a.@sign * b.@sign, nat: quo }
+    );
+}
+
+impl BigInt: Rem {
+    rem = |a, b| (
+        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+        BigInt { sign: a.@sign * b.@sign, nat: rem }
+    );
+}
+
 test_div: IO ();
 test_div = (
     let a0 = [ 3_U32, 5_U32, 2_U32, 1_U32];
     let a1 = [ 3_U32, 3_U32];
-    eprintln(_divmod(a0, a1).to_string)
+    eprintln(BigNat::_divmod(a0, a1).to_string)
     //let (a2, e2) = _sub_with_offset((a0, 2), (a1, 2));
     //println(e2.to_string+":" +a2.map(to_string).to_iter.join(","))
 );
 
+or_abort: Result ErrMsg a -> a;
+or_abort = |res| (
+    if res.is_err {
+        eval debug_eprintln("error: " + res.as_err);
+        abort()
+    };
+    res.as_ok
+);
+
 main: IO ();
 main = (
-    let a: Result ErrMsg BigInt = from_string("123456789012345678901234567890");
-    if a.is_err {
-        eprintln(a.as_err)
-    };
-    let a = a.as_ok;
-    let _ = *println(a.@nat.to_string);
-    let a = a.to_string;
-    let _ = *println(a);
+    let a: BigInt = from_string("-123456789012345678901234567890").or_abort;
+    let b: BigInt = from_string("123456789").or_abort;
+    let a: BigInt = from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort;
+    let b: BigInt = from_string("7777777777777777").or_abort;
+    let _ = *println("a=" + a.to_string);
+    let _ = *println("b=" + b.to_string);
+    let _ = *println("a+b=" + (a+b).to_string);
+    let _ = *println("a-b=" + (a-b).to_string);
+    let _ = *println("a*b=" + (a*b).to_string);
+    let _ = *println("a/b=" + (a/b).to_string);
+    let _ = *println("a%b=" + (a%b).to_string);
+    let _ = *println("b/a=" + (b/a).to_string);
+    let _ = *println("b%a=" + (b%a).to_string);
+    let _ = *println("a/a=" + (a/a).to_string);
+    let _ = *println("a%a=" + (a%a).to_string);
     pure()
 );

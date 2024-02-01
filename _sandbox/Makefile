@@ -26,7 +26,7 @@ test_state_monad:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
 
 bigint:
-	../bin/fixautolink run -L ../lib -f bigint.fix
+	../bin/fixautolink build -L ../lib -f bigint.fix
 
 clean:
 	rm -f *.out

@@ -167,8 +167,8 @@ namespace BigNat {
     // Returns err if any error occured.
     _divmod_or_err: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
     _divmod_or_err = |a0, a1| (
-        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
-        let _debug: Lazy String -> () = |_| ();
+        let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        //let _debug: Lazy String -> () = |_| ();
 
         let a0 = a0._remove_last_zeros;
         let a1 = a1._remove_last_zeros;
@@ -186,42 +186,56 @@ namespace BigNat {
         let n2 = n0;
         let a2 = Array::fill(n2, 0_U32);
 
+        // a0 = numerator, a1 = denominator
         // calc quotient(a2) and reminder(a0)
         let (a0, a2) = *loop_m(
             (a0, a2, n2 - 1, 0_U64), |(a0, a2, i, carry)|
-            eval _debug(|_| "(a0, a2, i, carry)="+(a0, a2, i, carry).to_string);
+            let offset0 = 0;
             let offset1 = i - (n1 - 1);
             if offset1 < 0 {
                 break_m $ (a0, a2)
             };
-            let offset0 = 0;
-            let d0 = a0.@(i).to_U64 + carry * _base;
+            let offset2 = 0;
+            let d0 = if 0 <= i && i < a0.get_size { a0.@(i).to_U64 } else { 0_U64 };
+            let d0 = d0 + carry * _base;
             let d1: U64 = if offset1 <= i && i < n1 + offset1 { a1.@(i - offset1).to_U64 } else { 0_U64 };
-            eval _debug(|_| "(a1)="+(a1).to_string);
-            eval _debug(|_| "(offset1, i, n1, d1)="+(offset1, i, n1, d1).to_string);
+            eval _debug(|_| "(i, carry)="+(i, carry).to_string);
+            eval _debug(|_| "(a0, offset0, n0, d0)="+(a0, offset0, n0, d0).to_string);
+            eval _debug(|_| "(a1, offset1, n1, d1)="+(a1, offset1, n1, d1).to_string);
+            eval _debug(|_| "(a2, offset2)="+(a2, offset2).to_string);
             let (a0, offset0, d2) = *(
                 if d0 >= d1 * _base {
                     err $ "d0 too large: d0=" + d0.to_string + " d1=" + d1.to_string
                 };
                 let d2 = (d0 / d1).to_U32;
+                if d2 == 0_U32 {
+                    ok $ (a0, offset0, d2)
+                };
                 let (a3, offset3) = (_mul_u32(d2, a1), offset1);
                 eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
                 if _cmp((a0, offset0), (a3, offset3)) >= 0 {
                     let (a0, offset0) = _sub_with_offset((a0, offset0), (a3, offset3));
+                    eval _debug(|_| "success1: (a0, offset0)=" + (a0, offset0).to_string);
                     ok $ (a0, offset0, d2)
                 };
-                let d2 = d2 - 1_U32;
+                //let d2 = d2 - 1_U32;
+                let d2 = (d0 / (d1 + 1_U64)).to_U32;
+                if d2 == 0_U32 {
+                    ok $ (a0, offset0, d2)
+                };
                 let (a3, offset3) = (_mul_u32(d2, a1), offset1);
                 eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
                 if _cmp((a0, offset0), (a3, offset3)) >= 0 {
                     let (a0, offset0) = _sub_with_offset((a0, offset0), (a3, offset3));
+                    eval _debug(|_| "success2: (a0, offset0)=" + (a0, offset0).to_string);
                     ok $ (a0, offset0, d2)
                 };
-                err $ "cannot div"
+                eval _debug(|_| "fail: (a0, offset0)=" + (a0, offset0).to_string);
+                ok $ (a0, offset0, 0_U32)
             );
-            let carry = a0.@(i).to_U64;
-            let a0 = a0._remove_last_zeros;
             let a2 = a2.set(offset1, d2);
+            let carry = if 0 <= i && i < a0.get_size { a0.@(i).to_U64 } else { 0_U64 };
+            let a0 = a0._remove_last_zeros;
             continue_m $ (a0, a2, i - 1, carry)
         );
         let a2 = a2._remove_last_zeros;

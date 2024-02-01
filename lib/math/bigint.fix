@@ -1,0 +1,458 @@
+module Minilib.Math.BigInt;
+
+import Debug;
+import Math;
+
+import Minilib.Text.StringEx;
+
+namespace BigNat {
+    // natural numbers, ie. n >= 0
+    // digits are ordered from least significant to most significant
+    //type BigNat = Array U32;
+
+    _base: U64;
+    _base = U32::maximum.to_U64 + 1_U64;
+    //_base = 100_U64;
+
+    _ceil_log2_base: I64;
+    _ceil_log2_base = loop(
+        0, |i|
+        if i >= 64 { break $ i };
+        if 1_U64.shift_left(i.to_U64) >= _base { break $ i };
+        continue $ i + 1
+    );
+
+    _divmod_base: U64 -> (U64, U64);
+    _divmod_base = |x| (
+        (x / _base, x % _base)
+    );
+
+    _remove_last_zeros: Array U32 -> Array U32;
+    _remove_last_zeros = |a| (
+        let n = a.get_size;
+        if n <= 1 { a };
+        if a.@(n-1) != 0_U32 { a };
+        let a = a.pop_back;
+        a._remove_last_zeros      // tail recursion
+    );
+
+    _from_u64: U64 -> Array U32;
+    _from_u64 = |u64| (
+        loop(
+            ([], u64), |(a, u64)|
+            if u64 == 0_U64 && a.get_size > 0 {
+                break $ a
+            };
+            let (quo, rem) = _divmod_base(u64);
+            let a = a.push_back(rem.to_U32);
+            continue $ (a, quo)
+        )
+    );
+
+    // Calculates `sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)`.
+    _cmp: (Array U32, I64) -> (Array U32, I64) -> I64;
+    _cmp = |(a0, offset0), (a1, offset1)| (
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n = max(n0, n1);
+        loop(
+            n-1, |i|
+            if i < offset0 && i < offset1 { break $ 0 };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            if d0 < d1 { break $ -1 };
+            if d0 > d1 { break $  1 };
+            continue $ i - 1
+        )
+    );
+
+    // Calculates `a0 + a1`.
+    _add: Array U32 -> Array U32 -> Array U32;
+    _add = |a0, a1| (
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        if n0 < n1 { _add(a1, a0) };
+        let a0 = loop(
+            (a0, 0, 0_U64), |(a0, i, carry)|
+            if (i >= n0 || i >= n1) && carry == 0_U64 {
+                break $ a0
+            };
+            let d0: U32 = if i < n0 { a0.@(i) } else { 0_U32 };
+            let d1: U32 = if i < n1 { a1.@(i) } else { 0_U32 };
+            let d0: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d0) = _divmod_base(d0);
+            let a0 = if i < n0 { a0.set(i, d0.to_U32) } else { a0.push_back(d0.to_U32) };
+            continue $ (a0, i + 1, carry)
+        );
+        a0
+    );
+
+    // Calculates `a0 * _base ^ offset0 + a1 * _base ^ offset1`.
+    _add_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
+    _add_with_offset = |(a0, offset0), (a1, offset1)| (
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1) + 1;
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let a2 = loop(
+            (a2, offset2, 0_U64), |(a2, i, carry)|
+            if i >= n0 && i >= n1 && carry == 0_U64 {
+                break $ a2
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, carry)
+        );
+        (a2, offset2)
+    );
+
+    // Calculates `a0 - a1`.
+    // Aborts if the result is negative.
+    _sub: Array U32 -> Array U32 -> Array U32;
+    _sub = |a0, a1| (
+        let res = _sub_with_offset((a0, 0), (a1, 0));
+        if res.is_err {
+            eval debug_eprintln("error: " + res.as_err);
+            abort()
+        };
+        let (a2, _) = res.as_ok;
+        a2
+    );
+
+    // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
+    // Returns err if the result is negative.
+    _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
+    _sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        if _cmp((a0, offset0), (a1, offset1)) < 0 {
+            err $ "underflow"
+        };
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let (a2, borrow) = loop(
+            (a2, offset2, 0_U64), |(a2, i, borrow)|
+            if i >= n0 && i >= n1  {
+                break $ (a2, borrow)
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d0: U64 = d0.to_U64;
+            let d1: U64 = d1.to_U64 + borrow;
+            let (borrow, d2) = if d0 >= d1 {
+                (0_U64, d0 - d1)
+            } else {
+                (1_U64, _base + d0 - d1)
+            };                
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            eval assert(|_| "should not reach here", false);
+            err $ "underflow"
+        };
+        ok $ (a2, offset2)
+    );
+
+    // Calculates `d0 * a1`.
+    _mul_u32: U32 -> Array U32 -> Array U32;
+    _mul_u32 = |d0, a1| (
+        let n1 = a1.get_size;
+        let n2 = n1 + 1;
+        let a2 = Array::empty(n2);
+        let a2 = loop(
+            (a2, 0, 0_U64), |(a2, i, carry)|
+            if i >= n1 && carry == 0_U64 {
+                break $ a2
+            };
+            let d1: U32 = if 0 <= i && i < n1 { a1.@(i) } else { 0_U32 };
+            let d2: U64 = d0.to_U64 * d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, carry)
+        );
+        a2
+    );
+
+    // Calculates `a0 * a1`.
+    _mul: Array U32 -> Array U32 -> Array U32;
+    _mul = |a0, a1| (
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        let n2 = n0 + n1 + 1;
+        let a2 = loop(
+            ([0_U32], 0), |(a2, i)|
+            if i >= n0 {
+                break $ a2
+            };
+            let d0 = a0.@(i);
+            let (a2, e2) = _add_with_offset((a2, 0), (_mul_u32(d0, a1), i));
+            // e2 == 0
+            continue $ (a2, i + 1)
+        );
+        a2
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod = |a0, a1| (
+        let a1_shift_table = _make_shift_table(a1);
+        _divmod_with_shift_table(a0, a1, a1_shift_table)
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // `a1_shift_table` is the precalculated shift table of `a1`.
+    // Aborts if any error occured.
+    _divmod_with_shift_table: Array U32 -> Array U32 -> Array (Array U32) -> (Array U32, Array U32);
+    _divmod_with_shift_table = |a0, a1, a1_shift_table| (
+        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        let _debug: Lazy String -> () = |_| ();
+
+        let a0 = a0._remove_last_zeros;
+        let a1 = a1._remove_last_zeros;
+        eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
+        if n0 < n1 {
+            ([0_U32], a0)
+        };
+        let n2 = n0;
+        let a2 = Array::fill(n2, 0_U32);
+
+        // a0 = numerator, a1 = denominator
+        // calc quotient(a2) and reminder(a0)
+        let (a0, a2) = loop(
+            (a0, a2, n2 - 1), |(a0, a2, i)|
+            let offset0 = 0;
+            let offset1 = i - (n1 - 1);
+            if offset1 < 0 {
+                break $ (a0, a2)
+            };
+            eval _debug(|_| "(i)="+(i).to_string);
+            eval _debug(|_| "(a0)="+(a0).to_string);
+            eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
+            eval _debug(|_| "(a2)="+(a2).to_string);
+            let (a0, a2) = loop(
+                (a0, a2, _ceil_log2_base - 1), |(a0, a2, shift)|
+                if shift < 0 {
+                    break $ (a0, a2)
+                };
+                let d2 = 1_U32.shift_left(shift.to_U32);
+                //let d2_mul_a1 = _mul_u32(d2, a1);
+                let d2_mul_a1 = a1_shift_table.@(shift);
+                let (a3, offset3) = (d2_mul_a1, offset1);
+                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
+                let res = _sub_with_offset((a0, offset0), (a3, offset3));
+                if res.is_ok {
+                    let (a0, _) = res.as_ok;
+                    eval _debug(|_| "success: (a0)=" + (a0).to_string);
+                    let a2 = a2.mod(offset1, |x| x + d2);
+                    continue $ (a0, a2, shift - 1)
+                };
+                eval _debug(|_| "fail: (a0)=" + (a0).to_string);
+                continue $ (a0, a2, shift - 1)
+            );
+            let a0 = a0._remove_last_zeros;
+            continue $ (a0, a2, i - 1)
+        );
+        let a2 = a2._remove_last_zeros;
+        (a2, a0)
+    );
+
+    // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_ceil_log2_base-1)*a]`.
+    _make_shift_table: Array U32 -> Array (Array U32);
+    _make_shift_table = |a| (
+        Iterator::range(0, _ceil_log2_base).map(|shift|
+            let u32 = 1_U32.shift_left(shift.to_U32);
+            _mul_u32(u32, a)
+        ).to_array
+    );
+
+    // 0 in BigNat.
+    _zero: Array U32;
+    _zero = [0_U32];
+
+    // 10 in BigNat.
+    _ten: Array U32;
+    _ten = [10_U32];
+
+    // the shift table of ten.
+    _ten_shift_table: Array (Array U32);
+    _ten_shift_table = _make_shift_table(_ten);
+
+    // ToString of BigNat.
+    _to_string: Array U32 -> String;
+    _to_string = |a| (
+        let a = a._remove_last_zeros;
+        let output = _to_string_inner(a, Iterator::empty);
+        let output = if output.is_empty { output.push_front('0') } else { output };
+        output.to_array._unsafe_to_string
+    );
+
+    _to_string_inner: Array U32 -> Iterator U8 -> Iterator U8;
+    _to_string_inner = |a, output| (
+        if a.get_size == 0 { output };
+        if a.get_size == 1 && a.@(0) == 0_U32 { output };
+        let (quo, rem) = _divmod_with_shift_table(a, BigNat::_ten, BigNat::_ten_shift_table);
+        let output = output.push_front('0' + rem.@(0).to_U8);
+        _to_string_inner(quo, output)
+    );
+    
+    // FromString of BigNat.
+    _from_string_inner: Array U8 -> I64 -> Array U32 -> Result ErrMsg (Array U32);
+    _from_string_inner = |bytes, i, a| (
+        if i >= bytes.get_size { ok $ a };
+        let c = bytes.@(i);
+        if !('0' <= c && c <= '9') { err $ "invalid character" };
+        let digit = (c - '0').to_U32;
+        let a = _add(_mul_u32(10_U32, a), [digit]);
+        _from_string_inner(bytes, i + 1, a)
+    );
+}
+
+// Integer with arbitrary precision.
+type BigInt = unbox struct {
+    sign: I64,          // sign
+    nat: Array U32      // natural number (>= 0)
+};
+
+namespace BigInt {
+    // `BigInt::make(sign, nat)` creates new BigInt object.
+    make: I64 -> Array U32 -> BigInt;
+    make = |sign, nat| (
+        let nat = nat._remove_last_zeros;
+        let sign = if sign < 0 { 
+            if nat == BigNat::_zero { 1 };
+            -1
+        } else { 
+            1
+        };
+        BigInt {
+            sign: sign,
+            nat: nat
+        }
+    );
+
+    // `BigInt::from_U64(u64)` creates new BigInt object from `u64`.
+    from_U64: U64 -> BigInt;
+    from_U64 = |u64| (
+        BigInt::make(1, BigNat::_from_u64(u64))
+    );
+
+    // `BigInt::from_I64(i64)` creates new BigInt object from `i64`.
+    from_I64: I64 -> BigInt;
+    from_I64 = |i64| (
+        let (sign, u64) = if i64 < 0 { 
+            (-1, (-i64).to_U64)     // TODO: it is ok if I64::minimum?
+        } else { 
+            (1, i64.to_U64)
+        };
+        BigInt::make(sign, BigNat::_from_u64(u64))
+    );
+
+    // `BigInt::cmp(a,b)` returns 1 if `a > b`, -1 if `a < b`, 0 if `a == b`.
+    cmp: BigInt -> BigInt -> I64;
+    cmp = |a, b| (
+        let c = a - b;
+        if c.@sign > 0 {
+            if c.@nat == BigNat::_zero { 0 } else { 1 }
+        } else {
+            -1
+        }
+    );
+}
+
+// Converts BigInt from a decimal string.
+impl BigInt: FromString {
+    from_string = |str| (
+        if str == "" { err $ "empty string" };
+        let bytes = str.get_bytes.pop_back;
+        let (bytes, sign) = if bytes.get_size >= 2 && bytes.@(0) == '-' {
+            (bytes.get_sub(1, bytes.get_size), -1)
+        } else { (bytes, 1) };
+        let nat = *BigNat::_from_string_inner(bytes, 0, BigNat::_zero);
+        ok $ BigInt::make(sign, nat)
+    );
+}
+
+// Converts BigInt to a decimal string.
+impl BigInt: ToString {
+    to_string = |a| (
+        let sign = if a.@sign < 0 { "-" } else { "" };
+        sign + a.@nat._to_string
+    );
+}
+
+// Checks two BigInts are equal.
+impl BigInt: Eq {
+    eq = |a, b| (a.@sign == b.@sign && a.@nat == b.@nat);
+}
+
+// Compares two BigInts.
+impl BigInt: LessThan {
+    less_than = |a, b| BigInt::cmp(a, b) < 0;
+}
+
+// Compares two BigInts.
+impl BigInt: LessThanOrEq {
+    less_than_or_eq = |a, b| BigInt::cmp(a, b) <= 0;
+}
+
+impl BigInt: Zero {
+    zero = BigInt::make(1, BigNat::_zero);
+}
+
+impl BigInt: Neg {
+    neg = |a| BigInt::make(-a.@sign, a.@nat);
+}
+
+impl BigInt: Add {
+    add = |a, b| (
+        if a.@sign == b.@sign {
+            let nat = BigNat::_add(a.@nat, b.@nat);
+            BigInt::make(a.@sign, nat) 
+        };
+        let cmp = BigNat::_cmp((a.@nat,0), (b.@nat,0));
+        if cmp > 0 {
+            let nat = BigNat::_sub(a.@nat, b.@nat);
+            BigInt::make(a.@sign, nat)
+        };
+        if cmp < 0 {
+            let nat = BigNat::_sub(b.@nat, a.@nat);
+            BigInt::make(b.@sign, nat)
+        };
+        zero
+    );
+}
+
+impl BigInt: Sub {
+    sub = |a, b| add(a, neg(b));
+}
+
+impl BigInt: Mul {
+    mul = |a, b| (
+        let nat = BigNat::_mul(a.@nat, b.@nat);
+        BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
+
+impl BigInt: Div {
+    div = |a, b| (
+        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+        BigInt::make(a.@sign * b.@sign, quo)
+    );
+}
+
+impl BigInt: Rem {
+    rem = |a, b| (
+        let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+        BigInt::make(a.@sign * b.@sign, rem)
+    );
+}

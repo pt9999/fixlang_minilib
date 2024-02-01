@@ -10,7 +10,7 @@ bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/io_ex.fix 
 
 -include .depends
 
-test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io_ex test_text test_net
+test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io_ex test_math test_text test_net
 
 test_app: test_clap
 test_clap:
@@ -42,6 +42,10 @@ test_json:
 
 test_io_ex:
 	bin/fixautolink run -f tests/io/io_ex_test.fix -L ./lib
+
+test_math: test_bigint
+test_bigint:
+	bin/fixautolink run -f tests/math/bigint_test.fix -L ./lib
 
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:

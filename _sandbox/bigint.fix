@@ -56,8 +56,22 @@ namespace BigNat {
     // Calculates `a0 + a1`.
     _add: Array U32 -> Array U32 -> Array U32;
     _add = |a0, a1| (
-        let (a2, _) = _add_with_offset((a0,0), (a1,0));
-        a2
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        if n0 < n1 { _add(a1, a0) };
+        let a0 = loop(
+            (a0, 0, 0_U64), |(a0, i, carry)|
+            if (i >= n0 || i >= n1) && carry == 0_U64 {
+                break $ a0
+            };
+            let d0: U32 = if i < n0 { a0.@(i) } else { 0_U32 };
+            let d1: U32 = if i < n1 { a1.@(i) } else { 0_U32 };
+            let d0: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d0) = _divmod_base(d0);
+            let a0 = if i < n0 { a0.set(i, d0.to_U32) } else { a0.push_back(d0.to_U32) };
+            continue $ (a0, i + 1, carry)
+        );
+        a0
     );
 
     // Calculates `a0 * _base ^ offset0 + a1 * _base ^ offset1`.
@@ -285,7 +299,7 @@ namespace BigNat {
         let c = bytes.@(i);
         if !('0' <= c && c <= '9') { err $ "invalid character" };
         let digit = (c - '0').to_U32;
-        let a = _add(_mul(a, _ten), [digit]);
+        let a = _add(_mul_u32(10_U32, a), [digit]);
         _from_string_inner(bytes, i + 1, a)
     );
 }

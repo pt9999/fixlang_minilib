@@ -6,87 +6,99 @@ import Minilib.Testing.UnitTest;
 
 test_make: TestCase;
 test_make = (
-    [
-        (1, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
-        (0, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
-        (-1, [2_U32, 3_U32], -1, [2_U32, 3_U32]),
-        (1, [0_U32, 0_U32], 1, [0_U32]),
-        (0, [0_U32, 0_U32], 1, [0_U32]),
-        (-1, [0_U32, 0_U32], 1, [0_U32])
-    ]
-    .map(|param|
-        make_test("test_make: " + param.to_string) $ |_|
-        let (sign, nat, expect_sign, expect_nat) = param;
+    make_table_test("test_make",
+        [
+            (1, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
+            (0, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
+            (-1, [2_U32, 3_U32], -1, [2_U32, 3_U32]),
+            (1, [0_U32, 0_U32], 1, [0_U32]),
+            (0, [0_U32, 0_U32], 1, [0_U32]),
+            (-1, [0_U32, 0_U32], 1, [0_U32])
+        ],
+        |(sign, nat, expect_sign, expect_nat)|
         let a = BigInt::make(sign, nat);
         let _ = *assert_equal("sign", expect_sign, a.@sign);
         let _ = *assert_equal("nat", expect_nat, a.@nat);
         pure()
     )
-    .run_tests
 );
 
 test_from_to_string: TestCase;
 test_from_to_string = (
-    [
-        ("", err $ "empty string"),
-        ("a", err $ "invalid character"),
-        ("-", err $ "invalid character"),
-        ("0", ok $ "0"),
-        ("-0", ok $ "0"),
-        ("1", ok $ "1"),
-        ("-1", ok $ "-1"),
-        ("123456789012345678901234567890", ok $ "123456789012345678901234567890"),
-        ("-9876543210987654321", ok $ "-9876543210987654321")
-    ]
-    .map(|param|
-        make_test("test_from_to_string: " + param.to_string) $ |_|
-        let (str, expect_res) = param;
+    make_table_test("test_from_to_string",
+        [
+            ("", err $ "empty string"),
+            ("a", err $ "invalid character"),
+            ("-", err $ "invalid character"),
+            ("0", ok $ "0"),
+            ("-0", ok $ "0"),
+            ("1", ok $ "1"),
+            ("-1", ok $ "-1"),
+            ("123456789012345678901234567890", ok $ "123456789012345678901234567890"),
+            ("-9876543210987654321", ok $ "-9876543210987654321")
+        ],
+        |(str, expect_res)|
         let res: Result ErrMsg BigInt = from_string(str);
-        let res = res.map(to_string);
-        let _ = *assert_equal("res", expect_res, res);
-        pure()
+        assert_equal("res", expect_res, res.map(to_string))
     )
-    .run_tests
 );
 
 test_from_I64: TestCase;
 test_from_I64 = (
-    [
-        (0, "0"),
-        (1, "1"),
-        (-1, "-1"),
-        (123456789, "123456789"),
-        (-123456789, "-123456789"),
-        (I64::maximum, I64::maximum.to_string),
-        (I64::minimum, I64::minimum.to_string)
-    ]
-    .map(|param|
-        make_test("test_from_I64: " + param.to_string) $ |_|
-        let (i64, expect) = param;
+    make_table_test("test_from_I64",
+        [
+            (0, "0"),
+            (1, "1"),
+            (-1, "-1"),
+            (123456789, "123456789"),
+            (-123456789, "-123456789"),
+            (I64::maximum, I64::maximum.to_string),
+            (I64::minimum, I64::minimum.to_string)
+        ],
+        |(i64, expect)|
         let a = BigInt::from_I64(i64);
-        let _ = *assert_equal("to_string", expect, a.to_string);
-        pure()
+        assert_equal("to_string", expect, a.to_string)
     )
-    .run_tests
 );
 
 test_from_U64: TestCase;
 test_from_U64 = (
-    [
-        (0_U64, "0"),
-        (1_U64, "1"),
-        (123456789_U64, "123456789"),
-        (U64::maximum, U64::maximum.to_string),
-        (U64::minimum, U64::minimum.to_string)
-    ]
-    .map(|param|
-        make_test("test_from_U64: " + param.to_string) $ |_|
-        let (u64, expect) = param;
+    make_table_test("test_from_U64",
+        [
+            (0_U64, "0"),
+            (1_U64, "1"),
+            (123456789_U64, "123456789"),
+            (U64::maximum, U64::maximum.to_string),
+            (U64::minimum, U64::minimum.to_string)
+        ],
+        |(u64, expect)|
         let a = BigInt::from_U64(u64);
-        let _ = *assert_equal("to_string", expect, a.to_string);
+        assert_equal("to_string", expect, a.to_string)
+    )
+);
+
+test_cmp_eq_lt_le: TestCase;
+test_cmp_eq_lt_le = (
+    make_table_test("test_cmp_eq_lt_le",
+        [
+            ("0", "0", (0, true, false, true)),
+            ("1234", "1234", (0, true, false, true)),
+            ("1234", "-1234", (1, false, false, false)),
+            ("-1234", "1234", (-1, false, true, true)),
+            ("-1234", "-1234", (0, true, false, true)),
+            ("12345678901234567891", "12345678901234567890", (1, false, false, false)),
+            ("12345678901234567890", "12345678901234567890", (0, true, false, true)),
+            ("12345678901234567890", "12345678901234567891", (-1, false, true, true))
+        ],
+        |(a,b,(cmp, eq, lt, le))|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let _ = *assert_equal("cmp", cmp, BigInt::cmp(a, b));
+        let _ = *assert_equal("eq", eq, a == b);
+        let _ = *assert_equal("lt", lt, a < b);
+        let _ = *assert_equal("le", le, a <= b);
         pure()
     )
-    .run_tests
 );
 
 main: IO ();
@@ -96,6 +108,7 @@ main = (
         test_from_to_string,
         test_from_I64,
         test_from_U64,
+        test_cmp_eq_lt_le,
         TestCase::empty
     ]
     .run_test_driver

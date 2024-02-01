@@ -36,6 +36,19 @@ namespace BigNat {
         a._remove_last_zeros      // tail recursion
     );
 
+    _from_u64: U64 -> Array U32;
+    _from_u64 = |u64| (
+        loop(
+            ([], u64), |(a, u64)|
+            if u64 == 0_U64 && a.get_size > 0 {
+                break $ a
+            };
+            let (quo, rem) = _divmod_base(u64);
+            let a = a.push_back(rem.to_U32);
+            continue $ (a, quo)
+        )
+    );
+
     // Calculates `sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)`.
     _cmp: (Array U32, I64) -> (Array U32, I64) -> I64;
     _cmp = |(a0, offset0), (a1, offset1)| (
@@ -311,13 +324,49 @@ type BigInt = unbox struct {
 };
 
 namespace BigInt {
+    // `BigInt::make(sign, nat)` creates new BigInt object.
     make: I64 -> Array U32 -> BigInt;
-    make = |sign, nat| BigInt {
-        sign: sign,
-        nat: nat
-    };
+    make = |sign, nat| (
+        let nat = nat._remove_last_zeros;
+        let sign = if sign < 0 && nat == BigNat::_zero { 
+            1
+        } else { sign };
+        BigInt {
+            sign: sign,
+            nat: nat
+        }
+    );
+
+    // `BigInt::from_U64(u64)` creates new BigInt object from `u64`.
+    from_U64: U64 -> BigInt;
+    from_U64 = |u64| (
+        BigInt::make(1, BigNat::_from_u64(u64))
+    );
+
+    // `BigInt::from_I64(i64)` creates new BigInt object from `i64`.
+    from_I64: I64 -> BigInt;
+    from_I64 = |i64| (
+        let (sign, u64) = if i64 < 0 { 
+            (-1, (-i64).to_U64)     // TODO: it is ok if I64::minimum?
+        } else { 
+            (1, i64.to_U64)
+        };
+        BigInt::make(sign, BigNat::_from_u64(u64))
+    );
+
+    // `BigInt::cmp(a,b)` returns 1 if `a > b`, -1 if `a < b`, 0 if `a == b`.
+    cmp: BigInt -> BigInt -> I64;
+    cmp = |a, b| (
+        let c = a - b;
+        if c.@sign > 0 {
+            if c.@nat == BigNat::_zero { 0 } else { 1 }
+        } else {
+            -1
+        }
+    );
 }
 
+// Converts BigInt from a decimal string.
 impl BigInt: FromString {
     from_string = |str| (
         if str == "" { err $ "empty string" };
@@ -330,6 +379,7 @@ impl BigInt: FromString {
     );
 }
 
+// Converts BigInt to a decimal string.
 impl BigInt: ToString {
     to_string = |a| (
         let sign = if a.@sign < 0 { "-" } else { "" };
@@ -337,28 +387,43 @@ impl BigInt: ToString {
     );
 }
 
+// Checks two BigInts are equal.
+impl BigInt: Eq {
+    eq = |a, b| (a.@sign == b.@sign && a.@nat == b.@nat);
+}
+
+// Compares two BigInts.
+impl BigInt: LessThan {
+    less_than = |a, b| BigInt::cmp(a, b) < 0;
+}
+
+// Compares two BigInts.
+impl BigInt: LessThanOrEq {
+    less_than_or_eq = |a, b| BigInt::cmp(a, b) <= 0;
+}
+
 impl BigInt: Zero {
-    zero = BigInt { sign: 1, nat: BigNat::_zero };
+    zero = BigInt::make(1, BigNat::_zero);
 }
 
 impl BigInt: Neg {
-    neg = |a| BigInt { sign: -a.@sign, nat: a.@nat };
+    neg = |a| BigInt::make(-a.@sign, a.@nat);
 }
 
 impl BigInt: Add {
     add = |a, b| (
         if a.@sign == b.@sign {
             let nat = BigNat::_add(a.@nat, b.@nat);
-            BigInt { sign: a.@sign, nat: nat } 
+            BigInt::make(a.@sign, nat) 
         };
         let cmp = BigNat::_cmp((a.@nat,0), (b.@nat,0));
         if cmp > 0 {
             let nat = BigNat::_sub(a.@nat, b.@nat);
-            BigInt { sign: a.@sign, nat: nat }
+            BigInt::make(a.@sign, nat)
         };
         if cmp < 0 {
             let nat = BigNat::_sub(b.@nat, a.@nat);
-            BigInt { sign: b.@sign, nat: nat }
+            BigInt::make(b.@sign, nat)
         };
         zero
     );
@@ -371,21 +436,21 @@ impl BigInt: Sub {
 impl BigInt: Mul {
     mul = |a, b| (
         let nat = BigNat::_mul(a.@nat, b.@nat);
-        BigInt { sign: a.@sign * b.@sign, nat: nat }
+        BigInt::make(a.@sign * b.@sign, nat)
     );
 }
 
 impl BigInt: Div {
     div = |a, b| (
         let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
-        BigInt { sign: a.@sign * b.@sign, nat: quo }
+        BigInt::make(a.@sign * b.@sign, quo)
     );
 }
 
 impl BigInt: Rem {
     rem = |a, b| (
         let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
-        BigInt { sign: a.@sign * b.@sign, nat: rem }
+        BigInt::make(a.@sign * b.@sign, rem)
     );
 }
 
@@ -439,10 +504,20 @@ timeit = |label, f| (
     pure $ result
 );
 
+notimeit: [a: ToString] String -> (() -> a) -> IO a;
+notimeit = |label, f| (
+    let result = f();
+    let _ = *eprintln(label + "=" + result.to_string);
+    pure $ result
+);
+
 main: IO ();
 main = (
     let a: BigInt = *timeit("a", |_| from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort);
     let b: BigInt = *timeit("b", |_| from_string("7777777777777777").or_abort);
+    let _ = *timeit("a==b", |_| a==b);
+    let _ = *timeit("a>b", |_| a>b);
+    let _ = *timeit("a>=b", |_| a>=b);
     let _ = *timeit("a+b", |_| a+b);
     let _ = *timeit("a-b", |_| a-b);
     let _ = *timeit("a*b", |_| a*b);
@@ -452,5 +527,10 @@ main = (
     let _ = *timeit("b%a", |_| b%a);
     let _ = *timeit("a/a", |_| a/a);
     let _ = *timeit("a%a", |_| a%a);
+    let _ = *notimeit("from_U64(U64::maximum)", |_| BigInt::from_U64(U64::maximum));
+    let _ = *notimeit("from_U64(U64::minimum)", |_| BigInt::from_U64(U64::minimum));
+    let _ = *notimeit("from_I64(I64::maximum)", |_| BigInt::from_I64(I64::maximum));
+    let _ = *notimeit("from_I64(I64::minimum)", |_| BigInt::from_I64(I64::minimum));
+    let _ = *notimeit("(-1 * 0).@sign", |_| (BigInt::from_I64(-1) * BigInt::from_I64(0)).@sign);
     pure()
 );

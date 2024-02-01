@@ -36,15 +36,14 @@ namespace BigNat {
         a._remove_last_zeros      // tail recursion
     );
 
-    // returns sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)
+    // Calculates `sign(a0 * _base ^ offset0 - a1 * _base ^ offset1)`.
     _cmp: (Array U32, I64) -> (Array U32, I64) -> I64;
     _cmp = |(a0, offset0), (a1, offset1)| (
         let n0 = a0.get_size + offset0;
         let n1 = a1.get_size + offset1;
-        if n0 < n1 { -1 };
-        if n0 > n1 {  1 };
+        let n = max(n0, n1);
         loop(
-            n0-1, |i|
+            n-1, |i|
             if i < offset0 && i < offset1 { break $ 0 };
             let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
             let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
@@ -61,7 +60,7 @@ namespace BigNat {
         a2
     );
 
-    // Calculates `a0 * pow(_base, offset0) + a1 * pow(_base, offset1)`.
+    // Calculates `a0 * _base ^ offset0 + a1 * _base ^ offset1`.
     _add_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
     _add_with_offset = |(a0, offset0), (a1, offset1)| (
         let n0 = a0.get_size + offset0;
@@ -101,6 +100,9 @@ namespace BigNat {
     // Returns err if the result is negative.
     _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
     _sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        if _cmp((a0, offset0), (a1, offset1)) < 0 {
+            err $ "underflow"
+        };
         let n0 = a0.get_size + offset0;
         let n1 = a1.get_size + offset1;
         let n2 = max(n0, n1);
@@ -124,6 +126,7 @@ namespace BigNat {
             continue $ (a2, i + 1, borrow)
         );
         if borrow > 0_U64 {
+            eval assert(|_| "should not reach here", false);
             err $ "underflow"
         };
         ok $ (a2, offset2)
@@ -172,47 +175,39 @@ namespace BigNat {
     // Aborts if any error occured.
     _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
     _divmod = |a0, a1| (
-        let res = _divmod_or_err(a0, a1);
-        if res.is_err {
-            eval debug_eprintln(res.as_err);
-            abort()
-        };
-        res.as_ok 
+        let a1_shift_table = _make_shift_table(a1);
+        _divmod_with_shift_table(a0, a1, a1_shift_table)
     );
 
     // Calculates `(a0 / a1, a0 % a1)`.
-    // Returns err if any error occured.
-    _divmod_or_err: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
-    _divmod_or_err = |a0, a1| (
+    // `a1_shift_table` is the precalculated shift table of `a1`.
+    // Aborts if any error occured.
+    _divmod_with_shift_table: Array U32 -> Array U32 -> Array (Array U32) -> (Array U32, Array U32);
+    _divmod_with_shift_table = |a0, a1, a1_shift_table| (
         //let _debug: Lazy String -> () = |f| debug_eprintln(f());
         let _debug: Lazy String -> () = |_| ();
 
         let a0 = a0._remove_last_zeros;
         let a1 = a1._remove_last_zeros;
-        if a1 == [ 0_U32 ] {
-            err $ "Divide by zero"
-        };
+        eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
         let n0 = a0.get_size;
         let n1 = a1.get_size;
-        if n0 <= 0 || n1 <= 0 {
-            err $ "Invalid array"
-        };
+        eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
         if n0 < n1 {
-            ok $ ([0_U32], a0)
+            ([0_U32], a0)
         };
         let n2 = n0;
         let a2 = Array::fill(n2, 0_U32);
 
         // a0 = numerator, a1 = denominator
         // calc quotient(a2) and reminder(a0)
-        let (a0, a2) = *loop_m(
+        let (a0, a2) = loop(
             (a0, a2, n2 - 1), |(a0, a2, i)|
             let offset0 = 0;
             let offset1 = i - (n1 - 1);
             if offset1 < 0 {
-                break_m $ (a0, a2)
+                break $ (a0, a2)
             };
-            let offset2 = 0;
             eval _debug(|_| "(i)="+(i).to_string);
             eval _debug(|_| "(a0)="+(a0).to_string);
             eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
@@ -223,8 +218,9 @@ namespace BigNat {
                     break $ (a0, a2)
                 };
                 let d2 = 1_U32.shift_left(shift.to_U32);
-                // TODO: cache _mul_u32(d2, a1)?
-                let (a3, offset3) = (_mul_u32(d2, a1), offset1);
+                //let d2_mul_a1 = _mul_u32(d2, a1);
+                let d2_mul_a1 = a1_shift_table.@(shift);
+                let (a3, offset3) = (d2_mul_a1, offset1);
                 eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
                 let res = _sub_with_offset((a0, offset0), (a3, offset3));
                 if res.is_ok {
@@ -237,12 +233,21 @@ namespace BigNat {
                 continue $ (a0, a2, shift - 1)
             );
             let a0 = a0._remove_last_zeros;
-            continue_m $ (a0, a2, i - 1)
+            continue $ (a0, a2, i - 1)
         );
         let a2 = a2._remove_last_zeros;
-        ok $ (a2, a0)
+        (a2, a0)
     );
-    
+
+    // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_ceil_log2_base-1)*a]`.
+    _make_shift_table: Array U32 -> Array (Array U32);
+    _make_shift_table = |a| (
+        Iterator::range(0, _ceil_log2_base).map(|shift|
+            let u32 = 1_U32.shift_left(shift.to_U32);
+            _mul_u32(u32, a)
+        ).to_array
+    );
+
     // 0 in BigNat.
     _zero: Array U32;
     _zero = [0_U32];
@@ -250,6 +255,10 @@ namespace BigNat {
     // 10 in BigNat.
     _ten: Array U32;
     _ten = [10_U32];
+
+    // the shift table of ten.
+    _ten_shift_table: Array (Array U32);
+    _ten_shift_table = _make_shift_table(_ten);
 
     // ToString of BigNat.
     _to_string: Array U32 -> String;
@@ -264,7 +273,7 @@ namespace BigNat {
     _to_string_inner = |a, output| (
         if a.get_size == 0 { output };
         if a.get_size == 1 && a.@(0) == 0_U32 { output };
-        let (quo, rem) = _divmod(a, BigNat::_ten);
+        let (quo, rem) = _divmod_with_shift_table(a, BigNat::_ten, BigNat::_ten_shift_table);
         let output = output.push_front('0' + rem.@(0).to_U8);
         _to_string_inner(quo, output)
     );
@@ -384,22 +393,50 @@ or_abort = |res| (
     res.as_ok
 );
 
+
+// Measures execution time of a function. Similar to `timeit()` function of Python.
+// It executes the function many times, and measures total time.
+// Prints the result and measured time per loop.
+timeit: [a: ToString] String -> (() -> a) -> IO a;
+timeit = |label, f| (
+    let total_time_threshold = 0.1;  // 100 msec
+    let repeat = fix $ |repeat, n| (
+        let result = f();
+        if n <= 1 { result };
+        repeat(n - 1)
+    );
+    let (result, total_time) = consumed_time_while(repeat, 1);
+    let (result, total_time, total_count) = loop(
+        (result, total_time, 1, 1), |(result, total_time, total_count, count)|
+        if total_time >= total_time_threshold {
+            break $ (result, total_time, total_count)
+        };
+        let (result, time) = consumed_time_while(repeat, count);
+        let total_time = total_time + time;
+        let total_count = total_count + count;
+        continue $ (result, total_time, total_count, count * 2)
+    );
+    let time = total_time / total_count.to_F64;
+    let (time, unit) = if time >= 1.0 { (time, "sec") }
+    else if time >= 1.0e-3 { (time * 1.0e3, "msec") }
+    else                   { (time * 1.0e6, "usec") };
+    let _ = *eprintln(label + "=" + result.to_string + 
+                      " time/loop=" + time.to_string_precision(3_U8) + " " + unit);
+    pure $ result
+);
+
 main: IO ();
 main = (
-    let a: BigInt = from_string("-123456789012345678901234567890").or_abort;
-    let b: BigInt = from_string("123456789").or_abort;
-    let a: BigInt = from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort;
-    let b: BigInt = from_string("7777777777777777").or_abort;
-    let _ = *println("a=" + a.to_string);
-    let _ = *println("b=" + b.to_string);
-    let _ = *println("a+b=" + (a+b).to_string);
-    let _ = *println("a-b=" + (a-b).to_string);
-    let _ = *println("a*b=" + (a*b).to_string);
-    let _ = *println("a/b=" + (a/b).to_string);
-    let _ = *println("a%b=" + (a%b).to_string);
-    let _ = *println("b/a=" + (b/a).to_string);
-    let _ = *println("b%a=" + (b%a).to_string);
-    let _ = *println("a/a=" + (a/a).to_string);
-    let _ = *println("a%a=" + (a%a).to_string);
+    let a: BigInt = *timeit("a", |_| from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort);
+    let b: BigInt = *timeit("b", |_| from_string("7777777777777777").or_abort);
+    let _ = *timeit("a+b", |_| a+b);
+    let _ = *timeit("a-b", |_| a-b);
+    let _ = *timeit("a*b", |_| a*b);
+    let _ = *timeit("a/b", |_| a/b);
+    let _ = *timeit("a%b", |_| a%b);
+    let _ = *timeit("b/a", |_| b/a);
+    let _ = *timeit("b%a", |_| b%a);
+    let _ = *timeit("a/a", |_| a/a);
+    let _ = *timeit("a%a", |_| a%a);
     pure()
 );

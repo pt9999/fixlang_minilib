@@ -31,6 +31,10 @@ Executes all test cases and treat the results as one test case.
 
 Creates a named test case from a lazy `IOFail ()`.
 
+#### make_table_test: [a: ToString] String -> Array a -> (a -> IOFail ()) -> TestCase;
+
+Creates a set of test cases from parameters and a lazy `IOFail ()`.
+
 #### assert_true : String -> Bool -> IOFail ();
 
 Verifies that the boolean value is true. If the boolean value is false, the test will fail with the specified message.
@@ -42,4 +46,8 @@ Verifies that two values are equal. If the values are different, the test will f
 #### assert_not_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
 
 Verifies that two values are not equal. If the values are equal, the test will fail with the specified message.
+
+#### `impl [a:Eq, e:Eq] Result e a: Eq`
+
+Eq implementation for Result
 

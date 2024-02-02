@@ -1,0 +1,257 @@
+// Generates probable prime numbers of arbitrary-precision integer.
+// 
+// Use `probable_prime(256, random)` to generate a probable prime number of 256-bit.
+//
+// Depending on the value of the random number, generating a probable prime number can take quite a while.
+// For example, generating a 512-bit probable prime number may take about 60 seconds.
+//
+module Minilib.Math.BigIntPrime;
+
+import Debug;
+import Random;
+
+import Minilib.Math.BigInt;
+import Minilib.Text.StringEx;
+
+namespace BigIntPrime {
+
+    // `probable_prime(bit_length, random)` returns a probable prime number with specified bit length.
+    probable_prime: I64 -> Random -> (BigInt, Random);
+    probable_prime = |bit_length, random| (
+        let end = pow_by_U64(BigInt::two, bit_length.to_U64);
+        let (begin, _) = end.divmod_by_two;
+        let (n, random) = random.generate_range(begin, end);
+        let (n, random) = next_probable_prime(n, random);
+        if begin <= n && n < end {
+            (n, random)
+        };
+        probable_prime(bit_length, random)  // try again
+    );
+
+    // `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
+    next_probable_prime: BigInt -> Random -> (BigInt, Random);
+    next_probable_prime = |n, random| (
+        let (ret, random) = miller_rabin(n, random);
+        if ret {
+            //let (ret2, random) = solovay_strassen(n, random);
+            //eval if !ret2 { debug_eprintln("miller_rabin==true && solovay_strassen==false !!") } else { () };
+            (n, random)
+        };
+        next_probable_prime(n + BigInt::one, random)
+    );
+
+    // Generates random BigInt `r` such that `begin <= r && r < end`.
+    generate_range: BigInt -> BigInt -> Random -> (BigInt, Random);
+    generate_range = |begin, end, random| (
+        if begin > end {
+            generate_range(end, begin, random)      // swap range and retry
+        };
+        let n = end - begin;
+        eval assert(|_| "invalid range", n > zero);
+        let size = n.@nat.get_size;
+        let (nat, random) = loop(
+            ([], 0, random), |(nat, i, random)|
+            let (u64, random) = random.generate_U64;
+            if i == size - 1 {
+                let m = n.@nat.@(size - 1).to_U64;
+                // choose 0..m uniformly
+                let u64 = u64 / (U64::maximum / (m + 1_U64));
+                if u64 > m {
+                    continue $ (nat, i, random)     // try again
+                };
+                let nat = nat.push_back(u64.to_U32);
+                break $ (nat, random)
+            };
+            let (_, rem) = BigNat::_divmod_base(u64);
+            let nat = nat.push_back(rem.to_U32);
+            continue $ (nat, i + 1, random)
+        );
+        let r = BigInt::make(1, nat);
+        if r >= n {
+            generate_range(begin, end, random)      // try again
+        };
+        let r = begin + r;
+        (r, random)
+    );
+
+    // Calculates `a^n`.
+    pow_by_U64: BigInt -> U64 -> BigInt;
+    pow_by_U64 = |a, n| (
+        loop(
+            (BigInt::from_I64(1), a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
+            };
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                prod * a
+            } else { prod };
+            continue $ (prod, a*a, n.shift_right(1_U64))
+        )
+    );
+
+    // Calculates `a^n mod m`.
+    modpow: BigInt -> BigInt -> BigInt -> BigInt;
+    modpow = |a, n, m| (
+        loop(
+            (BigInt::one, a, n), |(prod, a, n)|
+            if n == zero {
+                break $ prod
+            };
+            let (quo, rem) = BigInt::divmod(n, BigInt::two);
+            let prod = if rem != zero {
+                prod * a
+            } else { prod };
+            let prod = prod % m;
+            let a = (a * a) % m;
+            continue $ (prod, a, quo)
+        )
+    );
+
+    // `gcd(m,n)` returns the greatest common divisor of `abs(m)` and `abs(n)`.
+    gcd: BigInt -> BigInt -> BigInt;
+    gcd = |m, n| (
+        let m = m.abs;
+        let n = n.abs;
+        let cmp = BigInt::cmp(m, n);
+        if cmp < 0 { gcd(n, m) };
+        if cmp == 0 { n };
+        let loop = fix $ |loop, m, n| (
+            let rem = m % n;
+            if rem.is_zero { n };
+            loop(n, rem)
+        ) in loop(m, n)
+    );
+
+    // Calculates Jacobi symbol `(m/n)`.
+    // see: https://en.wikipedia.org/wiki/Jacobi_symbol
+    jacobi_symbol: BigInt -> BigInt -> I64;
+    jacobi_symbol = |m, n| (
+        eval assert(|_| "invalid `n`", n.is_positive && n.is_odd);
+        let g = gcd(m, n);
+        if g != BigInt::one {
+            0
+        };
+        let n_minus_one = n - BigInt::one;
+        // inner loop
+        let inner_loop = fix $ |inner_loop, accum, m, n| (
+            let m = m % n;
+            let m = if m.is_negative { m + n } else { m };
+            if m == BigInt::one {
+                // `jacobi_symbol(1, n)` == 1;
+                accum * 1
+            };
+            if m == n_minus_one {
+                // `jacobi_symbol(-1, n)` == (n%4 == 1) ? 1 : -1;
+                let n_mod_4 = n._bitand_I64(3);
+                accum * if n_mod_4 == 1 { 1 } else { -1 }
+            };
+            if m.is_even {
+                let accum = accum * (
+                    // `jacobi_symbol(2, n)` == (n%8 == 1 || n%8 == 7) ? 1 : -1;
+                    let n_mod_8 = n._bitand_I64(7);
+                    if n_mod_8 == 1 || n_mod_8 == 7 { 1 } else { -1 }
+                );
+                let (quo, _) = m.divmod_by_two;
+                inner_loop(accum, quo, n)
+            };
+            // m is odd and neither 1 nor -1
+            // `jacobi_symbol(m, n)` * `jacobi_symbol(n, m)` == (n%4 == 3 && n%4 == 3) ? -1 : 1;
+            let m_mod_4 = m._bitand_I64(3);
+            let n_mod_4 = n._bitand_I64(3);
+            let accum = if m_mod_4 == 3 && n_mod_4 == 3 { accum * -1 } else { accum * 1 };
+            inner_loop(accum, n, m)
+        ) in inner_loop(1, m, n)
+    );
+
+    // Performs Miller-Rabin primality test.
+    // Returns true if `n` is probably prime.
+    // Probability of false prime is less than or equal to `2^-100`.
+    // see: https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test
+    miller_rabin: BigInt -> Random -> (Bool, Random);
+    miller_rabin = |n, random| (
+        // For optimization purposes, let's check if `n` is divisible by a small prime number.
+        let (_, rem) = BigInt::divmod(n, BigInt::from_I64(2*3*5*7));
+        let rem = rem.to_I64;
+        if rem % 2 == 0 || rem % 3 == 0 || rem % 5 == 0 || rem % 7 == 0 {
+            // composite
+            (false, random)
+        };
+        // Determine `s` and `d` such that `n - 1 == 2^s * d`.
+        let n_minus_one = n - BigInt::one;
+        let (s, d) = loop(
+            (0, n_minus_one), |(s, d)|
+            let (quo, rem) = BigInt::divmod(d, BigInt::two);
+            if rem.to_I64 != 0 {
+                break $ (s, d)
+            };
+            continue $ (s+1, quo)
+        );
+        // `k` is the number of rounds of testing to perform.
+        // Accoding to Wikipedia, probability of false prime <= `4^(-k)`.
+        let k = 50;
+        loop(
+            (k, random), |(k, random)|
+            if k < 0 {
+                // probably prime
+                break $ (true, random)
+            };
+            let (a, random) = random.generate_range(two, n - two);
+            let x = modpow(a, d, n);
+            let (opt, y) = loop(
+                (s, x, x), |(s, x, y)|
+                if s < 0 {
+                    break $ (none(), y)
+                };
+                let y = (x*x) % n;
+                if y == one && x != one && x != n_minus_one {
+                    // composite
+                    break $ (some(false), y)
+                }; 
+                let x = y;
+                continue $ (s-1, x, y)
+            );
+            if opt.is_some {
+                break $ (opt.as_some, random)
+            };
+            if y != one {
+                // composite
+                break $ (false, random)
+            }; 
+            continue $ (k - 1, random) 
+        )
+    );
+
+    // Performs Solovay–Strassen primality test.
+    // see: https://en.wikipedia.org/wiki/Solovay%E2%80%93Strassen_primality_test
+    solovay_strassen: BigInt -> Random -> (Bool, Random);
+    solovay_strassen = |n, random| (
+        if n.is_negative {
+            solovay_strassen(-n, random)
+        };
+        if n.is_even {
+            (false, random)
+        };
+        let n_minus_one_div_two = (n - BigInt::one) / BigInt::two;
+        let k = 100;
+        loop(
+            (k, random), |(k, random)|
+            if k < 0 {
+                // probably prime
+                break $ (true, random)
+            };
+            let (a, random) = random.generate_range(BigInt::two, n);
+            let x = jacobi_symbol(a, n);
+            if x == 0 {
+                break $ (false, random)     // composite
+            };
+            let x = BigInt::from_I64(x);
+            let x_mod_n = if x.is_negative { x + n } else { x };
+            let a_pow = modpow(a, n_minus_one_div_two, n);
+            // if a^((n-1)/2) != x mod n, then n is composite
+            if a_pow != x_mod_n {
+                break $ (false, random)     // composite
+            };
+            continue $ (k - 1, random)
+        )
+    );
+}

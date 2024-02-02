@@ -43,9 +43,11 @@ test_json:
 test_io_ex:
 	bin/fixautolink run -f tests/io/io_ex_test.fix -L ./lib
 
-test_math: test_bigint
+test_math: test_bigint test_bigint_prime
 test_bigint:
 	bin/fixautolink run -f tests/math/bigint_test.fix -L ./lib
+test_bigint_prime:
+	bin/fixautolink run -f tests/math/bigint_prime_test.fix -L ./lib
 
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:

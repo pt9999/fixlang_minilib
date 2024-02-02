@@ -70,6 +70,10 @@ IO extensions, such as:
 
 Arbitrary-precision integer.
 
+### [module Minilib.Math.BigIntPrime (lib/math/bigint_prime.fix)](lib/math/bigint_prime.md)
+
+Generates probable prime numbers of arbitrary-precision integer.
+
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
 HTML handling, such as:

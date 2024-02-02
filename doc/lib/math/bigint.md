@@ -44,12 +44,12 @@ Converts BigInt to I64. If overflow, it produces unexpected result.
 
 #### divmod: BigInt -> BigInt -> (BigInt, BigInt);
 
-`BigInt::divmod(a,b)` Returns `(a/b, a%b)`.
+`BigInt::divmod(a,b)` returns `(a/b, a%b)`.
 NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
 
 #### divmod_by_two: BigInt -> (BigInt, BigInt);
 
-`BigInt::divmod_by_two(a)` Returns `(a/2, a%2)`.
+`BigInt::divmod_by_two(a)` returns `(a/2, a%2)`.
 
 #### one: BigInt;
 

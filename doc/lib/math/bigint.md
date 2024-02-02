@@ -22,6 +22,10 @@ type BigInt = unbox struct {
 
 `BigInt::make(sign, nat)` creates new BigInt object.
 
+#### abs: BigInt -> BigInt;
+
+`a.abs` returns the absolute value of `a`.
+
 #### from_U64: U64 -> BigInt;
 
 `BigInt::from_U64(u64)` creates new BigInt object from `u64`.
@@ -43,6 +47,10 @@ Converts BigInt to I64. If overflow, it produces unexpected result.
 `BigInt::divmod(a,b)` Returns `(a/b, a%b)`.
 NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
 
+#### divmod_by_two: BigInt -> (BigInt, BigInt);
+
+`BigInt::divmod_by_two(a)` Returns `(a/2, a%2)`.
+
 #### one: BigInt;
 
 BigInt constant representing 1.
@@ -50,6 +58,26 @@ BigInt constant representing 1.
 #### two: BigInt;
 
 BigInt constant representing 2.
+
+#### is_zero: BigInt -> Bool;
+
+`a.is_zero` returns true iff `a` is zero.
+
+#### is_positive: BigInt -> Bool;
+
+`a.is_positive` returns true iff `a` is a positive number.
+
+#### is_negative: BigInt -> Bool;
+
+`a.is_negative` returns true iff `a` is a negative number.
+
+#### is_even: BigInt -> Bool;
+
+`a.is_even` returns true iff `a` is an even number.
+
+#### is_odd: BigInt -> Bool;
+
+`a.is_odd` returns true iff `a` is an odd number.
 
 #### `impl BigInt: FromString`
 

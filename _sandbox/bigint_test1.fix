@@ -6,10 +6,11 @@ import Random;
 import Minilib.Math.BigInt;
 import Minilib.Testing.Timeit;
 
-namespace BigIntRandom {
+namespace BigIntPrime {
 
-    ipow: BigInt -> U64 -> BigInt;
-    ipow = |a, n| (
+    // Calculates `a^n`.
+    pow_by_U64: BigInt -> U64 -> BigInt;
+    pow_by_U64 = |a, n| (
         loop(
             (BigInt::from_I64(1), a, n), |(prod, a, n)|
             if n == 0_U64 {
@@ -40,11 +41,11 @@ namespace BigIntRandom {
         )
     );
 
-
+    // Generates random BigInt `r` such that `begin <= r && r < end`.
     generate_range: BigInt -> BigInt -> Random -> (BigInt, Random);
     generate_range = |begin, end, random| (
         if begin > end {
-            generate_range(end, begin, random)
+            generate_range(end, begin, random)      // swap range and retry
         };
         let n = end - begin;
         eval assert(|_| "invalid range", n > zero);
@@ -54,13 +55,12 @@ namespace BigIntRandom {
             let (u64, random) = random.generate_U64;
             if i == size - 1 {
                 let m = n.@nat.@(size - 1).to_U64;
-                let m1 = m + 1_U64;
-                if u64 >= U64::maximum / m1 * m1 {
+                // choose 0..m uniformly
+                let u64 = u64 / (U64::maximum / (m + 1_U64));
+                if u64 > m {
                     continue $ (nat, i, random)     // try again
                 };
-                // choose 0..m uniformly
-                let u32 = (u64 / (U64::maximum / m1)).to_U32;
-                let nat = nat.push_back(u32);
+                let nat = nat.push_back(u64.to_U32);
                 break $ (nat, random)
             };
             let (_, rem) = BigNat::_divmod_base(u64);
@@ -71,11 +71,13 @@ namespace BigIntRandom {
         if r >= n {
             generate_range(begin, end, random)      // try again
         };
+        let r = begin + r;
         (r, random)
     );
 
-    // Miller-Rabin primality test.
+    // Performs Miller-Rabin primality test.
     // Returns true if `n` is probably prime.
+    // Probability of false prime is less than or equal to `2^-100`.
     miller_rabin: BigInt -> Random -> (Bool, Random);
     miller_rabin = |n, random| (
         // For optimization purposes, let's check if `n` is divisible by a small prime number.
@@ -129,6 +131,29 @@ namespace BigIntRandom {
             continue $ (k - 1, random) 
         )
     );
+
+    // `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
+    next_probable_prime: BigInt -> Random -> (BigInt, Random);
+    next_probable_prime = |n, random| (
+        let (ret, random) = miller_rabin(n, random);
+        if ret {
+            (n, random)
+        };
+        next_probable_prime(n + BigInt::one, random)
+    );
+
+    // `probable_prime(bit_length, random)` returns a probable prime number with specified bit length.
+    probable_prime: I64 -> Random -> (BigInt, Random);
+    probable_prime = |bit_length, random| (
+        let end = pow_by_U64(BigInt::two, bit_length.to_U64);
+        let (begin, _) = end.divmod_by_two;
+        let (n, random) = random.generate_range(begin, end);
+        let (n, random) = next_probable_prime(n, random);
+        if begin <= n && n < end {
+            (n, random)
+        };
+        probable_prime(bit_length, random)  // try again
+    );
 }
 
 
@@ -141,8 +166,8 @@ or_abort = |res| (
     res.as_ok
 );
 
-main1: IO ();
-main1 = (
+test_perf: IO ();
+test_perf = (
     let a: BigInt = *timeit("a", |_| from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort);
     let b: BigInt = *timeit("b", |_| from_string("7777777777777777").or_abort);
     let _ = *timeit("a==b", |_| a==b);
@@ -165,18 +190,18 @@ main1 = (
     pure()
 );
 
-main: IO ();
-main = (
+test_prime: IO ();
+test_prime = (
     let _ = *pure();
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let time = CALL_C[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(time.to_U64);
-    let a = ipow(two, 256_U64);
+    let a = pow_by_U64(two, 256_U64);
     let (b, random) = random.generate_range(zero, a);
     //let _ = *println(a.to_string);
     let _ = *loop_m(
         (b, random), |(b, random)|
-        // Miller-Rabin Primality test. 2^-100
+        // Miller-Rabin Primality test.
         let (ret, random) = miller_rabin(b, random);
         let _ = *println(b.to_string + ": " + if ret { "prime" } else { "composite" });
         if ret {
@@ -186,3 +211,18 @@ main = (
     );
     pure()
 );
+
+test_probable_prime: IO ();
+test_probable_prime = (
+    let _ = *pure();
+    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(time.to_U64);
+    let bit_length = 512;
+    let _ = *println("Searching a probable prime of " + bit_length.to_string + " bits...");
+    let (n, random) = probable_prime(bit_length, random);
+    println(n.to_string)
+);
+
+main: IO ();
+main = test_probable_prime;

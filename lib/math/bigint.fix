@@ -246,21 +246,17 @@ namespace BigNat {
     // Aborts if any error occured.
     _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
     _divmod = |a0, a1| (
-        let a1_shift_table = _make_shift_table(a1);
-        _divmod_with_shift_table(a0, a1, a1_shift_table)
-    );
-
-    // Calculates `(a0 / a1, a0 % a1)`.
-    // `a1_shift_table` is the precalculated shift table of `a1`.
-    // Aborts if any error occured.
-    _divmod_with_shift_table: Array U32 -> Array U32 -> Array (Array U32) -> (Array U32, Array U32);
-    _divmod_with_shift_table = |a0, a1, a1_shift_table| (
         //let _debug: Lazy String -> () = |f| debug_eprintln(f());
         let _debug: Lazy String -> () = |_| ();
 
         let a0 = a0._remove_last_zeros;
         let a1 = a1._remove_last_zeros;
         eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
+        if a1.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a0, a1.@(0));
+            (quo, [rem])
+        };
+        let a1_shift_table = _make_shift_table(a1);
         let n0 = a0.get_size;
         let n1 = a1.get_size;
         eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
@@ -310,6 +306,26 @@ namespace BigNat {
         (a2, a0)
     );
 
+    // Calculates `(a0 / d1, a0 % d1)`.
+    _divmod_u32: Array U32 -> U32 -> (Array U32, U32);
+    _divmod_u32 = |a0, d1| (
+        eval assert(|_| "Divide by zero", d1 != 0_U32);
+        let d1 = d1.to_U64;
+        let n0 = a0.get_size;
+        let (quo, rem) = loop(
+            (a0, 0_U64, n0 - 1), |(a0, rem, i)|
+            if i < 0 { break $ (a0, rem) };
+            let dividend = rem * _base + a0.@(i).to_U64;
+            let q = dividend / d1;
+            eval assert(|_| "q overflow", q < _base);
+            let rem = dividend % d1;
+            let a0 = a0.set(i, q.to_U32);
+            continue $ (a0, rem, i - 1)
+        );
+        let quo = quo._remove_last_zeros;
+        (quo, rem.to_U32)
+    );
+
     // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_log2_base-1)*a]`.
     _make_shift_table: Array U32 -> Array (Array U32);
     _make_shift_table = |a| (
@@ -327,10 +343,6 @@ namespace BigNat {
     _ten: Array U32;
     _ten = [10_U32];
 
-    // the shift table of ten.
-    _ten_shift_table: Array (Array U32);
-    _ten_shift_table = _make_shift_table(_ten);
-
     // ToString of BigNat.
     _to_string: Array U32 -> String;
     _to_string = |a| (
@@ -344,8 +356,8 @@ namespace BigNat {
     _to_string_inner = |a, output| (
         if a.get_size == 0 { output };
         if a.get_size == 1 && a.@(0) == 0_U32 { output };
-        let (quo, rem) = _divmod_with_shift_table(a, BigNat::_ten, BigNat::_ten_shift_table);
-        let output = output.push_front('0' + rem.@(0).to_U8);
+        let (quo, rem) = _divmod_u32(a, 10_U32);
+        let output = output.push_front('0' + rem.to_U8);
         _to_string_inner(quo, output)
     );
     

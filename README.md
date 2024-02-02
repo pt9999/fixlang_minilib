@@ -26,6 +26,9 @@ This library is still in alpha stage.
   - JSON
 - IO
   - IO extension
+- Math
+  - BigInt
+  - BigIntPrime
 - Networking
   - TCP/IP Socket (IPv4 only)
   - URL, URI

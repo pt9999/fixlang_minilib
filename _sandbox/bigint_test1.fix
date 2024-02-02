@@ -138,9 +138,12 @@ namespace BigIntPrime {
     next_probable_prime: BigInt -> Random -> (BigInt, Random);
     next_probable_prime = |n, random| (
         let (ret, random) = miller_rabin(n, random);
+        //let (ret2, random) = solovay_strassen(n, random);
         if ret {
+            //eval if !ret2 { debug_eprintln("miller_rabin==true && solovay_strassen==false !!") } else { () };
             (n, random)
         };
+        //eval if ret2 { debug_eprintln("miller_rabin==false && solovay_strassen==true !!") } else { () };
         next_probable_prime(n + BigInt::one, random)
     );
 
@@ -213,6 +216,38 @@ namespace BigIntPrime {
         ) in inner_loop(1, m, n)
     );
 
+    // Performs Solovay–Strassen primality test.
+    solovay_strassen: BigInt -> Random -> (Bool, Random);
+    solovay_strassen = |n, random| (
+        if n.is_negative {
+            solovay_strassen(-n, random)
+        };
+        if n.is_even {
+            (false, random)
+        };
+        let n_minus_one_div_two = (n - BigInt::one) / BigInt::two;
+        let k = 100;
+        loop(
+            (k, random), |(k, random)|
+            if k < 0 {
+                // probably prime
+                break $ (true, random)
+            };
+            let (a, random) = random.generate_range(BigInt::two, n);
+            let x = jacobi_symbol(a, n);
+            if x == 0 {
+                break $ (false, random)     // composite
+            };
+            let x = BigInt::from_I64(x);
+            let x_mod_n = if x.is_negative { x + n } else { x };
+            let a_pow = modpow(a, n_minus_one_div_two, n);
+            // if a^((n-1)/2) != x mod n, then n is composite
+            if a_pow != x_mod_n {
+                break $ (false, random)     // composite
+            };
+            continue $ (k - 1, random)
+        )
+    );
 }
 
 
@@ -262,7 +297,12 @@ test_prime = (
         (b, random), |(b, random)|
         // Miller-Rabin Primality test.
         let (ret, random) = miller_rabin(b, random);
-        let _ = *println(b.to_string + ": " + if ret { "prime" } else { "composite" });
+        // Solovay–Strassen primality test.
+        let (ret2, random) = solovay_strassen(b, random);
+        let judge = |b| if b { "prime" } else { "composite" };
+        let _ = *println(
+            (b, judge(ret), judge(ret2)).format("{}: {}: {}")
+        );
         if ret {
             break_m $ ()
         };
@@ -277,7 +317,7 @@ test_probable_prime = (
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let time = CALL_C[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(time.to_U64);
-    let bit_length = 512;
+    let bit_length = 128;
     let _ = *println("Searching a probable prime of " + bit_length.to_string + " bits...");
     let (n, random) = probable_prime(bit_length, random);
     println(n.to_string)
@@ -334,5 +374,5 @@ run_unit_test = (
 );
 
 main: IO ();
-main = run_unit_test;
+main = test_prime;
 

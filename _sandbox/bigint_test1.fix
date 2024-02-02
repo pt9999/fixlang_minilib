@@ -6,6 +6,7 @@ import Random;
 import Minilib.Math.BigInt;
 import Minilib.Text.StringEx;
 import Minilib.Testing.Timeit;
+import Minilib.Testing.UnitTest;
 
 namespace BigIntPrime {
 
@@ -175,10 +176,41 @@ namespace BigIntPrime {
     // see: https://en.wikipedia.org/wiki/Jacobi_symbol
     jacobi_symbol: BigInt -> BigInt -> I64;
     jacobi_symbol = |m, n| (
-        eval assert(|_| "invalid `n`", n.is_positive && !n.is_even);
-        eval assert(|_| "invalid `n`", n.is_positive && !n.is_even);
-        let m = if m >= n { m % n }
-        abort()
+        eval assert(|_| "invalid `n`", n.is_positive && n.is_odd);
+        let g = gcd(m, n);
+        if g != BigInt::one {
+            0
+        };
+        let n_minus_one = n - BigInt::one;
+        // inner loop
+        let inner_loop = fix $ |inner_loop, accum, m, n| (
+            let m = m % n;
+            let m = if m.is_negative { m + n } else { m };
+            if m == BigInt::one {
+                // `jacobi_symbol(1, n)` == 1;
+                accum * 1
+            };
+            if m == n_minus_one {
+                // `jacobi_symbol(-1, n)` == (n%4 == 1) ? 1 : -1;
+                let n_mod_4 = n._bitand_I64(3);
+                accum * if n_mod_4 == 1 { 1 } else { -1 }
+            };
+            if m.is_even {
+                let accum = accum * (
+                    // `jacobi_symbol(2, n)` == (n%8 == 1 || n%8 == 7) ? 1 : -1;
+                    let n_mod_8 = n._bitand_I64(7);
+                    if n_mod_8 == 1 || n_mod_8 == 7 { 1 } else { -1 }
+                );
+                let (quo, _) = m.divmod_by_two;
+                inner_loop(accum, quo, n)
+            };
+            // m is odd and neither 1 nor -1
+            // `jacobi_symbol(m, n)` * `jacobi_symbol(n, m)` == (n%4 == 3 && n%4 == 3) ? -1 : 1;
+            let m_mod_4 = m._bitand_I64(3);
+            let n_mod_4 = n._bitand_I64(3);
+            let accum = if m_mod_4 == 3 && n_mod_4 == 3 { accum * -1 } else { accum * 1 };
+            inner_loop(accum, n, m)
+        ) in inner_loop(1, m, n)
     );
 
 }
@@ -251,21 +283,56 @@ test_probable_prime = (
     println(n.to_string)
 );
 
-test_gcd: IO ();
+test_gcd: TestCase;
 test_gcd = (
-    do {
-        let test = |a, b| (
-            let a: BigInt = *from_string(a).from_result;
-            let b: BigInt = *from_string(b).from_result;
-            println((a, b, gcd(a,b)).format("gcd({},{})={}")).lift
-        );
-        let _ = *test("5", "2");
-        let _ = *test("6", "10");
-        let _ = *test("-6", "-10");
-        let _ = *test("57", "51");
-        pure()
-    }.try(eprintln)
+    make_table_test("test_gcd",
+        [
+            ("5", "2", "1"),
+            ("6", "10", "2"),
+            ("-6", "-10", "2"),
+            ("57", "51", "3")
+        ],
+        |(a, b, expect)|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let actual = gcd(a,b);
+        let _ = *println((a, b, actual).format("gcd({},{})={}")).lift;
+        assert_equal("actual", actual.to_string, expect)
+    )
+);
+
+test_jacobi_symbol: TestCase;
+test_jacobi_symbol = (
+    make_table_test("test_jacobi_symbol",
+        [
+            ("1001", "9907", -1),
+            ("19", "45", 1),
+            ("8", "21", -1),
+            ("5", "21", 1),
+            ("40", "21", -1),
+            ("1", "21", 1),
+            ("-1", "21", 1),
+            ("-1", "23", -1),
+            ("-24", "23", -1),
+            ("27", "39", 0)
+        ],
+        |(m, n, expect)|
+        let m: BigInt = *from_string(m).from_result;
+        let n: BigInt = *from_string(n).from_result;
+        let actual = jacobi_symbol(m,n);
+        let _ = *println((m, n, actual).format("jacobi_symbol({},{})={}")).lift;
+        assert_equal("actual", actual, expect)
+    )
+);
+
+run_unit_test: IO ();
+run_unit_test = (
+    [
+        test_gcd,
+        test_jacobi_symbol
+    ].run_test_driver
 );
 
 main: IO ();
-main = test_gcd;
+main = run_unit_test;
+

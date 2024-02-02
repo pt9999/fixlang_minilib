@@ -5,42 +5,33 @@ import Random;
 
 import Minilib.Math.BigInt;
 import Minilib.Text.StringEx;
-import Minilib.Testing.Timeit;
 import Minilib.Testing.UnitTest;
 
 namespace BigIntPrime {
 
-    // Calculates `a^n`.
-    pow_by_U64: BigInt -> U64 -> BigInt;
-    pow_by_U64 = |a, n| (
-        loop(
-            (BigInt::from_I64(1), a, n), |(prod, a, n)|
-            if n == 0_U64 {
-                break $ prod
-            };
-            let prod = if n.bit_and(1_U64) != 0_U64 {
-                prod * a
-            } else { prod };
-            continue $ (prod, a*a, n.shift_right(1_U64))
-        )
+    // `probable_prime(bit_length, random)` returns a probable prime number with specified bit length.
+    probable_prime: I64 -> Random -> (BigInt, Random);
+    probable_prime = |bit_length, random| (
+        let end = pow_by_U64(BigInt::two, bit_length.to_U64);
+        let (begin, _) = end.divmod_by_two;
+        let (n, random) = random.generate_range(begin, end);
+        let (n, random) = next_probable_prime(n, random);
+        if begin <= n && n < end {
+            (n, random)
+        };
+        probable_prime(bit_length, random)  // try again
     );
 
-    // Calculates `a^n mod m`.
-    modpow: BigInt -> BigInt -> BigInt -> BigInt;
-    modpow = |a, n, m| (
-        loop(
-            (BigInt::one, a, n), |(prod, a, n)|
-            if n == zero {
-                break $ prod
-            };
-            let (quo, rem) = BigInt::divmod(n, BigInt::two);
-            let prod = if rem != zero {
-                prod * a
-            } else { prod };
-            let prod = prod % m;
-            let a = (a * a) % m;
-            continue $ (prod, a, quo)
-        )
+    // `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
+    next_probable_prime: BigInt -> Random -> (BigInt, Random);
+    next_probable_prime = |n, random| (
+        let (ret, random) = miller_rabin(n, random);
+        if ret {
+            //let (ret2, random) = solovay_strassen(n, random);
+            //eval if !ret2 { debug_eprintln("miller_rabin==true && solovay_strassen==false !!") } else { () };
+            (n, random)
+        };
+        next_probable_prime(n + BigInt::one, random)
     );
 
     // Generates random BigInt `r` such that `begin <= r && r < end`.
@@ -77,87 +68,37 @@ namespace BigIntPrime {
         (r, random)
     );
 
-    // Performs Miller-Rabin primality test.
-    // Returns true if `n` is probably prime.
-    // Probability of false prime is less than or equal to `2^-100`.
-    miller_rabin: BigInt -> Random -> (Bool, Random);
-    miller_rabin = |n, random| (
-        // For optimization purposes, let's check if `n` is divisible by a small prime number.
-        let (_, rem) = BigInt::divmod(n, BigInt::from_I64(2*3*5*7));
-        let rem = rem.to_I64;
-        if rem % 2 == 0 || rem % 3 == 0 || rem % 5 == 0 || rem % 7 == 0 {
-            // composite
-            (false, random)
-        };
-        // Determine `s` and `d` such that `n - 1 == 2^s * d`.
-        let n_minus_one = n - BigInt::one;
-        let (s, d) = loop(
-            (0, n_minus_one), |(s, d)|
-            let (quo, rem) = BigInt::divmod(d, BigInt::two);
-            if rem.to_I64 != 0 {
-                break $ (s, d)
-            };
-            continue $ (s+1, quo)
-        );
-        // `k` is the number of rounds of testing to perform.
-        // Accoding to Wikipedia, probability of false prime <= `4^(-k)`.
-        let k = 50;
+    // Calculates `a^n`.
+    pow_by_U64: BigInt -> U64 -> BigInt;
+    pow_by_U64 = |a, n| (
         loop(
-            (k, random), |(k, random)|
-            if k < 0 {
-                // probably prime
-                break $ (true, random)
+            (BigInt::from_I64(1), a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
             };
-            let (a, random) = random.generate_range(two, n - two);
-            let x = modpow(a, d, n);
-            let (opt, y) = loop(
-                (s, x, x), |(s, x, y)|
-                if s < 0 {
-                    break $ (none(), y)
-                };
-                let y = (x*x) % n;
-                if y == one && x != one && x != n_minus_one {
-                    // composite
-                    break $ (some(false), y)
-                }; 
-                let x = y;
-                continue $ (s-1, x, y)
-            );
-            if opt.is_some {
-                break $ (opt.as_some, random)
-            };
-            if y != one {
-                // composite
-                break $ (false, random)
-            }; 
-            continue $ (k - 1, random) 
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                prod * a
+            } else { prod };
+            continue $ (prod, a*a, n.shift_right(1_U64))
         )
     );
 
-    // `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
-    next_probable_prime: BigInt -> Random -> (BigInt, Random);
-    next_probable_prime = |n, random| (
-        let (ret, random) = miller_rabin(n, random);
-        //let (ret2, random) = solovay_strassen(n, random);
-        if ret {
-            //eval if !ret2 { debug_eprintln("miller_rabin==true && solovay_strassen==false !!") } else { () };
-            (n, random)
-        };
-        //eval if ret2 { debug_eprintln("miller_rabin==false && solovay_strassen==true !!") } else { () };
-        next_probable_prime(n + BigInt::one, random)
-    );
-
-    // `probable_prime(bit_length, random)` returns a probable prime number with specified bit length.
-    probable_prime: I64 -> Random -> (BigInt, Random);
-    probable_prime = |bit_length, random| (
-        let end = pow_by_U64(BigInt::two, bit_length.to_U64);
-        let (begin, _) = end.divmod_by_two;
-        let (n, random) = random.generate_range(begin, end);
-        let (n, random) = next_probable_prime(n, random);
-        if begin <= n && n < end {
-            (n, random)
-        };
-        probable_prime(bit_length, random)  // try again
+    // Calculates `a^n mod m`.
+    modpow: BigInt -> BigInt -> BigInt -> BigInt;
+    modpow = |a, n, m| (
+        loop(
+            (BigInt::one, a, n), |(prod, a, n)|
+            if n == zero {
+                break $ prod
+            };
+            let (quo, rem) = BigInt::divmod(n, BigInt::two);
+            let prod = if rem != zero {
+                prod * a
+            } else { prod };
+            let prod = prod % m;
+            let a = (a * a) % m;
+            continue $ (prod, a, quo)
+        )
     );
 
     // `gcd(m,n)` returns the greatest common divisor of `abs(m)` and `abs(n)`.
@@ -216,7 +157,66 @@ namespace BigIntPrime {
         ) in inner_loop(1, m, n)
     );
 
+    // Performs Miller-Rabin primality test.
+    // Returns true if `n` is probably prime.
+    // Probability of false prime is less than or equal to `2^-100`.
+    // see: https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test
+    miller_rabin: BigInt -> Random -> (Bool, Random);
+    miller_rabin = |n, random| (
+        // For optimization purposes, let's check if `n` is divisible by a small prime number.
+        let (_, rem) = BigInt::divmod(n, BigInt::from_I64(2*3*5*7));
+        let rem = rem.to_I64;
+        if rem % 2 == 0 || rem % 3 == 0 || rem % 5 == 0 || rem % 7 == 0 {
+            // composite
+            (false, random)
+        };
+        // Determine `s` and `d` such that `n - 1 == 2^s * d`.
+        let n_minus_one = n - BigInt::one;
+        let (s, d) = loop(
+            (0, n_minus_one), |(s, d)|
+            let (quo, rem) = BigInt::divmod(d, BigInt::two);
+            if rem.to_I64 != 0 {
+                break $ (s, d)
+            };
+            continue $ (s+1, quo)
+        );
+        // `k` is the number of rounds of testing to perform.
+        // Accoding to Wikipedia, probability of false prime <= `4^(-k)`.
+        let k = 50;
+        loop(
+            (k, random), |(k, random)|
+            if k < 0 {
+                // probably prime
+                break $ (true, random)
+            };
+            let (a, random) = random.generate_range(two, n - two);
+            let x = modpow(a, d, n);
+            let (opt, y) = loop(
+                (s, x, x), |(s, x, y)|
+                if s < 0 {
+                    break $ (none(), y)
+                };
+                let y = (x*x) % n;
+                if y == one && x != one && x != n_minus_one {
+                    // composite
+                    break $ (some(false), y)
+                }; 
+                let x = y;
+                continue $ (s-1, x, y)
+            );
+            if opt.is_some {
+                break $ (opt.as_some, random)
+            };
+            if y != one {
+                // composite
+                break $ (false, random)
+            }; 
+            continue $ (k - 1, random) 
+        )
+    );
+
     // Performs Solovay–Strassen primality test.
+    // see: https://en.wikipedia.org/wiki/Solovay%E2%80%93Strassen_primality_test
     solovay_strassen: BigInt -> Random -> (Bool, Random);
     solovay_strassen = |n, random| (
         if n.is_negative {
@@ -251,38 +251,6 @@ namespace BigIntPrime {
 }
 
 
-or_abort: Result ErrMsg a -> a;
-or_abort = |res| (
-    if res.is_err {
-        eval debug_eprintln("error: " + res.as_err);
-        abort()
-    };
-    res.as_ok
-);
-
-test_perf: IO ();
-test_perf = (
-    let a: BigInt = *timeit("a", |_| from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort);
-    let b: BigInt = *timeit("b", |_| from_string("7777777777777777").or_abort);
-    let _ = *timeit("a==b", |_| a==b);
-    let _ = *timeit("a>b", |_| a>b);
-    let _ = *timeit("a>=b", |_| a>=b);
-    let _ = *timeit("a+b", |_| a+b);
-    let _ = *timeit("a-b", |_| a-b);
-    let _ = *timeit("a*b", |_| a*b);
-    let _ = *timeit("a/b", |_| a/b);
-    let _ = *timeit("a%b", |_| a%b);
-    let _ = *timeit("b/a", |_| b/a);
-    let _ = *timeit("b%a", |_| b%a);
-    let _ = *timeit("a/a", |_| a/a);
-    let _ = *timeit("a%a", |_| a%a);
-    let _ = *notimeit("from_U64(U64::maximum)", |_| BigInt::from_U64(U64::maximum));
-    let _ = *notimeit("from_U64(U64::minimum)", |_| BigInt::from_U64(U64::minimum));
-    let _ = *notimeit("from_I64(I64::maximum)", |_| BigInt::from_I64(I64::maximum));
-    let _ = *notimeit("from_I64(I64::minimum)", |_| BigInt::from_I64(I64::minimum));
-    let _ = *notimeit("(-1 * 0).@sign", |_| (BigInt::from_I64(-1) * BigInt::from_I64(0)).@sign);
-    pure()
-);
 
 test_prime: IO ();
 test_prime = (

@@ -63,20 +63,20 @@ namespace Karatsuba {
     );
 }
 
-namespace NewtonRaphson {
-    _bit_length: Array U32 -> I64;
+namespace BigNatEx {
+    _bit_length: Array U32 -> U64;
     _bit_length = |a| (
         let a = a._remove_last_zeros;
         let n = a.get_size;
-        let bit_length = n * _log2_base;
+        let bit_length = n.to_U64 * _log2_base;
         let d = a.@(n-1).to_U64;
         loop(
-            (bit_length, _log2_base - 1), |(bit_length, i)|
+            (bit_length, _log2_base.to_I64 - 1), |(bit_length, i)|
             if i < 0 { break $ bit_length };
-            if d.bit_and(1_U64.shift_left(i)) != 0_U64 {
+            if d.bit_and(1_U64.shift_left(i.to_U64)) != 0_U64 {
                 break $ bit_length
             };
-            continue $ (bit_length - 1, i - 1)
+            continue $ (bit_length - 1_U64, i - 1)
         )
     );
     
@@ -135,57 +135,131 @@ namespace NewtonRaphson {
         );
         a._remove_last_zeros
     );
+}
 
-    _add_exp: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
-    _add_exp = |(a0, exp0), (a1, exp1)| (
-        if exp1 < exp0 { _add_exp((a1, exp1), (a0, exp0)) };
+namespace Goldschmidt {
+
+    _add_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _add_exp = |a0, exp0, a1, exp1| (
+        if exp1 < exp0 { _add_exp(a1, exp1, a0, exp0) };
         let dexp1 = exp1 - exp0;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
         let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
         let (a2, off2) = _add_with_offset((a0, 0), (a1, off1));
-        let exp2 = exp0 + off2 * _log2_base;
+        let exp2 = exp0 + off2 * _log2_base.to_I64;
         (a2, exp2)
     );
 
-    _sub_exp: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
-    _sub_exp = |(a0, exp0), (a1, exp1)| (
+    _sub_exp: Array U32 -> I64 -> Array U32 -> I64 -> Result ErrMsg (Array U32, I64);
+    _sub_exp = |a0, exp0, a1, exp1| (
         if exp1 < exp0 {
-            let dexp0 = exp0 - exp1;
+            let dexp0 = (exp0 - exp1).to_U64;
             let (off0, dexp0) = _divmod_log2_base(dexp0);
-            let a0 = _mul_u32(1_U64.shift_left(dexp0.to_U64).to_U32, a0);
-            let (a2, off2) = *_sub_with_offset((a0, off0), (a1, 0));
-            let exp2 = exp1 + off2 * _log2_base;
+            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);
+            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));
+            let exp2 = exp1 + off2 * _log2_base.to_I64;
             pure $ (a2, exp2)
         };
-        let dexp1 = exp1 - exp0;
+        let dexp1 = (exp1 - exp0).to_U64;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
-        let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
-        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1));
-        let exp2 = exp0 + off2 * _log2_base;
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);
+        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.to_I64));
+        let exp2 = exp0 + off2 * _log2_base.to_I64;
         pure $ (a2, exp2)
     );
 
-    _mul_exp: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
-    _mul_exp = |(a0, exp0), (a1, exp1)| (
+    _mul_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _mul_exp = |a0, exp0, a1, exp1| (
         let a2 = _mul(a0, a1);
         (a2, exp0 + exp1)
     );
 
-    _divmod2: Array U32 -> Array U32 -> (Array U32, Array U32);
-    _divmod2 = |a, b| (
-        let a = a._remove_last_zeros;
-        let b = b._remove_last_zeros;
-        abort()
+    _truncate_exp: Array U32 -> I64 -> U64 -> (Array U32, I64);
+    _truncate_exp = |a0, exp0, bit_length| (
+        let a0_bit_length = a0._bit_length;
+        if a0_bit_length <= bit_length { (a0, exp0) };
+        let shift = a0_bit_length - bit_length;
+        let a0 = a0._shift_right(shift);
+        let exp0 = exp0 + shift.to_I64;
+        (a0, exp0) 
     );
+
 
     _goldschmidt: Array U32 -> Array U32 -> Result ErrMsg (Array U32);
     _goldschmidt = |a, b| (
+        let a_bit_length = a._bit_length;
+        let b_bit_length = b._bit_length;
         // scale a and b such that 0.5 <= b < 1
-        let b_exp = -b._bit_length;         // exponent of 2
+        let b_exp = -b._bit_length.to_I64;         // exponent of 2
         let a_exp = b_exp;
-        let (f, f_exp) = *_sub_exp(([2_U32], 0), (b, b_exp));
-        abort()
+        let (a, a_exp, b, b_exp) = *loop_m(
+            (a, a_exp, b, b_exp, 0), |(a, a_exp, b, b_exp, i)|
+            //eval debug_eprintln((i, (a,a_exp),(b,b_exp)).format("{}: a={} b={}"));
+            if i >= 100 {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            let (f, f_exp) = *_sub_exp([2_U32], 0, b, b_exp);
+            //eval debug_eprintln((f, f_exp).format("f=({},{})"));
+            let (a1, a1_exp) = _mul_exp(a, a_exp, f, f_exp);
+            let (b1, b1_exp) = _mul_exp(b, b_exp, f, f_exp);
+            //eval debug_eprintln((i, (a1,a1_exp),(b1,b1_exp)).format("{}: a1={} b1={}"));
+            let (a1, a1_exp) = _truncate_exp(a1, a1_exp, a_bit_length);
+            let (b1, b1_exp) = _truncate_exp(b1, b1_exp, b_bit_length);
+            if (b, b_exp) == (b1, b1_exp) {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            continue_m $ (a1, a1_exp, b1, b1_exp, i + 1)
+        );
+        let a = if a_exp >= 0 { a._shift_left(a_exp.to_U64) }
+        else { a._shift_right((-a_exp).to_U64) };
+        //eval debug_eprintln((a).format("_goldschmidt: result a={}"));
+        pure $ a._remove_last_zeros
+    );
 
+    // Calculates `a0 - a1`.
+    // returns the result and the sign.
+    _signed_sub: Array U32 -> Array U32 -> (Array U32, I64);
+    _signed_sub = |a0, a1| (
+        let res = _sub_with_offset((a0, 0), (a1, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, 1)
+        };
+        let res = _sub_with_offset((a1, 0), (a0, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, -1)
+        };
+        eval debug_eprintln("error: " + res.as_err);
+        abort()
+    );
+
+    _divmod2: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod2 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        let (quo, rem, rem_sign) = *loop_m(
+            ([0_U32], a, 1), |(quo, a, a_sign)|
+            let q = *_goldschmidt(a, b);
+            let (rem, rem_sign) = _signed_sub(a, _mul(b, q));
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 { _add(quo, q) } else { _sub(quo, q) };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break_m $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue_m $ (quo, rem, rem_sign)
+        );
+        let (quo, rem) = if rem_sign > 0 || rem == BigNat::_zero { 
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        };
+        pure $ (quo, rem)
     );
 }
 
@@ -301,7 +375,31 @@ test_shift_right = (
     ).try(eprintln)
 );
 
+test_divmod2: IO ();
+test_divmod2 = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    loop_m(
+        (random, 0), |(random, i)|
+        if i >= 10 { break_m $ () };
+        let (a, random) = random.generate_bigint(2*bits);
+        let (b, random) = random.generate_bigint(bits);
+        /*
+        let (quo1, rem1) = _divmod(a.@nat, b.@nat);
+        let (quo2, rem2) = *_divmod2(a.@nat, b.@nat).from_result;
+        let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
+        let _ = *println((quo2, rem2).format("quo2={} rem2={}")).lift;
+        */
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
+        let (quo2, rem2) = *timeit("(quo2, rem2)", |_| _divmod2(a.@nat, b.@nat).as_ok).lift;
+        let _ = *assert_equal("quo", quo1, quo2);
+        let _ = *assert_equal("rem", rem1, rem2);
+        continue_m $ (random, i + 1)
+    ).try(eprintln)
+);
+
 main: IO ();
-main = test_shift_right;
+main = test_divmod2;
 
 

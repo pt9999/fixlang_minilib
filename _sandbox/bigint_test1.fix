@@ -9,7 +9,7 @@ import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Testing.Timeit;
 
-namespace BigIntOpt {
+namespace Karatsuba {
 
     _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
     _get_sub_or_zero = |begin, end, a| (
@@ -60,6 +60,75 @@ namespace BigIntOpt {
         let nat = _mul_karatsuba(a.@nat, b.@nat);
         let nat = nat._remove_last_zeros;
         BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
+
+namespace NewtonRaphson {
+    _bit_length: Array U32 -> I64;
+    _bit_length = |a| (
+        let a = a._remove_last_zeros;
+        let n = a.get_size;
+        let bit_length = n * _log2_base;
+        let d = a.@(n-1).to_U64;
+        loop(
+            (bit_length, _log2_base - 1), |(bit_length, i)|
+            if i < 0 { break $ bit_length };
+            if d.bit_and(1_U64.shift_left(i)) != 0_U64 {
+                break $ bit_length
+            };
+            continue $ (bit_length - 1, i - 1)
+        )
+    );
+    
+    _add_exp: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
+    _add_exp = |(a0, exp0), (a1, exp1)| (
+        if exp1 < exp0 { _add_exp((a1, exp1), (a0, exp0)) };
+        let dexp1 = exp1 - exp0;
+        let off1 = dexp1 / _log2_base;
+        let dexp1 = dexp1 % _log2_base;
+        let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
+        let (a2, off2) = _add_with_offset((a0, 0), (a1, off1));
+        let exp2 = exp0 + off2 * _log2_base;
+        (a2, exp2)
+    );
+    _sub_exp: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
+    _sub_exp = |(a0, exp0), (a1, exp1)| (
+        if exp1 < exp0 {
+            let dexp0 = exp0 - exp1;
+            let off0 = dexp0 / _log2_base;
+            let dexp0 = dexp0 % _log2_base;
+            let a0 = _mul_u32(1_U64.shift_left(dexp0.to_U64).to_U32, a0);
+            let (a2, off2) = *_sub_with_offset((a0, off0), (a1, 0));
+            let exp2 = exp1 + off2 * _log2_base;
+            pure $ (a2, exp2)
+        };
+        let dexp1 = exp1 - exp0;
+        let off1 = dexp1 / _log2_base;
+        let dexp1 = dexp1 % _log2_base;
+        let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
+        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1));
+        let exp2 = exp0 + off2 * _log2_base;
+        pure $ (a2, exp2)
+    );
+
+    _mul_exp: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
+    _mul_exp = |(a0, exp0), (a1, exp1)| (
+        let a2 = _mul(a0, a1);
+        (a2, exp0 + exp1)
+    );
+
+    _divmod2: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod2 = |n, d| (
+        let n = n._remove_last_zeros;
+        let d = d._remove_last_zeros;
+        // scale n and d such that 0.5 <= d < 1
+        let d_exp = -d._bit_length;         // exponent of 2
+        let n_exp = d_exp;
+        // according to wikipedia, suggested initial value is x0 = 48/17 - 32/17 * d
+        // we use x0 = 45/16 - 30/16 * d instead
+        let x_exp = d_exp - 4;
+        let (x, x_exp) = _add_exp(([45_U32], -4), (_mul_u32(30_U32, d), d_exp - 4));
+        abort()
     );
 }
 
@@ -124,7 +193,33 @@ test_karatsuba = (
     pure()
 );
 
+test_divmod: IO ();
+test_divmod = (
+    let _ = *pure();
+    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 512;
+    let (a, random) = random.generate_bigint(2*bits);
+    let (b, random) = random.generate_bigint(bits);
+    let _ = *timeit("divmod(a,b)", |_| divmod(a,b));
+    pure()
+);
+
+test_exp: IO ();
+test_exp = (
+    let _ = *pure();
+    let a = [1_U32];
+    let b = [1_U32];
+    let _ = *notimeit("_add_exp((a,2),(b,-1))", |_| _add_exp((a,2),(b,-1)));
+    let _ = *notimeit("_add_exp((a,2),(b,1))", |_| _add_exp((a,2),(b,1)));
+    let _ = *notimeit("_sub_exp((a,2),(b,-1))", |_| _sub_exp((a,2),(b,-1)));
+    let _ = *notimeit("_sub_exp((a,-1),(b,2))", |_| _sub_exp((a,-1),(b,2)));
+    pure() 
+);
+
+
 main: IO ();
-main = test_karatsuba;
+main = test_exp;
 
 

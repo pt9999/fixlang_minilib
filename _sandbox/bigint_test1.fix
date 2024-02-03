@@ -7,6 +7,61 @@ import Minilib.Math.BigInt;
 import Minilib.Math.BigIntPrime;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
+import Minilib.Testing.Timeit;
+
+namespace BigIntOpt {
+
+    _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
+    _get_sub_or_zero = |begin, end, a| (
+        eval assert(|_| "invalid range", begin < end);
+        let n = a.get_size;
+        if begin >= n { BigNat::_zero };
+        let end = min(end, n);
+        if begin == 0 && end == n { a };
+        a.get_sub(begin, end)
+    );
+    
+    // Calculates `a * b`.
+    _mul_karatsuba: Array U32 -> Array U32 -> Array U32;
+    _mul_karatsuba = |a, b| (
+        if a.get_size <= 2 && b.get_size <= 2 {
+            _mul(a,b)
+        };
+        /*
+        if a._is_zero || b._is_zero {
+            BigNat::_zero
+        };
+        if a.get_size == 1 {
+            _mul_u32(a.@(0), b)
+        };
+        if b.get_size == 1 {
+            _mul_u32(b.@(0), a)
+        };
+        */
+        let n = max(a.get_size, b.get_size);
+        let m = (n + 1) / 2;
+        let a0 = a._get_sub_or_zero(0, m);
+        let a1 = a._get_sub_or_zero(m, n);
+        let b0 = b._get_sub_or_zero(0, m);
+        let b1 = b._get_sub_or_zero(m, n);
+        let z0 = _mul_karatsuba(a0, b0);
+        let z2 = _mul_karatsuba(a1, b1);
+        let z3 = _mul_karatsuba(_add(a1, a0), _add(b1, b0)); 
+        let z1 = _sub(_sub(z3, z2), z0);
+        let (z,zoff) = _add_with_offset((z0,0), (z1,m));
+        let (z,zoff) = _add_with_offset((z,zoff), (z2,2*m));
+        eval assert(|_| "zoff != 0", zoff == 0);
+        z
+    );
+
+
+    mul_karatsuba: BigInt -> BigInt -> BigInt;
+    mul_karatsuba = |a, b| (
+        let nat = _mul_karatsuba(a.@nat, b.@nat);
+        let nat = nat._remove_last_zeros;
+        BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
 
 test_prime: IO ();
 test_prime = (
@@ -54,6 +109,22 @@ test_probable_prime = (
     )
 );
 
+test_karatsuba: IO ();
+test_karatsuba = (
+    let _ = *pure();
+    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 1024;
+    let (a, random) = random.generate_bigint(bits);
+    let (b, random) = random.generate_bigint(bits);
+    let _ = *timeit("a*b", |_| a*b);
+    let _ = *timeit("mul_karatsuba(a,b)", |_| mul_karatsuba(a,b));
+    eval assert(|_| "not eq", a*b == mul_karatsuba(a,b));
+    pure()
+);
+
 main: IO ();
-main = test_probable_prime;
+main = test_karatsuba;
+
 

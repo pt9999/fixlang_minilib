@@ -11,15 +11,25 @@ namespace BigNat {
     // Digits are ordered from least significant to most significant.
     //type BigNat = Array U32;
 
-    // log2 of base. It must be `0 <= _log2_base <= 32`.
-    _log2_base: I64;
-    _log2_base = 32;
+    // log2(log2(base)). It must be `0 <= _log2_log2_base <= 5`.
+    _log2_log2_base: U64;
+    _log2_log2_base = 5_U64;
+
+    // log2 of base. It must be power of 2 and `0 <= _log2_base <= 32`.
+    _log2_base: U64;
+    _log2_base = 1_U64.shift_left(_log2_log2_base);
 
     // The base of BigNat. It must be power of 2.
     _base: U64;
-    _base = 1_U64.shift_left(_log2_base.to_U64);
+    _base = 1_U64.shift_left(_log2_base);
 
-    // divmod by base.
+    // divmod by _log2_base.
+    _divmod_log2_base: U64 -> (U64, U64);
+    _divmod_log2_base = |x| (
+        (x.shift_right(_log2_log2_base.to_U64), x.bit_and(_log2_base.to_U64 - 1_U64))
+    );
+
+    // divmod by _base.
     _divmod_base: U64 -> (U64, U64);
     _divmod_base = |x| (
         (x.shift_right(_log2_base.to_U64), x.bit_and(_base - 1_U64))
@@ -271,7 +281,7 @@ namespace BigNat {
             eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
             eval _debug(|_| "(a2)="+(a2).to_string);
             let (a0, a2) = loop(
-                (a0, a2, _log2_base - 1), |(a0, a2, shift)|
+                (a0, a2, _log2_base.to_I64 - 1), |(a0, a2, shift)|
                 if shift < 0 {
                     break $ (a0, a2)
                 };
@@ -320,7 +330,7 @@ namespace BigNat {
     // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_log2_base-1)*a]`.
     _make_shift_table: Array U32 -> Array (Array U32);
     _make_shift_table = |a| (
-        Iterator::range(0, _log2_base).map(|shift|
+        Iterator::range(0, _log2_base.to_I64).map(|shift|
             let u32 = 1_U32.shift_left(shift.to_U32);
             _mul_u32(u32, a)
         ).to_array

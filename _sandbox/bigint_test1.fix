@@ -80,31 +80,85 @@ namespace NewtonRaphson {
         )
     );
     
+    // Calculates `a^n`.
+    _pow_by_U64: Array U32 -> U64 -> Array U32;
+    _pow_by_U64 = |a, n| (
+        loop(
+            ([1_U32], a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
+            };
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                _mul(prod, a)
+            } else { prod };
+            continue $ (prod, _mul(a,a), n.shift_right(1_U64))
+        )
+    );
+
+    _shift_left: U64 -> Array U32 -> Array U32;
+    _shift_left = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, 0), |(a, carry, i)|
+            if i >= n {
+                break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_right(_log2_base - shift);
+            let d = d.shift_left(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i + 1)
+        );
+        if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+    );
+
+    _shift_right: U64 -> Array U32 -> Array U32;
+    _shift_right = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let a = if off == 0_U64 { a } 
+        else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+        else { [0_U32] };
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, n-1), |(a, carry, i)|
+            if i < 0 {
+                break $ a
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_left(_log2_base - shift);
+            let d = d.shift_right(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i - 1)
+        );
+        a._remove_last_zeros
+    );
+
     _add_exp: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
     _add_exp = |(a0, exp0), (a1, exp1)| (
         if exp1 < exp0 { _add_exp((a1, exp1), (a0, exp0)) };
         let dexp1 = exp1 - exp0;
-        let off1 = dexp1 / _log2_base;
-        let dexp1 = dexp1 % _log2_base;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
         let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
         let (a2, off2) = _add_with_offset((a0, 0), (a1, off1));
         let exp2 = exp0 + off2 * _log2_base;
         (a2, exp2)
     );
+
     _sub_exp: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
     _sub_exp = |(a0, exp0), (a1, exp1)| (
         if exp1 < exp0 {
             let dexp0 = exp0 - exp1;
-            let off0 = dexp0 / _log2_base;
-            let dexp0 = dexp0 % _log2_base;
+            let (off0, dexp0) = _divmod_log2_base(dexp0);
             let a0 = _mul_u32(1_U64.shift_left(dexp0.to_U64).to_U32, a0);
             let (a2, off2) = *_sub_with_offset((a0, off0), (a1, 0));
             let exp2 = exp1 + off2 * _log2_base;
             pure $ (a2, exp2)
         };
         let dexp1 = exp1 - exp0;
-        let off1 = dexp1 / _log2_base;
-        let dexp1 = dexp1 % _log2_base;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
         let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
         let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1));
         let exp2 = exp0 + off2 * _log2_base;
@@ -118,17 +172,20 @@ namespace NewtonRaphson {
     );
 
     _divmod2: Array U32 -> Array U32 -> (Array U32, Array U32);
-    _divmod2 = |n, d| (
-        let n = n._remove_last_zeros;
-        let d = d._remove_last_zeros;
-        // scale n and d such that 0.5 <= d < 1
-        let d_exp = -d._bit_length;         // exponent of 2
-        let n_exp = d_exp;
-        // according to wikipedia, suggested initial value is x0 = 48/17 - 32/17 * d
-        // we use x0 = 45/16 - 30/16 * d instead
-        let x_exp = d_exp - 4;
-        let (x, x_exp) = _add_exp(([45_U32], -4), (_mul_u32(30_U32, d), d_exp - 4));
+    _divmod2 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
         abort()
+    );
+
+    _goldschmidt: Array U32 -> Array U32 -> Result ErrMsg (Array U32);
+    _goldschmidt = |a, b| (
+        // scale a and b such that 0.5 <= b < 1
+        let b_exp = -b._bit_length;         // exponent of 2
+        let a_exp = b_exp;
+        let (f, f_exp) = *_sub_exp(([2_U32], 0), (b, b_exp));
+        abort()
+
     );
 }
 
@@ -218,8 +275,33 @@ test_exp = (
     pure() 
 );
 
+test_shift_right: IO ();
+test_shift_right = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 128;
+    let iter = Iterator::generate(random, generate_bigint(bits) >> some).take(3);
+    iter.fold_m(
+        (), |_, a|
+        [1, 3, 31, 32, 33].map(I64::to_U64).to_iter.fold_m(
+            (), |_, shift|
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_left(shift));
+            let c = a * n;
+            let _ = *println(b.to_string).lift;
+            let _ = *assert_equal("left", c, b);
+
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_right(shift));
+            let c = a / n;
+            let _ = *println(b.to_string).lift;
+            let _ = *assert_equal("right", c, b);
+            pure()
+        )
+    ).try(eprintln)
+);
 
 main: IO ();
-main = test_exp;
+main = test_shift_right;
 
 

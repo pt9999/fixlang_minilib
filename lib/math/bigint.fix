@@ -11,17 +11,24 @@ namespace BigNat {
     // Digits are ordered from least significant to most significant.
     //type BigNat = Array U32;
 
+    // The base of BigNat. It must be power of 2.
+    _base: U64;
+    _base = 0x100000000_U64;    // 1_U64.shift_left(_log2_base)
+
+    // log2 of base. It must be power of 2 and `0 <= _log2_base <= 32`.
+    _log2_base: U64;
+    _log2_base = 32_U64;    // 1_U64.shift_left(_log2_log2_base)
+
     // log2(log2(base)). It must be `0 <= _log2_log2_base <= 5`.
     _log2_log2_base: U64;
     _log2_log2_base = 5_U64;
 
-    // log2 of base. It must be power of 2 and `0 <= _log2_base <= 32`.
-    _log2_base: U64;
-    _log2_base = 1_U64.shift_left(_log2_log2_base);
-
-    // The base of BigNat. It must be power of 2.
-    _base: U64;
-    _base = 1_U64.shift_left(_log2_base);
+    _dummy: ();
+    _dummy = (
+        eval assert(|_|"invalid _log2_base", _log2_base == 1_U64.shift_left(_log2_log2_base));
+        eval assert(|_|"invalid _base", _base == 1_U64.shift_left(_log2_base));
+        ()
+    );
 
     // divmod by _log2_base.
     _divmod_log2_base: U64 -> (U64, U64);
@@ -135,6 +142,37 @@ namespace BigNat {
         (a2, offset2)
     );
 
+    // Calculates `a0 + a1 * _base ^ offset1`.
+    _add_with_offset0: Array U32 -> (Array U32, I64) -> Array U32;
+    _add_with_offset0 = |a0, (a1, offset1)| (
+        let n0 = a0.get_size;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let a0 = loop (
+            a0, |a0|
+            if a0.get_size >= n2 { break $ a0 };
+            continue $ a0.push_back(0_U32)
+        );
+        loop(
+            (a0, 0, 0_U64), |(a0, i, carry)|
+            if i >= n2 {
+                let a0 = if carry == 0_U64 { a0 }
+                else if i < n2 { a0.set(i, carry.to_U32) }
+                else { a0.push_back(carry.to_U32) };
+                break $ a0
+            };
+            if i >= n1 && carry == 0_U64 {
+                break $ a0
+            };
+            let d0: U32 = a0.@(i);
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a0 = a0.set(i, d2.to_U32);
+            continue $ (a0, i + 1, carry)
+        )
+    );
+
     // Calculates `a0 - a1`.
     // Aborts if the result is negative.
     _sub: Array U32 -> Array U32 -> Array U32;
@@ -210,17 +248,16 @@ namespace BigNat {
         let n0 = a0.get_size;
         let n1 = a1.get_size;
         let n2 = n0 + n1 + 1;
-        let a2 = loop(
-            ([0_U32], 0), |(a2, i)|
+        let a2 = Array::fill(n2, 0_U32);
+        loop(
+            (a2, 0), |(a2, i)|
             if i >= n0 {
-                break $ a2
+                break $ a2._remove_last_zeros
             };
             let d0 = a0.@(i);
-            let (a2, e2) = _add_with_offset((a2, 0), (_mul_u32(d0, a1), i));
-            // e2 == 0
+            let a2 = _add_with_offset0(a2, (_mul_u32(d0, a1), i));
             continue $ (a2, i + 1)
-        );
-        a2
+        )
     );
 
     // Calculates `(a0 / 2, a0 % 2)`.

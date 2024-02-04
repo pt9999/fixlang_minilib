@@ -98,6 +98,7 @@ namespace BigNat {
         )
     );
 
+
     // Calculates `a0 + a1`.
     _add: Array U32 -> Array U32 -> Array U32;
     _add = |a0, a1| (
@@ -177,22 +178,18 @@ namespace BigNat {
     // Aborts if the result is negative.
     _sub: Array U32 -> Array U32 -> Array U32;
     _sub = |a0, a1| (
-        let res = _sub_with_offset((a0, 0), (a1, 0));
-        if res.is_err {
-            eval debug_eprintln("error: " + res.as_err);
+        let ((a2, offset2), sign2) = _signed_sub_with_offset((a0, 0), (a1, 0));
+        if sign2 < 0 {
+            eval debug_eprintln("error: sign2 < 0");
             abort()
         };
-        let (a2, _) = res.as_ok;
         a2
     );
 
     // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
-    // Returns err if the result is negative.
-    _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
-    _sub_with_offset = |(a0, offset0), (a1, offset1)| (
-        if _cmp((a0, offset0), (a1, offset1)) < 0 {
-            err $ "underflow"
-        };
+    // returns the result and the sign.
+    _signed_sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> ((Array U32, I64), I64);
+    _signed_sub_with_offset = |(a0, offset0), (a1, offset1)| (
         let n0 = a0.get_size + offset0;
         let n1 = a1.get_size + offset1;
         let n2 = max(n0, n1);
@@ -216,10 +213,24 @@ namespace BigNat {
             continue $ (a2, i + 1, borrow)
         );
         if borrow > 0_U64 {
-            eval assert(|_| "should not reach here", false);
-            err $ "underflow"
+            let a2 = a2._neg;
+            ((a2, offset2), -1)
         };
-        ok $ (a2, offset2)
+        ((a2, offset2), 1)
+    );
+
+    // Treats `a` as a negative number in two's complement representation and reverses its sign.
+    _neg: Array U32 -> Array U32;
+    _neg = |a| (
+        let mask = (_base - 1_U64).to_U32;
+        loop(
+            (a, a.get_size - 1), |(a, i)|
+            if i < 0 {
+                break $ _add(a, _one)
+            };
+            let a = a.mod(i, bit_xor(mask));
+            continue $ (a, i - 1)
+        )
     );
 
     // Calculates `d0 * a1`.
@@ -283,65 +294,61 @@ namespace BigNat {
     // Calculates `(a0 / a1, a0 % a1)`.
     // Aborts if any error occured.
     _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
-    _divmod = |a0, a1| (
-        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
-        let _debug: Lazy String -> () = |_| ();
-
-        let a0 = a0._remove_last_zeros;
-        let a1 = a1._remove_last_zeros;
-        eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
-        if a1.get_size == 1 {
-            let (quo, rem) = _divmod_u32(a0, a1.@(0));
+    _divmod = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        eval assert(|_| "Divide by zero", b != BigNat::_zero);
+        if b.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a, b.@(0));
             (quo, [rem])
         };
-        let a1_shift_table = _make_shift_table(a1);
-        let n0 = a0.get_size;
-        let n1 = a1.get_size;
-        eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
-        if n0 < n1 {
-            ([0_U32], a0)
-        };
-        let n2 = n0;
-        let a2 = Array::fill(n2, 0_U32);
-
-        // a0 = numerator, a1 = denominator
-        // calc quotient(a2) and reminder(a0)
-        let (a0, a2) = loop(
-            (a0, a2, n2 - 1), |(a0, a2, i)|
-            let offset0 = 0;
-            let offset1 = i - (n1 - 1);
-            if offset1 < 0 {
-                break $ (a0, a2)
+        let (quo, rem, rem_sign) = loop(
+            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
+            let an = a.get_size;
+            let bn = b.get_size;
+            if an < bn {
+                break $ (quo, a, a_sign)
             };
-            eval _debug(|_| "(i)="+(i).to_string);
-            eval _debug(|_| "(a0)="+(a0).to_string);
-            eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
-            eval _debug(|_| "(a2)="+(a2).to_string);
-            let (a0, a2) = loop(
-                (a0, a2, _log2_base.to_I64 - 1), |(a0, a2, shift)|
-                if shift < 0 {
-                    break $ (a0, a2)
-                };
-                let d2 = 1_U32.shift_left(shift.to_U32);
-                //let d2_mul_a1 = _mul_u32(d2, a1);
-                let d2_mul_a1 = a1_shift_table.@(shift);
-                let (a3, offset3) = (d2_mul_a1, offset1);
-                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
-                let res = _sub_with_offset((a0, offset0), (a3, offset3));
-                if res.is_ok {
-                    let (a0, _) = res.as_ok;
-                    eval _debug(|_| "success: (a0)=" + (a0).to_string);
-                    let a2 = a2.mod(offset1, |x| x + d2);
-                    continue $ (a0, a2, shift - 1)
-                };
-                eval _debug(|_| "fail: (a0)=" + (a0).to_string);
-                continue $ (a0, a2, shift - 1)
-            );
-            let a0 = a0._remove_last_zeros;
-            continue $ (a0, a2, i - 1)
+            let (q, qoff) = if an == bn {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 1) - (bn - 1);
+                (q, qoff)
+            } else {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 2) - (bn - 1);
+                (q, qoff)
+            };
+            let ((rem, rem_off), rem_sign) = _signed_sub_with_offset((a,0), (_mul(b, q), qoff));
+            // rem_off == 0
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let (quo, _) = if a_sign > 0 {
+                _add_with_offset((quo, 0), (q, qoff)) 
+            } else { 
+                let (quo_qoffset, sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
+                eval assert(|_| "quo subtraction underflow", sign > 0);
+                quo_qoffset
+            };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue $ (quo, rem, rem_sign)
         );
-        let a2 = a2._remove_last_zeros;
-        (a2, a0)
+        if rem_sign > 0 || rem == BigNat::_zero { 
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        }
     );
 
     // Calculates `(a0 / d1, a0 % d1)`.

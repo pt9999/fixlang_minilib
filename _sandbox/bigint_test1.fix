@@ -253,22 +253,52 @@ namespace Goldschmidt {
 }
 
 namespace DivMod3 {
+
+    // Treats `a` as a negative number in two's complement representation and reverses its sign.
+    _neg: Array U32 -> Array U32;
+    _neg = |a| (
+        let mask = (_base - 1_U64).to_U32;
+        loop(
+            (a, a.get_size - 1), |(a, i)|
+            if i < 0 {
+                break $ _add(a, _one)
+            };
+            let a = a.mod(i, bit_xor(mask));
+            continue $ (a, i - 1)
+        )
+    );
+
     // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
     // returns the result and the sign.
     _signed_sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> ((Array U32, I64), I64);
-    _signed_sub_with_offset = |a0_offset0, a1_offset1| (
-        let res = _sub_with_offset(a0_offset0, a1_offset1);
-        if res.is_ok {
-            let a2_offset2 = res.as_ok;
-            (a2_offset2, 1)
+    _signed_sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let (a2, borrow) = loop(
+            (a2, offset2, 0_U64), |(a2, i, borrow)|
+            if i >= n0 && i >= n1  {
+                break $ (a2, borrow)
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d0: U64 = d0.to_U64;
+            let d1: U64 = d1.to_U64 + borrow;
+            let (borrow, d2) = if d0 >= d1 {
+                (0_U64, d0 - d1)
+            } else {
+                (1_U64, _base + d0 - d1)
+            };                
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            let a2 = a2._neg;
+            ((a2, offset2), -1)
         };
-        let res = _sub_with_offset(a1_offset1, a0_offset0);
-        if res.is_ok {
-            let a2_offset2 = res.as_ok;
-            (a2_offset2, -1)
-        };
-        eval debug_eprintln("error: " + res.as_err);
-        abort()
+        ((a2, offset2), 1)
     );
 
     _divmod3: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
@@ -276,7 +306,7 @@ namespace DivMod3 {
         let a = a._remove_last_zeros;
         let b = b._remove_last_zeros;
         let (quo, rem, rem_sign) = *loop_m(
-            ([0_U32], a, 1), |(quo, a, a_sign)|
+            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
             let an = a.get_size;
             let bn = b.get_size;
             if an < bn {
@@ -478,7 +508,7 @@ test_divmod3: IO ();
 test_divmod3 = (
     let _ = *pure();
     let random = Random::init_by_seed(123_U64); // time.to_U64);
-    let bits = 256;
+    let bits = 512;
     loop_m(
         (random, 0), |(random, i)|
         if i >= 10 { break_m $ () };
@@ -517,6 +547,6 @@ prof_divmod3 = (
 );
 
 main: IO ();
-main = prof_divmod3;
+main = test_divmod3;
 
 

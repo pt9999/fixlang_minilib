@@ -7,7 +7,7 @@ Generates probable prime numbers of arbitrary-precision integer.
 Use `probable_prime(256, random)` to generate a probable prime number of 256-bit.
 
 Depending on the value of the random number, generating a probable prime number can take quite a while.
-For example, generating a 512-bit probable prime number may take about 60 seconds.
+For example, generating a 1024-bit probable prime number may take about 90 seconds.
 
 
 ### namespace BigIntPrime
@@ -44,6 +44,15 @@ Calculates `a^n mod m`.
 
 Calculates Jacobi symbol `(m/n)`.
 see: https://en.wikipedia.org/wiki/Jacobi_symbol
+
+#### check_for_small_primes: BigInt -> Bool;
+
+Performes divisibility check against small primes.
+
+#### fermat_base2: BigInt -> Bool;
+
+Performes base-2 Fermat primality test.
+Returns true if `2^(n-1) == 1 mod n`.
 
 #### miller_rabin: BigInt -> Random -> (Bool, Random);
 

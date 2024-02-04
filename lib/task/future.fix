@@ -1,0 +1,37 @@
+module Minilib.Task.Future;
+
+import AsyncTask;
+
+type Future a = unbox struct {
+    var: Var (Option a)
+};
+
+trait r: FutureRunner {
+    run_future: IO () -> r -> IOFail ();
+}
+
+// `Future::make(runner, io) creates a Future.
+// `io` is performed in the runner.
+// If the runner has been shutdown, the future will never be resolved.
+make: [r: FutureRunner] r -> IO a -> IOFail (Future a);
+make = |runner, io| (
+    let var = *Var::make(none()).lift;
+    let io_unit = do {
+        let a = *io;
+        var.Var::set(some $ a)
+    };
+    let _ = *runner.run_future(io_unit);
+    pure $ Future {
+        var: var
+    }
+);
+
+// Gets the result of the Future.
+// If the `io` is not performed yet, wait until `io` is performed.
+// If the taskpool has been shutdown, it may or may not wait forever.
+get: Future a -> IO a;
+get = |future| (
+    future.@var.wait_and_lock(
+        is_some, as_some >> pure
+    )
+);

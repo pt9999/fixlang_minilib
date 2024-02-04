@@ -20,7 +20,11 @@ For example, generating a 512-bit probable prime number may take about 60 second
 
 `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
 
-#### generate_range: BigInt -> BigInt -> Random -> (BigInt, Random);
+#### generate_bigint:  I64 -> Random -> (BigInt, Random);
+
+Generates random BigInt `r` of specified bit length.
+
+#### generate_bigint_range: BigInt -> BigInt -> Random -> (BigInt, Random);
 
 Generates random BigInt `r` such that `begin <= r && r < end`.
 

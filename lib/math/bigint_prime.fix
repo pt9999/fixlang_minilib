@@ -3,7 +3,7 @@
 // Use `probable_prime(256, random)` to generate a probable prime number of 256-bit.
 //
 // Depending on the value of the random number, generating a probable prime number can take quite a while.
-// For example, generating a 512-bit probable prime number may take about 60 seconds.
+// For example, generating a 1024-bit probable prime number may take about 90 seconds.
 //
 module Minilib.Math.BigIntPrime;
 
@@ -14,6 +14,9 @@ import Minilib.Math.BigInt;
 import Minilib.Text.StringEx;
 
 namespace BigIntPrime {
+    _progress: String -> ();
+    _progress = debug_eprint;
+    //_progress = |_| ();
 
     // `probable_prime(bit_length, random)` returns a probable prime number with specified bit length.
     probable_prime: I64 -> Random -> (BigInt, Random);
@@ -31,13 +34,33 @@ namespace BigIntPrime {
     // `next_probable_prime(n, random)` returns a probable prime number greater than or equal to `n`.
     next_probable_prime: BigInt -> Random -> (BigInt, Random);
     next_probable_prime = |n, random| (
-        let (ret, random) = miller_rabin(n, random);
+        let (ret, random) = _is_probable_prime(n, random);
         if ret {
             //let (ret2, random) = solovay_strassen(n, random);
             //eval if !ret2 { debug_eprintln("miller_rabin==true && solovay_strassen==false !!") } else { () };
             (n, random)
         };
         next_probable_prime(n + BigInt::one, random)
+    );
+
+    // Returns true iff `n` is a probable prime number.
+    _is_probable_prime: BigInt -> Random -> (Bool, Random);
+    _is_probable_prime = |n, random| (
+        if !check_for_small_primes(n) {
+            eval _progress(".");
+            (false, random)
+        };
+        if !fermat_base2(n) {
+            eval _progress("F");
+            (false, random)
+        };
+        let (ret, random) = miller_rabin(n, random);
+        if !ret {
+            eval _progress("M");
+            (false, random)
+        };
+        eval _progress("!\n");
+        (true, random)
     );
 
     // Generates random BigInt `r` of specified bit length.
@@ -106,11 +129,10 @@ namespace BigIntPrime {
             if n == zero {
                 break $ prod
             };
-            let (quo, rem) = BigInt::divmod(n, BigInt::two);
+            let (quo, rem) = n.divmod_by_two;
             let prod = if rem != zero {
-                prod * a
+                (prod * a) % m
             } else { prod };
-            let prod = prod % m;
             let a = (a * a) % m;
             continue $ (prod, a, quo)
         )
@@ -172,16 +194,43 @@ namespace BigIntPrime {
         ) in inner_loop(1, m, n)
     );
 
+    // Performes divisibility check against small primes.
+    check_for_small_primes: BigInt -> Bool;
+    check_for_small_primes = |n| (
+        let (_, rem) = BigInt::divmod(n, BigInt::from_I64(2*3*5*7));
+        let rem = rem.to_I64;
+        if rem % 2 == 0 || rem % 3 == 0 || rem % 5 == 0 || rem % 7 == 0 {
+            // `n` is surely composite
+            false
+        };
+        let d = gcd(n, BigInt::from_I64(11*13*17*19*23*29*31));
+        if d != BigInt::one {
+            // `n` is surely composite
+            false
+        };
+        // `n` is maybe composite or maybe prime
+        true
+    );
+
+    // Performes base-2 Fermat primality test.
+    // Returns true if `2^(n-1) == 1 mod n`.
+    fermat_base2: BigInt -> Bool;
+    fermat_base2 = |n| (
+        if modpow(BigInt::two, n - BigInt::one, n) != BigInt::one {
+            // `n` is surely composite
+            false
+        };
+        // `n` is maybe composite or maybe prime
+        true
+    );
+
     // Performs Miller-Rabin primality test.
     // Returns true if `n` is probably prime.
     // Probability of false prime is less than or equal to `2^-100`.
     // see: https://en.wikipedia.org/wiki/Miller%E2%80%93Rabin_primality_test
     miller_rabin: BigInt -> Random -> (Bool, Random);
     miller_rabin = |n, random| (
-        // For optimization purposes, let's check if `n` is divisible by a small prime number.
-        let (_, rem) = BigInt::divmod(n, BigInt::from_I64(2*3*5*7));
-        let rem = rem.to_I64;
-        if rem % 2 == 0 || rem % 3 == 0 || rem % 5 == 0 || rem % 7 == 0 {
+        if n.is_even {
             // composite
             (false, random)
         };
@@ -200,6 +249,7 @@ namespace BigIntPrime {
         let k = 50;
         loop(
             (k, random), |(k, random)|
+            eval _progress("o");
             if k < 0 {
                 // probably prime
                 break $ (true, random)

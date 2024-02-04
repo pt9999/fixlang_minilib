@@ -25,6 +25,9 @@ png.out:
 test_state_monad:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
 
+bigint_test1:
+	../bin/fixautolink build -L ../lib -f bigint_test1.fix
+
 clean:
 	rm -f *.out
 

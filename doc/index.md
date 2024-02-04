@@ -66,6 +66,14 @@ IO extensions, such as:
 - Retrieve file information, such as file size and time stamps
 - Get kernel information such as system name, machine archtecture
 
+### [module Minilib.Math.BigInt (lib/math/bigint.fix)](lib/math/bigint.md)
+
+Arbitrary-precision integer.
+
+### [module Minilib.Math.BigIntPrime (lib/math/bigint_prime.fix)](lib/math/bigint_prime.md)
+
+Generates probable prime numbers of arbitrary-precision integer.
+
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
 HTML handling, such as:
@@ -107,6 +115,10 @@ URL and URI parsing
 ### [module Minilib.Testing.TestUtilArray (lib/testing/test_util_array.fix)](lib/testing/test_util_array.md)
 
 Array utility functions for testing.
+
+### [module Minilib.Testing.Timeit (lib/testing/timeit.fix)](lib/testing/timeit.md)
+
+Measures execution time. Similar to `timeit` module of Python.
 
 ### [module Minilib.Testing.UnitTest (lib/testing/unit_test.fix)](lib/testing/unit_test.md)
 

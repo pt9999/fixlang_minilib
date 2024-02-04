@@ -1,0 +1,296 @@
+module Main;
+
+import Debug;
+
+import Minilib.Math.BigInt;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.Timeit;
+
+test_make: TestCase;
+test_make = (
+    make_table_test("test_make",
+        [
+            (1, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
+            (0, [2_U32, 3_U32], 1, [2_U32, 3_U32]),
+            (-1, [2_U32, 3_U32], -1, [2_U32, 3_U32]),
+            (1, [0_U32, 0_U32], 1, [0_U32]),
+            (0, [0_U32, 0_U32], 1, [0_U32]),
+            (-1, [0_U32, 0_U32], 1, [0_U32])
+        ],
+        |(sign, nat, expect_sign, expect_nat)|
+        let a = BigInt::make(sign, nat);
+        let _ = *assert_equal("sign", expect_sign, a.@sign);
+        let _ = *assert_equal("nat", expect_nat, a.@nat);
+        pure()
+    )
+);
+
+test_from_to_string: TestCase;
+test_from_to_string = (
+    make_table_test("test_from_to_string",
+        [
+            ("", err $ "empty string"),
+            ("a", err $ "invalid character"),
+            ("-", err $ "invalid character"),
+            ("0", ok $ "0"),
+            ("-0", ok $ "0"),
+            ("1", ok $ "1"),
+            ("-1", ok $ "-1"),
+            ("123456789012345678901234567890", ok $ "123456789012345678901234567890"),
+            ("-9876543210987654321", ok $ "-9876543210987654321")
+        ],
+        |(str, expect_res)|
+        let res: Result ErrMsg BigInt = from_string(str);
+        assert_equal("res", expect_res, res.map(to_string))
+    )
+);
+
+test_from_I64: TestCase;
+test_from_I64 = (
+    make_table_test("test_from_I64",
+        [
+            (0, "0"),
+            (1, "1"),
+            (-1, "-1"),
+            (123456789, "123456789"),
+            (-123456789, "-123456789"),
+            (I64::maximum, I64::maximum.to_string),
+            (I64::minimum, I64::minimum.to_string)
+        ],
+        |(i64, expect)|
+        let a = BigInt::from_I64(i64);
+        assert_equal("to_string", expect, a.to_string)
+    )
+);
+
+test_from_U64: TestCase;
+test_from_U64 = (
+    make_table_test("test_from_U64",
+        [
+            (0_U64, "0"),
+            (1_U64, "1"),
+            (123456789_U64, "123456789"),
+            (U64::maximum, U64::maximum.to_string),
+            (U64::minimum, U64::minimum.to_string)
+        ],
+        |(u64, expect)|
+        let a = BigInt::from_U64(u64);
+        assert_equal("to_string", expect, a.to_string)
+    )
+);
+
+test_to_I64: TestCase;
+test_to_I64 = (
+    make_table_test("test_to_I64",
+        [
+            (0, "0"),
+            (1, "1"),
+            (-1, "-1"),
+            (123456789, "123456789"),
+            (-123456789, "-123456789"),
+            (I64::maximum, I64::maximum.to_string),
+            (I64::minimum, I64::minimum.to_string)
+        ],
+        |(expect, a)|
+        let a: BigInt = *from_string(a).from_result;
+        assert_equal("I64", expect, a.to_I64)
+    )
+);
+
+test_is_zero_positive_negative: TestCase;
+test_is_zero_positive_negative = (
+    make_table_test("test_is_zero_positive_negative",
+        [
+            ("0", (true, false, false)),
+            ("12345678901234567890", (false, true, false)),
+            ("12345678901234567891", (false, true, false)),
+            ("-12345678901234567890", (false, false, true)),
+            ("-12345678901234567891", (false, false, true))
+        ],
+        |(a,(zero,pos,neg))|
+        let a: BigInt = *from_string(a).from_result;
+        let _ = *assert_equal("zero", zero, a.is_zero);
+        let _ = *assert_equal("pos", pos, a.is_positive);
+        let _ = *assert_equal("neg", neg, a.is_negative);
+        pure()
+    )
+);
+
+test_is_even_odd: TestCase;
+test_is_even_odd = (
+    make_table_test("test_is_even_odd",
+        [
+            ("0", (true, false)),
+            ("12345678901234567890", (true, false)),
+            ("12345678901234567891", (false, true)),
+            ("-12345678901234567890", (true, false)),
+            ("-12345678901234567891", (false, true))
+        ],
+        |(a,(even,odd))|
+        let a: BigInt = *from_string(a).from_result;
+        let _ = *assert_equal("even", even, a.is_even);
+        let _ = *assert_equal("odd", odd, a.is_odd);
+        pure()
+    )
+);
+
+test_cmp_eq_lt_le: TestCase;
+test_cmp_eq_lt_le = (
+    make_table_test("test_cmp_eq_lt_le",
+        [
+            ("0", "0", (0, true, false, true)),
+            ("1234", "1234", (0, true, false, true)),
+            ("1234", "-1234", (1, false, false, false)),
+            ("-1234", "1234", (-1, false, true, true)),
+            ("-1234", "-1234", (0, true, false, true)),
+            ("12345678901234567891", "12345678901234567890", (1, false, false, false)),
+            ("12345678901234567890", "12345678901234567890", (0, true, false, true)),
+            ("12345678901234567890", "12345678901234567891", (-1, false, true, true))
+        ],
+        |(a,b,(cmp, eq, lt, le))|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let _ = *assert_equal("cmp", cmp, BigInt::cmp(a, b));
+        let _ = *assert_equal("eq", eq, a == b);
+        let _ = *assert_equal("lt", lt, a < b);
+        let _ = *assert_equal("le", le, a <= b);
+        pure()
+    )
+);
+
+test_add: TestCase;
+test_add = (
+    make_table_test("test_add",
+        [
+            ("0", "0", "0"),
+            ("1", "-2", "-1"),
+            ("2", "-1", "1"),
+            ("-1", "1", "0"),
+            ("-2", "1", "-1"),
+            ("-1", "2", "1"),
+            ("912605542148191028999109919","910352129","912605542148191029909462048"),
+            ("441387311258377763257058391","900517102692220922644611012","1341904413950598685901669403"),
+            ("106980813634457004906956412","-181030386924840221711489090","-74049573290383216804532678")
+        ],
+        |(a,b,c)|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let c: BigInt = *from_string(c).from_result;
+        assert_equal("eq", c, a+b)
+    )
+);
+
+test_sub: TestCase;
+test_sub = (
+    make_table_test("test_sub",
+        [
+            ("0", "0", "0"),
+            ("0", "1", "-1"),
+            ("41873702927385878799431513","537534494","41873702927385878261897019"),
+            ("514696548868198222437298289","298512336579473396180939309","216184212288724826256358980"),
+            ("92068705919369386302345206","698712510966614352153589283","-606643805047244965851244077")
+        ],
+        |(a,b,c)|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let c: BigInt = *from_string(c).from_result;
+        assert_equal("eq", c, a-b)
+    )
+);
+
+test_mul: TestCase;
+test_mul = (
+    make_table_test("test_mul",
+        [
+            ("0", "0", "0"),
+            ("0", "1", "0"),
+            ("0", "-1", "0"),
+            ("1", "1", "1"),
+            ("-1", "1", "-1"),
+            ("-802862796874133692","387138377110700780","-310819000224410328648846045528679760"),
+            ("-956779839725694388513174021","-691313204","661434536523376268847863128667073284")
+        ],
+        |(a,b,c)|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let c: BigInt = *from_string(c).from_result;
+        assert_equal("eq", c, a*b)
+    )
+);
+
+test_div_rem: TestCase;
+test_div_rem = (
+    make_table_test("test_div_rem",
+        [
+            ("0", "1", "0", "0"),
+            ("1", "1", "1", "0"),
+            ("8", "3", "2", "2"),
+            ("8", "-3", "-2", "2"),
+            ("-8", "3", "-2", "-2"),
+            ("-8", "-3", "2", "-2"),
+            ("-59520825788528182793573034","7688936889687","-7741099535927","-156301288185"),
+            ("73123522593744249398268816","523764679890547220","139611404","268614385685771936"),
+            ("852568105875959402535497678","4294967295","198503980896077906","2493413408"),
+            ("546095267330275997753464520","7","78013609618610856821923502","6")
+        ],
+        |(a,b,quo,rem)|
+        let a: BigInt = *from_string(a).from_result;
+        let b: BigInt = *from_string(b).from_result;
+        let quo: BigInt = *from_string(quo).from_result;
+        let rem: BigInt = *from_string(rem).from_result;
+        let _ = *assert_equal("quo", quo, a/b);
+        let _ = *assert_equal("rem", rem, a%b);
+        let _ = *assert_equal("a", a, quo * b + rem);
+        pure()
+    )
+);
+
+// benchmarking
+test_perf: IO ();
+test_perf = (
+    let or_abort = |res| (
+        if res.is_err {
+            eval debug_eprintln("error: " + res.as_err);
+            abort()
+        };
+        res.as_ok
+    );
+    let a: BigInt = *timeit("a", |_| from_string("10000000000000000000000000000000000000000000000000000000000000000000000").or_abort);
+    let b: BigInt = *timeit("b", |_| from_string("7777777777777777").or_abort);
+    let _ = *timeit("a.to_string", |_| a.to_string);
+    let _ = *timeit("a==b", |_| a==b);
+    let _ = *timeit("a>b", |_| a>b);
+    let _ = *timeit("a>=b", |_| a>=b);
+    let _ = *timeit("a+b", |_| a+b);
+    let _ = *timeit("a-b", |_| a-b);
+    let _ = *timeit("a*b", |_| a*b);
+    let _ = *timeit("a/b", |_| a/b);
+    let _ = *timeit("a%b", |_| a%b);
+    let _ = *timeit("b/a", |_| b/a);
+    let _ = *timeit("b%a", |_| b%a);
+    let _ = *timeit("a/a", |_| a/a);
+    let _ = *timeit("a%a", |_| a%a);
+    pure()
+);
+
+main: IO ();
+main = (
+    //if true { test_perf };
+    [
+        test_make,
+        test_from_to_string,
+        test_from_I64,
+        test_from_U64,
+        test_to_I64,
+        test_is_zero_positive_negative,
+        test_is_even_odd,
+        test_cmp_eq_lt_le,
+        test_add,
+        test_sub,
+        test_mul,
+        test_div_rem,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

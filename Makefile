@@ -8,9 +8,9 @@ bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/io_ex.fix 
 	mkdir -p bin
 	fix build -o $@ -f $^
 
--include .depends
+-include .depend
 
-test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io_ex test_text test_net
+test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io_ex test_monad test_math test_text test_net
 
 test_app: test_clap
 test_clap:
@@ -43,6 +43,12 @@ test_json:
 test_io_ex:
 	bin/fixautolink run -f tests/io/io_ex_test.fix -L ./lib
 
+test_math: test_bigint test_bigint_prime
+test_bigint:
+	bin/fixautolink run -f tests/math/bigint_test.fix -L ./lib
+test_bigint_prime:
+	bin/fixautolink run -f tests/math/bigint_prime_test.fix -L ./lib
+
 test_monad: test_functor_m
 test_functor_m:
 	bin/fixautolink run -f tests/monad/functor_m_test.fix -L ./lib
@@ -72,7 +78,8 @@ document: examples/fixdoc.out
 
 examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out \
 		examples/fixdoc.out examples/sample_http_server.out \
-		examples/grep.out examples/spell_checker.out
+		examples/grep.out examples/spell_checker.out \
+		examples/probable_primes.out
 
 examples/json_cat.out: 
 	bin/fixautolink build -o $@ -L ./lib -f examples/json_cat.fix
@@ -94,3 +101,5 @@ examples/grep.out:
 
 examples/spell_checker.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/spell_checker.fix
+examples/probable_primes.out:
+	bin/fixautolink build -o $@ -L ./lib -f examples/probable_primes.fix

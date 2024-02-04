@@ -252,6 +252,74 @@ namespace Goldschmidt {
     );
 }
 
+namespace DivMod3 {
+    // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
+    // returns the result and the sign.
+    _signed_sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> ((Array U32, I64), I64);
+    _signed_sub_with_offset = |a0_offset0, a1_offset1| (
+        let res = _sub_with_offset(a0_offset0, a1_offset1);
+        if res.is_ok {
+            let a2_offset2 = res.as_ok;
+            (a2_offset2, 1)
+        };
+        let res = _sub_with_offset(a1_offset1, a0_offset0);
+        if res.is_ok {
+            let a2_offset2 = res.as_ok;
+            (a2_offset2, -1)
+        };
+        eval debug_eprintln("error: " + res.as_err);
+        abort()
+    );
+
+    _divmod3: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod3 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        let (quo, rem, rem_sign) = *loop_m(
+            ([0_U32], a, 1), |(quo, a, a_sign)|
+            let an = a.get_size;
+            let bn = b.get_size;
+            if an < bn {
+                break_m $ (quo, a, a_sign)
+            };
+            let (q, qoff) = if an == bn {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 1) - (bn - 1);
+                (q, qoff)
+            } else {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 2) - (bn - 1);
+                (q, qoff)
+            };
+            let ((rem, rem_off), rem_sign) = _signed_sub_with_offset((a,0), (_mul(b, q), qoff));
+            // rem_off == 0
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let (quo, _) = if a_sign > 0 { _add_with_offset((quo, 0), (q, qoff)) } else { _sub_with_offset((quo, 0), (q, qoff)).as_ok };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break_m $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue_m $ (quo, rem, rem_sign)
+        );
+        let (quo, rem) = if rem_sign > 0 || rem == BigNat::_zero { 
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        };
+        pure $ (quo, rem)
+    );
+}
+
 test_prime: IO ();
 test_prime = (
     let _ = *pure();
@@ -406,7 +474,49 @@ prof_divmod2 = (
     pure()
 );
 
+test_divmod3: IO ();
+test_divmod3 = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    loop_m(
+        (random, 0), |(random, i)|
+        if i >= 10 { break_m $ () };
+        let (a, random) = random.generate_bigint(2*bits);
+        let (b, random) = random.generate_bigint(bits);
+        /*
+        let (quo1, rem1) = _divmod(a.@nat, b.@nat);
+        let (quo3, rem3) = *_divmod3(a.@nat, b.@nat).from_result;
+        let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
+        let _ = *println((quo3, rem3).format("quo3={} rem3={}")).lift;
+        */
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
+        let (quo3, rem3) = *timeit("(quo3, rem3)", |_| _divmod3(a.@nat, b.@nat).as_ok).lift;
+        let _ = *assert_equal("quo", quo1, quo3);
+        let _ = *assert_equal("rem", rem1, rem3);
+        continue_m $ (random, i + 1)
+    ).try(eprintln)
+);
+
+prof_divmod3: IO ();
+prof_divmod3 = (
+    let _ = *pure();
+    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    let (a, random) = random.generate_bigint(2*bits);
+    let (b, random) = random.generate_bigint(bits);
+    let _ = loop(
+        0, |i|
+        if i >= 1000000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = _divmod3(a.@nat, b.@nat).as_ok;
+        continue $ i + 1
+    );
+    pure()
+);
+
 main: IO ();
-main = test_probable_prime;
+main = prof_divmod3;
 
 

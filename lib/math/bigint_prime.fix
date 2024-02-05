@@ -1,9 +1,16 @@
 // Generates probable prime numbers of arbitrary-precision integer.
-// 
-// Use `probable_prime(256, random)` to generate a probable prime number of 256-bit.
+//
+// Sample code:
+// ```
+// let random = Random::init_by_seed(123_U64);
+// let prime_gen = *PrimeGen::make(random, true);
+// let n = *prime_gen.probable_prime(256);
+// ``` 
+//
+// PrimeGen uses a task pool internally, so it can run faster with multi-core CPUs.
 //
 // Depending on the value of the random number, generating a probable prime number can take some time.
-// For example, generating a 1024-bit probable prime number may take about 15 seconds.
+// For example, generating a 1024-bit probable prime number takes approximately 15 seconds.
 // (AMD Ryzen 7 2700, 8 cores, 16 threads)
 //
 module Minilib.Math.BigIntPrime;
@@ -18,8 +25,7 @@ import Minilib.Text.StringEx;
 import Minilib.Task.Future;
 import Minilib.Task.TaskPool;
 
-trait PrimeMonad = Monad;
-
+// Prime generator
 type PrimeGen = unbox struct {
     rand_var: Var Random,
     task_pool_var: Var TaskPool,
@@ -27,6 +33,7 @@ type PrimeGen = unbox struct {
 };
 
 namespace PrimeGen {
+    // Creates a prime generator.
     make: Random -> Bool -> IO PrimeGen;
     make = |random, progress| (
         let rand_var = *Var::make(random);
@@ -39,6 +46,7 @@ namespace PrimeGen {
         }
     );
 
+    // Prints a progress message if `@progress` is true.
     _progress: String -> PrimeGen -> IO ();
     _progress = |str, prime_gen| (
         if prime_gen.@progress {
@@ -46,6 +54,32 @@ namespace PrimeGen {
         } else { 
             pure()
         }
+    );
+
+    // `prime_gen._find_first_or(default, f, iter)` executes each computation in `iter`
+    // in parallel, then finds the first result that meets the specified condition.
+    // Returns the default value if no one meets the condition.
+    // This function uses the task pool for each computation.
+    _find_first_or: a -> (a -> Bool) -> Iterator (IO a) -> PrimeGen -> IO a;
+    _find_first_or = |default, f, iter, prime_gen| (
+        // Create futures for each computation.
+        let task_pool = *prime_gen.@task_pool_var.get;
+        let futures = *iter.map_m(|io| Future::make(task_pool, io)).to_result;
+        eval assert(|_| "Future::make failed: " + futures.as_err, futures.is_ok);
+
+        // Wait for futures and stop at the first result that meets the condition.
+        let result = *futures.as_ok.loop_iter_m(
+            default, |result, future|
+            let a = *future.get;
+            if f(a) {
+                break_m $ a
+            };
+            continue_m $ result
+        );
+
+        // Clear the queue of the task pool.
+        let _ = *task_pool.clear;
+        pure $ result
     );
 
     // `prime_gen.probable_prime(bit_length)` returns a probable prime number with specified bit length.
@@ -82,22 +116,11 @@ namespace PrimeGen {
     _next_weak_probable_prime: BigInt -> PrimeGen -> IO BigInt;
     _next_weak_probable_prime = |n, prime_gen| (
         let group_size = 50 * number_of_processors;
-        let task_pool = *prime_gen.@task_pool_var.get;
-        let futures = *Iterator::range(0, group_size)
-            .map(|i| n + BigInt::from_I64(i))
-            .map_m(|n|
-                Future::make(task_pool, prime_gen._is_weak_probable_prime(n))
-            ).to_result;
-        eval assert(|_| "Future::make failed: " + futures.as_err, futures.is_ok);
-        let opt = *futures.as_ok.loop_iter_m(
-            none(), |_, future|
-            let opt = *future.get;
-            if opt.is_some {
-                break_m $ opt
-            };
-            continue_m $ none()
+        let checks = Iterator::range(0, group_size).map(|i|
+            let n = n + BigInt::from_I64(i);
+            prime_gen._is_weak_probable_prime(n)
         );
-        let _ = *task_pool.clear;
+        let opt = *prime_gen._find_first_or(none(), is_some, checks);
         if opt.is_none {
             prime_gen._next_weak_probable_prime(n + BigInt::from_I64(group_size))
         };
@@ -273,53 +296,40 @@ namespace PrimeGen {
             // maybe prime
             pure $ true
         );
-        let task_pool = *prime_gen.@task_pool_var.get;
-        let futures = *Array::fill(k, 0).map_m(|_| Future::make(task_pool, maybe_prime)).to_result;
-        eval assert(|_| "Future::make failed: " + futures.as_err, futures.is_ok);
-        let is_probable_prime = *futures.as_ok.to_iter.loop_iter_m(
-            true, |_, future|
-            let is_probable_prime = *future.get;
-            if !is_probable_prime {
-                break_m $ false
-            };
-            continue_m $ true
-        );
-        let _ = *task_pool.clear;
-        pure $ is_probable_prime
+        let checks = Iterator::range(0, k).map(|_| maybe_prime);
+        prime_gen._find_first_or(true, |x| x == false, checks)
     );
 
     // Performs Solovay–Strassen primality test.
     // see: https://en.wikipedia.org/wiki/Solovay%E2%80%93Strassen_primality_test
-    solovay_strassen: BigInt -> Random -> (Bool, Random);
-    solovay_strassen = |n, random| (
+    solovay_strassen: BigInt -> PrimeGen -> IO Bool;
+    solovay_strassen = |n, prime_gen| (
         if n.is_negative {
-            solovay_strassen(-n, random)
+            prime_gen.solovay_strassen(-n)
         };
         if n.is_even {
-            (false, random)
+            pure $ false
         };
         let n_minus_one_div_two = (n - BigInt::one) / BigInt::two;
         let k = 100;
-        loop(
-            (k, random), |(k, random)|
-            if k < 0 {
-                // probably prime
-                break $ (true, random)
-            };
-            let (a, random) = random.generate_bigint_range(BigInt::two, n);
+        let maybe_prime: IO Bool = (
+            let _ = *pure();
+            let a = *prime_gen.generate_bigint_range(BigInt::two, n);
             let x = jacobi_symbol(a, n);
             if x == 0 {
-                break $ (false, random)     // composite
+                pure $ false     // composite
             };
             let x = BigInt::from_I64(x);
             let x_mod_n = if x.is_negative { x + n } else { x };
             let a_pow = modpow(a, n_minus_one_div_two, n);
             // if a^((n-1)/2) != x mod n, then n is composite
             if a_pow != x_mod_n {
-                break $ (false, random)     // composite
+                pure $ false     // composite
             };
-            continue $ (k - 1, random)
-        )
+            pure $ true
+        );
+        let checks = Iterator::range(0, k).map(|_| maybe_prime);
+        prime_gen._find_first_or(true, |x| x == false, checks)
     );
 }
 

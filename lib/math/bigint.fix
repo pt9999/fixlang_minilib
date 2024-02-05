@@ -120,32 +120,9 @@ namespace BigNat {
         a0
     );
 
-    // Calculates `a0 * _base ^ offset0 + a1 * _base ^ offset1`.
-    _add_with_offset: (Array U32, I64) -> (Array U32, I64) -> (Array U32, I64);
-    _add_with_offset = |(a0, offset0), (a1, offset1)| (
-        let n0 = a0.get_size + offset0;
-        let n1 = a1.get_size + offset1;
-        let n2 = max(n0, n1) + 1;
-        let offset2 = min(offset0, offset1);
-        let a2 = Array::empty(n2 - offset2);
-        let a2 = loop(
-            (a2, offset2, 0_U64), |(a2, i, carry)|
-            if i >= n0 && i >= n1 && carry == 0_U64 {
-                break $ a2
-            };
-            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
-            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
-            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
-            let (carry, d2) = _divmod_base(d2);
-            let a2 = a2.push_back(d2.to_U32);
-            continue $ (a2, i + 1, carry)
-        );
-        (a2, offset2)
-    );
-
     // Calculates `a0 + a1 * _base ^ offset1`.
-    _add_with_offset0: Array U32 -> (Array U32, I64) -> Array U32;
-    _add_with_offset0 = |a0, (a1, offset1)| (
+    _add_with_offset1: Array U32 -> (Array U32, I64) -> Array U32;
+    _add_with_offset1 = |a0, (a1, offset1)| (
         let n0 = a0.get_size;
         let n1 = a1.get_size + offset1;
         let n2 = max(n0, n1);
@@ -266,7 +243,7 @@ namespace BigNat {
                 break $ a2._remove_last_zeros
             };
             let d0 = a0.@(i);
-            let a2 = _add_with_offset0(a2, (_mul_u32(d0, a1), i));
+            let a2 = _add_with_offset1(a2, (_mul_u32(d0, a1), i));
             continue $ (a2, i + 1)
         )
     );
@@ -328,12 +305,12 @@ namespace BigNat {
             // rem_off == 0
             let rem = rem._remove_last_zeros;
             let rem_sign = rem_sign * a_sign;
-            let (quo, _) = if a_sign > 0 {
-                _add_with_offset((quo, 0), (q, qoff)) 
+            let quo = if a_sign > 0 {
+                _add_with_offset1(quo, (q, qoff)) 
             } else { 
-                let (quo_qoffset, sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
+                let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
                 eval assert(|_| "quo subtraction underflow", sign > 0);
-                quo_qoffset
+                quo
             };
             let quo = quo._remove_last_zeros;
             if _cmp((rem,0), (b,0)) < 0 {

@@ -28,7 +28,7 @@ trait r: FutureRunner {
 `io` is performed in the runner.
 If the runner has been shutdown, the future will never be resolved.
 
-#### get: Future a -> IO a;
+#### get: Future a -> IOFail a;
 
 Gets the result of the Future.
 If the `io` is not performed yet, wait until `io` is performed.

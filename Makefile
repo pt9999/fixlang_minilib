@@ -10,7 +10,7 @@ bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/io_ex.fix 
 
 -include .depend
 
-test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io test_monad test_math test_text test_net
+test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io test_math test_monad test_task test_text test_net
 
 test_app: test_clap
 test_clap:
@@ -55,6 +55,10 @@ test_bigint_prime:
 test_monad: test_functor_m
 test_functor_m:
 	bin/fixautolink run -f tests/monad/functor_m_test.fix -L ./lib
+
+test_task: test_task_pool
+test_task_pool:
+	bin/fixautolink run -f tests/task/task_pool_test.fix -L ./lib
 
 test_text: test_string_ex test_unicode test_parser test_regexp
 test_string_ex:

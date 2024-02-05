@@ -54,6 +54,7 @@ type Module = unbox struct {
 
 namespace Module {
     // Read *.fix file and extract module information.
+    // NOTE: block comment(/*...*/) are partially supported.
     read: String -> IOFail Module;
     read = |path| (
         let module = Module {
@@ -63,28 +64,35 @@ namespace Module {
         };
         let contents = *read_file_bytes(Path::parse(path).as_some);
         let contents = contents._unsafe_to_string;
-        let module = *contents.split("\n").loop_iter_m(
-            module, |module, line|
+        let (module, _) = *contents.split("\n").loop_iter_m(
+            (module, false), |(module, comment), line|
             let line = line.strip_spaces;
             if line == "" {
-                continue_m $ module
+                continue_m $ (module, comment)
             };
-            // TODO: support for /* ... */ style comment
-            let is_comment = line.substring(0, 2) == "//";
-            if is_comment {
-                continue_m $ module
+            let com_s = line.find("/*", 0);
+            let com_e = line.find("*/", 0);
+            if comment {
+                continue_m $ (module, com_e.is_none)
+            };
+            if com_s.is_some {
+                continue_m $ (module, com_e.is_none)
+            };
+            let is_line_comment = line.substring(0, 2) == "//";
+            if is_line_comment {
+                continue_m $ (module, comment)
             };
             let module_decl = matches_decl("module", line);
             if module_decl.is_ok {
                 let module = module.set_name(module_decl.as_ok);
-                continue_m $ module
+                continue_m $ (module, comment)
             };
             let import_decl = matches_decl("import", line);
             if import_decl.is_ok {
                 let module = module.mod_imports(push_back(import_decl.as_ok));
-                continue_m $ module
+                continue_m $ (module, comment)
             };
-            break_m $ module
+            break_m $ (module, comment)
         );
         if module.@name == "" {
             throw $ "module declaration not found: " + path

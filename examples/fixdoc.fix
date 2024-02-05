@@ -2,6 +2,7 @@
 module Main;
 
 import Character;
+import Debug;
 
 import Minilib.App.Clap;
 import Minilib.IO.IOEx;
@@ -22,6 +23,26 @@ match_type: Parser String;
 match_type = do {
     let _ = *match_str("type");
     let _ = *one_or_more(match_char_class(is_space));
+    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
+    pure $ chars._unsafe_to_string
+};
+
+// Matches `/[a-z][a-zA-Z0-9]*/`.
+match_tyvar: Parser String;
+match_tyvar = do {
+    match_str_class(|c| c.is_alnum || c == '_')
+    .filter(|s| !s.is_empty && s.get_bytes.@(0).is_lower)
+};
+
+// Matches `/^trait\s+TYVAR\s*:\s*(\w+)/`.
+match_trait: Parser String;
+match_trait = do {
+    let _ = *match_str("trait");
+    let _ = *one_or_more(match_char_class(is_space));
+    let tyvar = *match_tyvar;
+    let _ = *zero_or_more(match_char_class(is_space));
+    let colon = *match_char(':');
+    let _ = *zero_or_more(match_char_class(is_space));
     let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
     pure $ chars._unsafe_to_string
 };
@@ -68,7 +89,9 @@ type State = unbox struct {
     module_summary: String, // module summary
     doc: String,        // document (function comment etc.)
     type_name: String,  // name of type declaration
-    type_decl: String    // body of type declaration
+    type_decl: String,  // body of type declaration
+    trait_name: String, // name of trait declaration
+    trait_decl: String  // body of trait declaration
 };
 
 namespace State {
@@ -81,7 +104,9 @@ namespace State {
             module_summary: "",
             doc: "",
             type_name: "",
-            type_decl: ""
+            type_decl: "",
+            trait_name: "",
+            trait_decl: ""
         }
     );
 
@@ -122,6 +147,15 @@ namespace State {
         let _ = *state.print(state.@type_decl);
         let _ = *state.println("```");
         pure $ state.set_type_decl("")
+    );
+
+    // Prints the declaration of the trait.
+    print_trait_declaration: State -> IOFail State;
+    print_trait_declaration = |state| (
+        let _ = *state.println("```");
+        let _ = *state.print(state.@trait_decl);
+        let _ = *state.println("```");
+        pure $ state.set_trait_decl("")
     );
 
     process_comment: String -> State -> IOFail State;
@@ -165,6 +199,7 @@ namespace State {
 
     process_type_decl: String -> String -> Result ErrMsg String -> State -> IOFail State;
     process_type_decl = |orig_line, line, type_name, state| (
+        //eval debug_println("process_type_decl: " + orig_line);
         let state = if type_name.is_ok {
             state.set_type_name(type_name.as_ok)
         } else {
@@ -180,6 +215,27 @@ namespace State {
         let _ = *state.println("### type " + state.@type_name + "\n");
         let state = *state.print_doc;
         let state = *state.print_type_declaration;
+        pure $ state
+    );
+
+    process_trait_decl: String -> String -> Result ErrMsg String -> State -> IOFail State;
+    process_trait_decl = |orig_line, line, trait_name, state| (
+        //eval debug_println("process_trait_decl: " + orig_line);
+        let state = if trait_name.is_ok {
+            state.set_trait_name(trait_name.as_ok)
+        } else {
+            state
+        };
+        let state = state.mod_trait_decl(|t| t + orig_line + "\n");
+        if state.@trait_decl.find("}", 0).is_none {
+            pure $ state
+        };
+        if state.contains_nofixdoc {
+            pure $ state.set_trait_decl("").set_doc("")
+        };
+        let _ = *state.println("### trait " + state.@trait_name + "\n");
+        let state = *state.print_doc;
+        let state = *state.print_trait_declaration;
         pure $ state
     );
 
@@ -210,6 +266,14 @@ namespace State {
         if module_decl.is_ok {
             state.process_module_decl(module_decl.as_ok)
         };
+        let type_name: Result ErrMsg String = match_type.matches(line);
+        if type_name.is_ok || state.@type_decl != "" {
+            state.process_type_decl(orig_line, line, type_name)
+        };
+        let trait_name: Result ErrMsg String = match_trait.matches(line);
+        if trait_name.is_ok || state.@trait_decl != "" {
+            state.process_trait_decl(orig_line, line, trait_name)
+        };
         let impl_decl: Result ErrMsg String = match_impl.matches(line);
         if impl_decl.is_ok {
             state.process_impl_decl(impl_decl.as_ok)
@@ -217,10 +281,6 @@ namespace State {
         let global_decl: Result ErrMsg () = match_global.matches(line);
         if global_decl.is_ok {
             state.process_global_decl(line)
-        };
-        let type_name: Result ErrMsg String = match_type.matches(line);
-        if type_name.is_ok || state.@type_decl != "" {
-            state.process_type_decl(orig_line, line, type_name)
         };
         let namespace_decl: Result ErrMsg String = match_namespace.matches(line);
         if namespace_decl.is_ok {

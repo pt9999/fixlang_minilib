@@ -2,7 +2,7 @@
 	../bin/fixautolink build -o $@ -L ../lib -f $<
 
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
-	channel.out png.out ndarray_calc.out
+	png.out ndarray_calc.out
 
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix

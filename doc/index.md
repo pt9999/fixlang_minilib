@@ -56,6 +56,10 @@ Encodes a JSON value to a string.
 
 Definition of the structure of a JSON value.
 
+### [module Minilib.IO.Channel (lib/io/channel.fix)](lib/io/channel.md)
+
+A Channel that can be used for the communication of threads.
+
 ### [module Minilib.IO.IOEx (lib/io/io_ex.fix)](lib/io/io_ex.md)
 
 IO extensions, such as:
@@ -115,6 +119,14 @@ TCP operation, such as:
 ### [module Minilib.Net.URL (lib/net/url.fix)](lib/net/url.md)
 
 URL and URI parsing
+
+### [module Minilib.Task.Future (lib/task/future.fix)](lib/task/future.md)
+
+A computation that is performed in a TaskPool in parallel.
+
+### [module Minilib.Task.TaskPool (lib/task/task_pool.fix)](lib/task/task_pool.md)
+
+A task pool that can be used parallel computation.
 
 ### [module Minilib.Testing.TestUtilArray (lib/testing/test_util_array.fix)](lib/testing/test_util_array.md)
 

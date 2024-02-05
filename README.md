@@ -28,11 +28,14 @@ This library is still in alpha stage.
   - IO extension
 - Math
   - BigInt
-  - BigIntPrime
+  - Prime generator using BigInt
 - Networking
   - TCP/IP Socket (IPv4 only)
   - URL, URI
   - Simple HTTP Server
+- Task
+  - Task Pool
+  - Future
 - Testing
   - Unit test
 - Text

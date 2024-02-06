@@ -56,6 +56,10 @@ Encodes a JSON value to a string.
 
 Definition of the structure of a JSON value.
 
+### [module Minilib.IO.Channel (lib/io/channel.fix)](lib/io/channel.md)
+
+A Channel that can be used for the communication of threads.
+
 ### [module Minilib.IO.IOEx (lib/io/io_ex.fix)](lib/io/io_ex.md)
 
 IO extensions, such as:
@@ -73,6 +77,10 @@ Arbitrary-precision integer.
 ### [module Minilib.Math.BigIntPrime (lib/math/bigint_prime.fix)](lib/math/bigint_prime.md)
 
 Generates probable prime numbers of arbitrary-precision integer.
+
+### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
+
+`map_m`, `foreach_m` for Array and Iterator.
 
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
@@ -111,6 +119,14 @@ TCP operation, such as:
 ### [module Minilib.Net.URL (lib/net/url.fix)](lib/net/url.md)
 
 URL and URI parsing
+
+### [module Minilib.Task.Future (lib/task/future.fix)](lib/task/future.md)
+
+A computation that is performed in a TaskPool in parallel.
+
+### [module Minilib.Task.TaskPool (lib/task/task_pool.fix)](lib/task/task_pool.md)
+
+A task pool that can be used parallel computation.
 
 ### [module Minilib.Testing.TestUtilArray (lib/testing/test_util_array.fix)](lib/testing/test_util_array.md)
 

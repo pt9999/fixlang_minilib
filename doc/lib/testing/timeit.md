@@ -14,3 +14,9 @@ Prints the result and measured time per loop.
 
 Same interface as `timeit()` but does not measure time.
 
+#### get_now : IO Time;
+
+Get current time.
+
+#### consumed_realtime_while_io : IO a -> IO (a, F64);
+

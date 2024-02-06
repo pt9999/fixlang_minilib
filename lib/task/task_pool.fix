@@ -1,0 +1,77 @@
+// A task pool that can be used parallel computation.
+//
+// A task pool creates IOTasks and starts them.
+// Each task waits for request until shutdown.
+// When the task receives the request, it performs the request as a computation.
+// When the task pool is shutdown, all tasks are stopped.
+// Computations are never performed after shutdown.
+//
+module Minilib.Task.TaskPool;
+
+import AsyncTask;
+
+import Minilib.IO.Channel;
+import Minilib.Monad.FunctorM;
+import Minilib.Task.Future;
+
+// A task pool that manages a collection of IOTasks.
+type TaskPool = unbox struct {
+    chan: Channel (IO ()),
+    tasks: Array (IOTask ())
+};
+
+// `TaskPool::make(task_count)` creates a TaskPool.
+make: I64 -> IO TaskPool;
+make = |task_count| (
+    let chan = *Channel::make;
+    let tasks = *Iterator::range(0, task_count).to_array.map_m(|i|
+        AsyncIOTask::make(_task_func(chan))
+    );
+    pure $ TaskPool {
+        chan: chan,
+        tasks: tasks
+    }
+);
+
+// Sends `io` to the channel.
+_send: IO () -> TaskPool -> IOFail ();
+_send = |io, pool| (
+    pool.@chan.send(io)
+);
+
+// Clears the queue of futures.
+clear: TaskPool -> IO ();
+clear = |pool| (
+    pool.@chan.clear
+);
+
+// Shutdowns a taskpool.
+shutdown: TaskPool -> IO TaskPool;
+shutdown = |pool| (
+    let _ = *pool.@chan.close;
+    let _ = *pool.@tasks.foreach_m(
+        |task| task.get
+    );
+    pure $ pool.set_tasks([])
+);
+
+// The task function of the taskpool.
+_task_func: Channel (IO ()) -> IO ();
+_task_func = |chan| (
+    loop_m(
+        (), |_|
+        let io = *chan.recv;
+        let _ = *io.lift;
+        continue_m $ ()
+    )
+    .try(|err|
+        if err == Channel::closed_error {
+            pure()    
+        };
+        eprintln(err)
+    )
+);
+
+impl TaskPool: FutureRunner {
+    run_future = _send;
+}

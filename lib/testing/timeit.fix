@@ -2,7 +2,7 @@
 module Minilib.Testing.Timeit;
 
 import Debug;
-
+import Time;
 
 // Measures execution time of a function.
 // It executes the function many times, and measures total time.
@@ -41,4 +41,27 @@ notimeit = |label, f| (
     let result = f();
     let _ = *eprintln(label + "=" + result.to_string);
     pure $ result
+);
+
+// Get current time.
+get_now : IO Time;
+get_now = (
+    IO { _data : |_| (
+        let buf: Array I64 = Array::empty(2)._unsafe_set_size(2); // sec, usec.
+        eval CALL_C[() fixruntime_clock_gettime(Ptr), buf._get_ptr];
+        Time { sec : buf.@(0), nanosec : buf.@(1).to_U32 }
+    )}
+);
+
+consumed_realtime_while_io : IO a -> IO (a, F64);
+consumed_realtime_while_io = |io| (
+    let _ = *pure();
+    let start = *Timeit::get_now;
+    //let _ = *eprintln("start=" + start.@sec.to_string + "," + start.@nanosec.to_string);
+    let result = *io;
+    let end = *Timeit::get_now;
+    //let _ = *eprintln("end=" + end.@sec.to_string + "," + end.@nanosec.to_string);
+    let time = (end.@sec.to_F64 - start.@sec.to_F64) +
+               (end.@nanosec.to_F64 * 1.0e-9 - start.@nanosec.to_F64 * 1.0e-9);
+    pure $ (result, time)
 );

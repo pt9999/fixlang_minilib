@@ -6,6 +6,7 @@ import Debug;
 import HashMap;
 import HashSet;
 import Subprocess;
+import AsyncTask;
 
 import Minilib.IO.IOEx;
 import Minilib.Text.StringEx;
@@ -349,9 +350,29 @@ namespace App {
     execute_command = |cmd, args| (
         let command_line = args.to_iter.join(" ");
         let _ = *eprintln("executing: " + command_line).lift;
-        let ((output, error), exit_status) = *Subprocess::run_string(cmd, args, "");
-        let _ = *print(output).lift;
-        let _ = *eprint(error).lift;
+
+        let make_drain_task = |src_fh, dest_fh| (
+            AsyncIOTask::make(
+                loop_m(
+                    (), |_|
+                    let line = *read_line(src_fh);
+                    if line == "" {
+                        break_m $ ()
+                    };
+                    let _ = *write_string(dest_fh, line);
+                    continue_m $ ()
+                ).try(eprintln)
+            )
+        );
+        let (_, exit_status) = *Subprocess::run_with_stream(cmd, args, 
+            |(stdin, stdout, stderr)|
+            eval *close_file(stdin).lift; // Send EOF.
+            let stdout_task = *make_drain_task(stdout, IO::stdout).lift;
+            let stderr_task = *make_drain_task(stderr, IO::stderr).lift;
+            let _ = *stdout_task.get.lift;
+            let _ = *stderr_task.get.lift;
+            pure()
+        );
         if exit_status.is_exit && exit_status.as_exit != 0_U8 {
             throw $ "program exited with exit code " + exit_status.as_exit.to_string
         };

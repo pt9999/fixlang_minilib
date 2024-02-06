@@ -37,9 +37,8 @@ namespace Karatsuba {
         let z2 = _mul_karatsuba(a1, b1);
         let z3 = _mul_karatsuba(_add(a1, a0), _add(b1, b0)); 
         let z1 = _sub(_sub(z3, z2), z0);
-        let (z,zoff) = _add_with_offset((z0,0), (z1,m));
-        let (z,zoff) = _add_with_offset((z,zoff), (z2,2*m));
-        eval assert(|_| "zoff != 0", zoff == 0);
+        let z = _add_with_offset1(z0, (z1,m));
+        let z = _add_with_offset1(z, (z2,2*m));
         z
     );
 
@@ -134,8 +133,8 @@ namespace Goldschmidt {
         let dexp1 = exp1 - exp0;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
         let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
-        let (a2, off2) = _add_with_offset((a0, 0), (a1, off1));
-        let exp2 = exp0 + off2 * _log2_base.to_I64;
+        let a2 = _add_with_offset1(a0, (a1, off1));
+        let exp2 = exp0;
         (a2, exp2)
     );
 
@@ -252,7 +251,7 @@ namespace Goldschmidt {
     );
 }
 
-namespace DivMod1 {
+namespace DivMod3 {
     // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
     // Returns err if the result is negative.
     _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
@@ -364,47 +363,22 @@ namespace DivMod1 {
 
 }
 
-test_prime: IO ();
-test_prime = (
-    let _ = *pure();
-    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
-    let time = CALL_C[I32 time(Ptr), nullptr];
-    let random = Random::init_by_seed(time.to_U64);
-    let a = pow_by_U64(two, 256_U64);
-    let (b, random) = random.generate_bigint_range(zero, a);
-    //let _ = *println(a.to_string);
-    let _ = *loop_m(
-        (b, random), |(b, random)|
-        // Miller-Rabin Primality test.
-        let (ret, random) = miller_rabin(b, random);
-        // Solovay–Strassen primality test.
-        let (ret2, random) = solovay_strassen(b, random);
-        let judge = |b| if b { "prime" } else { "composite" };
-        let _ = *println(
-            (b, judge(ret), judge(ret2)).format("{}: {}: {}")
-        );
-        if ret {
-            break_m $ ()
-        };
-        continue_m $ (b + one, random)
-    );
-    pure()
-);
-
 test_probable_prime: IO ();
 test_probable_prime = (
     let _ = *pure();
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stderr._file_ptr, nullptr];
     let time = CALL_C[I32 time(Ptr), nullptr];
     //let random = Random::init_by_seed(time.to_U64);
     let random = Random::init_by_seed(123_U64);
+    let prime_gen = *PrimeGen::make(random, true);
     loop_m(
         128, |bit_length|
         if bit_length > 1024 { break_m $ () };
         let _ = *println("Searching a probable prime of " + bit_length.to_string + " bits...");
-        let ((n, random), time) = consumed_time_while(|_|
-            probable_prime(bit_length, random)
-        , ());
+        let (n, time) = *consumed_realtime_while_io(
+            prime_gen.probable_prime(bit_length)
+        );
         let _ = *println(n.to_string);
         let _ = *println("time="+time.to_string);
         continue_m $ bit_length + 128
@@ -417,9 +391,10 @@ test_karatsuba = (
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let time = CALL_C[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random,false);
     let bits = 1024;
-    let (a, random) = random.generate_bigint(bits);
-    let (b, random) = random.generate_bigint(bits);
+    let a = *prime_gen.generate_bigint(bits);
+    let b = *prime_gen.generate_bigint(bits);
     let _ = *timeit("a*b", |_| a*b);
     let _ = *timeit("mul_karatsuba(a,b)", |_| mul_karatsuba(a,b));
     eval assert(|_| "not eq", a*b == mul_karatsuba(a,b));
@@ -433,8 +408,9 @@ test_divmod = (
     let time = CALL_C[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 512;
-    let (a, random) = random.generate_bigint(2*bits);
-    let (b, random) = random.generate_bigint(bits);
+    let prime_gen = *PrimeGen::make(random,false);
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
     let _ = *timeit("divmod(a,b)", |_| divmod(a,b));
     pure()
 );
@@ -481,12 +457,13 @@ test_divmod2: IO ();
 test_divmod2 = (
     let _ = *pure();
     let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
     let bits = 256;
     loop_m(
         (random, 0), |(random, i)|
         if i >= 10 { break_m $ () };
-        let (a, random) = random.generate_bigint(2*bits);
-        let (b, random) = random.generate_bigint(bits);
+        let a = *prime_gen.generate_bigint(2*bits).lift;
+        let b = *prime_gen.generate_bigint(bits).lift;
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
         let (quo2, rem2) = *_divmod2(a.@nat, b.@nat).from_result;
@@ -506,9 +483,10 @@ prof_divmod2 = (
     let _ = *pure();
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
     let bits = 256;
-    let (a, random) = random.generate_bigint(2*bits);
-    let (b, random) = random.generate_bigint(bits);
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
     let _ = loop(
         0, |i|
         if i >= 1000000 { break $ () };
@@ -523,12 +501,13 @@ test_divmod3: IO ();
 test_divmod3 = (
     let _ = *pure();
     let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
     let bits = 256;
     loop_m(
         (random, 0), |(random, i)|
         if i >= 10 { break_m $ () };
-        let (a, random) = random.generate_bigint(2*bits);
-        let (b, random) = random.generate_bigint(bits);
+        let a = *prime_gen.generate_bigint(2*bits).lift;
+        let b = *prime_gen.generate_bigint(bits).lift;
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
         let (quo3, rem3) = *_divmod3(a.@nat, b.@nat).from_result;
@@ -548,9 +527,10 @@ prof_divmod3 = (
     let _ = *pure();
     let _ = CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
     let bits = 256;
-    let (a, random) = random.generate_bigint(2*bits);
-    let (b, random) = random.generate_bigint(bits);
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
     let _ = loop(
         0, |i|
         if i >= 1000000 { break $ () };
@@ -563,5 +543,3 @@ prof_divmod3 = (
 
 main: IO ();
 main = test_probable_prime;
-
-

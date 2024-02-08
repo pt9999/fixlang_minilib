@@ -14,8 +14,8 @@ let n = *prime_gen.probable_prime(256);
 PrimeGen uses a task pool internally, so it can run faster with multi-core CPUs.
 
 Depending on the value of the random number, generating a probable prime number can take some time.
-For example, generating a 1024-bit probable prime number takes approximately 15 seconds.
-(AMD Ryzen 7 2700, 8 cores, 16 threads)
+For example, generating a 1024-bit probable prime number takes approximately 15 seconds
+with AMD Ryzen 7 2700 (8 cores / 16 threads), or 35 seconds with MediaTek mt8183 (4 cores / 8 threads).
 
 
 ### type PrimeGen

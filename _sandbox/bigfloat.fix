@@ -293,11 +293,22 @@ namespace BigFloat {
         a
     );
 
+    // Get around `log2(a)`. (not accurate)
+    _log2: BigFloat -> I64;
+    _log2 = |a| (
+        a.@exp + a.@int.@nat._bit_length.to_I64
+    );
 
     // Calculates `a * 2^e`.
     mul_pow2: I64 -> BigFloat -> BigFloat;
     mul_pow2 = |e, a| (
         a.mod_exp(|exp| exp + e)
+    );
+
+    // Returns the absolute value of `a`.
+    abs: BigFloat -> BigFloat;
+    abs = |a| (
+        a.mod_int(set_sign(1))
     );
 
     // Returns the square root of `a`.
@@ -322,6 +333,16 @@ namespace BigFloat {
         let xsq_a = x * x + a;              // x^2 + a
         let x2 = x.mul_pow2(1);             // 2x
         let quo = xsq_a / x2;
+        
+        let is_converged = (
+            let x = x.abs;
+            let dq = (quo - x).abs;
+            let dx = x.mul_pow2(-(x.get_prec - 1));
+            //eval debug_eprintln("dq="+dq.to_string);
+            //eval debug_eprintln("dx="+dx.to_string);
+            dq <= dx
+        );
+        if is_converged { x };
         let quo = quo.set_prec(a.get_prec);
         if quo == x { x };
         _sqrt_inner(quo, a, max_loop - 1)

@@ -28,8 +28,8 @@ test_state_monad:
 bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix
 
-bigfloat:
-	../bin/fixautolink run -L ../lib -f bigfloat.fix
+bigfloat_test1:
+	../bin/fixautolink run -L ../lib -L . -f bigfloat_test1.fix
 
 clean:
 	rm -f *.out

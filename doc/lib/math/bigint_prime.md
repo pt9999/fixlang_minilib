@@ -17,6 +17,8 @@ Depending on the value of the random number, generating a probable prime number 
 For example, generating a 1024-bit probable prime number takes approximately 15 seconds
 with AMD Ryzen 7 2700 (8 cores / 16 threads), or 35 seconds with MediaTek mt8183 (4 cores / 8 threads).
 
+NOTE: Due to multi-threading, the generated prime number is non-deterministic
+even if the random number generator state is the same.
 
 ### type PrimeGen
 

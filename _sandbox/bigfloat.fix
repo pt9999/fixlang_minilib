@@ -1,0 +1,582 @@
+module Main;
+
+import Math;
+import Debug;
+
+import Minilib.Math.BigInt;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+//import Minilib.Testing.Timeit;
+
+namespace BigNatEx {
+    _is_zero_ex = |a| (
+        loop(
+            a.get_size - 1, |i|
+            if i < 0 { break $ true };
+            if a.@(i) != 0_U32 { break $ false };
+            continue $ i - 1
+        )
+    );
+
+    // Returns the bit length of `a`, ie. one plus the bit position of most significant `1`.
+    // Returns 0 if `a` is zero.
+    _bit_length: Array U32 -> U64;
+    _bit_length = |a| (
+        let a = a._remove_last_zeros;
+        let n = a.get_size;
+        let last_digit = a.@(n-1);
+        if last_digit == 0_U32 {
+            eval assert(|_| "_remove_last_zeros did not remove last zero", n == 1);
+            0_U64
+        };
+        let last_bit_length = loop(
+            _log2_base.to_U32 - 1_U32, |bit|
+            if last_digit.shift_right(bit).bit_and(1_U32) != 0_U32 {
+                break $ bit + 1_U32
+            };
+            if bit == 0_U32 {
+                eval assert(|_| "should not reach here", false);
+                break $ 0_U32
+            };
+            continue $ bit - 1_U32
+        );
+        let bit_length = (n-1).to_U64 * _log2_base + last_bit_length.to_U64;
+        bit_length
+    );
+
+    _shift_left: U64 -> Array U32 -> Array U32;
+    _shift_left = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, 0), |(a, carry, i)|
+            if i >= n {
+                break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_right(_log2_base - shift);
+            let d = d.shift_left(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i + 1)
+        );
+        if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+    );
+
+    _shift_right: U64 -> Array U32 -> Array U32;
+    _shift_right = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let a = if off == 0_U64 { a }
+        else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+        else { [0_U32] };
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, n-1), |(a, carry, i)|
+            if i < 0 {
+                break $ a
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_left(_log2_base - shift);
+            let d = d.shift_right(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i - 1)
+        );
+        a._remove_last_zeros
+    );
+
+    // Calculates `(a0 / 2 ^ exp, a0 % 2 ^ exp)`.
+    // Aborts if any error occured.
+    _divmod_by_power_of_two: Array U32 -> U64 -> (Array U32, Array U32);
+    _divmod_by_power_of_two = |a0, exp| (
+        if exp == 0_U64 {
+            (a0, BigNat::_zero)
+        };
+        if exp >= a0.get_size.to_U64 * _log2_base {
+            (BigNat::_zero, a0)
+        };
+        let (exp_quo, exp_rem) = _divmod_log2_base(exp);
+        eval assert(|_| "exp_quo too big", exp_quo < a0.get_size.to_U64);
+        let quo = a0._shift_right(exp);
+        let rem = a0.get_sub(0, exp_quo.to_I64);
+        let rem = if exp_rem == 0_U64 { rem }
+        else {
+            let d0 = a0.@(exp_quo.to_I64);
+            let mask = (1_U64.shift_left(exp_rem) - 1_U64).to_U32;
+            rem.push_back(d0.bit_and(mask))
+        };
+        (quo, rem)
+    );
+
+    // Returns the square root of `a`.
+    _sqrt: Array U32 -> Array U32;
+    _sqrt = |a| (
+        if a._is_zero { BigNat::_zero };
+        let n = a.get_size;
+        let x = Array::fill(n / 2, 0_U32).append([1_U32]);
+        let max_loop = a.get_size * _log2_base.to_I64;
+        _sqrt_inner(x, a, max_loop)
+    );
+
+    // Returns the square root of `a` using Newton-Raphson method.
+    _sqrt_inner: Array U32 -> Array U32 -> I64 -> Array U32;
+    _sqrt_inner = |x, a, max_loop| (
+        // f(x) = x^2 - a
+        // x <- x - f(x) / f'(x)
+        // x <- x - (x^2 - a) / 2x
+        // x <- (2x^2 - x^2 + a) / 2x
+        // x <- (x^2 + a) / 2x
+        if max_loop < 0 { x };
+        let xsq_a = _add(_mul(x, x), a);        // x^2 - a
+        let x2 = x._mul_u32(2_U32);             // 2x
+        let (quo, rem) = _divmod(xsq_a, x2);
+        let quo = quo._remove_last_zeros;
+        if quo == x { x };
+        _sqrt_inner(quo, a, max_loop - 1)
+    );
+}
+
+namespace BigIntEx {
+    shift_right: U64 -> BigInt -> BigInt;
+    shift_right = |shift, a| (
+        a.mod_nat(_shift_right(shift))
+    );
+}
+
+// Arbitrary-precision floating point number.
+// It is interpreted as `@int * 2 ^ @exp`.
+type BigFloat = unbox struct {
+    int: BigInt,        // bigint
+    exp: I64            // the exponent of base 2
+};
+
+namespace BigFloat {
+    // Creates a BigFloat from a BigInt and the exponent of base 2.
+    make: BigInt -> I64 -> BigFloat;
+    make = |int, exp| (
+        BigFloat { int: int, exp: exp }
+    );
+
+    _zero: BigFloat;
+    _zero = BigFloat { int: Zero::zero, exp: 0 };
+
+    // Returns true iff the BigFloat is zero.
+    is_zero: BigFloat -> Bool;
+    is_zero = |a| a.@int.@nat._is_zero_ex;
+
+    // Returns true iff the BigFloat is positive.
+    is_positive: BigFloat -> Bool;
+    is_positive = |a| a.@int.is_positive;
+
+    // Returns true iff the BigFloat is negative.
+    is_negative: BigFloat -> Bool;
+    is_negative = |a| a.@int.is_negative;
+
+    // Converts F64 to BigFloat.
+    from_F64: F64 -> BigFloat;
+    from_F64 = |f64| (
+        if f64 == 0.0 { BigFloat::_zero };
+        let sign = if f64 < 0.0 { -1 } else { 1 };
+        let f64 = f64.abs;
+        let (fr, exp) = Math::frexp(f64);
+        let exp = exp.to_I64 - 53;
+        let fr = fr * 2.0.Math::pow(53.0);
+        let (quo, rem) = _divmod_base(fr.to_U64);
+        let nat = [rem.to_U32, quo.to_U32];
+        BigFloat::make(BigInt::make(sign, nat), exp)
+    );
+
+    // Converts BigFloat to F64. If BigFloat is out of range of F64, unexpected result is returned.
+    to_F64: BigFloat -> F64;
+    to_F64 = |a| (
+        if a.is_zero { 0.0 };
+        let a = a.set_prec(53);
+        eval assert(|_| "invalid nat size", a.@int.@nat.get_size <= 2);
+        let u64 = a.@int.@nat._to_u64;
+        let sign = a.@int.@sign;
+        let f64 = sign.to_F64 * u64.to_F64 * 2.0.Math::pow(a.@exp.to_F64);
+        f64
+    );
+
+    // Get precision of a BigFloat in bits. It is multiple of 32.
+    get_prec: BigFloat -> I64;
+    get_prec = |a| (
+        a.@int.@nat.get_size * BigNat::_log2_base.to_I64
+    );
+
+    // Set precision of a BigFloat in bits. The precision is round-up to multiple of 32, except
+    // if `prec == 0` then the precision is set to 32.
+    set_prec: I64 -> BigFloat -> BigFloat;
+    set_prec = |prec, a| (
+        // Round-up the precision to the multiple of _log2_base.
+        let prec = (
+            if prec == 0 { _log2_base.to_I64 };
+            let (quo, rem) = _divmod_log2_base(prec.to_U64);
+            let quo = if rem == 0_U64 { quo } else { quo + 1_U64 };
+            (quo * _log2_base).to_I64
+        );
+
+        // Shift-left a.@int.@nat such that MSB == 1
+        let a = _lift_prec_bf(a);
+
+        let old_size = a.@int.@nat.get_size;
+        let new_size = prec / BigNat::_log2_base.to_I64;
+        if old_size == new_size {
+            a
+        };
+        let a = if old_size < new_size {
+            a.mod_int(mod_nat $ |nat|
+                Array::fill(new_size - old_size, 0_U32).append(nat)
+            )
+        } else { // old_size > new_size
+            a.mod_int(mod_nat $ |nat|
+                let n = old_size - new_size;
+                // round up if truncated part >= 0.5
+                let round_up = nat.@(n - 1) >= _base.shift_right(1_U64).to_U32;
+                let nat = nat.get_sub(n, old_size);
+                let nat = if round_up { _add(nat, BigNat::_one) } else { nat };
+                nat
+            )
+        };
+        let a = a.mod_exp(|exp|
+            exp + (old_size - new_size) * BigNat::_log2_base.to_I64
+        );
+        a
+    );
+
+    // shift-left such that MSB is 1
+    _lift_prec_bf: BigFloat -> BigFloat;
+    _lift_prec_bf = |a| (
+        if a.is_zero { a };
+        let nat = a.@int.@nat;
+        let last_digit = nat.@(nat.get_size - 1);
+        if last_digit.shift_right(_log2_base.to_U32 - 1_U32).bit_and(1_U32) != 0_U32 {
+            a
+        };
+        let bit_length = nat._bit_length;
+        let (_, last_bit_length) = _divmod_log2_base(bit_length);
+        let shift = _log2_base - last_bit_length;
+        let a = a.mod_int(mod_nat(_shift_left(shift)));
+        let a = a.mod_exp(|exp| exp - shift.to_I64);
+        a
+    );
+
+    _neg_bf: BigFloat -> BigFloat;
+    _neg_bf = |a| a.mod_int(neg);
+
+    _add_bf: BigFloat -> BigFloat -> BigFloat;
+    _add_bf = |a, b| (
+        if a.is_zero { b };
+        if b.is_zero { a };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(prec);
+        let b = b.set_prec(prec);
+        let a_exp = a.@exp;
+        let b_exp = b.@exp;
+        if a_exp < b_exp { _add_bf(b, a) };
+        // now a_exp >= b_exp
+        // LSB of a is 2^(a_exp+a_prec-1)
+        let c_exp = a_exp;
+        let diff_exp = a_exp - b_exp;
+        let a_int = a.@int;
+        let b_int = b.@int;
+        let c_int = if diff_exp >= prec {
+            a_int
+        } else {
+            a_int + b_int.shift_right(diff_exp.to_U64)
+        };
+        BigFloat::make(c_int, c_exp)
+    );
+
+    _mul_bf: BigFloat -> BigFloat -> BigFloat;
+    _mul_bf = |a, b| (
+        if a.is_zero { BigFloat::_zero };
+        if b.is_zero { BigFloat::_zero };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(prec);
+        let b = b.set_prec(prec);
+        let c_int = a.@int * b.@int;
+        let c_exp = a.@exp + b.@exp;
+        let c = BigFloat::make(c_int, c_exp);
+        let c = c.set_prec(prec);
+        c
+    );
+
+    // Calculates `a * 2^e`.
+    mul_pow2: I64 -> BigFloat -> BigFloat;
+    mul_pow2 = |e, a| (
+        a.mod_exp(|exp| exp + e)
+    );
+
+    _div_bf: BigFloat -> BigFloat -> BigFloat;
+    _div_bf = |a, b| (
+        if a.is_zero { BigFloat::_zero };
+        if b.is_zero { BigFloat::_zero };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(2 * prec);
+        let b = b.set_prec(prec);
+        // TODO: round c_int by fraction
+        let c_int = a.@int / b.@int;
+        let c_exp = a.@exp - b.@exp;
+        let c = BigFloat::make(c_int, c_exp);
+        let c = c.set_prec(prec);
+        c
+    );
+
+    // Convert to string of internal representation.
+    _to_string_rep: BigFloat -> String;
+    _to_string_rep = |a| (
+        "{ sign=" + a.@int.@sign.to_string +
+        " nat=" + a.@int.@nat.to_string +
+        " exp=" + a.@exp.to_string +
+        " }"
+    );
+
+    // Convert a BigFloat to a string. The precision is specified in base 10.
+    // For example, `a.to_string_precision(20)` has 20 digits in fractional part.
+    to_string_precision: I64 -> BigFloat -> String;
+    to_string_precision = |prec10, a| (
+        if a.is_negative {
+            "-" + a.neg.to_string_precision(prec10)
+        };
+        let a_nat = a.@int.@nat;
+        let a_exp = a.@exp;
+        if a_exp >= 0 {
+            a_nat._shift_left(a_exp.to_U64)._to_string
+        };
+        let neg_a_exp = (-a_exp).to_U64;
+        let (int_part, frac_part) = _divmod_by_power_of_two(a_nat, neg_a_exp);
+        /*
+        if frac_part._remove_last_zeros._is_zero {
+            int_part._to_string
+        };
+        */
+        int_part._to_string + "." + frac_part._to_string_frac(prec10, Array::empty(0), neg_a_exp)
+    );
+
+    // Convert frac * 2^(-neg_exp) to a fractional String up to num_digits.
+    _to_string_frac: I64 -> Array U8 -> U64 -> Array U32 -> String;
+    _to_string_frac = |num_digits, output, neg_exp, frac| (
+        // TODO: Round-up by the last truncated digit. But it is difficult.
+        //       ... For example, 12.999999999 should be converted to "13.000000" when prec10=6.
+        //       ... Should we multiple original BigFloat with pow(10, prec10 + 1) and convert it to BigInt
+        //           then round-up BigInt?  In this case, padding by zero is required.
+        if num_digits <= 0 {
+            output._unsafe_to_string
+        };
+        let frac_mul_10 = frac._mul_u32(10_U32);
+        let (int, frac) = _divmod_by_power_of_two(frac_mul_10, neg_exp);
+        let digit = int._to_u64;
+        eval assert(|_| "digit overflow", digit < 10_U64);
+        let output = output.push_back('0' + digit.to_U8);
+        _to_string_frac(num_digits - 1, output, neg_exp, frac)
+    );
+}
+
+impl BigFloat: ToString {
+    to_string = |a| (
+        let prec10 = (a.get_prec.to_F64 * 0.3010).to_I64;
+        a.to_string_precision(prec10)
+    );
+}
+
+impl BigFloat: Zero {
+    zero = BigFloat::_zero;
+}
+
+impl BigFloat: Neg {
+    neg = BigFloat::_neg_bf;
+}
+
+impl BigFloat: Add {
+    add = BigFloat::_add_bf;
+}
+
+impl BigFloat: Sub {
+    sub = |a, b| (
+        a.add(b.neg)
+    );
+}
+
+impl BigFloat: Mul {
+    mul = BigFloat::_mul_bf;
+}
+
+impl BigFloat: Div {
+    div = BigFloat::_div_bf;
+}
+
+test_bit_length: TestCase;
+test_bit_length = (
+    make_table_test("test_bit_length",
+        [
+            ([0x76543210_U32, 0x00000a98_U32], 44_U64),
+            ([0x01010101_U32, 4_U32], 35_U64),
+            ([0xabababab_U32, 1_U32], 33_U64),
+            ([0xcdcdcdcd_U32, 0_U32], 32_U64),
+            ([0_U32, 0_U32], 0_U64),
+            ([1_U32], 1_U64),
+            ([0_U32], 0_U64)
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._bit_length)
+    )
+);
+
+test_shift_left: TestCase;
+test_shift_left = (
+    make_table_test("test_shift_left",
+        [
+            ([0x1234_U32, 0xabcd_U32], 56_U64, [0_U32, 0x34000000_U32, 0xcd000012_U32, 0xab_U32]),
+            ([0x1234_U32, 0xabcd_U32], 32_U64, [0_U32, 0x1234_U32, 0xabcd_U32]),
+            ([0x1234_U32, 0xabcd_U32], 4_U64,  [0x12340_U32, 0xabcd0_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 1_U64, [0xeca86420_U32, 0xfdb97530_U32, 0x1_U32]),
+            ([0x1234_U32, 0_U32], 36_U64, [0_U32, 0x12340_U32, 0_U32]),
+            ([0x1234_U32, 0_U32], 32_U64, [0_U32, 0x1234_U32, 0_U32]),
+            ([0x1234_U32, 0_U32], 4_U64, [0x12340_U32, 0_U32]),
+            ([0_U32], 0_U64, [0_U32])
+        ],
+        |(a, shift, expect)|
+        assert_equal("eq", expect, a._shift_left(shift))
+    )
+);
+
+test_shift_right: TestCase;
+test_shift_right = (
+    make_table_test("test_shift_right",
+        [
+            ([0x76543210_U32, 0xfedcba98_U32], 1_U64, [0x3b2a1908_U32, 0x7f6e5d4c_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 4_U64, [0x87654321_U32, 0x0fedcba9_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 32_U64, [0xfedcba98_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 36_U64, [0x0fedcba9_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 64_U64, [0_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 65_U64, [0_U32]),
+            ([0x1234_U32, 0_U32], 32_U64, [0_U32]),
+            ([0x1234_U32, 0_U32], 16_U64, [0_U32]),
+            ([0_U32], 0_U64, [0_U32])
+        ],
+        |(a, shift, expect)|
+        assert_equal("eq", expect, a._shift_right(shift))
+    )
+);
+
+test_divmod_by_power_of_two: TestCase;
+test_divmod_by_power_of_two = (
+    make_table_test("test_divmod_by_power_of_two",
+        [
+            ([0x76543210_U32, 0xfedcba98_U32], 0_U64,  ([0x76543210_U32, 0xfedcba98_U32], [0x00_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 8_U64,  ([0x98765432_U32, 0x00fedcba_U32], [0x10_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 16_U64, ([0xba987654_U32, 0x0000fedc_U32], [0x3210_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 32_U64, ([0xfedcba98_U32], [0x76543210_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 36_U64, ([0x0fedcba9_U32], [0x76543210_U32, 0x08_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32, 0x4321_U32], 36_U64, ([0x1fedcba9_U32, 0x432_U32], [0x76543210_U32, 0x08_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 64_U64, ([0_U32], [0x76543210_U32, 0xfedcba98_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 65_U64, ([0_U32], [0x76543210_U32, 0xfedcba98_U32])),
+            ([0xfedcba98_U32], 16_U64, ([0xfedc_U32], [0xba98_U32])),
+            ([0x1234_U32, 0_U32], 32_U64, ([0_U32], [0x1234_U32])),
+            ([0_U32], 0_U64, ([0_U32], [0_U32]))
+        ],
+        |(a, exp, expect)|
+        assert_equal("eq", expect, _divmod_by_power_of_two(a, exp))
+    )
+);
+
+test_get_prec: TestCase;
+test_get_prec = (
+    make_table_test("test_get_prec",
+        [
+            ([0x76543210_U32, 0xfedcba98_U32], -1, 5, 64),
+            ([0x76543210_U32, 0_U32], 1, 3, 64),
+            ([0x76543210_U32], -1, 123, 32),
+            ([0_U32], 1, 111, 32)
+        ],
+        |(nat, sign, exp, expect)|
+        let a = BigFloat::make(BigInt::make(sign, nat), exp);
+        let a = a.mod_int(set_nat(nat)); // to avoid _remove_last_zeros
+        assert_equal("eq", expect, a.get_prec)
+    )
+);
+
+test_set_prec: TestCase;
+test_set_prec = (
+    make_table_test("test_set_prec",
+        [
+            (([0x76543210_U32, 0xfedcba98_U32], 5), 65, ([0x00000000_U32, 0x76543210_U32, 0xfedcba98_U32], 5 - 32)),
+            (([0x76543210_U32, 0xfedcba98_U32], 7), 64, ([0x76543210_U32, 0xfedcba98_U32], 7)),
+            (([0x7fffffff_U32, 0xfedcba98_U32], 9), 32, ([0xfedcba98_U32], 9 + 32)),
+            (([0x80000000_U32, 0xfedcba98_U32], 9), 32, ([0xfedcba99_U32], 9 + 32)),
+            (([0x7fffffff_U32, 0xfedcba98_U32], 9), 0, ([0xfedcba98_U32], 9 + 32)),
+            (([0x0000fedc_U32], 11), 96, ([0x00000000_U32, 0x00000000_U32, 0xfedc0000_U32], 11 - 64 - 16)),
+            (([0_U32], 0), 32, ([0_U32], 0))
+        ],
+        |((nat, exp), prec, (ex_nat, ex_exp))|
+        let sign = 1;
+        let a = BigFloat::make(BigInt::make(sign, nat), exp);
+        let a = a.mod_int(set_nat(nat)); // to avoid _remove_last_zeros
+        let a = a.set_prec(prec);
+        let _ = *assert_equal("nat", ex_nat, a.@int.@nat);
+        assert_equal("exp", ex_exp, a.@exp)
+    )
+);
+
+test_to_string_precision: TestCase;
+test_to_string_precision = (
+    make_table_test("to_string_precision",
+        [
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 5, "12.34567"),
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 12, "12.345678901234"),
+            (([3_U32], 4), 5, "48"),
+            (([3_U32], -1), 5, "1.50000"),
+            (([0_U32], 0), 0, "0")
+        ],
+        |((nat, exp), prec, expect)|
+        let sign = 1;
+        let a = BigFloat::make(BigInt::make(sign, nat), exp);
+        let a = a.mod_int(set_nat(nat)); // to avoid _remove_last_zeros
+        assert_equal("to_string_precision", expect, a.to_string_precision(prec))
+    )
+);
+
+main: IO ();
+main = (
+    let _ = *(
+        let _ = *eprintln("--- test_sqrt");
+        let off = 10;
+        let a = Array::fill(off * 2, 0_U32).append([2_U32]);
+        let x = _sqrt(a);
+        let _ = *eprintln(x.to_string);
+        let _ = *eprintln(_mul(x,x).to_string);
+        let fx = BigFloat::make(BigInt::make(1, x), -off * _log2_base.to_I64);
+        let _ = *eprintln(fx.to_string);
+        let _ = *eprintln(fx.to_F64.to_string);
+        let _ = *eprintln((fx*fx).to_string);
+        let fx1 = BigFloat::make(BigInt::make(1, _add(x,[1_U32])), -off * _log2_base.to_I64);
+        let _ = *eprintln((fx1*fx1).to_string);
+        let fx2 = BigFloat::make(BigInt::make(1, _sub(x,[1_U32])), -off * _log2_base.to_I64);
+        let _ = *eprintln((fx2*fx2).to_string);
+        pure()
+    );
+    let _ = *(
+        let _ = *eprintln("--- test_misc");
+        let a = BigFloat::from_F64(1.024);
+        let b = BigFloat::from_F64(6.4);
+        let _ = *eprintln("a="+a.to_F64.to_string);
+        let _ = *eprintln("b="+b.to_F64.to_string);
+        let c = a * b;
+        let _ = *eprintln("c="+c.to_string);
+        let _ = *eprintln("c.to_F64="+c.to_F64.to_string);
+        pure()
+    );
+    [
+        test_bit_length,
+        test_shift_left,
+        test_shift_right,
+        test_divmod_by_power_of_two,
+        test_get_prec,
+        test_set_prec,
+        test_to_string_precision,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

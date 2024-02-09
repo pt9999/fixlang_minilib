@@ -2,7 +2,7 @@
 	../bin/fixautolink build -o $@ -L ../lib -f $<
 
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
-	png.out ndarray_calc.out
+	png.out ndarray_calc.out pi.out
 
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
@@ -30,6 +30,9 @@ bigint_test1:
 
 bigfloat_test1:
 	../bin/fixautolink run -L ../lib -L . -f bigfloat_test1.fix
+
+pi.out:
+	../bin/fixautolink build -L ../lib -L . -f pi.fix -o pi.out
 
 clean:
 	rm -f *.out

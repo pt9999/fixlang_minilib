@@ -9,6 +9,7 @@ import Minilib.Testing.UnitTest;
 //import Minilib.Testing.Timeit;
 
 namespace BigNatEx {
+    _is_zero_ex: Array U32 -> Bool;
     _is_zero_ex = |a| (
         loop(
             a.get_size - 1, |i|
@@ -42,6 +43,21 @@ namespace BigNatEx {
         );
         let bit_length = (n-1).to_U64 * _log2_base + last_bit_length.to_U64;
         bit_length
+    );
+
+    // Calculates `a^n`.
+    _pow_by_U64: Array U32 -> U64 -> Array U32;
+    _pow_by_U64 = |a, n| (
+        loop(
+            ([1_U32], a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
+            };
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                _mul(prod, a)
+            } else { prod };
+            continue $ (prod, _mul(a,a), n.shift_right(1_U64))
+        )
     );
 
     _shift_left: U64 -> Array U32 -> Array U32;
@@ -332,44 +348,47 @@ namespace BigFloat {
         " }"
     );
 
-    // Convert a BigFloat to a string. The precision is specified in base 10.
+    // Convert a BigFloat to a string. The precision is the count of digits in fractional part,
+    // specified in base 10.
     // For example, `a.to_string_precision(20)` has 20 digits in fractional part.
     to_string_precision: I64 -> BigFloat -> String;
     to_string_precision = |prec10, a| (
+        eval assert(|_| "invalid prec10", prec10 >= 0);
         if a.is_negative {
             "-" + a.neg.to_string_precision(prec10)
         };
         let a_nat = a.@int.@nat;
         let a_exp = a.@exp;
-        if a_exp >= 0 {
-            a_nat._shift_left(a_exp.to_U64)._to_string
+        // multiply a_nat by 10^prec10.
+        let a_nat = if prec10 == 0 { 
+            a_nat 
+        } else { 
+            _mul(a_nat, _pow_by_U64([10_U32], prec10.to_U64))
         };
-        let neg_a_exp = (-a_exp).to_U64;
-        let (int_part, frac_part) = _divmod_by_power_of_two(a_nat, neg_a_exp);
-        /*
-        if frac_part._remove_last_zeros._is_zero {
-            int_part._to_string
+        // multiply a_nat by 2^a_exp.
+        let a_nat = if a_exp >= 0 {
+            a_nat._shift_left(a_exp.to_U64)
+        } else {
+            let neg_exp = (-a_exp).to_U64;
+            let (quo, rem) = _divmod_by_power_of_two(a_nat, neg_exp);
+            // round-up by rem
+            let rem = rem._shift_right(neg_exp - 1_U64)._remove_last_zeros;
+            if rem._is_zero { quo } else { _add(quo, BigNat::_one) }
         };
-        */
-        int_part._to_string + "." + frac_part._to_string_frac(prec10, Array::empty(0), neg_a_exp)
-    );
-
-    // Convert frac * 2^(-neg_exp) to a fractional String up to num_digits.
-    _to_string_frac: I64 -> Array U8 -> U64 -> Array U32 -> String;
-    _to_string_frac = |num_digits, output, neg_exp, frac| (
-        // TODO: Round-up by the last truncated digit. But it is difficult.
-        //       ... For example, 12.999999999 should be converted to "13.000000" when prec10=6.
-        //       ... Should we multiple original BigFloat with pow(10, prec10 + 1) and convert it to BigInt
-        //           then round-up BigInt?  In this case, padding by zero is required.
-        if num_digits <= 0 {
-            output._unsafe_to_string
+        
+        // convert BigNat to a string.
+        let str = a_nat._to_string;
+        if prec10 == 0 {
+            str
         };
-        let frac_mul_10 = frac._mul_u32(10_U32);
-        let (int, frac) = _divmod_by_power_of_two(frac_mul_10, neg_exp);
-        let digit = int._to_u64;
-        eval assert(|_| "digit overflow", digit < 10_U64);
-        let output = output.push_back('0' + digit.to_U8);
-        _to_string_frac(num_digits - 1, output, neg_exp, frac)
+        let str = if str.get_size >= prec10 + 1 { str }
+        else { 
+            let zero_padding = Array::fill(prec10 + 1 - str.get_size, '0');
+            zero_padding._unsafe_to_string + str
+        };
+        let int_part = str.get_sub(0, str.get_size - prec10);
+        let frac_part = str.get_sub(str.get_size - prec10, str.get_size);
+        int_part + "." + frac_part 
     );
 }
 
@@ -523,9 +542,16 @@ test_to_string_precision: TestCase;
 test_to_string_precision = (
     make_table_test("to_string_precision",
         [
-            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 5, "12.34567"),
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 0, "12"),
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 1, "12.3"),
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 2, "12.35"),
+            (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 5, "12.34568"),
             (([0xB82A0B09_U32, 0x587E6997_U32, 0xc_U32], -64), 12, "12.345678901234"),
-            (([3_U32], 4), 5, "48"),
+            (([0x94395810_U32, 0xD_U32], -32), 0, "14"),
+            (([0x94395810_U32, 0xD_U32], -32), 1, "13.6"),
+            (([0x94395810_U32, 0xD_U32], -32), 2, "13.58"),
+            (([0x94395810_U32, 0xD_U32], -32), 3, "13.579"),
+            (([3_U32], 4), 5, "48.00000"),
             (([3_U32], -1), 5, "1.50000"),
             (([0_U32], 0), 0, "0")
         ],
@@ -558,13 +584,19 @@ main = (
     );
     let _ = *(
         let _ = *eprintln("--- test_misc");
-        let a = BigFloat::from_F64(1.024);
-        let b = BigFloat::from_F64(6.4);
-        let _ = *eprintln("a="+a.to_F64.to_string);
-        let _ = *eprintln("b="+b.to_F64.to_string);
+        let a = BigFloat::from_F64(1024.0).set_prec(256) / BigFloat::from_F64(1000.0);
+        let b = BigFloat::from_F64(64.0).set_prec(256)  / BigFloat::from_F64(10.0);
+        let _ = *eprintln("a="+a.to_string);
+        let _ = *eprintln("a="+a.to_string_precision(20));
+        let _ = *eprintln("b="+b.to_string);
+        let _ = *eprintln("b="+b.to_string_precision(20));
         let c = a * b;
         let _ = *eprintln("c="+c.to_string);
+        let _ = *eprintln("c="+c.to_string_precision(20));
         let _ = *eprintln("c.to_F64="+c.to_F64.to_string);
+        let d = c / a;
+        let _ = *eprintln("d="+d.to_string);
+        let _ = *eprintln("d.to_F64="+d.to_F64.to_string);
         pure()
     );
     [

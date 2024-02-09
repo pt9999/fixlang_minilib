@@ -163,6 +163,7 @@ namespace BigIntEx {
 // It is interpreted as `@int * 2 ^ @exp`.
 type BigFloat = unbox struct {
     int: BigInt,        // bigint
+                        // NOTE: @int.@nat might have trailing zeros.
     exp: I64            // the exponent of base 2
 };
 
@@ -277,66 +278,11 @@ namespace BigFloat {
         a
     );
 
-    _neg_bf: BigFloat -> BigFloat;
-    _neg_bf = |a| a.mod_int(neg);
-
-    _add_bf: BigFloat -> BigFloat -> BigFloat;
-    _add_bf = |a, b| (
-        if a.is_zero { b };
-        if b.is_zero { a };
-        let prec = max(a.get_prec, b.get_prec);
-        let a = a.set_prec(prec);
-        let b = b.set_prec(prec);
-        let a_exp = a.@exp;
-        let b_exp = b.@exp;
-        if a_exp < b_exp { _add_bf(b, a) };
-        // now a_exp >= b_exp
-        // LSB of a is 2^(a_exp+a_prec-1)
-        let c_exp = a_exp;
-        let diff_exp = a_exp - b_exp;
-        let a_int = a.@int;
-        let b_int = b.@int;
-        let c_int = if diff_exp >= prec {
-            a_int
-        } else {
-            a_int + b_int.shift_right(diff_exp.to_U64)
-        };
-        BigFloat::make(c_int, c_exp)
-    );
-
-    _mul_bf: BigFloat -> BigFloat -> BigFloat;
-    _mul_bf = |a, b| (
-        if a.is_zero { BigFloat::_zero };
-        if b.is_zero { BigFloat::_zero };
-        let prec = max(a.get_prec, b.get_prec);
-        let a = a.set_prec(prec);
-        let b = b.set_prec(prec);
-        let c_int = a.@int * b.@int;
-        let c_exp = a.@exp + b.@exp;
-        let c = BigFloat::make(c_int, c_exp);
-        let c = c.set_prec(prec);
-        c
-    );
 
     // Calculates `a * 2^e`.
     mul_pow2: I64 -> BigFloat -> BigFloat;
     mul_pow2 = |e, a| (
         a.mod_exp(|exp| exp + e)
-    );
-
-    _div_bf: BigFloat -> BigFloat -> BigFloat;
-    _div_bf = |a, b| (
-        if a.is_zero { BigFloat::_zero };
-        if b.is_zero { BigFloat::_zero };
-        let prec = max(a.get_prec, b.get_prec);
-        let a = a.set_prec(2 * prec);
-        let b = b.set_prec(prec);
-        // TODO: round c_int by fraction
-        let c_int = a.@int / b.@int;
-        let c_exp = a.@exp - b.@exp;
-        let c = BigFloat::make(c_int, c_exp);
-        let c = c.set_prec(prec);
-        c
     );
 
     // Convert to string of internal representation.
@@ -399,16 +345,58 @@ impl BigFloat: ToString {
     );
 }
 
+impl BigFloat: Eq {
+    eq = |a, b| (
+        let c = a - b;
+        c.is_zero
+    );
+}
+
+impl BigFloat: LessThan {
+    less_than = |a, b| (
+        let c = a - b;
+        c.is_negative
+    );
+}
+
+impl BigFloat: LessThanOrEq {
+    less_than_or_eq = |a, b| (
+        let c = a - b;
+        !c.is_positive
+    );
+}
+
 impl BigFloat: Zero {
     zero = BigFloat::_zero;
 }
 
 impl BigFloat: Neg {
-    neg = BigFloat::_neg_bf;
+    neg = |a| a.mod_int(neg);
 }
 
 impl BigFloat: Add {
-    add = BigFloat::_add_bf;
+    add = |a, b| (
+        if a.is_zero { b };
+        if b.is_zero { a };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(prec);
+        let b = b.set_prec(prec);
+        let a_exp = a.@exp;
+        let b_exp = b.@exp;
+        if a_exp < b_exp { add(b, a) };
+        // now a_exp >= b_exp
+        // LSB of a is 2^(a_exp+a_prec-1)
+        let c_exp = a_exp;
+        let diff_exp = a_exp - b_exp;
+        let a_int = a.@int;
+        let b_int = b.@int;
+        let c_int = if diff_exp >= prec {
+            a_int
+        } else {
+            a_int + b_int.shift_right(diff_exp.to_U64)
+        };
+        BigFloat::make(c_int, c_exp)
+    );
 }
 
 impl BigFloat: Sub {
@@ -418,12 +406,37 @@ impl BigFloat: Sub {
 }
 
 impl BigFloat: Mul {
-    mul = BigFloat::_mul_bf;
+    mul = |a, b| (
+        if a.is_zero { BigFloat::_zero };
+        if b.is_zero { BigFloat::_zero };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(prec);
+        let b = b.set_prec(prec);
+        let c_int = a.@int * b.@int;
+        let c_exp = a.@exp + b.@exp;
+        let c = BigFloat::make(c_int, c_exp);
+        let c = c.set_prec(prec);
+        c
+    );
 }
 
 impl BigFloat: Div {
-    div = BigFloat::_div_bf;
+    div = |a, b| (
+        if a.is_zero { BigFloat::_zero };
+        if b.is_zero { BigFloat::_zero };
+        let prec = max(a.get_prec, b.get_prec);
+        let a = a.set_prec(2 * prec);
+        let b = b.set_prec(prec);
+        // TODO: round c_int by fraction
+        let c_int = a.@int / b.@int;
+        let c_exp = a.@exp - b.@exp;
+        let c = BigFloat::make(c_int, c_exp);
+        let c = c.set_prec(prec);
+        c
+    );
 }
+
+// ------------------------------------------------------------------------
 
 test_bit_length: TestCase;
 test_bit_length = (
@@ -563,6 +576,29 @@ test_to_string_precision = (
     )
 );
 
+test_eq_lt_le: TestCase;
+test_eq_lt_le = (
+    make_table_test("test_eq_lt_le",
+        [
+            (12.345, 12.345, (true, false, true)),
+            (12.345, 12.3456, (false, true, true)),
+            (12.3456, 12.345, (false, false, false)),
+            (0.056789, 0.056789, (true, false, true)),
+            (0.056789, 0.0567891, (false, true, true)),
+            (0.0567892, 0.056789, (false, false, false)),
+            (0.0, 0.0, (true, false, true))
+        ],
+        |(a, b, expect)|
+        let a = BigFloat::from_F64(a);
+        let b = BigFloat::from_F64(b).set_prec(96);
+        let actual = (a == b, a < b, a <= b);
+        let _ = *assert_equal("eq", expect.@0, actual.@0);
+        let _ = *assert_equal("lt", expect.@1, actual.@1);
+        let _ = *assert_equal("le", expect.@2, actual.@2);
+        pure()
+    )
+);
+
 main: IO ();
 main = (
     let _ = *(
@@ -607,8 +643,8 @@ main = (
         test_get_prec,
         test_set_prec,
         test_to_string_precision,
+        test_eq_lt_le,
         TestCase::empty
     ]
     .run_test_driver
 );
-

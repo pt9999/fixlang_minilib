@@ -117,8 +117,8 @@ set_prec = |prec, a| (
         (quo * _log2_base).to_I64
     );
 
-    // Shift-left a.@int.@nat such that MSB == 1
-    let a = _lift_prec_bf(a);
+    // Move the topmost 1 to MSB
+    let a = _maximize_precision(a);
 
     let old_size = a.@int.@nat.get_size;
     let new_size = prec / BigNat::_log2_base.to_I64;
@@ -145,14 +145,14 @@ set_prec = |prec, a| (
     a
 );
 
-// shift-left such that MSB is 1
-_lift_prec_bf: BigFloat -> BigFloat;
-_lift_prec_bf = |a| (
+// Move the topmost 1 to MSB
+_maximize_precision: BigFloat -> BigFloat;
+_maximize_precision = |a| (
     if a.is_zero { a };
     let nat = a.@int.@nat;
     let last_digit = nat.@(nat.get_size - 1);
     if last_digit.shift_right(_log2_base.to_U32 - 1_U32).bit_and(1_U32) != 0_U32 {
-        a
+        a   // MSB is 1 already
     };
     let bit_length = nat._bit_length;
     let (_, last_bit_length) = _divmod_log2_base(bit_length);
@@ -162,10 +162,10 @@ _lift_prec_bf = |a| (
     a
 );
 
-// Get around `log2(a)`. (not accurate)
-_log2: BigFloat -> I64;
-_log2 = |a| (
-    a.@exp + a.@int.@nat._bit_length.to_I64
+// Gets a BigInt that represents the smallest change in the mantissa of this BigInt.
+epsilon: BigFloat -> BigFloat;
+epsilon = |a| (
+    a.set_int(BigInt::one)
 );
 
 // Calculates `a * 2^e`.
@@ -256,7 +256,7 @@ _from_string = |str| (
 _to_string_rep: BigFloat -> String;
 _to_string_rep = |a| (
     "{ sign=" + a.@int.@sign.to_string +
-    " nat=" + a.@int.@nat.to_string +
+    " nat=" + a.@int.@nat._to_string_hex +
     " exp=" + a.@exp.to_string +
     " }"
 );

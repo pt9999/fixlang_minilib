@@ -38,6 +38,12 @@ make = |int, exp| (
 _zero: BigFloat;
 _zero = BigFloat { int: Zero::zero, exp: 0 };
 
+_one: BigFloat;
+_one = BigFloat::from_F64(1.0);
+
+_ten: BigFloat;
+_ten = BigFloat::from_F64(10.0);
+
 // Returns true iff the BigFloat is zero.
 is_zero: BigFloat -> Bool;
 is_zero = |a| a.@int.is_zero;
@@ -211,6 +217,41 @@ _sqrt_inner = |x, a, max_loop| (
     _sqrt_inner(quo, a, max_loop - 1)
 );
 
+// Calculates `a^n`.
+pow_by_U64: U64 -> BigFloat -> BigFloat;
+pow_by_U64 = |n, a| (
+    loop(
+        (BigFloat::_one, a, n), |(prod, a, n)|
+        if n == 0_U64 {
+            break $ prod
+        };
+        let prod = if n.bit_and(1_U64) != 0_U64 {
+            prod * a
+        } else { prod };
+        continue $ (prod, a * a, n.shift_right(1_U64))
+    )
+);
+
+_from_string: String -> Result ErrMsg BigFloat;
+_from_string = |str| (
+    if str.get_size > 0 && str.get_bytes.@(0) == '-' {
+        str.get_sub(1, str.get_size)._from_string.map(neg)
+    };
+    let (int_part, frac_part) = str.split_first(".");
+    if frac_part == "" {
+        let int: BigInt = *from_string(int_part);
+        let bf_int: BigFloat = BigFloat::make(int, 0);
+        ok $ bf_int
+    };
+    let str_append = int_part + frac_part;
+    let prec10 = str_append.get_size;
+    let int: BigInt = *from_string(str_append);
+    let bf: BigFloat = BigFloat::make(int, 0);
+    let bf = bf / BigFloat::_ten.pow_by_U64(frac_part.get_size.to_U64);
+    let bf = bf.set_prec10(prec10);
+    ok $ bf
+);
+
 // Convert to string of internal representation.
 _to_string_rep: BigFloat -> String;
 _to_string_rep = |a| (
@@ -262,6 +303,10 @@ to_string_precision = |prec10, a| (
     let frac_part = str.get_sub(str.get_size - prec10, str.get_size);
     int_part + "." + frac_part 
 );
+
+impl BigFloat: FromString {
+    from_string = _from_string;
+}
 
 impl BigFloat: ToString {
     to_string = |a| (

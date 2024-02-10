@@ -1,0 +1,136 @@
+// Fix test runner
+module Main;
+
+import AsyncTask;
+import Debug;
+import Subprocess;
+
+import Minilib.App.Clap;
+import Minilib.IO.IOEx;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+
+
+execute_command: String -> Array String -> IOFail ();
+execute_command = |cmd, args| (
+    let command_line = args.to_iter.join(" ");
+    let _ = *eprintln(">> " + command_line).lift;
+
+    let make_drain_task = |src_fh, dest_fh| (
+        AsyncIOTask::make(
+            loop_m(
+                (), |_|
+                let line = *read_line(src_fh);
+                if line == "" {
+                    break_m $ ()
+                };
+                let _ = *write_string(dest_fh, line);
+                continue_m $ ()
+            ).try(eprintln)
+        )
+    );
+    let (_, exit_status) = *Subprocess::run_with_stream(cmd, args, 
+        |(stdin, stdout, stderr)|
+        eval *close_file(stdin).lift; // Send EOF.
+        let stdout_task = *make_drain_task(stdout, IO::stdout).lift;
+        let stderr_task = *make_drain_task(stderr, IO::stderr).lift;
+        let _ = *stdout_task.get.lift;
+        let _ = *stderr_task.get.lift;
+        pure()
+    );
+    if exit_status.is_exit && exit_status.as_exit != 0_U8 {
+        throw $ "program exited with exit code " + exit_status.as_exit.to_string
+    };
+    if exit_status.is_signaled {
+        throw $ "program exited with signal " + exit_status.as_signaled.to_string
+    };
+    if exit_status.is_wait_failed {
+        throw $ "waiting for program failed!"
+    };
+    let _ = *println("").lift;
+    pure()
+);
+
+
+// Application
+type App = unbox struct {
+    test_dirs: Array String,
+    test_names: Array String,
+    lib_dirs: Array String
+};
+
+namespace App {
+    get_bin_dir: App -> IOFail String;
+    get_bin_dir = |app| (
+        let args = *IO::get_args.lift;
+        let cmd = args.@(0);
+        pure $ dirname(cmd)
+    );
+
+    process_test_file: String -> App -> IOFail ();
+    process_test_file = |test_file_path, app| (
+        let args = [
+            *app.get_bin_dir + "/fixautolink",
+            "run"
+        ].append(
+            app.@lib_dirs.map(|lib_dir|
+                [ "-L", lib_dir ]
+            ).flatten
+        ).append(
+            [ "-f", test_file_path ]
+        );
+        execute_command(args.@(0), args)
+    );
+
+    process_test_dir: String -> App -> IOFail ();
+    process_test_dir = |test_dir, app| (
+        let file_paths = (*find_files(test_dir)).to_iter;
+        let file_paths = file_paths.filter(|path|
+            path.ends_with(".fix") &&
+            path.find("/.fixlang/", 0).is_none
+        );
+        let file_paths = file_paths.filter(|file_path|
+            if app.@test_names.is_empty { true };
+            app.@test_names.to_iter.map(|test_name|
+                file_path.find(test_name, 0).is_some
+            ).fold(false, |a, b| a || b)
+        );
+        file_paths.foreach_m(|file_path|
+            app.process_test_file(file_path)
+        )
+    );
+
+    process_test_dirs: App -> IOFail ();
+    process_test_dirs = |app| (
+        app.@test_dirs.foreach_m(|test_dir|
+            app.process_test_dir(test_dir)
+        )
+    );
+}
+
+command: Command;
+command = (
+    Command::new("fixautotest")
+    .version("0.1.0")
+    .about("Run tests in specified test directory")
+    .arg(Arg::new("TEST_NAME").help("Test names to run. If omitted, run all tests.").takes_multiple_values)
+    .arg(Arg::new("TEST_DIR").short('T').long("test-dir").help("Test directory").required.takes_multiple_values)
+    .arg(Arg::new("LIB_DIR").short('L').long("lib-dir").help("Library directory").takes_multiple_values)
+);
+
+
+main: IO ();
+main = (
+    do {
+        let _ = *IO::stdout.set_unbuffered_mode.lift;
+        let _ = *IO::stderr.set_unbuffered_mode.lift;
+        let matches = *command.get_matches;
+        let app = App {
+            test_dirs: matches.get_many("TEST_DIR").as_some,
+            test_names: matches.get_many("TEST_NAME").as_some_or([]),
+            lib_dirs: matches.get_many("LIB_DIR").as_some_or([])
+        };
+        app.process_test_dirs
+    }
+    .try(|err| eprintln (err))
+);

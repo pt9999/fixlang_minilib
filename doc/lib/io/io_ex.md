@@ -25,6 +25,14 @@ For details, see Linux manual page for [unlink()](https://man7.org/linux/man-pag
 Flushes a file stream.
 For details, see Linux manual page for [fflush()](https://man7.org/linux/man-pages/man3/fflush.3.html).
 
+#### set_unbuffered_mode: IOHandle -> IO ();
+
+Sets IOHandle to unbuffered mode.
+For detials, see Linux manual page for [setbuf()](https://man7.org/linux/man-pages/man3/setbuf.3.html).
+NOTE: When a fix program is invoked by `run_with_stream()`,
+then the stdout and stderr becomes not a TTY but a file stream.
+So the stdout becomes block-buffered. The stderr also seems to be block-buffered.
+
 #### fdopen: I32 -> String -> IOFail IOHandle;
 
 Associates a stream with a file descriptor.

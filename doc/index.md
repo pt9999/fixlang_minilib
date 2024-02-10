@@ -70,6 +70,10 @@ IO extensions, such as:
 - Retrieve file information, such as file size and time stamps
 - Get kernel information such as system name, machine archtecture
 
+### [module Minilib.Math.BigFloat (lib/math/bigfloat.fix)](lib/math/bigfloat.md)
+
+Arbitrary-precision floating point number.
+
 ### [module Minilib.Math.BigInt (lib/math/bigint.fix)](lib/math/bigint.md)
 
 Arbitrary-precision integer.

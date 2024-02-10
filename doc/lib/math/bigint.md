@@ -47,6 +47,14 @@ NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
 
 `BigInt::divmod_by_two(a)` returns `(a/2, a%2)`.
 
+#### shift_left: U64 -> BigInt -> BigInt;
+
+Shifts `@nat` to left. NOTE `@sign` does not affect at all.
+
+#### shift_right: U64 -> BigInt -> BigInt;
+
+Shifts `@nat` to right. NOTE `@sign` does not affect at all.
+
 #### one: BigInt;
 
 BigInt constant representing 1.

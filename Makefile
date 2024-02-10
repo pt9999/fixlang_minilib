@@ -1,14 +1,19 @@
-all: bin/fixautolink examples
+all: tools examples
 
 clean:
 	rm -f examples/*.out
-	rm -f bin/fixautolink
+	rm -f bin/fixautolink bin/fixdoc
+
+-include .depend
+
+tools: bin/fixautolink bin/fixdoc
 
 bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/io_ex.fix lib/text/simple_parser.fix lib/text/string_ex.fix
 	mkdir -p bin
 	fix build -o $@ -f $^
 
--include .depend
+bin/fixdoc: bin/fixautolink
+	bin/fixautolink build -o $@ -L ./lib -f tools/fixdoc.fix
 
 test: bin/fixautolink test_app test_collection test_crypto test_encoding test_io test_math test_monad test_task test_text test_net
 
@@ -80,10 +85,11 @@ test_router:
 test_html:
 	bin/fixautolink run -f tests/net/html_test.fix -L ./lib
 
-document: examples/fixdoc.out
-	examples/fixdoc.out -i lib -o doc
+document: bin/fixdoc
+	bin/fixdoc -i lib -o doc
 
-examples: examples/json_cat.out examples/sample_client.out examples/sample_server.out \
+examples: bin/fixautolink \
+		examples/json_cat.out examples/sample_client.out examples/sample_server.out \
 		examples/fixdoc.out examples/sample_http_server.out \
 		examples/grep.out examples/spell_checker.out \
 		examples/probable_primes.out
@@ -96,9 +102,6 @@ examples/sample_client.out:
 
 examples/sample_server.out: 
 	bin/fixautolink build -o $@ -L ./lib -f examples/sample_server.fix
-
-examples/fixdoc.out:
-	bin/fixautolink build -o $@ -L ./lib -f examples/fixdoc.fix
 
 examples/sample_http_server.out: 
 	bin/fixautolink build -o $@ -L ./lib -f examples/sample_http_server.fix

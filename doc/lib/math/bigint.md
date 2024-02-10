@@ -4,8 +4,6 @@
 
 Arbitrary-precision integer.
 
-### namespace BigNat
-
 ### type BigInt
 
 Arbitrary-precision integer.
@@ -16,8 +14,6 @@ type BigInt = unbox struct {
     nat: Array U32      // natural number (>= 0)
 };
 ```
-### namespace BigInt
-
 #### make: I64 -> Array U32 -> BigInt;
 
 `BigInt::make(sign, nat)` creates new BigInt object.

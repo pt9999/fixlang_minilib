@@ -354,6 +354,111 @@ _divmod_u32 = |a0, d1| (
     (quo, rem.to_U32)
 );
 
+// Returns the bit length of `a`, ie. one plus the bit position of most significant `1`.
+// Returns 0 if `a` is zero.
+_bit_length: Array U32 -> U64;
+_bit_length = |a| (
+    let a = a._remove_last_zeros;
+    let n = a.get_size;
+    let last_digit = a.@(n-1);
+    if last_digit == 0_U32 {
+        eval assert(|_| "_remove_last_zeros did not remove last zero", n == 1);
+        0_U64
+    };
+    let last_bit_length = loop(
+        _log2_base.to_U32 - 1_U32, |bit|
+        if last_digit.shift_right(bit).bit_and(1_U32) != 0_U32 {
+            break $ bit + 1_U32
+        };
+        if bit == 0_U32 {
+            eval assert(|_| "should not reach here", false);
+            break $ 0_U32
+        };
+        continue $ bit - 1_U32
+    );
+    let bit_length = (n-1).to_U64 * _log2_base + last_bit_length.to_U64;
+    bit_length
+);
+
+// Calculates `a^n`.
+_pow_by_U64: Array U32 -> U64 -> Array U32;
+_pow_by_U64 = |a, n| (
+    loop(
+        ([1_U32], a, n), |(prod, a, n)|
+        if n == 0_U64 {
+            break $ prod
+        };
+        let prod = if n.bit_and(1_U64) != 0_U64 {
+            _mul(prod, a)
+        } else { prod };
+        continue $ (prod, _mul(a,a), n.shift_right(1_U64))
+    )
+);
+
+_shift_left: U64 -> Array U32 -> Array U32;
+_shift_left = |shift, a| (
+    if shift == 0_U64 { a };
+    let (off, shift) = _divmod_log2_base(shift);
+    let n = a.get_size;
+    let a = loop(
+        (a, 0_U64, 0), |(a, carry, i)|
+        if i >= n {
+            break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+        };
+        let d = a.@(i).to_U64;
+        let carry2 = d.shift_right(_log2_base - shift);
+        let d = d.shift_left(shift).bit_or(carry);
+        let a = a.set(i, d.to_U32);
+        continue $ (a, carry2, i + 1)
+    );
+    if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+);
+
+_shift_right: U64 -> Array U32 -> Array U32;
+_shift_right = |shift, a| (
+    if shift == 0_U64 { a };
+    let (off, shift) = _divmod_log2_base(shift);
+    let a = if off == 0_U64 { a }
+    else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+    else { [0_U32] };
+    let n = a.get_size;
+    let a = loop(
+        (a, 0_U64, n-1), |(a, carry, i)|
+        if i < 0 {
+            break $ a
+        };
+        let d = a.@(i).to_U64;
+        let carry2 = d.shift_left(_log2_base - shift);
+        let d = d.shift_right(shift).bit_or(carry);
+        let a = a.set(i, d.to_U32);
+        continue $ (a, carry2, i - 1)
+    );
+    a._remove_last_zeros
+);
+
+// Calculates `(a0 / 2 ^ exp, a0 % 2 ^ exp)`.
+// Aborts if any error occured.
+_divmod_by_power_of_two: Array U32 -> U64 -> (Array U32, Array U32);
+_divmod_by_power_of_two = |a0, exp| (
+    if exp == 0_U64 {
+        (a0, BigNat::_zero)
+    };
+    if exp >= a0.get_size.to_U64 * _log2_base {
+        (BigNat::_zero, a0)
+    };
+    let (exp_quo, exp_rem) = _divmod_log2_base(exp);
+    eval assert(|_| "exp_quo too big", exp_quo < a0.get_size.to_U64);
+    let quo = a0._shift_right(exp);
+    let rem = a0.get_sub(0, exp_quo.to_I64);
+    let rem = if exp_rem == 0_U64 { rem }
+    else {
+        let d0 = a0.@(exp_quo.to_I64);
+        let mask = (1_U64.shift_left(exp_rem) - 1_U64).to_U32;
+        rem.push_back(d0.bit_and(mask))
+    };
+    (quo, rem)
+);
+
 // 0 in BigNat.
 _zero: Array U32;
 _zero = [0_U32];

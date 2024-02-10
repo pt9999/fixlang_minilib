@@ -26,9 +26,12 @@ document: bin/fixdoc
 	bin/fixdoc -i lib -o doc
 
 examples: bin/fixautolink \
-		examples/json_cat.out examples/sample_client.out examples/sample_server.out \
-		examples/fixdoc.out examples/sample_http_server.out \
-		examples/grep.out examples/spell_checker.out \
+		examples/json_cat.out \
+		examples/sample_client.out \
+		examples/sample_server.out \
+		examples/sample_http_server.out \
+		examples/grep.out \
+		examples/spell_checker.out \
 		examples/probable_primes.out
 
 examples/json_cat.out: 
@@ -48,5 +51,6 @@ examples/grep.out:
 
 examples/spell_checker.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/spell_checker.fix
+
 examples/probable_primes.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/probable_primes.fix

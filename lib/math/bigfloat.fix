@@ -252,7 +252,7 @@ _from_string = |str| (
     ok $ bf
 );
 
-// Convert to string of internal representation.
+// Convert a BigFloat to a string of internal representation.
 _to_string_rep: BigFloat -> String;
 _to_string_rep = |a| (
     "{ sign=" + a.@int.@sign.to_string +
@@ -261,22 +261,20 @@ _to_string_rep = |a| (
     " }"
 );
 
-// Convert a BigFloat to a string. The precision is the count of digits in fractional part,
-// specified in base 10.
-// For example, `a.to_string_precision(20)` has 20 digits in fractional part.
+// Convert a BigFloat to a string with specified precision (i.e., number of digits after the decimal point).
 to_string_precision: I64 -> BigFloat -> String;
-to_string_precision = |prec10, a| (
-    eval assert(|_| "invalid prec10", prec10 >= 0);
+to_string_precision = |num_frac_digits, a| (
+    eval assert(|_| "invalid num_frac_digits", num_frac_digits >= 0);
     if a.is_negative {
-        "-" + a.neg.to_string_precision(prec10)
+        "-" + a.neg.to_string_precision(num_frac_digits)
     };
     let a_nat = a.@int.@nat;
     let a_exp = a.@exp;
-    // multiply a_nat by 10^prec10.
-    let a_nat = if prec10 == 0 { 
+    // multiply a_nat by 10^num_frac_digits.
+    let a_nat = if num_frac_digits == 0 { 
         a_nat 
     } else { 
-        _mul(a_nat, _pow_by_U64([10_U32], prec10.to_U64))
+        _mul(a_nat, _pow_by_U64([10_U32], num_frac_digits.to_U64))
     };
     // multiply a_nat by 2^a_exp.
     let a_nat = if a_exp >= 0 {
@@ -291,17 +289,74 @@ to_string_precision = |prec10, a| (
     
     // convert BigNat to a string.
     let str = a_nat._to_string;
-    if prec10 == 0 {
+    if num_frac_digits == 0 {
         str
     };
-    let str = if str.get_size >= prec10 + 1 { str }
+    let str = if str.get_size >= num_frac_digits + 1 { str }
     else { 
-        let zero_padding = Array::fill(prec10 + 1 - str.get_size, '0');
+        let zero_padding = Array::fill(num_frac_digits + 1 - str.get_size, '0');
         zero_padding._unsafe_to_string + str
     };
-    let int_part = str.get_sub(0, str.get_size - prec10);
-    let frac_part = str.get_sub(str.get_size - prec10, str.get_size);
+    let int_part = str.get_sub(0, str.get_size - num_frac_digits);
+    let frac_part = str.get_sub(str.get_size - num_frac_digits, str.get_size);
     int_part + "." + frac_part 
+);
+
+// Convert a BigFloat to a string of exponential form.
+to_string_exp: BigFloat -> String;
+to_string_exp = |a| (
+    a._to_string_exp_precision(none())
+);
+
+// Convert a BigFloat to a string of exponential form with specified precision (i.e., number of digits after the decimal point).
+to_string_exp_precision: I64 -> BigFloat -> String;
+to_string_exp_precision = |num_frac_digits, a| (
+    a._to_string_exp_precision(some(num_frac_digits))
+);
+
+_to_string_exp_precision: Option I64 -> BigFloat -> String;
+_to_string_exp_precision = |num_frac_digits, a| (
+    let (a, log10) = (
+        if a.is_zero { (a, 0) };
+        let log2 = a.@int.@nat._bit_length.to_I64 + a.@exp;
+        let log10 = (log2.to_F64 * Math::log10(2.0)).to_I64 - 1;
+        let a = if log10 == 0 { a }
+        else if log10 > 0 { 
+            a / BigFloat::_ten.pow_by_U64(log10.to_U64)
+        } else {
+            a * BigFloat::_ten.pow_by_U64((-log10).to_U64)
+        };
+        loop(
+            (a, log10), |(a, log10)|
+            //eval debug_eprintln("(log10,a)="+(log10,a, a._to_string_rep).to_string);
+            let a_abs = a.abs;
+            if a_abs < BigFloat::_one {
+                continue $ (a * BigFloat::_ten, log10 - 1)
+            };
+            if a_abs >= BigFloat::_ten {
+                continue $ (a / BigFloat::_ten, log10 + 1)
+            };
+            if a_abs + a_abs.epsilon >= BigFloat::_ten {    // workaround for that 9.999999 is printed as 10.000000
+                break $ (a / BigFloat::_ten, log10 + 1)
+            };
+            break $ (a, log10)
+        )
+    );
+    //eval debug_eprintln("==> (log10,a)="+(log10,a, a._to_string_rep).to_string);
+    let num_frac_digits = num_frac_digits.as_some_or(a._get_num_frac_digits);
+    let str = a.to_string_precision(num_frac_digits);
+    let str = str + "E" + (if log10 >= 0 { "+" } else { "" }) + log10.to_string;
+    str
+);
+
+// get the preferred number of fractional digits (not same as a.get_prec10).
+_get_num_frac_digits: BigFloat -> I64;
+_get_num_frac_digits = |a| (
+    if a.@exp >= 0 { 
+        0
+    } else { 
+        Math::floor((-a.@exp).to_F64 * Math::log10(2.0)).to_I64 
+    }
 );
 
 impl BigFloat: FromString {
@@ -310,13 +365,8 @@ impl BigFloat: FromString {
 
 impl BigFloat: ToString {
     to_string = |a| (
-        // count of fractional digits (not same as a.get_prec10).
-        let prec10 = if a.@exp >= 0 { 
-            0
-        } else { 
-            Math::floor((-a.@exp).to_F64 * Math::log10(2.0)).to_I64 
-        };
-        a.to_string_precision(prec10)
+        let num_frac_digits = a._get_num_frac_digits;
+        a.to_string_precision(num_frac_digits)
     );
 }
 

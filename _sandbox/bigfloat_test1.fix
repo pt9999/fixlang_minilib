@@ -13,7 +13,7 @@ import Minilib.Testing.UnitTest;
 namespace BigFloatEx {
     exp: BigFloat -> BigFloat;
     exp = |a| (
-        if a.is_zero { BigFloat::_one };
+        if a.is_zero { BigFloat::_one.set_prec(a.get_prec) };
         let k = max(0, a.@int.@nat._bit_length.to_I64 + a.@exp + 3);
         let x = a.mul_pow2(-k);
         // x = a * 2^-k,  a = x * 2^k
@@ -38,6 +38,51 @@ namespace BigFloatEx {
             continue $ (exp_a * exp_a, i + 1)
         )
     );
+
+    log: BigFloat -> BigFloat;
+    log = |a| (
+        eval assert(|_| "log: `a` must be positive", a.is_positive);
+        let one = BigFloat::_one;
+        if a == one { BigFloat::_zero.set_prec(a.get_prec) };
+        // Inverse if `a` is smaller than 1. Then `log(b)` is positive since `b > 1`.
+        let (b, log_sign) = (
+            if a < one { (one / a, -1) }
+            else       { (a, 1) }
+        );
+        // Apply `sqrt` repeatedly, so that Tailor series converses quickly.
+        let small = BigFloat::from_F64(0.01);
+        let (x, k) = loop(
+            (b, 0), |(x, k)|
+            if (x - one).abs < small {
+                break $ (x, k)
+            };
+            let x = x.sqrt;
+            continue $ (x, k + 1)
+        );
+        //eval debug_eprintln("(b,k,x)="+(b.to_string_exp,k, x.to_string_exp).to_string);
+        let x = x - one;
+        // b = (1+x)^(2^k), log(b) = 2^k * log(1+x)
+        // x is small enough
+
+        // calculate log(1+x) using Tailor series
+        // log(1+x) = \sum_{n=0}^{\infty}{(-1)^(n+1) * x^n / n}
+        let sum = BigFloat::_zero;
+        let x_n = BigFloat::_one;
+        let log_1_x = loop(
+            (sum, x_n, 1), |(sum, x_n, n)|
+            let x_n = x_n * x;
+            let term = x_n / BigFloat::from_F64(n.to_F64);
+            let sum2 = if n.bit_and(1) == 1 { sum + term } else { sum - term };
+            //eval debug_eprintln("(n,x_n,term)="+(n,x_n.to_string_exp,term.to_string_exp).to_string);
+            if sum2 == sum { break $ sum };
+            continue $ (sum2, x_n, n + 1) 
+        );
+        //eval debug_eprintln("(1+x, log_1_x)="+(one+x,log_1_x.to_string_exp).to_string);
+
+        let log_b = log_1_x.mul_pow2(k);
+        let log_a = if log_sign < 0 { -log_b } else { log_b };
+        log_a
+    );
 }
 
 
@@ -54,6 +99,23 @@ test_exp = (
     let _ = *test(BigFloat::from_F64(3.0));
     let _ = *test(BigFloat::from_F64(100.0));
     let _ = *test(BigFloat::from_F64(-100.0));
+    pure()
+);
+
+test_log: IO ();
+test_log = (
+    let _ = *eprintln("--- test_log");
+    let test: BigFloat -> IO () = |x| (
+        let x_str = x.to_string_exp_precision(3);
+        //let _ = *eprintln([x_str, x.set_prec10(100).log.to_string_exp].format("log({})={}"));
+        let _ = *eprintln([x_str, x.set_prec10(100).log.exp.to_string_exp].format("exp(log({}))={}"));
+        let _ = *eprintln([x_str, x.set_prec10(100).exp.log.to_string_exp].format("log(exp({}))={}"));
+        pure()
+    );
+    let _ = *test(BigFloat::from_F64(1.0).set_prec10(100) / BigFloat::_ten.pow_by_U64(7_U64));
+    let _ = *test(BigFloat::from_F64(1.0));
+    let _ = *test(BigFloat::from_F64(2.0));
+    let _ = *test(BigFloat::from_F64(100.0));
     pure()
 );
 
@@ -92,8 +154,9 @@ test_misc = (
 
 main: IO ();
 main = (
-    let _ = *test_exp;
+    let _ = *test_log;
     if true { pure() };
+    let _ = *test_exp;
     let _ = *test_sqrt;
     let _ = *test_misc;
     pure()

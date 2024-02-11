@@ -237,17 +237,25 @@ _from_string = |str| (
     if str.get_size > 0 && str.get_bytes.@(0) == '-' {
         str.get_sub(1, str.get_size)._from_string.map(neg)
     };
-    let (int_part, frac_part) = str.split_first(".");
-    if frac_part == "" {
-        let int: BigInt = *from_string(int_part);
-        let bf_int: BigFloat = BigFloat::make(int, 0);
-        ok $ bf_int
+    let (mantissa_part, exp_part) = str.to_lower.split_first("e");
+    let exp10: I64 = *if exp_part == "" {
+        pure $ 0
+    } else {
+        from_string(exp_part)
     };
+    let (int_part, frac_part) = mantissa_part.split_first(".");
     let str_append = int_part + frac_part;
     let prec10 = str_append.get_size;
     let int: BigInt = *from_string(str_append);
     let bf: BigFloat = BigFloat::make(int, 0);
-    let bf = bf / BigFloat::_ten.pow_by_U64(frac_part.get_size.to_U64);
+    let exp10 = exp10 - frac_part.get_size;
+    let bf = if exp10 == 0 {
+        bf
+    } else if exp10 > 0 {
+        bf * BigFloat::_ten.pow_by_U64(exp10.to_U64)
+    } else {
+        bf / BigFloat::_ten.pow_by_U64((-exp10).to_U64)
+    };
     let bf = bf.set_prec10(prec10);
     ok $ bf
 );

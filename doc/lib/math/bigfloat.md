@@ -71,6 +71,10 @@ It calls `set_prec()` after converting the precision to base 2.
 Set the precision of a BigFloat in base2.
 The precision is round-up to multiple of 32, except if `prec == 0` then the precision is set to 32.
 
+#### epsilon: BigFloat -> BigFloat;
+
+Gets a BigInt that represents the smallest change in the mantissa of this BigInt.
+
 #### mul_pow2: I64 -> BigFloat -> BigFloat;
 
 Calculates `a * 2^e`.
@@ -83,11 +87,23 @@ Returns the absolute value of `a`.
 
 Returns the square root of `a`.
 
+#### pow_by_U64: U64 -> BigFloat -> BigFloat;
+
+Calculates `a^n`.
+
 #### to_string_precision: I64 -> BigFloat -> String;
 
-Convert a BigFloat to a string. The precision is the count of digits in fractional part,
-specified in base 10.
-For example, `a.to_string_precision(20)` has 20 digits in fractional part.
+Convert a BigFloat to a string with specified precision (i.e., number of digits after the decimal point).
+
+#### to_string_exp: BigFloat -> String;
+
+Convert a BigFloat to a string of exponential form.
+
+#### to_string_exp_precision: I64 -> BigFloat -> String;
+
+Convert a BigFloat to a string of exponential form with specified precision (i.e., number of digits after the decimal point).
+
+#### `impl BigFloat: FromString`
 
 #### `impl BigFloat: ToString`
 

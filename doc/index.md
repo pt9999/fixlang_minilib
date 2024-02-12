@@ -70,6 +70,10 @@ IO extensions, such as:
 - Retrieve file information, such as file size and time stamps
 - Get kernel information such as system name, machine archtecture
 
+### [module Minilib.Math.BigFloat (lib/math/bigfloat.fix)](lib/math/bigfloat.md)
+
+Arbitrary-precision floating point number.
+
 ### [module Minilib.Math.BigInt (lib/math/bigint.fix)](lib/math/bigint.md)
 
 Arbitrary-precision integer.
@@ -77,6 +81,10 @@ Arbitrary-precision integer.
 ### [module Minilib.Math.BigIntPrime (lib/math/bigint_prime.fix)](lib/math/bigint_prime.md)
 
 Generates probable prime numbers of arbitrary-precision integer.
+
+### [module Minilib.Math.BigNat (lib/math/bignat.fix)](lib/math/bignat.md)
+
+Arbitrary-precision natural number. This is internal module of BigInt.
 
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 

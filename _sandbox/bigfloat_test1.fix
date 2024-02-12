@@ -1,0 +1,166 @@
+module Main;
+
+import Math;
+import Debug;
+
+import Minilib.Math.BigFloat;
+import Minilib.Math.BigInt;
+import Minilib.Math.BigNat;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+//import Minilib.Testing.Timeit;
+
+namespace BigFloatEx {
+    exp: BigFloat -> BigFloat;
+    exp = |a| (
+        let prec = a.get_prec;
+        if a.is_zero { BigFloat::_one.set_prec(prec) };
+        let k = max(0, a.@int.@nat._bit_length.to_I64 + a.@exp + 3);
+        let x = a.mul_pow2(-k);
+        // x = a * 2^-k,  a = x * 2^k
+        // exp(a) = exp(x*2^k) = exp(x)^(2^k)
+        eval assert (|_| "x out of range: x = "+x.to_string, x <= BigFloat::_one);
+        //eval debug_eprintln("(k, x)="+(k, x).to_string);
+        let sum = BigFloat::_one;
+        let x_i = BigFloat::_one;
+        let factorial = BigFloat::_one;
+        let exp_x = loop(
+            (sum, x_i, factorial, 1), |(sum, x_i, factorial, i)|
+            let x_i = x_i * x;
+            let factorial = factorial * BigFloat::from_F64(i.to_F64).set_prec(prec);
+            let sum2 = sum + x_i / factorial;
+            //eval debug_eprintln("(i, sum2)="+(i, sum2).to_string);
+            if sum2 == sum { break $ sum };
+            continue $ (sum2, x_i, factorial, i + 1)
+        );
+        loop(
+            (exp_x, 0), |(exp_a, i)|
+            if i >= k { break $ exp_a };
+            continue $ (exp_a * exp_a, i + 1)
+        )
+    );
+
+    log: BigFloat -> BigFloat;
+    log = |a| (
+        eval assert(|_| "log: `a` must be positive", a.is_positive);
+        let prec = a.get_prec;
+        let one = BigFloat::_one;
+        if a == one { BigFloat::_zero.set_prec(prec) };
+        // Inverse if `a` is smaller than 1. Then `log(b)` is positive since `b > 1`.
+        let (b, log_sign) = (
+            if a < one { (one / a, -1) }
+            else       { (a, 1) }
+        );
+        // Apply `sqrt` repeatedly, so that Tailor series converses quickly.
+        let small = BigFloat::from_F64(0.01);
+        let (x, k) = loop(
+            (b, 0), |(x, k)|
+            if (x - one).abs < small {
+                break $ (x, k)
+            };
+            let x = x.sqrt;
+            continue $ (x, k + 1)
+        );
+        //eval debug_eprintln("(b,k,x)="+(b.to_string_exp,k, x.to_string_exp).to_string);
+        let x = x - one;
+        // b = (1+x)^(2^k), log(b) = 2^k * log(1+x)
+        // x is small enough
+
+        // calculate log(1+x) using Tailor series
+        // log(1+x) = \sum_{n=0}^{\infty}{(-1)^(n+1) * x^n / n}
+        let sum = BigFloat::_zero.set_prec(prec);
+        let x_n = BigFloat::_one.set_prec(prec);
+        let log_1_x = loop(
+            (sum, x_n, 1), |(sum, x_n, n)|
+            let x_n = x_n * x;
+            let term = x_n / BigFloat::from_F64(n.to_F64).set_prec(prec);
+            let sum2 = if n.bit_and(1) == 1 { sum + term } else { sum - term };
+            //eval debug_eprintln("(n,x_n,term)="+(n,x_n.to_string_exp,term.to_string_exp).to_string);
+            if sum2 == sum { break $ sum };
+            continue $ (sum2, x_n, n + 1) 
+        );
+        //eval debug_eprintln("(1+x, log_1_x)="+(one+x,log_1_x.to_string_exp).to_string);
+
+        let log_b = log_1_x.mul_pow2(k);
+        let log_a = if log_sign < 0 { -log_b } else { log_b };
+        log_a
+    );
+}
+
+
+test_exp: IO ();
+test_exp = (
+    let _ = *eprintln("--- test_exp");
+    let test: BigFloat -> IO () = |x| (
+        eprintln([x, x.set_prec10(30).exp].map(to_string_exp).format("exp({{})={}"))
+    );
+    let _ = *test(BigFloat::from_F64(0.0));
+    let _ = *test(BigFloat::from_F64(-0.000001));
+    let _ = *test(BigFloat::from_F64(0.000001));
+    let _ = *test(BigFloat::from_F64(1.0));
+    let _ = *test(BigFloat::from_F64(3.0));
+    let _ = *test(BigFloat::from_F64(100.0));
+    let _ = *test(BigFloat::from_F64(-100.0));
+    pure()
+);
+
+test_log_exp: IO ();
+test_log_exp = (
+    let _ = *eprintln("--- test_log_exp");
+    let test: BigFloat -> IO () = |x| (
+        let x_str = x.to_string_exp_precision(3);
+        //let _ = *eprintln([x_str, x.set_prec10(100).log.to_string_exp].format("log({})     ={}"));
+        //let _ = *eprintln([x_str, x.set_prec10(100).exp.to_string_exp].format("exp({})     ={}"));
+        let _ = *eprintln([x_str, x.set_prec10(100).log.exp.to_string_exp].format("exp(log({}))     ={}"));
+        let _ = *eprintln([x_str, x.set_prec10(100).exp.log.to_string_exp].format("log(exp({}))     ={}"));
+        pure()
+    );
+    let _ = *test(BigFloat::from_F64(1.0).set_prec10(100) / BigFloat::_ten.pow_by_U64(7_U64));
+    let _ = *test(BigFloat::from_F64(1.0));
+    let _ = *test(BigFloat::from_F64(2.0));
+    let _ = *test(BigFloat::from_F64(100.0));
+    let _ = *test(BigFloat::from_F64(10000.0));
+    pure()
+);
+
+test_sqrt: IO ();
+test_sqrt = (
+    let _ = *eprintln("--- test_sqrt");
+    let prec10 = 100;
+    let a: BigFloat = from_string("8.8e-4342").as_ok.set_prec10(prec10);
+    let x = a.sqrt;
+    //let _ = *eprintln("a  =" + a._to_string_rep);
+    let _ = *eprintln("a  =" + a.to_string_exp);
+    let _ = *eprintln("x  =" + x.to_string_exp);
+    let _ = *eprintln("x*x=" + (x * x).to_string_exp);
+    pure()
+);
+
+test_misc: IO ();
+test_misc = (
+    let _ = *eprintln("--- test_misc");
+    let a = BigFloat::from_F64(1024.0).set_prec(256) / BigFloat::from_F64(1000.0);
+    let b = BigFloat::from_F64(64.0).set_prec(256)  / BigFloat::from_F64(10.0);
+    let _ = *eprintln("a="+a.to_string);
+    let _ = *eprintln("a="+a.to_string_precision(20));
+    let _ = *eprintln("b="+b.to_string);
+    let _ = *eprintln("b="+b.to_string_precision(20));
+    let c = a * b;
+    let _ = *eprintln("c="+c.to_string);
+    let _ = *eprintln("c="+c.to_string_precision(20));
+    let _ = *eprintln("c.to_F64="+c.to_F64.to_string);
+    let d = c / a;
+    let _ = *eprintln("d="+d.to_string);
+    let _ = *eprintln("d.to_F64="+d.to_F64.to_string);
+    pure()
+);
+
+
+main: IO ();
+main = (
+    let _ = *test_log_exp;
+    let _ = *test_exp;
+    let _ = *test_sqrt;
+    let _ = *test_misc;
+    pure()
+);

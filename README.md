@@ -28,6 +28,7 @@ This library is still in alpha stage.
   - IO extension
 - Math
   - BigInt
+  - BigFloat (currently not well tested)
   - Prime generator using BigInt
 - Networking
   - TCP/IP Socket (IPv4 only)

@@ -17,10 +17,13 @@ ndarray_calc.out:
 	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
 
 png: 
-	../bin/fixautolink run -L ../lib -f png.fix ndarray.fix -d png -d z
+	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z
 
 png.out: 
-	../bin/fixautolink build -o $@ -L ../lib -f png.fix ndarray.fix -d png -d z
+	../bin/fixautolink build -o $@ -L ../lib -L . -f png_test.fix -d png -d z
+
+mandelbrot: 
+	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
 
 test_state_monad:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix

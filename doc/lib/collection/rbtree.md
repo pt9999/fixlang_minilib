@@ -21,6 +21,10 @@ then `less_than(x,z)` must be true.
 
 ### namespace RBNode
 
+### trait RBNodeElem = ToString;
+
+A trait of the element. Currently `ToString` is required.
+
 ### type RBNode
 
 A type of red-black tree node.

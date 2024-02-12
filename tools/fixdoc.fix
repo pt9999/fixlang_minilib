@@ -47,6 +47,17 @@ match_trait = do {
     pure $ chars._unsafe_to_string
 };
 
+// Matches `/^trait\s+(\w+)\s*=/`.
+match_trait_alias: Parser String;
+match_trait_alias = do {
+    let _ = *match_str("trait");
+    let _ = *one_or_more(match_char_class(is_space));
+    let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
+    let _ = *zero_or_more(match_char_class(is_space));
+    let equal = *match_char('=');
+    pure $ chars._unsafe_to_string
+};
+
 // Matches `/^(impl [^{]+)/`.
 match_impl: Parser String;
 match_impl = do {
@@ -239,6 +250,16 @@ namespace State {
         pure $ state
     );
 
+    process_trait_alias_decl: String -> String -> State -> IOFail State;
+    process_trait_alias_decl = |line, trait_alias_name, state| (
+        if state.contains_nofixdoc {
+            pure $ state.set_doc("")
+        };
+        let _ = *state.println("### " + line + "\n");
+        let state = *state.print_doc;
+        pure $ state
+    );
+
     process_namespace_decl: String -> String -> State -> IOFail State;
     process_namespace_decl = |line, namespace_name, state| (
         if state.contains_nofixdoc {
@@ -274,6 +295,11 @@ namespace State {
         if trait_name.is_ok || state.@trait_decl != "" {
             state.process_trait_decl(orig_line, line, trait_name)
         };
+        let trait_alias_name: Result ErrMsg String = match_trait_alias.matches(line);
+        if trait_alias_name.is_ok {
+            state.process_trait_alias_decl(line, trait_alias_name.as_ok)
+        };
+        
         let impl_decl: Result ErrMsg String = match_impl.matches(line);
         if impl_decl.is_ok {
             state.process_impl_decl(impl_decl.as_ok)

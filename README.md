@@ -27,6 +27,7 @@ This library is still in alpha stage.
 - IO
   - IO extension
 - Math
+  - Complex number
   - BigInt
   - BigFloat (currently not well tested)
   - Prime generator using BigInt

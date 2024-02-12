@@ -86,6 +86,12 @@ Generates probable prime numbers of arbitrary-precision integer.
 
 Arbitrary-precision natural number. This is internal module of BigInt.
 
+### [module Minilib.Math.Complex (lib/math/complex.fix)](lib/math/complex.md)
+
+
+### [module Minilib.Math.Types (lib/math/types.fix)](lib/math/types.md)
+
+
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 
 `map_m`, `foreach_m` for Array and Iterator.

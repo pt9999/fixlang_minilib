@@ -2,9 +2,12 @@
 
 ## module Minilib.Math.Complex
 
+Complex number.
+
 ### type Complex
 
 A type that represents a complex number.
+`a` is typically F64 or F32.
 
 ```
 type Complex a = unbox struct {
@@ -20,7 +23,7 @@ Creates a complex number.
 
 `complex` is synonym for `make`.
 
-#### abs2: [a: Ring] Complex a -> a;
+#### abs2: [a: Add, a: Mul] Complex a -> a;
 
 Returns the square of the absolute value of a complex number.
 
@@ -32,7 +35,7 @@ Returns the absolute value of a complex number.
 
 Returns the argument of a complex number, ie.
 
-#### conj: [a: Ring] Complex a -> Complex a;
+#### conj: [a: Neg] Complex a -> Complex a;
 
 Returns the conjugate complex number.
 

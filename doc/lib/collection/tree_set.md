@@ -6,6 +6,10 @@ TreeSet is a set that manages elements in sorted order.
 
 ### namespace TreeSet
 
+### trait TreeSetElem = ToString;
+
+A trait of the element. Currently `ToString` is required.
+
 ### type TreeSet
 
 A type of set that manages elements in sorted order.

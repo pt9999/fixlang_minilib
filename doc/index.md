@@ -88,9 +88,11 @@ Arbitrary-precision natural number. This is internal module of BigInt.
 
 ### [module Minilib.Math.Complex (lib/math/complex.fix)](lib/math/complex.md)
 
+Complex number.
 
 ### [module Minilib.Math.Types (lib/math/types.fix)](lib/math/types.md)
 
+Type definitions for mathematical concepts.
 
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 

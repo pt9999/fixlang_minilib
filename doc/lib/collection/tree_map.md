@@ -6,6 +6,10 @@ TreeMap is a map that manages keys in sorted order.
 
 ### namespace TreeMap
 
+### trait TreeMapKey = ToString;
+
+A trait of the key. Currently `ToString` is required.
+
 ### type TreeMap
 
 `TreeMap` is a structure that stores key-value pairs into a red-black tree.

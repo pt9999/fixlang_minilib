@@ -15,13 +15,27 @@ import Minilib.Media.Image;
 
 write_png_file: String -> Image -> IOFail ();
 write_png_file = |filepath, image| (
+    let imgio = image._to_png_imageio;
+    let row_stride = image.@width * image.@channels;
+    imgio.write_to_file(filepath, false, image.@data, row_stride)
+);
+
+write_png_to_memory: Image -> IOFail (Array U8);
+write_png_to_memory = |image| (
+    let imgio = image._to_png_imageio;
+    let row_stride = image.@width * image.@channels;
+    imgio.write_to_memory(false, image.@data, row_stride)
+);
+
+_to_png_imageio: Image -> PngImageIO;
+_to_png_imageio = |image| (
     let imgio = PngImageIO::empty;
     let imgio = imgio.set_width(image.@width);
     let imgio = imgio.set_height(image.@height);
     let imgio = imgio.set_format(PngImageIO::parse_format(image.@format));
-    let row_stride = image.@width * image.@channels;
-    imgio.write_to_file(filepath, false, image.@data, row_stride)
+    imgio
 );
+
 
 type PngImageIO = unbox struct {
     data: ByteBuffer
@@ -70,22 +84,27 @@ namespace PngImageIO {
     set_flags = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_flags, n.to_U32));
 
     write_to_file: String -> Bool -> Array U8 -> I64 -> PngImageIO -> IOFail ();
-    write_to_file = |filepath, convert_to_8bit, buffer, row_stride, png_image| (
+    write_to_file = |filepath, convert_to_8bit, buffer, row_stride, png_imageio| (
         let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
         let colormap = nullptr;
         let res =
-            png_image.@data.borrow_ptr(|p_png_image|
+            png_imageio.@data.borrow_ptr(|p_png_imageio|
               filepath.borrow_c_str(|p_filepath|
                 buffer.borrow_ptr(|p_buffer|
                     CALL_C[I32 png_image_write_to_file(Ptr, Ptr, I32, Ptr, I32, Ptr),
-                        p_png_image, p_filepath, convert_to_8bit, 
+                        p_png_imageio, p_filepath, convert_to_8bit, 
                         p_buffer, row_stride.to_I32, colormap]
                 )
               )
             );
-        let result = "PngImageIO::write_to_file: res=" + res.to_string;
-        let warning_or_error = png_image.get_warning_or_error;
-        let message = png_image.get_message;
+        png_imageio._check_warning_or_error("write_to_file", res)
+    );
+
+    _check_warning_or_error: String -> I32 -> PngImageIO -> IOFail ();
+    _check_warning_or_error = |func_name, res, png_imageio| (
+        let result = "PngImageIO::" + func_name + ": res=" + res.to_string;
+        let warning_or_error = png_imageio.get_warning_or_error;
+        let message = png_imageio.get_message;
         if warning_or_error == 2 {  // error
             throw $ result + " ERROR: " + message
         };
@@ -98,6 +117,28 @@ namespace PngImageIO {
             // something is wrong, but no message
             throw $ result
         }
+    );
+
+    write_to_memory:  Bool -> Array U8 -> I64 -> PngImageIO -> IOFail (Array U8);
+    write_to_memory = |convert_to_8bit, buffer, row_stride, png_imageio| (
+        let output = Array::fill(buffer.get_size * 2, 0_U8); // TODO: is it ok?
+        let output_size = Array::fill(1, output.get_size.to_U32);
+        let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
+        let colormap = nullptr;
+        let res =
+            png_imageio.@data.borrow_ptr(|p_png_imageio|
+              output.borrow_ptr(|p_output|
+                output_size.borrow_ptr(|p_output_size|
+                  buffer.borrow_ptr(|p_buffer|
+                    CALL_C[I32 png_image_write_to_memory(Ptr, Ptr, Ptr, I32, Ptr, I32, Ptr),
+                        p_png_imageio, p_output, p_output_size, convert_to_8bit, 
+                        p_buffer, row_stride.to_I32, colormap]
+                  )
+                )
+              )
+            );
+        let _ = *png_imageio._check_warning_or_error("write_to_memory", res);
+        pure $ output.get_sub(0, output_size.@(0).to_I64)
     );
 
     _PNG_FORMAT_FLAG_ALPHA: I64;

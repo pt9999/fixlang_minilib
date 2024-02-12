@@ -64,12 +64,11 @@ type Param = unbox struct {
     y0: Real,
     x1: Real,
     y1: Real,
-    loop_max: I64,
-    filepath: String
+    loop_max: I64
 };
 
-render_image: Param -> IOFail ();
-render_image = |param| (
+render_png_image: Param -> IOFail (Array U8);
+render_png_image = |param| (
     let width = param.@width;
     let height = param.@height;
     let xrange = (param.@x0, param.@x1);
@@ -101,10 +100,7 @@ render_image = |param| (
             image.set_rgb(index, color)
         )
     );
-    let filepath = param.@filepath;
-    let _ = *image.write_png_file(filepath);
-    //let _ = *println("Wrote " + filepath).lift;
-    pure()
+    image.write_png_to_memory
 );
 
 
@@ -159,8 +155,7 @@ namespace AppState {
                 y0: *get_param_F64("y0"),
                 x1: *get_param_F64("x1"),
                 y1: *get_param_F64("y1"),
-                loop_max: *get_param_I64("loop_max"),
-                filepath: "/tmp/a.png"
+                loop_max: *get_param_I64("loop_max")
             }
         }.to_result.lift;
         if param.is_err {
@@ -171,9 +166,8 @@ namespace AppState {
             res.status(400).write_str(param.as_err)
         };
         let param = param.as_ok;
-        let _ = *render_image(param);
-        let content = *read_file_bytes(Path::parse(param.@filepath).as_some);
-        res.content_type("image/png").write_bytes(content)
+        let png_data = *render_png_image(param);
+        res.content_type("image/png").write_bytes(png_data)
     );
 }
 

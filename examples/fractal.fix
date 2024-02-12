@@ -10,6 +10,8 @@ import Minilib.Math.Complex;
 //import Minilib.Net.HTML;
 import Minilib.Net.HttpServer;
 import Minilib.Net.Request;
+import Minilib.Task.Future;
+import Minilib.Task.TaskPool;
 import Minilib.Text.StringEx;
 
 type Real = F64;
@@ -45,6 +47,16 @@ palette = |loop_max, i| (
     (r, g, b)
 );
 
+parallel_map_m: TaskPool -> (a -> IO b) -> Array a -> IOFail (Array b);
+parallel_map_m = |pool, f, arr| (
+    let futures = *arr.map_m(
+        |a| Future::make(pool, pure(a).bind(f))
+    );
+    futures.map_m(
+        |future| future.get
+    )
+);
+
 type Param = unbox struct {
     width: I64,
     height: I64,
@@ -63,14 +75,28 @@ render_image = |param| (
     let xrange = (param.@x0, param.@x1);
     let yrange = (param.@y0, param.@y1);
     let loop_max = param.@loop_max;
+    let render_scanline: I64 -> IO (Array (U8, U8, U8)) = |y| (
+        let _ = *pure();
+        let im = y.to_F64 / height.to_F64 * (yrange.@1 - yrange.@0) + yrange.@0;
+        pure $ Iterator::range(0, width).to_array.map(|x|
+            let re = x.to_F64 / width.to_F64  * (xrange.@1 - xrange.@0) + xrange.@0;
+            let color = mandelbrot(re, im, loop_max).palette(loop_max);
+            color
+        )
+    );
+
+    let task_pool = *TaskPool::make(number_of_processors).lift;
+    let scanlines = *Iterator::range(0, height).to_array
+                     .parallel_map_m(task_pool, render_scanline);
+    let _ = *task_pool.shutdown.lift;
+
     let image = Image::make(width, height, "RGB");
     let image = Iterator::range(0, height).fold(
         image, |image, y|
-        let im = y.to_F64 / height.to_F64 * (yrange.@1 - yrange.@0) + yrange.@0;
+        let scanline = scanlines.@(y);
         Iterator::range(0, width).fold (
             image, |image, x|
-            let re = x.to_F64 / width.to_F64  * (xrange.@1 - xrange.@0) + xrange.@0;
-            let color = mandelbrot(re, im, loop_max).palette(loop_max);
+            let color = scanline.@(x);
             let index = image.calc_index(x, y, 0);
             image.set_rgb(index, color)
         )

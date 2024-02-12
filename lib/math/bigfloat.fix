@@ -171,6 +171,12 @@ epsilon = |a| (
     ))
 );
 
+// Calculates approximation of `log2(a.abs)`.
+_approx_log2: BigFloat -> I64;
+_approx_log2 = |a| (
+    a.@int.@nat._bit_length.to_I64 + a.@exp
+);
+
 // Calculates `a * 2^e`.
 mul_pow2: I64 -> BigFloat -> BigFloat;
 mul_pow2 = |e, a| (
@@ -188,8 +194,10 @@ sqrt: BigFloat -> BigFloat;
 sqrt = |a| (
     eval assert(|_| "out of range: a="+a.to_string, !a.is_negative);
     if a.is_zero { BigFloat::_zero };
-    let x = BigFloat::from_F64(1.0);
-    let max_loop = a.get_prec;
+    let a_prec = a.get_prec;
+    let a_log2 = a._approx_log2;
+    let x = BigFloat::_one.mul_pow2(a_log2 / 2).set_prec(a_prec);
+    let max_loop = a_prec;
     BigFloat::_sqrt_inner(x, a, max_loop)
 );
 
@@ -201,15 +209,20 @@ _sqrt_inner = |x, a, max_loop| (
     // x <- x - (x^2 - a) / 2x
     // x <- (2x^2 - x^2 + a) / 2x
     // x <- (x^2 + a) / 2x
-    if max_loop < 0 { x };
+    if max_loop < 0 { 
+        eval debug_eprintln("max_loop reached");
+        x 
+    };
     let xsq_a = x * x + a;              // x^2 + a
     let x2 = x.mul_pow2(1);             // 2x
     let quo = xsq_a / x2;
+    //eval debug_eprintln(max_loop.to_string + ": x  ="+x.to_string_exp);
+    //eval debug_eprintln(max_loop.to_string + ": quo="+quo.to_string_exp);
 
     let is_converged = (
-        let x = x.abs;
         let dq = (quo - x).abs;
-        let dx = x.mul_pow2(-(x.get_prec - 1));
+        let dx = x.epsilon;
+        //let dx = x.mul_pow2(-(x.get_prec - 1));
         //eval debug_eprintln("dq="+dq.to_string);
         //eval debug_eprintln("dx="+dx.to_string);
         dq <= dx
@@ -329,7 +342,7 @@ _to_string_exp_precision: Option I64 -> BigFloat -> String;
 _to_string_exp_precision = |num_frac_digits, a| (
     let (a, log10) = (
         if a.is_zero { (a, 0) };
-        let log2 = a.@int.@nat._bit_length.to_I64 + a.@exp;
+        let log2 = a._approx_log2;
         let log10 = (log2.to_F64 * Math::log10(2.0)).to_I64 - 1;
         let a = if log10 == 0 { a }
         else if log10 > 0 {

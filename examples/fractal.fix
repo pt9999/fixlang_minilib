@@ -17,11 +17,8 @@ type Real = F64;
 threshold_distance: Real;
 threshold_distance = 4.0;
 
-loop_max: I64;
-loop_max = 20;
-
-mandelbrot: Real -> Real -> I64;
-mandelbrot = |re, im| (
+mandelbrot: Real -> Real -> I64 -> I64;
+mandelbrot = |re, im, loop_max| (
     let c = complex(re, im);
     let z = complex(zero, zero);
     loop(
@@ -38,8 +35,8 @@ mandelbrot = |re, im| (
     )
 );
 
-palette: I64 -> (U8, U8, U8);
-palette = |i| (
+palette: I64 -> I64 -> (U8, U8, U8);
+palette = |loop_max, i| (
     if i == -1 { (0_U8, 0_U8, 0_U8) };
     let c = i.to_F64 / loop_max.to_F64 * 512.0;
     let r = max(0.0, min(255.0, c - 256.0)).to_U8;
@@ -55,6 +52,7 @@ type Param = unbox struct {
     y0: Real,
     x1: Real,
     y1: Real,
+    loop_max: I64,
     filepath: String
 };
 
@@ -64,6 +62,7 @@ render_image = |param| (
     let height = param.@height;
     let xrange = (param.@x0, param.@x1);
     let yrange = (param.@y0, param.@y1);
+    let loop_max = param.@loop_max;
     let image = Image::make(width, height, "RGB");
     let image = Iterator::range(0, height).fold(
         image, |image, y|
@@ -71,7 +70,7 @@ render_image = |param| (
         Iterator::range(0, width).fold (
             image, |image, x|
             let re = x.to_F64 / width.to_F64  * (xrange.@1 - xrange.@0) + xrange.@0;
-            let color = mandelbrot(re, im).palette;
+            let color = mandelbrot(re, im, loop_max).palette(loop_max);
             let index = image.calc_index(x, y, 0);
             image.set_rgb(index, color)
         )
@@ -117,6 +116,11 @@ namespace AppState {
         let app_state = *app_state_var.get.lift;
         let param = *do {
             let get_param = |name| req.find_query(name).map_or(throw $ "param not found: " + name, pure);
+            let get_param_I64 = |name| (
+                let value = *get_param(name);
+                let value: I64 = *from_string(value).from_result;
+                pure $ value
+            );
             let get_param_F64 = |name| (
                 let value = *get_param(name);
                 let value: F64 = *from_string(value).from_result;
@@ -129,6 +133,7 @@ namespace AppState {
                 y0: *get_param_F64("y0"),
                 x1: *get_param_F64("x1"),
                 y1: *get_param_F64("y1"),
+                loop_max: *get_param_I64("loop_max"),
                 filepath: "/tmp/a.png"
             }
         }.to_result.lift;

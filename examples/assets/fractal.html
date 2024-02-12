@@ -5,11 +5,6 @@
 <title>FixLang Fractal Demo</title>
 <style>
 body {background: #ffe; } 
-div.note1 {background: #fcc; margin-bottom: 2vmin; }
-div.note { color: #f88; margin-bottom: 2vmin; }
-div.history {background: #fed; padding: 2vmin;}
-div.chat {border-bottom: 1px solid #888; margin-bottom: 2vh; }
-span.name { color: #174; width: 15vw; margin-right: 5vw; }
 div.params {border:1px solid #888; border-radius: 2vmin; margin: 5vmin; padding: 2vmin; }
 input.coord { width: 60vw; }
 </style>
@@ -25,43 +20,93 @@ input.coord { width: 60vw; }
 <div><label>X1: <input class="coord" name="x1" type="text" maxlength="80" value=""></label></div>
 <div><label>Y1: <input class="coord" name="y1" type="text" maxlength="80" value=""></label></div>
 <input type="button" value="Render" onclick="render()">
+<input type="button" value="Undo" onclick="pop_stack()">
+<input type="button" value="Reset" onclick="reset_and_render()">
 </div>
 <script>
-    let x0 = "-2.0", y0 = "-1.25", x1 = "0.5", y1 = "1.25";
+    const default_param = {
+        x0: -2.0,
+        y0: -1.25,
+        x1: 0.5,
+        y1: 1.25
+    };
+    let param = { ...default_param };
+    let param_stack = [];
     function onload () {
-        console.log("init");
+        init_event_handlers();
+        reset_and_render();
+    }
+    function image_element() {
+        return document.querySelector("#image")
+    }
+    function input_element(name) {
+        return document.querySelector(`input[name=${name}]`)
+    }
+    function init_event_handlers() {
+        const image = image_element();
+        image.addEventListener('mouseup', image_onmouseup);
+        image.addEventListener('mousedown', image_onmousedown);
+    }
+    function reset_and_render () {
+        reset_param();
         update_form();
         render();
     }
+    function reset_param () {
+        param = { ...default_param };
+        param_stack = [];
+    }
+    function pop_stack () {
+        if (param_stack.length == 0) { return }
+        param = param_stack.pop();
+        update_form();
+        render()
+    }
     function update_form ()  {
-        get_input("x0").value = x0;
-        get_input("y0").value = y0;
-        get_input("x1").value = x1;
-        get_input("y1").value = y1;
+        for (const name in param) {
+            input_element(name).value = param[name]
+        }
     }
-    function get_form() {
-        x0 = get_input("x0").value;
-        y0 = get_input("y0").value;
-        x1 = get_input("x1").value;
-        y1 = get_input("y1").value;
-    }
-    function get_input (name) {
-        return document.querySelector(`input[name=${name}]`)
+    function get_param() {
+        for (const name in param) {
+            param[name] = +input_element(name).value
+        }
+        return param
     }
     function render() {
-        get_form();
-        const url = `/image?x0=${x0}&y0=${y0}&x1=${x1}&y1=${y1}`;
-        document.querySelector("#image").src=url;
+        const p = get_param();
+        const url = `/image?x0=${p.x0}&y0=${p.y0}&x1=${p.x1}&y1=${p.y1}`;
+        image_element().src=url;
     }
-    /*
-    function render() {
-        console.log("render")
-        const canvas = document.querySelector("canvas");
-        const g = canvas.getContext("2d");
-        g.fill = "#fff";
-        g.fillRect(0, 0, canvas.width, canvas.height);
+
+    function get_mouse_pos(e) {
+        const image = image_element();
+        const rect = image.getBoundingClientRect();
+        let x = (e.clientX - rect.x) / rect.width;
+        let y = (e.clientY - rect.y) / rect.height;
+        x = param.x0 + x * (param.x1 - param.x0);
+        y = param.y0 + y * (param.y1 - param.y0);
+        return {x, y};
     }
-    */
+
+    let drag_start = null;
+    function image_onmousedown(e) {
+        drag_start = get_mouse_pos(e);
+    }
+    function image_onmouseup(e) {
+        if (drag_start === null) { return }
+        const p = drag_start;
+        const q = get_mouse_pos(e);
+        if (p.x == q.x && p.y == q.y) { return }
+        param_stack.push(param);
+        param = { ...param };
+        param.x0 = Math.min(p.x, q.x);
+        param.y0 = Math.min(p.y, q.y);
+        param.x1 = Math.max(p.x, q.x);
+        param.y1 = Math.max(p.y, q.y);
+        update_form();
+        render();
+    }
 </script>
 </body>
 </html>

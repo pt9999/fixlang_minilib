@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <title>FixLang Fractal Demo</title>
 <style>
 body {background: #ffe; } 
+div.hbox {display:flex; }
 div.params {border:1px solid #888; border-radius: 2vmin; margin: 5vmin; padding: 2vmin; }
 input.coord { width: 30vw; }
 input.short { width: 10vw; }
@@ -12,6 +13,9 @@ input.short { width: 10vw; }
 </head>
 <body onload="onload()">
 <h1>FixLang Fractal Demo</h1>
+<div>Zoom In: Left Click, Zoom Out: Right Click</div>
+<div>Change `loop_max` to change colors</div>
+<div class="hbox">
 
 <image id="image" width="512" height="512" draggable="false"></image>
 
@@ -25,13 +29,14 @@ input.short { width: 10vw; }
 <input type="button" value="Undo" onclick="pop_stack()">
 <input type="button" value="Reset" onclick="reset_and_render()">
 </div>
+</div>
 <script>
     const default_param = {
         x0: -2.0,
         y0: -1.25,
         x1: 0.5,
         y1: 1.25,
-        loop_max: 20
+        loop_max: 100
     };
     let param = { ...default_param };
     let param_stack = [];
@@ -47,8 +52,8 @@ input.short { width: 10vw; }
     }
     function init_event_handlers() {
         const image = image_element();
-        image.addEventListener('mouseup', image_onmouseup);
-        image.addEventListener('mousedown', image_onmousedown);
+        image.addEventListener('click', image_onclick);
+        image.addEventListener('contextmenu', image_oncontextmenu);
     }
     function reset_and_render () {
         reset_param();
@@ -92,21 +97,26 @@ input.short { width: 10vw; }
         return {x, y};
     }
 
-    let drag_start = null;
-    function image_onmousedown(e) {
-        drag_start = get_mouse_pos(e);
+    function image_oncontextmenu(e) {
+        const center = get_mouse_pos(e);
+        zoom(center, false);
+        e.preventDefault();
     }
-    function image_onmouseup(e) {
-        if (drag_start === null) { return }
-        const p = drag_start;
-        const q = get_mouse_pos(e);
-        if (p.x == q.x && p.y == q.y) { return }
+
+    function image_onclick(e) {
+        const center = get_mouse_pos(e);
+        zoom(center, true);
+    }
+
+    function zoom(center, zoomIn) {
+        const scale = zoomIn ? 0.2 : 1 / 0.2;
+        const r = Math.max(Math.abs(param.x1 - param.x0), Math.abs(param.y1 - param.y0)) / 2 * scale;
         param_stack.push(param);
         param = { ...param };
-        param.x0 = Math.min(p.x, q.x);
-        param.y0 = Math.min(p.y, q.y);
-        param.x1 = Math.max(p.x, q.x);
-        param.y1 = Math.max(p.y, q.y);
+        param.x0 = center.x - r;
+        param.y0 = center.y - r;
+        param.x1 = center.x + r;
+        param.y1 = center.y + r;
         update_form();
         render();
     }

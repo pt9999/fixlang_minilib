@@ -32,6 +32,7 @@ examples: bin/fixautolink \
 		examples/sample_http_server.out \
 		examples/grep.out \
 		examples/spell_checker.out \
+		examples/calc_pi.out \
 		examples/probable_primes.out
 
 examples/json_cat.out: 
@@ -51,6 +52,9 @@ examples/grep.out:
 
 examples/spell_checker.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/spell_checker.fix
+
+examples/calc_pi.out:
+	bin/fixautolink build -o $@ -L ./lib -f examples/calc_pi.fix
 
 examples/probable_primes.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/probable_primes.fix

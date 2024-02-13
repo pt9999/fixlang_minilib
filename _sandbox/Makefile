@@ -34,9 +34,6 @@ bigint_test1:
 bigfloat_test1:
 	../bin/fixautolink run -L ../lib -L . -f bigfloat_test1.fix
 
-pi.out:
-	../bin/fixautolink build -L ../lib -L . -f pi.fix -o pi.out
-
 clean:
 	rm -f *.out
 

@@ -9,6 +9,124 @@ import Minilib.Testing.UnitTest;
 
 // TODO: add tests
 
+test_cmp: TestCase;
+test_cmp = (
+    make_table_test("test_cmp",
+        [
+            (([0_U32], 0), ([0_U32, 0_U32], 0), 0),
+            (([1_U32], 0), ([0_U32, 0_U32], 0), 1),
+            (([0_U32], 0), ([1_U32, 0_U32], 0), -1),
+            (([0_U32, 2_U32], 0), ([2_U32], 1), 0),
+            (([1_U32, 2_U32], 0), ([2_U32], 1), 1),
+            (([1_U32], 0), ([2_U32], 2), -1),
+            (([1_U32], 0), ([0_U32], 2), 1),
+            (([1_U32], 2), ([2_U32], 1), 1),
+            (([1_U32], 2), ([2_U32], 2), -1),
+            (([0_U32], 3), ([0_U32, 0_U32], 2), 0)
+        ],
+        |((a0, offset0), (a1, offset1), expect)|
+        let actual = _cmp((a0, offset0), (a1, offset1));
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_add: TestCase;
+test_add = (
+    let s = |i| i.I64::shift_left(28);
+    make_table_test("test_add",
+        [
+            ([1, 2, 3], [10, 20], [11, 22, 3]),
+            ([10, 20], [1, 2, 3], [11, 22, 3]),
+            // 8 + 9 = 17 = 0x11 so result=s(1) and carry=1
+            ([s(8) + 10, s(8) + 20], [s(9) + 100, s(9) + 200],
+             [s(1) + 110, s(1) + 221, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], [s(9) + 100, s(9) + 200],
+             [s(1) + 110, s(1) + 221, s(8) + 31]),
+            ([s(8) + 10, s(8) + 20], [s(9) + 100, s(9) + 200, s(9) + 300],
+             [s(1) + 110, s(1) + 221, s(9) + 301]),
+            ([0], [1, 0], [1, 0]),
+            ([0], [0, 0, 0], [0, 0, 0])
+        ],
+        |(a0, a1, expect)|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _add(a0, a1);
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_add_with_offset1: TestCase;
+test_add_with_offset1 = (
+    let s = |i| i.I64::shift_left(28);
+    make_table_test("test_add_with_offset1",
+        [
+            ([1, 2, 3], ([10, 20], 0), [11, 22, 3]),
+            ([1, 2, 3], ([10, 20], 2), [1, 2, 13, 20]),
+            ([1, 2, 3], ([10, 20], 3), [1, 2, 3, 10, 20]),
+            ([1, 2, 3], ([10, 20], 4), [1, 2, 3, 0, 10, 20]),
+            // 8 + 9 = 17 = 0x11 so result=s(1) and carry=1
+            ([s(8) + 10, s(8) + 20], ([s(9) + 100, s(9) + 200], 0), 
+             [s(1) + 110, s(1) + 221, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 0), 
+             [s(1) + 110, s(1) + 221, s(8) + 31]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 1), 
+             [s(8) + 10, s(1) + 120, s(1) + 231, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 2), 
+             [s(8) + 10, s(8) + 20, s(1) + 130, s(9) + 201]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 3), 
+             [s(8) + 10, s(8) + 20, s(8) + 30, s(9) + 100, s(9) + 200]),
+            ([0], ([1], 2), [0, 0, 1]),
+            ([0], ([0], 2), [0, 0, 0])
+        ],
+        |(a0, (a1, offset1), expect)|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _add_with_offset1(a0, (a1, offset1));
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_signed_sub_with_offset: TestCase;
+test_signed_sub_with_offset = (
+    make_table_test("test_signed_sub_with_offset",
+        [
+            (([11, 22, 33], 0), ([1, 2, 3], 0), (([10, 20, 30], 0), 1)),
+            (([1, 2, 3], 0), ([11, 22, 33], 0), (([10, 20, 30], 0), -1)),
+            (([0, 0, 1], 0), ([4], 0), (([0xfffffffc, 0xffffffff, 0], 0), 1)),
+            (([0, 0, 2], 0), ([8, 4], 0), (([0xfffffff8, 0xfffffffb, 1], 0), 1)),
+            (([0, 0, 0], 0), ([8, 4], 0), (([8, 4, 0], 0), -1)),
+            (([0, 0, 0, 0, 2], 0), ([8, 4], 2), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), 1)),
+            (([8, 4], 2), ([0, 0, 0, 0, 2], 0), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), -1)),
+            (([0, 0, 0, 0, 2], 0), ([8, 4], 3), (([0, 0, 0, 8, 2], 0), -1)),
+            (([0], 2), ([0], 2), (([0], 2), 1))
+        ],
+        |((a0, offset0), (a1, offset1), ((expect, ex_offset), ex_sign))|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _signed_sub_with_offset((a0, offset0), (a1, offset1));
+        assert_equal("eq", ((expect, ex_offset), ex_sign), actual)
+    )
+);
+
+test_neg: TestCase;
+test_neg = (
+    make_table_test("test_neg",
+        [
+            ([0xaaaaaaaa], [0x55555556]),
+            ([1, 2, 3], [0xffffffff, 0xfffffffd, 0xfffffffc]),
+            ([0, 0, 0], [0, 0, 0])
+        ],
+        |(a0, expect)|
+        let a0 = a0.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = a0._neg;
+        assert_equal("eq", expect, actual)
+    )
+);
+
 test_bit_length: TestCase;
 test_bit_length = (
     make_table_test("test_bit_length",
@@ -87,6 +205,11 @@ test_divmod_by_power_of_two = (
 main: IO ();
 main = (
     [
+        test_cmp,
+        test_add,
+        test_add_with_offset1,
+        test_signed_sub_with_offset,
+        test_neg,
         test_bit_length,
         test_shift_left,
         test_shift_right,

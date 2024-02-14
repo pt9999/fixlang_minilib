@@ -61,5 +61,5 @@ examples/probable_primes.out:
 	bin/fixautolink build -o $@ -L ./lib -f examples/probable_primes.fix
 
 examples/fractal_server.out:
-	bin/fixautolink build -o $@ -L ./lib -d png -d z -f examples/fractal_server.fix
+	-bin/fixautolink build -o $@ -L ./lib -d png -d z -f examples/fractal_server.fix
 

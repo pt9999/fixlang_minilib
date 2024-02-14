@@ -33,7 +33,8 @@ examples: bin/fixautolink \
 		examples/grep.out \
 		examples/spell_checker.out \
 		examples/calc_pi.out \
-		examples/probable_primes.out
+		examples/probable_primes.out \
+		examples/fractal_server.out
 
 examples/json_cat.out: 
 	bin/fixautolink build -o $@ -L ./lib -f examples/json_cat.fix

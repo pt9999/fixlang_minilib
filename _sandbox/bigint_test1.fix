@@ -3,6 +3,7 @@ module Main;
 import Debug;
 import Random;
 
+import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigIntPrime;
 import Minilib.Text.StringEx;
@@ -51,6 +52,7 @@ namespace Karatsuba {
     );
 }
 
+/*
 namespace BigNatEx {
     _bit_length: Array U32 -> U64;
     _bit_length = |a| (
@@ -124,6 +126,7 @@ namespace BigNatEx {
         a._remove_last_zeros
     );
 }
+*/
 
 namespace Goldschmidt {
 
@@ -143,14 +146,14 @@ namespace Goldschmidt {
         if exp1 < exp0 {
             let dexp0 = (exp0 - exp1).to_U64;
             let (off0, dexp0) = _divmod_log2_base(dexp0);
-            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);
-            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));
+            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);      // TODO: is it ok to use just _shift_left?
+            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));     // TODO: use _signed_sub_with_offset
             let exp2 = exp1 + off2 * _log2_base.to_I64;
             pure $ (a2, exp2)
         };
         let dexp1 = (exp1 - exp0).to_U64;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
-        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);          // TODO: is it ok to use just _shift_left?
         let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.to_I64));
         let exp2 = exp0 + off2 * _log2_base.to_I64;
         pure $ (a2, exp2)
@@ -541,5 +544,28 @@ prof_divmod3 = (
     pure()
 );
 
+
+test_perf_div: IO ();
+test_perf_div = (
+    Iterator::range(0, 10).fold_m(
+        (), |_, i|
+        let prec10 = (i+1) * 1000;
+        let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let random = Random::init_by_seed(123_U64); // time.to_U64);
+        let prime_gen = *PrimeGen::make(random, false);
+        let a = *prime_gen.generate_bigint(2*bits);
+        let b = *prime_gen.generate_bigint(bits);
+        let _ = *timeit("_divmod: prec10="+prec10.to_string, |_|
+                    let c = _divmod(a.@nat, b.@nat);      // currently the cost of `_divmod` is O(n^3)
+                    ());
+        let _ = *timeit("_divmod2: prec10="+prec10.to_string, |_|
+                    let c = _divmod2(a.@nat, b.@nat);      // goldschmidt is about O(n^2)
+                    ());
+        pure()
+    )
+);
+
 main: IO ();
-main = test_probable_prime;
+//main = test_probable_prime;
+main = test_perf_div;
+

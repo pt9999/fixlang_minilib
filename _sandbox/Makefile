@@ -32,7 +32,7 @@ bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix
 
 bigfloat_test1:
-	../bin/fixautolink run -L ../lib -L . -f bigfloat_test1.fix
+	../bin/fixautolink build -L ../lib -L . -f bigfloat_test1.fix
 
 clean:
 	rm -f *.out

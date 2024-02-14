@@ -40,23 +40,23 @@ namespace Worker {
     handle = |connection, remote_addr, worker| (
         do {
             let app = worker.@app;
-            eval debug_eprintln("parsing request");
+            //eval debug_eprintln("parsing request");
             let request = *Request::parse(connection, remote_addr);
             
-            eval debug_eprintln("request=" + request.to_string);
+            //eval debug_eprintln("request=" + request.to_string);
             let response = Response::make(request);
-            eval debug_eprintln("finding handler");
+            //eval debug_eprintln("finding handler");
             let path = *request.@path.decodeURI.from_result;
             let handler = app.@router.find(request.@method, path).map_or(
                 _not_found_handler,
                 |handler| 
-                eval debug_eprintln("found handler");
+                //eval debug_eprintln("found handler");
                 handler
             );
-            eval debug_eprintln("handling response");
+            //eval debug_eprintln("handling response");
             let response = *handler(request, response);  
             let _ = *response.end;
-            eval debug_eprintln("worker finished");
+            //eval debug_eprintln("worker finished");
             pure()
         }
         ._finally(|_| close_file(connection))
@@ -108,8 +108,14 @@ namespace App {
 
     // `app.listen(server_host_port)` listens for incoming requests,
     // and respond to accepted connections.
+    //
+    // This function sets the signal handler for SIGPIPE to SIG_IGN to avoid
+    // abnormal program termination when writing to a closed socket.
     listen: String -> App -> IOFail App;
     listen = |server_host_port, app| (
+        // Set the signal handler for SIGPIPE to SIG_IGN.
+        eval CALL_C[Ptr signal(I32, I64), /* SIGPIPE = */ 13_I32, /* SIG_IGN = */ 1_I64];
+
         let socket = *listen_tcp_server(server_host_port, app.@backlog);
         let _ = *eprintln ("Listening on " + server_host_port).lift;
         loop_m(

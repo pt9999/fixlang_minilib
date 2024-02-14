@@ -8,31 +8,20 @@ import AsyncTask;
 // Memoize function
 //-------------------------------------------------------
 
-type MemoFunc k v = unbox struct {
-    f: (k -> IO v) -> k -> IO v,
-    memo: Var (HashMap k v)
-};
-
-namespace MemoFunc {
-    make: [k: HashKey] ((k -> IO v) -> k -> IO v)-> IO (MemoFunc k v);
-    make = |f| (
-        let memo = *Var::make(HashMap::empty(0));
-        pure $ MemoFunc { f: f, memo: memo }
-    );
-
-    call: [k: HashKey] k -> MemoFunc k v -> IO v;
-    call = |key, mf| (
-        let memo = *mf.@memo.get;
+memoize: [k: HashKey] ((k -> IO v) -> k -> IO v) -> IO (k -> IO v);
+memoize = |f| (
+    let memo_var = *Var::make(HashMap::empty(0));
+    pure $ fix $ |loop, key| (
+        let memo = *memo_var.get;
         let opt = memo.find(key);
         if opt.is_some {
             pure(opt.as_some)
         };
-        let loop = |k| mf.call(k);
-        let value = *(mf.@f) (loop, key);
-        let _ = *mf.@memo.mod(insert(key, value));
+        let value = *f(loop, key);
+        let _ = *memo_var.mod(insert(key, value));
         pure $ value
-    );
-}
+    )
+);
 
 //-------------------------------------------------------
 // Fibonacci function (I64 -> I64)
@@ -75,8 +64,8 @@ main = (
     //   let ans = fib(45);
 
     // Memoized fibonacci function call (running time is about 0.003 second).
-    let fib_memo = *MemoFunc::make(fib_inner);
-    let ans = *fib_memo.call(45);
+    let fib_memo = *memoize(fib_inner);
+    let ans = *fib_memo(45);
 
     eval assert_eq(|_|"fib(45) is not 1134903170!", ans, 1134903170);
     print $ ans.to_string

@@ -3,6 +3,7 @@ module Minilib.Math.BigNat;
 
 import Debug;
 import Math;
+import Random;
 
 import Minilib.Text.StringEx;
 
@@ -527,3 +528,45 @@ _from_string_inner = |bytes, i, a| (
     let a = _add(_mul_u32(10_U32, a), [digit]);
     _from_string_inner(bytes, i + 1, a)
 );
+
+_generate_bignat:  I64 -> Random -> (Array U32, Random); 
+_generate_bignat = |bit_length, random| (
+    eval assert(|_| "invalid bit_length", bit_length >= 0);
+    let end = BigNat::_one._shift_left(bit_length.to_U64);
+    let begin = end._shift_right(1_U64);
+    _generate_bignat_range(begin, end, random)
+);
+
+_generate_bignat_range:  Array U32 -> Array U32 -> Random -> (Array U32, Random); 
+_generate_bignat_range = |begin, end, random| (
+    if _cmp((begin, 0), (end, 0)) > 0 {
+        _generate_bignat_range(end, begin, random)      // swap range and retry
+    };
+    let n = _sub(end, begin);
+    let n = n._remove_last_zeros;
+    eval assert(|_| "invalid range", !n._is_zero);
+    let size = n.get_size;
+    let (r, random) = loop(
+        ([], 0, random), |(nat, i, random)|
+        let (u64, random) = random.generate_U64;
+        if i == size - 1 {
+            let m = n.@(size - 1).to_U64;
+            // choose 0..m uniformly
+            let u64 = u64 / (U64::maximum / (m + 1_U64));
+            if u64 > m {
+                continue $ (nat, i, random)     // try again
+            };
+            let nat = nat.push_back(u64.to_U32);
+            break $ (nat, random)
+        };
+        let (_, rem) = BigNat::_divmod_base(u64);
+        let nat = nat.push_back(rem.to_U32);
+        continue $ (nat, i + 1, random)
+    );
+    if _cmp((r, 0), (n, 0)) >= 0 {
+        _generate_bignat_range(begin, end, random)      // try again
+    };
+    let r = _add(begin, r);
+    (r, random)
+);
+

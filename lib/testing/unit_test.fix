@@ -2,6 +2,7 @@
 module Minilib.Testing.UnitTest;
 
 import Debug;
+import Time;
 
 // If _TEST_VERBOSE is false, only failed testcases will be reported.
 // If the environment variable `TEST_VERBOSE` is set to non-empty string, _TEST_VERBOSE becomes true.
@@ -41,13 +42,18 @@ run_test_driver = |tests| (
         eval CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
         eval CALL_C[() setbuf(Ptr, Ptr), IO::stderr._file_ptr, nullptr];
 
-        let _ = *(lift $ eprintln ("Starting Test Driver"));
+        let _ = *eprintln ("Starting Test Driver").lift;
+        let start = *Time::get_now.lift;
         let test: TestCase = tests.run_tests;
         let (success, fail) = *(test());
-        let _ = *(lift $ eprintln ("SUCCESS: " + success.to_string + " FAIL: " + fail.to_string));
+        let end = *Time::get_now.lift;
+        let time = (end.@sec.to_F64 - start.@sec.to_F64) +
+                   (end.@nanosec.to_F64 * 1.0e-9 - start.@nanosec.to_F64 * 1.0e-9);
+        let _ = *eprintln("SUCCESS: " + success.to_string + " FAIL: " + fail.to_string +
+                          " TIME: " + time.to_string_precision(3_U8) + " sec").lift;
         pure $ if fail == 0 { 0 } else { 1 }
     }.try(|err|
-        let _ = *(eprintln ("FATAL ERROR: " + err));
+        let _ = *eprintln("FATAL ERROR: " + err);
         pure $ 1
     )
     .bind(|exitcode| exit(exitcode))

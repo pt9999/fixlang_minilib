@@ -45,8 +45,8 @@ test_add = (
              [s(1) + 110, s(1) + 221, s(8) + 31]),
             ([s(8) + 10, s(8) + 20], [s(9) + 100, s(9) + 200, s(9) + 300],
              [s(1) + 110, s(1) + 221, s(9) + 301]),
-            ([0], [1, 0], [1, 0]),
-            ([0], [0, 0, 0], [0, 0, 0])
+            ([0], [1, 0], [1]),
+            ([0], [0, 0, 0], [0])
         ],
         |(a0, a1, expect)|
         let a0 = a0.map(to_U32);
@@ -78,7 +78,7 @@ test_add_with_offset1 = (
             ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 3), 
              [s(8) + 10, s(8) + 20, s(8) + 30, s(9) + 100, s(9) + 200]),
             ([0], ([1], 2), [0, 0, 1]),
-            ([0], ([0], 2), [0, 0, 0])
+            ([0], ([0], 2), [0])
         ],
         |(a0, (a1, offset1), expect)|
         let a0 = a0.map(to_U32);
@@ -95,9 +95,9 @@ test_signed_sub_with_offset = (
         [
             (([11, 22, 33], 0), ([1, 2, 3], 0), (([10, 20, 30], 0), 1)),
             (([1, 2, 3], 0), ([11, 22, 33], 0), (([10, 20, 30], 0), -1)),
-            (([0, 0, 1], 0), ([4], 0), (([0xfffffffc, 0xffffffff, 0], 0), 1)),
+            (([0, 0, 1], 0), ([4], 0), (([0xfffffffc, 0xffffffff], 0), 1)),
             (([0, 0, 2], 0), ([8, 4], 0), (([0xfffffff8, 0xfffffffb, 1], 0), 1)),
-            (([0, 0, 0], 0), ([8, 4], 0), (([8, 4, 0], 0), -1)),
+            (([0, 0, 0], 0), ([8, 4], 0), (([8, 4], 0), -1)),
             (([0, 0, 0, 0, 2], 0), ([8, 4], 2), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), 1)),
             (([8, 4], 2), ([0, 0, 0, 0, 2], 0), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), -1)),
             (([0, 0, 0, 0, 2], 0), ([8, 4], 3), (([0, 0, 0, 8, 2], 0), -1)),
@@ -109,6 +109,70 @@ test_signed_sub_with_offset = (
         let expect = expect.map(to_U32);
         let actual = _signed_sub_with_offset((a0, offset0), (a1, offset1));
         assert_equal("eq", ((expect, ex_offset), ex_sign), actual)
+    )
+);
+
+test_add_sub_random: TestCase;
+test_add_sub_random = (
+    make_table_test("test_add_sub_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((123 + bit_length1*551 + bit_length2*661).to_U64);
+        let (a, random) = BigNat::_generate_bignat(bit_length1, random);
+        let (b, random) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _add(a, b);
+        let d = _sub(c, b);
+        let _ = *assert_equal("d", a, d);
+        pure()        
+    )
+);
+
+test_add_sub_with_offset_random: TestCase;
+test_add_sub_with_offset_random = (
+    make_table_test("test_add_sub_with_offset_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((123 + bit_length1*551 + bit_length2*661).to_U64);
+        let (a, random) = BigNat::_generate_bignat(bit_length1, random);
+        let (b, random) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _add_with_offset1(a, (b, 0));
+        let ((d, doff), dsign) = _signed_sub_with_offset((c, 0), (b, 0));
+        let _ = *assert_equal("d", a, d);
+        let _ = *assert_equal("doff", 0, doff);
+        let _ = *assert_equal("dsign", 1, dsign);
+        pure()        
+    )
+);
+
+test_mul_div_random: TestCase;
+test_mul_div_random = (
+    make_table_test("test_mul_div_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((12345 + bit_length1*331 + bit_length2*441).to_U64);
+        let (a, random) = BigNat::_generate_bignat(bit_length1, random);
+        let (b, random) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _mul(a, b);
+        let (quo, rem) = _divmod(c, b);
+        let _ = *assert_equal("quo", a, quo);
+        let _ = *assert_equal("rem", BigNat::_zero, rem);
+        let (quo2, rem2) = _divmod(a, b);
+        let d = _add(_mul(quo2, b), rem2);
+        //let _ = *println("(a,b,c,d)="+(a,b,c,d).to_string).lift;
+        let _ = *assert_equal("d", a, d);
+        pure()        
     )
 );
 
@@ -226,6 +290,9 @@ main = (
         test_add,
         test_add_with_offset1,
         test_signed_sub_with_offset,
+        test_add_sub_random,
+        test_add_sub_with_offset_random,
+        test_mul_div_random,
         test_neg,
         test_bit_length,
         test_shift_left,

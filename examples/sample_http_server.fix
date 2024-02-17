@@ -1,8 +1,11 @@
+// Sample HTTP server that serves a chat room.
+
 module Main;
 
 import AsyncTask;
 import Debug;
 
+import Minilib.App.Clap;
 import Minilib.Net.HTML;
 import Minilib.Net.HttpServer;
 import Minilib.Net.Request;
@@ -117,15 +120,30 @@ namespace AppState {
     );
 }
 
+command: Command;
+command = (
+    Command::new("sample_http_server.out")
+    .version("1.0")
+    .about("Sample http server")
+    .arg(Arg::new("host").short('h').long("host").help("IP address to liten (default: 127.0.0.1)").takes_value.default_value("127.0.0.1"))
+    .arg(Arg::new("port").short('p').long("port").help("port number to listen (default: 8080)").takes_value.default_value("8080"))
+);
+
+
 main: IO ();
 main = (
     do {
+        let matches = *command.get_matches;
+        let host = matches.get_one("host").as_some;
+        let port = matches.get_one("port").as_some;
+        let server_host_port = host + ":" + port;
+
         let app_state_var = *AppState::initialize;
         let app = App::make();
         let app = app.on("GET", "/", ChatBoard::on_get(app_state_var));
         let app = app.on("POST", "/", ChatBoard::on_post(app_state_var));
-        let app = *app.listen("localhost:8080");
+        let app = *app.listen(server_host_port);
         pure()
     }
-    .try(|err| eprintln("ERROR: " + err))
+    .try(|err| eprintln(err))
 );

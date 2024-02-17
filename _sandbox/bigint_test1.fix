@@ -25,7 +25,8 @@ namespace Karatsuba {
     // Calculates `a * b`.
     _mul_karatsuba: Array U32 -> Array U32 -> Array U32;
     _mul_karatsuba = |a, b| (
-        if a.get_size <= 2 && b.get_size <= 2 {
+        let thresh = 64;
+        if a.get_size <= thresh && b.get_size <= thresh {
             _mul(a,b)
         };
         let n = max(a.get_size, b.get_size);
@@ -395,7 +396,7 @@ test_karatsuba = (
     let time = CALL_C[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let prime_gen = *PrimeGen::make(random,false);
-    let bits = 1024;
+    let bits = 8192;   //1024;
     let a = *prime_gen.generate_bigint(bits);
     let b = *prime_gen.generate_bigint(bits);
     let _ = *timeit("a*b", |_| a*b);
@@ -565,7 +566,27 @@ test_perf_div = (
     )
 );
 
+test_perf_karatsuba: IO ();
+test_perf_karatsuba = (
+    Iterator::range(0, 50).fold_m(
+        (), |_, i|
+        let prec10 = (i+1) * 1000;
+        let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let random = Random::init_by_seed((321 + i * 13).to_U64); // time.to_U64);
+        let prime_gen = *PrimeGen::make(random, false);
+        let a = *prime_gen.generate_bigint(bits);
+        let b = *prime_gen.generate_bigint(bits);
+        let _ = *timeit("mul:           prec10="+prec10.to_string, |_|
+                    let c = mul(a, b);
+                    ());
+        let _ = *timeit("mul_karatsuba: prec10="+prec10.to_string, |_|
+                    let c = mul_karatsuba(a, b);
+                    ());
+        pure()
+    )
+);
+
 main: IO ();
 //main = test_probable_prime;
-main = test_perf_div;
+main = test_karatsuba;
 

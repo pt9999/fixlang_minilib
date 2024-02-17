@@ -11,22 +11,27 @@ module Main;
 
 import Character;
 import Debug;
+import Hash;
+import HashMap;
+import HashSet;
 
 import Minilib.App.Clap;
-import Minilib.Collection.TreeMap;
-import Minilib.Collection.TreeSet;
+//import Minilib.Collection.TreeMap;
+//import Minilib.Collection.TreeSet;
 import Minilib.IO.IOEx;
 import Minilib.Text.StringEx;
 
 namespace SpellChecker {
     type SpellChecker = unbox struct {
-        dict: TreeMap String (Array String)
+        words: HashSet String,
+        symspell: HashMap String (Array String)
     };
 
     empty: SpellChecker;
     empty = (
         SpellChecker {
-            dict: TreeMap::make()
+            words: HashSet::empty(100),
+            symspell: HashMap::empty(100)
         }
     );
 
@@ -40,12 +45,14 @@ namespace SpellChecker {
             from_word_list_file_contents(word_lists)
         , ());
         let _ = *eprintln("registering time=" + time.to_string).lift;
-        let _ = *eprintln("deleted count=" + checker.@dict.get_size.to_string).lift;
+        /*
+        let _ = *eprintln("deleted count=" + checker.@symspell.get_size.to_string).lift;
         let (count, time) = consumed_time_while(|_|
-            checker.@dict.to_iter.fold(0, |n, (k, words)| n + words.get_size)
+            checker.@symspell.to_iter.fold(0, |n, (k, words)| n + words.get_size)
         , ());
         let _ = *eprintln("word count=" + count.to_string).lift;
         let _ = *eprintln("word count time=" + time.to_string).lift;
+        */
         let _ = *eprintln("done.").lift;
         pure $ checker
     );
@@ -62,33 +69,58 @@ namespace SpellChecker {
         )
     );
 
+    _upsert: [k: HashKey] k -> v -> (v -> v) -> HashMap k v -> HashMap k v;
+    _upsert = |k, v, f, map| (
+        let opt = map.find(k);
+        if opt.is_none {
+            map.insert(k, v)
+        };
+        let v = f(opt.as_some);
+        map.insert(k, v)
+    );
+
     add_word: String -> SpellChecker -> SpellChecker;
     add_word = |word, checker| (
+        let checker = checker.mod_words(insert(word));
         let k = _max_delete_char_count(word);
         _delete_chars(k, word).to_iter.fold(
             checker, |checker, deleted|
-            checker.mod_dict(upsert(deleted, [word], push_back(word)))
+            checker.mod_symspell(_upsert(deleted, [word], push_back(word)))
         )
     );
 
     find_word: String -> SpellChecker -> Iterator String;
     find_word = |typemiss_word, checker| (
+        if checker.@words.contains(typemiss_word) {
+            Iterator::empty
+        };
         let k = _max_delete_char_count(typemiss_word);
         let candidates: Iterator String = (
             _delete_chars(k, typemiss_word).to_iter.map(
                 |typemiss_deleted|
-                checker.@dict.find(typemiss_deleted)
+                checker.@symspell.find(typemiss_deleted)
                 .map_or(Iterator::empty, to_iter)
             )
             .flatten
         );
-        let candidates = candidates.push_front(typemiss_word);
-        let candidates = TreeSet::from_iter(candidates).to_iter;    // sort & uniq
-        let max_levenshtein = 2;
-        let candidates = candidates.filter(|word|
-            levenshtein(word, typemiss_word) <= max_levenshtein
+        //let candidates = candidates.push_front(typemiss_word);
+        let candidates = HashSet::from_iter(candidates).to_iter;    // uniq
+        let candidates = candidates.map(|word|
+            (levenshtein(word, typemiss_word), word)
         );
-        candidates
+        // sort by levenshtein
+        let candidates = candidates.to_array.sort_by(|((i1, w1), (i2,w2))|
+            i1 < i2 ||
+            (i1 == i2 && w1 < w2)
+        ).to_iter;
+        // filter by levenshtein
+        let max_levenshtein = 2;
+        let min_levenshtein = candidates.fold(
+            max_levenshtein, |min_levenshtein, (i, w)|
+            min(min_levenshtein, i)
+        );
+        let candidates = candidates.filter(|(i, w)| i == min_levenshtein);
+        candidates.map(|(i,w)| w)
     );
 
     _max_delete_char_count: String -> I64;

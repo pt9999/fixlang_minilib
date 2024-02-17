@@ -73,3 +73,7 @@ To run test codes, type `make test`. It has been mainly tested in the following 
 ## Library Reference
 
 See [Library Reference](doc/index.md).
+
+## Example programs
+
+See [examples/README.md](examples/README.md).

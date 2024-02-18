@@ -1,0 +1,240 @@
+module Main;
+
+import Debug;
+
+import Minilib.Math.Types;
+import Minilib.Text.StringEx;
+
+trait RemRing = Ring + Rem + ToString;
+
+//-------------------------------------------------------------
+
+type Modulo a = unbox struct {
+    value: a,
+    modulo: a
+};
+
+namespace Modulo {
+    make: a -> a -> Modulo a;
+    make = |value, modulo| (
+        Modulo { value: value, modulo: modulo }
+    );
+
+    _assert_modulo_equals: [a: RemRing] Modulo a -> Modulo a -> ();
+    _assert_modulo_equals = |x, y| (
+        assert(|_| "modulo is not equal", x.@modulo == y.@modulo)
+    );
+
+    is_zero: [a: RemRing] Modulo a -> Bool;
+    is_zero = |x| x.@value == zero;
+}
+
+impl [a: ToString] Modulo a: ToString {
+    to_string = |x| x.@value.to_string;         // does not show modulo
+}
+
+impl [a: RemRing] Modulo a: Eq {
+    eq = |x, y| (
+        if x.is_zero { y.is_zero };
+        if y.is_zero { false };
+        x.@value == y.@value && x.@modulo == y.@modulo
+    );
+}
+
+impl [a: RemRing] Modulo a: Zero {
+    zero = Modulo::make(zero, zero);       // modulo is unknown
+}
+
+impl [a: RemRing] Modulo a: Neg {
+    neg = |x| (
+        Modulo::make(-x.@value, x.@modulo)
+    );
+}
+
+impl [a: RemRing] Modulo a: Add {
+    add = |x, y| (
+        if x.is_zero { y };
+        if y.is_zero { x };
+
+        eval _assert_modulo_equals(x, y);
+        Modulo::make((x.@value + y.@value) % x.@modulo, x.@modulo)
+    );
+}
+
+impl [a: RemRing] Modulo a: Sub {
+    sub = |x, y| (
+        if x.is_zero { -y };
+        if y.is_zero { x };
+
+        eval _assert_modulo_equals(x, y);
+        Modulo::make((x.@value - y.@value) % x.@modulo, x.@modulo)
+    );
+}
+
+impl [a: RemRing] Modulo a: Mul {
+    mul = |x, y| (
+        if x.is_zero { zero };
+        if y.is_zero { zero };
+
+        eval _assert_modulo_equals(x, y);
+        Modulo::make((x.@value * y.@value) % x.@modulo, x.@modulo)
+    );
+}
+
+// TODO: inverse
+
+//-------------------------------------------------------------
+
+// Polynomial
+type Polynomial a = unbox struct {
+    coeff: Array a
+};
+
+namespace Polynomial {
+    make: [a: Ring] Array a -> Polynomial a;
+    make = |coeff| (
+        // remove last zeros
+        let coeff = loop(
+            coeff, |coeff|
+            let n = coeff.get_size;
+            if n <= 1 { break $ coeff };
+            if coeff.@(n - 1) != zero { break $ coeff };
+            let coeff = coeff.pop_back;
+            continue $ coeff
+        );
+        eval assert(|_| "invalid size", coeff.get_size >= 1);
+        Polynomial { coeff: coeff }
+    );
+
+    of_power: [a: Ring] a -> I64 -> Polynomial a;
+    of_power = |x, power| (
+        eval assert(|_| "invalid power", power >= 0);
+        let coeff = Array::from_map(power + 1, |i|
+            if i == power { x } else { zero }
+        );
+        Polynomial::make(coeff)
+    );
+
+    is_zero: [a: Ring] Polynomial a -> Bool;
+    is_zero = |p| p == zero;
+
+    get: [a: Ring] I64 -> Polynomial a -> a;
+    get = |i, p| (
+        if i < 0 || p.@coeff.get_size <= i { zero };
+        p.@coeff.@(i)
+    );
+
+    get_degree: Polynomial a -> I64;
+    get_degree = |p| p.@coeff.get_size - 1;
+
+    divmod: [a: Field] Polynomial a -> Polynomial a -> (Polynomial a, Polynomial a);
+    divmod = |num, den| (
+        eval assert (|_| "Divide by zero", !den.is_zero);
+        let (quo, rem) = loop(
+            (zero, num), |(quo, num)|
+            if num.is_zero { break $ (quo, num) };
+            let num_degree = num.get_degree;
+            let den_degree = den.get_degree;
+            if num_degree < den_degree { break $ (quo, num) };
+            let n = num.get(num_degree);
+            let d = den.get(den_degree);
+            let q = n / d;
+            let qd = q * d;
+            eval assert(|_| "has remainder", n == qd);
+            let q = Polynomial::of_power(n / d, num_degree - den_degree);
+            let quo = quo + q;
+            let rem = num - q * den;
+            eval assert(|_| "has reminder !!", rem.get_degree < num.get_degree);
+            continue $ (quo, rem)
+        );
+        (quo, rem)
+    );
+}
+
+impl [a: Ring, a: ToString] Polynomial a: ToString {
+    to_string = |x| (
+        let degree = x.get_degree;
+        Iterator::range(0, degree + 1).reverse.map(|i| 
+            x.get(i).to_string + "x^" + i.to_string
+        ).join(" + ")
+    );
+}
+
+impl [a: Ring] Polynomial a: Eq {
+    eq = |x, y| (
+        x.@coeff == y.@coeff
+    );
+}
+
+impl [a: Ring] Polynomial a: Zero {
+    zero = Polynomial::make([zero]);
+}
+
+impl [a: Ring] Polynomial a: Neg {
+    neg = |x| (
+        Polynomial::make(x.@coeff.map(neg))
+    );
+}
+
+impl [a: Ring] Polynomial a: Add {
+    add = |x, y| (
+        let degree = max(x.get_degree, y.get_degree);
+        let coeff = Array::from_map(degree + 1, |i| x.get(i) + y.get(i));
+        Polynomial::make(coeff)
+    );
+}
+
+impl [a: Ring] Polynomial a: Sub {
+    sub = |x, y| (
+        let degree = max(x.get_degree, y.get_degree);
+        let coeff = Array::from_map(degree + 1, |i| x.get(i) - y.get(i));
+        Polynomial::make(coeff)
+    );
+}
+
+
+impl [a: Ring, a:ToString] Polynomial a: Mul {
+    mul = |x, y| (
+        let x_degree = x.get_degree;
+        let y_degree = y.get_degree;
+        let degree = x_degree + y_degree;
+        let iter = do {
+            pure $ (*Iterator::range(0, x_degree + 1), *Iterator::range(0, y_degree + 1))
+        };
+        let coeff = Array::fill(degree + 1, zero);
+        let coeff = iter.fold(
+            coeff, |coeff, (ix, iy)|
+            coeff.mod(ix + iy, add(x.get(ix) * y.get(iy)))
+        );
+        Polynomial::make(coeff)
+    );
+}
+
+test1: IO ();
+test1 = (
+    let m = 31;
+    let a = 3;
+    let a = Modulo::make(a, m);
+    let one = Modulo::make(1, m);
+    let x = *Iterator::range(0, m).fold_m(
+        one, |x, i|
+        let _ = *println((a, i, x, m).format("{}^{} = {} (mod {})"));
+        pure $ x * a
+    );
+    pure()
+);
+
+test2: IO ();
+test2 = (
+    let a = Polynomial::make([1, 3]);
+    let one = Polynomial::make([1]);
+    let x = *Iterator::range(0, 5).fold_m(
+        one, |x, i|
+        let _ = *println((a, i, x).format("({})^{} = {}"));
+        pure $ x * a
+    );
+    pure()
+);
+
+main: IO ();
+main = test2;

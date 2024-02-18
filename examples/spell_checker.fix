@@ -18,6 +18,7 @@ import HashSet;
 import Minilib.App.Clap;
 //import Minilib.Collection.TreeMap;
 //import Minilib.Collection.TreeSet;
+import Minilib.Encoding.Binary;
 import Minilib.IO.IOEx;
 import Minilib.Text.StringEx;
 
@@ -39,7 +40,7 @@ namespace SpellChecker {
     from_word_list_file = |filepath| (
         let _ = *eprintln("loading word list file...").lift;
         // IO::read_file_string() sometimes freezes
-        let word_lists = (*IO::read_file_bytes(filepath))._unsafe_to_string;
+        let word_lists = (*_read_file_bytes_ex(filepath))._unsafe_to_string;
         let _ = *eprintln("registering word list...").lift;
         let (checker, time) = consumed_time_while(|_|
             from_word_list_file_contents(word_lists)
@@ -55,6 +56,16 @@ namespace SpellChecker {
         */
         let _ = *eprintln("done.").lift;
         pure $ checker
+    );
+
+    _read_file_bytes_ex: Path -> IOFail (Array U8);
+    _read_file_bytes_ex = |path| (
+        let file_stat = *stat(path.to_string);
+        let file_size = file_stat.st_size;
+        let fh = *open_file(path, "r");
+        let bytes = *read_n_bytes(fh, file_size);
+        let _ = *close_file(fh).lift;
+        pure $ bytes
     );
 
     from_word_list_file_contents: String -> SpellChecker;
@@ -197,7 +208,137 @@ namespace SpellChecker {
         arr.@((n1 + 1) * (n2 + 1) - 1)
     );
 
+}
 
+namespace DictCache {
+    save_dict_cache: Path -> SpellChecker -> IOFail ();
+    save_dict_cache = |path, checker| (
+        let _ = *println("saving " + path.to_string).lift;
+        let buf = ByteBuffer::empty(1024*1024, ByteOrder::little_endian());
+        let buf = buf.write_words(checker.@words.to_iter);
+        let buf = buf.write_symspell(checker.@symspell);
+        write_file_bytes(path, buf.@array)
+    );
+
+    load_dict_cache: Path -> IOFail SpellChecker;
+    load_dict_cache = |path| (
+        let _ = *println("loading " + path.to_string).lift;
+        let array = *_read_file_bytes_ex(path);
+        let buf = ByteBuffer::make(array, ByteOrder::little_endian());
+        let pos = 0;
+        let (words, pos) = buf.read_words(pos);
+        let (symspell, pos) = buf.read_symspell(pos);
+        let checker = SpellChecker::empty;
+        let checker = checker.set_words(HashSet::from_iter(words.to_iter));
+        let checker = checker.set_symspell(symspell);
+        let _ = *println("loading done").lift;
+        pure $ checker
+    );
+
+    push_back_zeros: I64 -> ByteBuffer -> ByteBuffer;
+    push_back_zeros = |size, buf| (
+        buf.mod_array(|arr|
+            loop(
+                (arr, 0), |(arr, i)|
+                if i >= size { break $ arr };
+                continue $ (arr.push_back(0_U8), i + 1)
+            )
+        )
+    );
+
+    write_U64: U64 -> ByteBuffer -> ByteBuffer;
+    write_U64 = |u64, buf| (
+        let i = buf.get_size;
+        buf.push_back_zeros(8).set_u64(i, u64)
+    );
+
+    write_string: String -> ByteBuffer -> ByteBuffer;
+    write_string = |str, buf| (
+        let n = str.get_size;
+        let bytes = str.get_bytes;
+        eval assert (|_| "invalid bytes", bytes.@(n) == '\0');
+        let i = buf.get_size;
+        buf.mod_array(|arr|
+            loop(
+                (arr, 0), |(arr, i)|
+                if i >= n + 1 { break $ arr };
+                continue $ (arr.push_back(bytes.@(i)), i + 1)
+            )
+        )
+    );
+
+    write_words: Iterator String -> ByteBuffer -> ByteBuffer;
+    write_words = |iter, buf| (
+        let size = iter.fold(0, |size, _| size + 1);
+        let buf = buf.write_U64(size.to_U64);
+        let buf = iter.fold(buf, |buf, word|
+            buf.write_string(word)
+        );
+        buf
+    );
+
+    write_symspell: HashMap String (Array String) -> ByteBuffer -> ByteBuffer;
+    write_symspell = |map, buf| (
+        let iter = map.to_iter;
+        let size = iter.fold(0, |size, _| size + 1);
+        let buf = buf.write_U64(size.to_U64);
+        let buf = iter.fold(buf, |buf, (deleted, words)|
+            let buf = buf.write_string(deleted);
+            buf.write_words(words.to_iter)
+        );
+        buf
+    );
+
+    read_U64: I64 -> ByteBuffer -> (U64, I64);
+    read_U64 = |pos, buf| (
+        (buf.get_u64(pos), pos + 8)
+    );
+    
+    read_string: I64 -> ByteBuffer -> (String, I64);
+    read_string = |pos, buf| (
+        let array = buf.@array;
+        let output = Array::empty(25);
+        loop(
+            (output, pos), |(output, pos)|
+            let c = array.@(pos);
+            let output = output.push_back(c);
+            if c == 0_U8 { 
+                let str = output._unsafe_to_string;
+                break $ (str, pos + 1) 
+            };
+            continue $ (output, pos + 1)
+        )
+    );
+
+    read_words: I64 -> ByteBuffer -> (Array String, I64);
+    read_words = |pos, buf| (
+        let (size, pos) = buf.read_U64(pos);
+        let size = size.to_I64;
+
+        let words = Array::empty(size);
+        loop(
+            (words, pos), |(words, pos)|
+            if words.get_size >= size { break $ (words, pos) };
+            let (word, pos) = buf.read_string(pos);
+            let words = words.push_back(word);
+            continue $ (words, pos)
+        )
+    );
+
+    read_symspell: I64 -> ByteBuffer -> (HashMap String (Array String), I64);
+    read_symspell = |pos, buf| (
+        let (size, pos) = buf.read_U64(pos);
+        let size = size.to_I64;
+        let map = HashMap::empty(size);
+        loop(
+            (map, pos), |(map, pos)|
+            if map.get_size >= size { break $ (map, pos) };
+            let (key, pos) = buf.read_string(pos);
+            let (words, pos) = buf.read_words(pos);
+            let map = map.insert(key, words);
+            continue $ (map, pos)
+        )
+    );
 }
 
 test_levenshtein: IO ();
@@ -244,6 +385,7 @@ command = (
     .version("1.0")
     .about("Sample spell checker")
     .arg(Arg::new("word-list").short('w').long("word-list").help("Word list file").takes_value.default_value("/usr/share/dict/american-english"))
+    .arg(Arg::new("dict-cache").short('c').long("dict-cache").help("Dict cache file").takes_value.default_value(".fixlang/spell_checker_dict_cache.dat"))
 );
 
 main: IO ();
@@ -251,10 +393,18 @@ main = (
     do {
         let matches = *command.get_matches;
         let word_list_file = matches.get_one("word-list").as_some;
+        let dict_cache_file = matches.get_one("dict-cache").as_some;
 
-        let checker = *SpellChecker::from_word_list_file(
-            Path::parse(word_list_file).as_some
-        );
+        let checker = *if *dict_cache_file.file_exists.lift {
+            load_dict_cache(Path::parse(dict_cache_file).as_some)
+        } else {
+            let checker = *SpellChecker::from_word_list_file(
+                Path::parse(word_list_file).as_some
+            );
+            let _ = *checker.save_dict_cache(Path::parse(dict_cache_file).as_some);
+            pure $ checker
+        };
+
         loop_m(
             (), |_|
             let _ = *print("Input word> ").lift;

@@ -1,0 +1,78 @@
+module Main;
+
+type Accessor c a = unbox struct {
+    getter: c -> a,
+    modifier: (a -> a) -> c -> c
+};
+
+namespace Accessor {
+    make: (c -> a) -> ((a -> a) -> c -> c) -> Accessor c a;
+    make = |getter, modifier| (
+        Accessor { getter: getter, modifier: modifier }
+    );
+
+    get: c -> Accessor c a -> a;
+    get = |c, acc| (acc.@getter)(c);
+    
+    mod: (a -> a) -> c -> Accessor c a -> c;
+    mod = |f, c, acc| (acc.@modifier)(f, c);
+    
+    set: a -> c -> Accessor c a -> c;
+    set = |a, c, acc| acc.mod(|_| a, c);
+
+    comp: (a -> b) -> ((b -> b) -> a -> a) -> Accessor c a -> Accessor c b;
+    comp = |g, m, acc| (
+        Accessor { getter: acc.@getter >> g, modifier: acc.@modifier << m }
+    );
+}
+
+//-------------------
+
+type Foo = unbox struct {
+    bar: Bar
+};
+
+type Bar = unbox struct {
+    baz: Baz
+};
+
+type Baz = unbox struct {
+    n: I64
+};
+
+
+test1: IO ();
+test1 = (
+    let acc = Accessor::make(Foo::@bar, Foo::mod_bar);
+    let acc = acc.comp(Bar::@baz, Bar::mod_baz);
+    let acc = acc.comp(Baz::@n, Baz::mod_n);
+    
+    let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
+    let foo = acc.set(3, foo);
+    let foo = acc.mod(add(1), foo);
+    let a = acc.get(foo);
+    println(a.to_string)
+);
+
+test2: IO ();
+test2 = (
+    // 以下のように関数合成を使えばいいので、わざわざ Accessor を使うまでもない
+    /*
+    let set = |n, foo| foo.mod_bar(mod_baz(set_n(n)));
+    let get = |foo| foo.@bar.@baz.@n;
+    let mod = |f, foo| foo.mod_bar(mod_baz(mod_n(f)));
+    */
+    let set = mod_bar << mod_baz << set_n;
+    let get = @bar >> @baz >> @n;
+    let mod = mod_bar << mod_baz << mod_n;
+
+    let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
+    let foo = foo.set(3);
+    let foo = foo.mod(add(1));
+    let a = foo.get;
+    println(a.to_string)
+);
+
+main: IO ();
+main = test2;
+

@@ -5,6 +5,12 @@ import Debug;
 import Minilib.Math.Types;
 import Minilib.Text.StringEx;
 
+trait a: Finite {
+    finite: ();     // dummy
+}
+
+trait FiniteGroup = Finite + Group;
+
 //-------------------------------------------------------------
 // Modular Arithmetic
 // https://en.wikipedia.org/wiki/Modular_arithmetic
@@ -139,6 +145,10 @@ impl [a: Euclid] Modular a: Div {
     );
 }
 
+impl [a: Euclid] Modular a: Finite {
+    finite = ();
+}
+
 //-------------------------------------------------------------
 
 // Polynomial
@@ -162,8 +172,8 @@ namespace Polynomial {
         Polynomial { coeff: coeff }
     );
 
-    polinomial: [a: Ring] Array a -> Polynomial a;
-    polinomial = make;
+    polynomial: [a: Ring] Array a -> Polynomial a;
+    polynomial = make;
 
     of_power: [a: Ring] a -> I64 -> Polynomial a;
     of_power = |x, power| (
@@ -287,6 +297,113 @@ impl [a: Field] Polynomial a: Rem {
     );
 }
 
+namespace Ring {
+
+    // Calculates x.op(a).op(a)... for n times.
+    // `op` is associative binary operation.
+    // Same as `Iterator::range(0, n).fold(x, |x, _| x.op(a))` but fast.
+    // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+    repeat_by_U64: [a: Ring] (a -> a -> a) -> a -> a -> U64 -> a;
+    repeat_by_U64 = |op, x, a, n| (
+        loop(
+            (x, a, n), |(x, a, n)|
+            if n == 0_U64 {
+                break $ x
+            };
+            let x = if n.bit_and(1_U64) != 0_U64 {
+                op(x, a)
+            } else { x };
+            continue $ (x, op(a, a), n.shift_right(1_U64))
+        )
+    );
+
+    // Calculates `a * n`
+    times_by_U64: [a: Ring] U64 -> a -> a;
+    times_by_U64 = |n, a| (
+        repeat_by_U64(add, zero, a, n)
+    );
+
+    // Calculates `a ^ n`
+    pow_by_U64: [a: Ring] U64 -> a -> a;
+    pow_by_U64 = |n, a| (
+        repeat_by_U64(mul, one, a, n)
+    );
+
+    gcd: [a: Euclid] a -> a -> a;
+    gcd = |a, b| (
+        if b == zero { a };
+        let c = a % b;
+        gcd(b, c)
+    );
+}
+
+namespace I64 {
+
+    factorization: I64 -> Array I64;
+    factorization = |n| (
+        eval assert(|_| "invalid n", n > 0);
+
+        loop(
+            ([], n, 2), |(output, n, i)|
+            if n <= 1 { output };
+            if n % i == 0 {
+                continue $ (output.push_back(i), n/i, i)
+            };
+            if i == 2 {
+                continue $ (output, n, i + 1)
+            } else {
+                continue $ (output, n, i + 2)
+            }
+        )
+    );
+}
+
+namespace Polynomial {
+    
+    // Calculates `f'`, ie. derivative of `f`.
+    derivative: [a: Ring] Polynomial a -> Polynomial a;
+    derivative = |f| (
+        let n = f.get_degree;
+        if n == 0 {
+            zero
+        };
+        let coeff_ = Array::from_map(n, |i|
+            Ring::from_U64((i + 1).to_U64) * f.get(i + 1)
+        );
+        Polynomial::make(coeff_)
+    );
+
+    // Square-free factorization
+    // https://en.wikipedia.org/wiki/Factorization_of_polynomials_over_finite_fields#Square-free_factorization
+    square_free_factorization: [a: FiniteGroup] Polynomial a -> Array (Polynomial a);
+    square_free_factorization = |f| (
+        let r = one;
+        let c = Ring::gcd(f, f.derivative);
+        let w = f / c;
+        let (r, c, w) = loop(
+            (r, c, w, 1), |(r, c, w, i)|
+            if w == one { break $ (r, c, w) };
+            let y = gcd(w, c);
+            let fac = w / y;
+            let r = r * fac.pow_by_U64(i.to_U64);
+            let w = y;
+            let c = c / y;
+            continue $ (r, w, c, i + 1) 
+        );
+
+        // TODO: calculates p-th root of c
+        abort();
+    );
+
+    // https://en.wikipedia.org/wiki/Factorization_of_polynomials_over_finite_fields#Rabin's_test_of_irreducibility
+    rabin_irreducibility_test: [a: FiniteGroup] Polynomial a -> Bool;
+    rabin_irreducibility_test = |f| (
+
+    );
+}
+
+
+
 //---------------------------------------
 
 test1: IO ();
@@ -355,12 +472,16 @@ test4 = (
 test5: IO ();
 test5 = (
     let m = 3;
-    let p = polinomial([ modulo(0, m), modulo(1, m) ]);
-    let q = polinomial([ modulo(1, m), modulo(0, m), modulo(0, m), modulo(1, m) ]);
-    let a = modulo(p, q);   // x mod x^3+1 on GF(3)
-    let x = *Iterator::range(0, 27).fold_m(
-        modulo(one, q), |x, i|
-        let _ = *println((a, i, x).format("({})^{} = {}"));
+    let p = polynomial([ modulo(0, m), modulo(1, m) ]);
+    //let q = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m) ]);
+    let q = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m), modulo(1, m) ]);
+    let a = modulo(p, q);
+    let one_ = modulo(one, q);
+    let x = *Iterator::range(0, 9).fold_m(
+        one_, |x, i|
+        let is_one = if x == one_ { " !!!" } else { "" };
+        let _ = *println((a, i, x).format("({})^{} = {}") + is_one);
+        let _ = *println([x.@value, derivative(x.@value)].format("deriv {} = {}"));
         pure $ x * a
     );
     pure()    

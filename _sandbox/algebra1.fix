@@ -8,12 +8,14 @@ import Minilib.Text.StringEx;
 
 namespace Ring {
 
-    // Calculates x.op(a).op(a)... for n times.
-    // `op` is associative binary operation.
-    // Same as `Iterator::range(0, n).fold(x, |x, _| x.op(a))` but fast.
-    // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+    // `repeat_by_U64(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+    // `op` is an associative binary operation.
+    // This function returns the same result as `Iterator::range(0, n).fold(x, |x, _| x.op(a))`,
+    // but faster.
     repeat_by_U64: [a: Ring] (a -> a -> a) -> a -> a -> U64 -> a;
     repeat_by_U64 = |op, x, a, n| (
+        // Russian peasant method
+        // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
         loop(
             (x, a, n), |(x, a, n)|
             if n == 0_U64 {
@@ -26,13 +28,13 @@ namespace Ring {
         )
     );
 
-    // Calculates `a * n`
+    // `a.times_by_U64(n)` calculates `a * n`.
     times_by_U64: [a: Ring] U64 -> a -> a;
     times_by_U64 = |n, a| (
         repeat_by_U64(add, zero, a, n)
     );
 
-    // Calculates `a ^ n`
+    // `a.pow_by_U64(n)` calculates `a ^ n`.
     pow_by_U64: [a: Ring] U64 -> a -> a;
     pow_by_U64 = |n, a| (
         repeat_by_U64(mul, one, a, n)
@@ -40,6 +42,7 @@ namespace Ring {
 }
 
 namespace Euclid {
+    // `gcd(a,b)` calculates the greatest common divisor of `a` and `b`.
     gcd: [a: Euclid] a -> a -> a;
     gcd = |a, b| (
         if b == zero { a };
@@ -47,10 +50,10 @@ namespace Euclid {
         gcd(b, c)
     );
 
-
-    // Extended Euclidean algorithm
-    // Solve a * x + b * y = d, where d = gcd(a, b)
-    // Returns (x, y, d)
+    // `extended_euclid(a,b)` performs 
+    // [Extended Euclidean algorithm](https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm).
+    // It solves `a * x + b * y = d` where `d = gcd(a, b)`,
+    // and returns `(x, y, d)`.
     extended_euclid: [a: Euclid] a -> a -> (a, a, a);
     extended_euclid = |a, b| (
         if b == zero {
@@ -73,9 +76,10 @@ namespace Euclid {
 }
 
 //-------------------------------------------------------------
-// Modular Arithmetic
-// https://en.wikipedia.org/wiki/Modular_arithmetic
+//  Modular Arithmetic
+//-------------------------------------------------------------
 
+// A type that performs [Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
 type Modular a = unbox struct {
     value: a,
     modulus: a          // zero if unknown
@@ -108,8 +112,9 @@ namespace Modular {
         y.@modulus
     );
 
-    // Change @value to non-negative value.
-    // For example, -1 mod 3 = 2 mod 3.
+    // `x.nonneg` changes `@value` with a equivalent non-negative value.
+    // For example, `modulo(-1, 3)` will be changed to `modulo(2,3)`
+    // because `-1 == 2 mod 3`.
     nonneg: [a: Euclid, a: LessThan] Modular a -> Modular a;
     nonneg = |x| (
         if x.@modulus == zero { x };
@@ -197,7 +202,7 @@ impl [a: Euclid] Modular a: Div {
 
 // Polynomial
 type Polynomial a = unbox struct {
-    coeff: Array a
+    coeff: Array a      // coefficients
 };
 
 namespace Polynomial {
@@ -231,20 +236,24 @@ namespace Polynomial {
         Polynomial::make(coeff)
     );
 
+    // `f.get(i)` returns the coefficient of degree `i`.
     get: [a: Ring] I64 -> Polynomial a -> a;
-    get = |i, p| (
-        if i < 0 || p.@coeff.get_size <= i { zero };
-        p.@coeff.@(i)
+    get = |i, f| (
+        if i < 0 || f.@coeff.get_size <= i { zero };
+        f.@coeff.@(i)
     );
 
     get_degree: Polynomial a -> I64;
-    get_degree = |p| p.@coeff.get_size - 1;
+    get_degree = |f| f.@coeff.get_size - 1;
 
     map_coeff: [a: Ring] (a -> a) -> Polynomial a -> Polynomial a;
     map_coeff = |f, p| (
         polynomial(p.@coeff.map(f))
     );
 
+    // `divmod(num, den)` calculates a quotient `quo = num / den` 
+    // and a reminder `rem = num % den`.
+    // Returns `(quo, rem)`.
     divmod: [a: Field] Polynomial a -> Polynomial a -> (Polynomial a, Polynomial a);
     divmod = |num, den| (
         eval assert (|_| "Divide by zero", den != zero);
@@ -336,7 +345,6 @@ impl [a: Ring] Polynomial a: Sub {
     );
 }
 
-
 impl [a: Ring] Polynomial a: Mul {
     mul = |x, y| (
         let x_degree = x.get_degree;
@@ -396,7 +404,7 @@ namespace Polynomial {
         )
     );
 
-    // Generates polynomials of degree m or lower.
+    // `generate(p,m)` generates polynomials of degree `m` or lower in GF(p).
     generate: I64 -> I64 -> Iterator (Polynomial (Modular I64));
     generate = |p, m| (
         let inner = fix $ |inner, m| (
@@ -411,7 +419,7 @@ namespace Polynomial {
         inner(m).map(to_array >> polynomial)
     );
 
-    // Generates primitive polynomials of degree m in GF(p).
+    // `generate_primitive_polynomials(p, m)` generates primitive polynomials of degree `m` in GF(p).
     generate_primitive_polynomials: I64 -> I64 -> Iterator (Polynomial (Modular I64));
     generate_primitive_polynomials = |p, m| (
         Polynomial::generate(p, m)
@@ -419,7 +427,7 @@ namespace Polynomial {
         .filter(is_primitive)
     );
 
-    // Substitute `x` with specified number.
+    // `f.subst(x)` substitutes the indeterminate of a polynomial with `x`.
     subst: I64 -> Polynomial (Modular I64) -> I64;
     subst = |x, f| (
         let coeff = f.@coeff.to_iter.map(nonneg);

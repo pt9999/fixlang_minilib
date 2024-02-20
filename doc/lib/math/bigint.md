@@ -105,6 +105,8 @@ Compares two BigInts.
 
 #### `impl BigInt: Zero`
 
+#### `impl BigInt: One`
+
 #### `impl BigInt: Neg`
 
 #### `impl BigInt: Add`

@@ -45,7 +45,7 @@ OPTIONS:
 ## sample_server
 
 This program implements a chat server.
-The chat server listens on `localhost:2525`.
+The chat server listens on `127.0.0.1:2525` by default.
 
 Chat members can connect to the chat server using `nc` (netcat) command.
 Chat messages are broadcasted to all chat members.
@@ -54,13 +54,13 @@ Prerequisite:
 
 `$ sudo apt install netcat`
 
-Start server:  (Ctrl+c to stop server)
+Start server:  (Type Ctrl+C to stop server)
 
 `$ examples/sample_server.out`
 
-Start client:  (Ctrl+c to disconnect)
+Start client:  (Type Ctrl+C to disconnect)
 
-`$ nc localhost 2525`
+`$ nc 127.0.0.1 2525`
 
 ```
 $ ./sample_server.out --help
@@ -82,6 +82,7 @@ OPTIONS:
 Sample HTTP server that serves a chat room.
 
 Start the server and open `http://127.0.0.1:8080/` in your favorite browser.
+To stop the server, type Ctrl+C.
 
 ```
 $ ./sample_http_server.out --help
@@ -121,7 +122,8 @@ OPTIONS:
 
 ## calc_pi
 
-Calculates PI (3.1415926...)
+Calculates PI (3.1415926...) with the specified number of digits.
+By default, it prints 1000 digits.
 
 ```
 $ ./calc_pi.out --help
@@ -134,7 +136,7 @@ USAGE:
 OPTIONS:
     -h, --help                  Print help information
     -V, --version               Print version information
-    -p, --prec <VALUE>          precision of base 10
+    -p, --prec <VALUE>          precision of base 10 (default: 1000)
     -f, --f64                   calculate with F64
 ```
 
@@ -143,6 +145,7 @@ OPTIONS:
 An HTTP server that renders Mandelbrot fractal images.
 
 Start the server and open `http://127.0.0.1:8080/` in your favorite browser.
+To stop the server, type Ctrl+C.
 
 ```
 $ examples/fractal_server.out --help
@@ -166,19 +169,19 @@ By default, it generates probable primes of 128 bit to 1024 bit.
 
 ```
 $ examples/probable_primes.out --help
-probable_primes 0.1.0
+probable_primes.out 0.1.0
 Generates probable primes
 
 USAGE:
-    probable_primes [OPTIONS]
+    probable_primes.out [OPTIONS]
 
 OPTIONS:
     -h, --help                  Print help information
     -V, --version               Print version information
-    -f, --from <VALUE>          from
-    -t, --to <VALUE>            to
-    -s, --step <VALUE>          step
-        --seed <VALUE>          Seed of the random number generator. Default is current time
+    -f, --from <VALUE>          Minimum number of bits (default: 128)
+    -t, --to <VALUE>            Maximum number of bits (default: 1024)
+    -s, --step <VALUE>          Step of bits (default: 128)
+        --seed <VALUE>          Seed of the random number generator (default: current time)
 ```
 
 ## spell_checker

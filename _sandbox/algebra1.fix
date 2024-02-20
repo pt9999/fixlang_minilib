@@ -5,12 +5,6 @@ import Debug;
 import Minilib.Math.Types;
 import Minilib.Text.StringEx;
 
-trait a: Finite {
-    finite: ();     // dummy
-}
-
-trait FiniteGroup = Finite + Group;
-
 //-------------------------------------------------------------
 // Modular Arithmetic
 // https://en.wikipedia.org/wiki/Modular_arithmetic
@@ -76,8 +70,8 @@ impl [a: ToString] Modular a: ToString {
 
 impl [a: Euclid] Modular a: Eq {
     eq = |x, y| (
-        if x.is_zero { y.is_zero };
-        if y.is_zero { false };
+        //if x.is_zero { y.is_zero };
+        //if y.is_zero { false };
         let modulus = _get_modulus(x, y);
         if modulus == zero { x.@value == y.@value };
         (x.@value - y.@value) % modulus == zero
@@ -143,10 +137,6 @@ impl [a: Euclid] Modular a: Div {
         eval assert(|_| "cannot inverse", u % d == zero);
         Modular::make(x.@value * (u / d), modulus)
     );
-}
-
-impl [a: Euclid] Modular a: Finite {
-    finite = ();
 }
 
 //-------------------------------------------------------------
@@ -218,15 +208,37 @@ namespace Polynomial {
         );
         (quo, rem)
     );
-}
 
-impl [a: Ring, a: ToString] Polynomial a: ToString {
-    to_string = |x| (
+    _to_string_full: [a: Ring, a: ToString] Polynomial a -> String;
+    _to_string_full = |x| (
         let degree = x.get_degree;
         Iterator::range(0, degree + 1).map(|i|
             x.get(i).to_string + "x^" + i.to_string
         ).join(" + ")
     );
+
+    _to_string_simple: [a: Ring, a: ToString] Polynomial a -> String;
+    _to_string_simple = |f| (
+        let degree = f.get_degree;
+        let str = Iterator::range(0, degree + 1).map(|i|
+            let c = f.get(i);
+            if c == zero { "" };
+            let str_c = if c == one && i > 0 { "" } else { c.to_string };
+            let str_x_i = if i == 0 { "" } 
+            else if i == 1 { "x" }
+            else { "x^" + i.to_string };
+            str_c + str_x_i
+        )
+        .filter(|s| s != "")
+        .reverse
+        .join(" + ");
+        if str == "" { f.get(0).to_string };
+        str
+    );
+}
+
+impl [a: Ring, a: ToString] Polynomial a: ToString {
+    to_string = _to_string_simple;
 }
 
 impl [a: Ring] Polynomial a: Eq {
@@ -337,27 +349,6 @@ namespace Ring {
     );
 }
 
-namespace I64 {
-
-    factorization: I64 -> Array I64;
-    factorization = |n| (
-        eval assert(|_| "invalid n", n > 0);
-
-        loop(
-            ([], n, 2), |(output, n, i)|
-            if n <= 1 { output };
-            if n % i == 0 {
-                continue $ (output.push_back(i), n/i, i)
-            };
-            if i == 2 {
-                continue $ (output, n, i + 1)
-            } else {
-                continue $ (output, n, i + 2)
-            }
-        )
-    );
-}
-
 namespace Polynomial {
     
     // Calculates `f'`, ie. derivative of `f`.
@@ -373,32 +364,45 @@ namespace Polynomial {
         Polynomial::make(coeff_)
     );
 
-    // Square-free factorization
-    // https://en.wikipedia.org/wiki/Factorization_of_polynomials_over_finite_fields#Square-free_factorization
-    square_free_factorization: [a: FiniteGroup] Polynomial a -> Array (Polynomial a);
-    square_free_factorization = |f| (
-        let r = one;
-        let c = Ring::gcd(f, f.derivative);
-        let w = f / c;
-        let (r, c, w) = loop(
-            (r, c, w, 1), |(r, c, w, i)|
-            if w == one { break $ (r, c, w) };
-            let y = gcd(w, c);
-            let fac = w / y;
-            let r = r * fac.pow_by_U64(i.to_U64);
-            let w = y;
-            let c = c / y;
-            continue $ (r, w, c, i + 1) 
-        );
-
-        // TODO: calculates p-th root of c
-        abort();
+    is_primitive: Polynomial (Modular I64) -> Bool;
+    is_primitive = |f| (
+        let m = f.get_degree;
+        if f.get(0) == zero { false };  // TODO ok?
+        if f.get(m) != one { false };
+        let p = f.get(m).@modulus;
+        let q = p.pow_by_U64(m.to_U64);
+        let a = polynomial([modulo(0, p), modulo(1, p)]);
+        loop(
+            (a, 1), |(x, i)|
+            eval debug_println((a, i, x, f).format("     {}^{} = {} (modulo {})"));
+            if x == zero {
+                break $ false
+            };
+            if x == one {
+                break $ i == q - 1
+            };
+            if i == q - 1 {
+                break $ false
+            };
+            let x = (x * a) % f;
+            continue $ (x, i + 1)
+        )
     );
 
-    // https://en.wikipedia.org/wiki/Factorization_of_polynomials_over_finite_fields#Rabin's_test_of_irreducibility
-    rabin_irreducibility_test: [a: FiniteGroup] Polynomial a -> Bool;
-    rabin_irreducibility_test = |f| (
-
+    // Generates polynomials of degree m.
+    generate: I64 -> I64 -> Iterator (Polynomial (Modular I64));
+    generate = |p, m| (
+        let inner = fix $ |inner, m| (
+            if m < 0 {
+                pure $ Iterator::empty
+            };
+            let coeff = *inner(m - 1);
+            Iterator::range(0, p).map(|i|
+                coeff.push_front(modulo(i, p))
+            )
+        );
+        inner(m).map(to_array >> polynomial)
+        .filter(|f| f.get_degree == m)
     );
 }
 
@@ -472,11 +476,11 @@ test4 = (
 test5: IO ();
 test5 = (
     let m = 3;
-    let p = polynomial([ modulo(0, m), modulo(1, m) ]);
-    //let q = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m) ]);
-    let q = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m), modulo(1, m) ]);
-    let a = modulo(p, q);
-    let one_ = modulo(one, q);
+    //let f = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m) ]);
+    let f = polynomial([ modulo(2, m), modulo(2, m), modulo(1, m), modulo(1, m) ]);
+    let a = polynomial([ modulo(0, m), modulo(1, m) ]);
+    let a = modulo(a, f);
+    let one_ = modulo(one, f);
     let x = *Iterator::range(0, 9).fold_m(
         one_, |x, i|
         let is_one = if x == one_ { " !!!" } else { "" };
@@ -487,5 +491,20 @@ test5 = (
     pure()    
 );
 
+test6: IO ();
+test6 = (
+    let p = 3;
+    let m = 2;
+    Polynomial::generate(p, m).fold_m(
+        (), |_, f|
+        let _ = *println("Checking " + f.to_string);
+        let result = if f.is_primitive {
+            "  PRIMITIVE"
+        } else { "  not primitive" };
+        let _ = *println(result);
+        pure()
+    )
+);
+
 main: IO ();
-main = test5;
+main = test6;

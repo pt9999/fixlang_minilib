@@ -5,11 +5,6 @@ import Debug;
 import Minilib.Math.Types;
 import Minilib.Text.StringEx;
 
-
-
-
-//-------------------------------------------------------------
-
 //-------------------------------------------------------------
 // Modular Arithmetic
 // https://en.wikipedia.org/wiki/Modular_arithmetic
@@ -25,38 +20,72 @@ namespace Modular {
         Modular { value: value, modulus: modulus }
     );
 
-    _assert_modulus_equal: [a: RemRing] Modular a -> Modular a -> ();
+    modulo: a -> a -> Modular a;
+    modulo = make;
+
+    _assert_modulus_equal: [a: Euclid] Modular a -> Modular a -> ();
     _assert_modulus_equal = |x, y| (
         assert(|_| "modulus is not equal", x.@modulus == y.@modulus)
     );
 
-    is_zero: [a: RemRing] Modular a -> Bool;
+    is_zero: [a: Euclid] Modular a -> Bool;
     is_zero = |x| x.@value == zero;
+
+    // Extended Euclidean algorithm
+    // Solve a * x + b * y = d, where d = gcd(a, b)
+    // Returns (x, y, d)
+    _extended_euclid: [a: Euclid] a -> a -> (a, a, a);
+    _extended_euclid = |a, b| (
+        if b == zero {
+            (one, zero, a)
+        };
+        let q = a / b;
+        let r = a % b;
+        eval assert(|_| "division-with-remainder failed", a == q * b + r);
+        let (y, z, d) = _extended_euclid(b, r);
+        // b * y + r * z = d
+        // b * y + (a - q * b) * z = d
+        // a * z + b * (y - q * z) = d
+        let x = z;
+        let y = y - q * z;
+        eval assert(|_| "extended euclid failed"
+            // + " ((a,x),(b,y),(ans, d))=" + ((a, x), (b, y), (a * x + b * y, d)).to_string
+        , a * x + b * y == d);
+        (x, y, d)
+    );
+
+    _inverse: [a: Euclid] a -> Option a;
+    _inverse = |a| (
+        if one % a != zero {        // cannot inverse
+            none()
+        };
+        some(one / a)
+    );
 }
 
 impl [a: ToString] Modular a: ToString {
     to_string = |x| x.@value.to_string;         // does not show modulus
 }
 
-impl [a: RemRing] Modular a: Eq {
+impl [a: Euclid] Modular a: Eq {
     eq = |x, y| (
         if x.is_zero { y.is_zero };
         if y.is_zero { false };
-        x.@value == y.@value && x.@modulus == y.@modulus
+        x.@modulus == y.@modulus && (x.@value - y.@value) % x.@modulus == zero
     );
 }
 
-impl [a: RemRing] Modular a: Zero {
+impl [a: Euclid] Modular a: Zero {
     zero = Modular::make(zero, zero);       // modulus is unknown
 }
 
-impl [a: RemRing] Modular a: Neg {
+impl [a: Euclid] Modular a: Neg {
     neg = |x| (
         Modular::make(-x.@value, x.@modulus)
     );
 }
 
-impl [a: RemRing] Modular a: Add {
+impl [a: Euclid] Modular a: Add {
     add = |x, y| (
         if x.is_zero { y };
         if y.is_zero { x };
@@ -66,7 +95,7 @@ impl [a: RemRing] Modular a: Add {
     );
 }
 
-impl [a: RemRing] Modular a: Sub {
+impl [a: Euclid] Modular a: Sub {
     sub = |x, y| (
         if x.is_zero { -y };
         if y.is_zero { x };
@@ -76,7 +105,7 @@ impl [a: RemRing] Modular a: Sub {
     );
 }
 
-impl [a: RemRing] Modular a: Mul {
+impl [a: Euclid] Modular a: Mul {
     mul = |x, y| (
         if x.is_zero { zero };
         if y.is_zero { zero };
@@ -86,7 +115,19 @@ impl [a: RemRing] Modular a: Mul {
     );
 }
 
-// TODO: Modular multiplicative inverse
+impl [a: Euclid] Modular a: Div {
+    div = |x, y| (
+        eval assert(|_| "Divide by zero", !y.is_zero);
+        if x.is_zero { zero };
+
+        eval _assert_modulus_equal(x, y);
+        let (u, v, d) = _extended_euclid(y.@value, y.@modulus);
+        // y.@value * u + y.@modulus * v = d
+        eval assert(|_| "cannot inverse", u % d == zero);
+        
+        Modular::make((x.@value * (u / d)) % x.@modulus, x.@modulus)
+    );
+}
 
 //-------------------------------------------------------------
 
@@ -219,14 +260,14 @@ impl [a: Field] Polynomial a: Div {
     div = |x, y| (
         let (quo, rem) = divmod(x, y);
         quo
-    )
+    );
 }
 
 impl [a: Field] Polynomial a: Rem {
     rem = |x, y| (
         let (quo, rem) = divmod(x, y);
         rem
-    )
+    );
 }
 
 test1: IO ();
@@ -255,5 +296,42 @@ test2 = (
     pure()
 );
 
+test3: IO ();
+test3 = (
+    let table = [
+        (5, 7),
+        (20, 32),
+        (40, 30)
+    ];
+    table.to_iter.fold_m(
+        (), |_, (a, b)|
+        let (x, y, d) = _extended_euclid(a, b);
+        println([a, x, b, y, d].format("{} * {} + {} * {} = {}"))
+    )
+);
+
+test4: IO ();
+test4 = (
+    let m = 31;
+    let table = [
+        (5, 7),
+        (20, 12),
+        (10, 3)
+    ];
+    table.to_iter.fold_m(
+        (), |_, (a, b)|
+        let a = modulo(a, m);
+        let b = modulo(b, m);
+        let c = a / b;
+        let cc = c * b;
+        let d = b / a;
+        let dd = d * a;
+        println([a, b, c, cc].format("a={}, b={}, a/b={}, a/b*b={}\n") +
+                [a, b, d, dd].format("a={}, b={}, b/a={}, b/a*a={}\n") +
+                [cc == a, dd == b].format("ok={} {}\n")
+                )
+    )
+);
+
 main: IO ();
-main = test2;
+main = test4;

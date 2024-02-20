@@ -66,3 +66,6 @@ Alias of `insert_handler`.
 `app.listen(server_host_port)` listens for incoming requests,
 and respond to accepted connections.
 
+This function sets the signal handler for SIGPIPE to SIG_IGN to avoid
+abnormal program termination when writing to a closed socket.
+

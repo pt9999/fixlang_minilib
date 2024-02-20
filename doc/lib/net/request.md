@@ -121,6 +121,11 @@ See the definition of `_CONTENT_TYPE_ALIASES` for a list of available aliases.
 `response.write_str(str)` sends headers with a status line if they have not already been sent.
 Then it sends the specified string.
 
+#### write_bytes: Array U8 -> Response -> IOFail Response;
+
+`response.write_bytes(bytes)` sends headers with a status line if they have not already been sent.
+Then it sends the specified bytes.
+
 #### end: Response -> IOFail Response;
 
 Sends headers with a status line if they have not already been sent.

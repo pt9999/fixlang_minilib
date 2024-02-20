@@ -94,6 +94,13 @@ Complex number.
 
 Type definitions for mathematical concepts.
 
+### [module Minilib.Media.Image (lib/media/image.fix)](lib/media/image.md)
+
+
+### [module Minilib.Media.Png (lib/media/png.fix)](lib/media/png.md)
+
+PNG image I/O.
+
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 
 `map_m`, `foreach_m` for Array and Iterator.

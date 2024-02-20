@@ -183,7 +183,19 @@ OPTIONS:
 
 ## spell_checker
 
-Sample spell checker
+This is a sample program for spell checker.
+
+Currently, you can only enter a single word, and if the word is not in the word list,
+correction suggestions will be displayed.
+
+Although the spell checker can be used with user-defined word lists,
+I recommend that you use predefined word list files.
+
+For Ubuntu 22.04, American English word list file can be installed by the command below.
+It is installed to `/usr/share/dict/american-english`.
+```
+$ sudo apt install wamerican
+```
 
 ```
 $ examples/spell_checker.out --help

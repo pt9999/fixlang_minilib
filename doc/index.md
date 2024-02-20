@@ -90,6 +90,10 @@ Arbitrary-precision natural number. This is internal module of BigInt.
 
 Complex number.
 
+### [module Minilib.Math.Rational (lib/math/rational.fix)](lib/math/rational.md)
+
+Rational number
+
 ### [module Minilib.Math.Types (lib/math/types.fix)](lib/math/types.md)
 
 Type definitions for mathematical concepts.

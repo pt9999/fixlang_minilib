@@ -1,0 +1,556 @@
+module Main;
+
+import Debug;
+
+import Minilib.Math.Types;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+
+namespace Ring {
+
+    // `repeat_by_U64(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+    // `op` is an associative binary operation.
+    // This function returns the same result as `Iterator::range(0, n).fold(x, |x, _| x.op(a))`,
+    // but faster.
+    repeat_by_U64: [a: Ring] (a -> a -> a) -> a -> a -> U64 -> a;
+    repeat_by_U64 = |op, x, a, n| (
+        // Russian peasant method
+        // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+        loop(
+            (x, a, n), |(x, a, n)|
+            if n == 0_U64 {
+                break $ x
+            };
+            let x = if n.bit_and(1_U64) != 0_U64 {
+                op(x, a)
+            } else { x };
+            continue $ (x, op(a, a), n.shift_right(1_U64))
+        )
+    );
+
+    // `a.times_by_U64(n)` calculates `a * n`.
+    times_by_U64: [a: Ring] U64 -> a -> a;
+    times_by_U64 = |n, a| (
+        repeat_by_U64(add, zero, a, n)
+    );
+
+    // `a.pow_by_U64(n)` calculates `a ^ n`.
+    pow_by_U64: [a: Ring] U64 -> a -> a;
+    pow_by_U64 = |n, a| (
+        repeat_by_U64(mul, one, a, n)
+    );
+}
+
+namespace Euclid {
+    // `gcd(a,b)` calculates the greatest common divisor of `a` and `b`.
+    gcd: [a: Euclid] a -> a -> a;
+    gcd = |a, b| (
+        if b == zero { a };
+        let c = a % b;
+        gcd(b, c)
+    );
+
+    // `extended_euclid(a,b)` performs 
+    // [Extended Euclidean algorithm](https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm).
+    // It solves `a * x + b * y = d` where `d = gcd(a, b)`,
+    // and returns `(x, y, d)`.
+    extended_euclid: [a: Euclid] a -> a -> (a, a, a);
+    extended_euclid = |a, b| (
+        if b == zero {
+            (one, zero, a)
+        };
+        let q = a / b;
+        let r = a % b;
+        eval assert(|_| "division-with-remainder failed", a == q * b + r);
+        let (y, z, d) = extended_euclid(b, r);
+        // b * y + r * z = d
+        // b * y + (a - q * b) * z = d
+        // a * z + b * (y - q * z) = d
+        let x = z;
+        let y = y - q * z;
+        eval assert(|_| "extended euclid failed"
+            // + " ((a,x),(b,y),(ans, d))=" + ((a, x), (b, y), (a * x + b * y, d)).to_string
+        , a * x + b * y == d);
+        (x, y, d)
+    );
+}
+
+//-------------------------------------------------------------
+//  Modular Arithmetic
+//-------------------------------------------------------------
+
+// A type that performs [Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
+type Modular a = unbox struct {
+    value: a,
+    modulus: a          // zero if unknown
+};
+
+namespace Modular {
+    // `Modular::make(v, m)` creates `v modulo m`.
+    // It is an equivalence class of a quotient ring `Z/mZ`.
+    make: [a: Euclid] a -> a -> Modular a;
+    make = |value, modulus| (
+        let value = if modulus == zero { value } else { value % modulus };
+        Modular { value: value, modulus: modulus }
+    );
+
+    // Synonym for `make`.
+    modulo: [a: Euclid] a -> a -> Modular a;
+    modulo = make;
+
+    // Returns modulus of either `x` or `y`.
+    _get_modulus: [a: Euclid] Modular a -> Modular a -> a;
+    _get_modulus = |x, y| (
+        eval if x.@modulus != y.@modulus &&
+                x.@modulus != zero && 
+                y.@modulus != zero {
+            debug_eprintln("warning: modulus mismatch")
+        } else { () };
+        if x.@modulus != zero { 
+            x.@modulus
+        };
+        y.@modulus
+    );
+
+    // `x.nonneg` changes `@value` with a equivalent non-negative value.
+    // For example, `modulo(-1, 3)` will be changed to `modulo(2,3)`
+    // because `-1 == 2 mod 3`.
+    nonneg: [a: Euclid, a: LessThan] Modular a -> Modular a;
+    nonneg = |x| (
+        if x.@modulus == zero { x };
+        if x.@value < zero {
+            modulo((x.@value + x.@modulus) % x.@modulus, x.@modulus)
+        };
+        x
+    );
+}
+
+impl [a: ToString] Modular a: ToString {
+    to_string = |x| x.@value.to_string;         // does not show modulus
+}
+
+impl [a: Euclid] Modular a: Eq {
+    eq = |x, y| (
+        let modulus = _get_modulus(x, y);
+        if modulus == zero { x.@value == y.@value };
+        (x.@value - y.@value) % modulus == zero
+    );
+}
+
+impl [a: Euclid] Modular a: Zero {
+    zero = Modular::make(zero, zero);       // modulus is unknown
+}
+
+impl [a: Euclid] Modular a: One {
+    one = Modular::make(one, zero);       // modulus is unknown
+}
+
+impl [a: Euclid] Modular a: Neg {
+    neg = |x| (
+        Modular::make(-x.@value, x.@modulus)
+    );
+}
+
+impl [a: Euclid] Modular a: Add {
+    add = |x, y| (
+        if x == zero { y };
+        if y == zero { x };
+
+        let modulus = _get_modulus(x, y);
+        Modular::make(x.@value + y.@value, modulus)
+    );
+}
+
+impl [a: Euclid] Modular a: Sub {
+    sub = |x, y| (
+        if x == zero { -y };
+        if y == zero { x };
+
+        let modulus = _get_modulus(x, y);
+        Modular::make(x.@value - y.@value, modulus)
+    );
+}
+
+impl [a: Euclid] Modular a: Mul {
+    mul = |x, y| (
+        if x == zero { zero };
+        if y == zero { zero };
+
+        let modulus = _get_modulus(x, y);
+        Modular::make(x.@value * y.@value, modulus)
+    );
+}
+
+impl [a: Euclid] Modular a: Div {
+    div = |x, y| (
+        eval assert(|_| "Divide by zero", y != zero);
+        if x == zero { zero };
+
+        let modulus = _get_modulus(x, y);
+        if modulus == zero { 
+            // TODO correct?
+            Modular::make(x.@value / y.@value, modulus)
+        };
+        let (u, v, d) = extended_euclid(y.@value, modulus);
+        // y.@value * u + modulus * v = d
+        eval assert(|_| "cannot inverse", u % d == zero);
+        Modular::make(x.@value * (u / d), modulus)
+    );
+}
+
+//-------------------------------------------------------------
+
+// Polynomial
+type Polynomial a = unbox struct {
+    coeff: Array a      // coefficients
+};
+
+namespace Polynomial {
+
+    // Creates a polynomial from coefficients.
+    make: [a: Ring] Array a -> Polynomial a;
+    make = |coeff| (
+        // remove last zeros
+        let coeff = loop(
+            coeff, |coeff|
+            let n = coeff.get_size;
+            if n <= 1 { break $ coeff };
+            if coeff.@(n - 1) != zero { break $ coeff };
+            let coeff = coeff.pop_back;
+            continue $ coeff
+        );
+        eval assert(|_| "invalid size", coeff.get_size >= 1);
+        Polynomial { coeff: coeff }
+    );
+
+    // Synonym for `make`.
+    polynomial: [a: Ring] Array a -> Polynomial a;
+    polynomial = make;
+
+    of_power: [a: Ring] a -> I64 -> Polynomial a;
+    of_power = |x, power| (
+        eval assert(|_| "invalid power", power >= 0);
+        let coeff = Array::from_map(power + 1, |i|
+            if i == power { x } else { zero }
+        );
+        Polynomial::make(coeff)
+    );
+
+    // `f.get(i)` returns the coefficient of degree `i`.
+    get: [a: Ring] I64 -> Polynomial a -> a;
+    get = |i, f| (
+        if i < 0 || f.@coeff.get_size <= i { zero };
+        f.@coeff.@(i)
+    );
+
+    get_degree: Polynomial a -> I64;
+    get_degree = |f| f.@coeff.get_size - 1;
+
+    map_coeff: [a: Ring] (a -> a) -> Polynomial a -> Polynomial a;
+    map_coeff = |f, p| (
+        polynomial(p.@coeff.map(f))
+    );
+
+    // `divmod(num, den)` calculates a quotient `quo = num / den` 
+    // and a reminder `rem = num % den`.
+    // Returns `(quo, rem)`.
+    divmod: [a: Field] Polynomial a -> Polynomial a -> (Polynomial a, Polynomial a);
+    divmod = |num, den| (
+        eval assert (|_| "Divide by zero", den != zero);
+        let (quo, rem) = loop(
+            (zero, num), |(quo, num)|
+            if num == zero { break $ (quo, num) };
+            let num_degree = num.get_degree;
+            let den_degree = den.get_degree;
+            if num_degree < den_degree { break $ (quo, num) };
+            let n = num.get(num_degree);
+            let d = den.get(den_degree);
+            let q = n / d;
+            let qd = q * d;
+            eval assert(|_| "has remainder", n == qd);
+            let q = Polynomial::of_power(n / d, num_degree - den_degree);
+            let quo = quo + q;
+            let rem = num - q * den;
+            eval assert(|_| "has reminder !!", rem.get_degree < num.get_degree);
+            continue $ (quo, rem)
+        );
+        (quo, rem)
+    );
+
+    _to_string_full: [a: Ring, a: ToString] Polynomial a -> String;
+    _to_string_full = |x| (
+        let degree = x.get_degree;
+        Iterator::range(0, degree + 1).map(|i|
+            x.get(i).to_string + "x^" + i.to_string
+        ).join(" + ")
+    );
+
+    _to_string_simple: [a: Ring, a: ToString] Polynomial a -> String;
+    _to_string_simple = |f| (
+        let degree = f.get_degree;
+        let str = Iterator::range(0, degree + 1).map(|i|
+            let c = f.get(i);
+            if c == zero { "" };
+            let str_c = if c == one && i > 0 { "" } else { c.to_string };
+            let str_x_i = if i == 0 { "" } 
+            else if i == 1 { "x" }
+            else { "x^" + i.to_string };
+            str_c + str_x_i
+        )
+        .filter(|s| s != "")
+        .reverse
+        .join(" + ");
+        if str == "" { f.get(0).to_string };
+        str
+    );
+}
+
+impl [a: Ring, a: ToString] Polynomial a: ToString {
+    to_string = _to_string_simple;
+}
+
+impl [a: Ring] Polynomial a: Eq {
+    eq = |x, y| (
+        x.@coeff == y.@coeff
+    );
+}
+
+impl [a: Ring] Polynomial a: Zero {
+    zero = Polynomial::make([zero]);
+}
+
+impl [a: Ring] Polynomial a: One {
+    one = Polynomial::make([one]);
+}
+
+impl [a: Ring] Polynomial a: Neg {
+    neg = |x| (
+        Polynomial::make(x.@coeff.map(neg))
+    );
+}
+
+impl [a: Ring] Polynomial a: Add {
+    add = |x, y| (
+        let degree = max(x.get_degree, y.get_degree);
+        let coeff = Array::from_map(degree + 1, |i| x.get(i) + y.get(i));
+        Polynomial::make(coeff)
+    );
+}
+
+impl [a: Ring] Polynomial a: Sub {
+    sub = |x, y| (
+        let degree = max(x.get_degree, y.get_degree);
+        let coeff = Array::from_map(degree + 1, |i| x.get(i) - y.get(i));
+        Polynomial::make(coeff)
+    );
+}
+
+impl [a: Ring] Polynomial a: Mul {
+    mul = |x, y| (
+        let x_degree = x.get_degree;
+        let y_degree = y.get_degree;
+        let degree = x_degree + y_degree;
+        let iter = do {
+            pure $ (*Iterator::range(0, x_degree + 1), *Iterator::range(0, y_degree + 1))
+        };
+        let coeff = Array::fill(degree + 1, zero);
+        let coeff = iter.fold(
+            coeff, |coeff, (ix, iy)|
+            coeff.mod(ix + iy, add(x.get(ix) * y.get(iy)))
+        );
+        Polynomial::make(coeff)
+    );
+}
+
+impl [a: Field] Polynomial a: Div {
+    div = |x, y| (
+        let (quo, rem) = divmod(x, y);
+        quo
+    );
+}
+
+impl [a: Field] Polynomial a: Rem {
+    rem = |x, y| (
+        let (quo, rem) = divmod(x, y);
+        rem
+    );
+}
+
+namespace Polynomial {
+
+    // Checks whether it is a primitive polynomial.
+    is_primitive: Polynomial (Modular I64) -> Bool;
+    is_primitive = |f| (
+        let m = f.get_degree;
+        if f.get(0) == zero { false };  // TODO ok?
+        if f.get(m) != one { false };
+        let p = f.get(m).@modulus;
+        let q = p.pow_by_U64(m.to_U64);
+        let a = polynomial([modulo(0, p), modulo(1, p)]);
+        loop(
+            (a, 1), |(x, i)|
+            //eval debug_println((a, i, x, f).format("     {}^{} = {} (modulo {})"));
+            if x == zero {
+                break $ false
+            };
+            if x == one {
+                break $ i == q - 1
+            };
+            if i == q - 1 {
+                break $ false
+            };
+            let x = (x * a) % f;
+            continue $ (x, i + 1)
+        )
+    );
+
+    // `generate(p,m)` generates polynomials of degree `m` or lower in GF(p).
+    generate: I64 -> I64 -> Iterator (Polynomial (Modular I64));
+    generate = |p, m| (
+        let inner = fix $ |inner, m| (
+            if m < 0 {
+                pure $ Iterator::empty
+            };
+            let coeff = *inner(m - 1);
+            Iterator::range(0, p).map(|i|
+                coeff.push_front(modulo(i, p))
+            )
+        );
+        inner(m).map(to_array >> polynomial)
+    );
+
+    // `generate_primitive_polynomials(p, m)` generates primitive polynomials of degree `m` in GF(p).
+    generate_primitive_polynomials: I64 -> I64 -> Iterator (Polynomial (Modular I64));
+    generate_primitive_polynomials = |p, m| (
+        Polynomial::generate(p, m)
+        .filter(|f| f.get_degree == m)
+        .filter(is_primitive)
+    );
+
+    // `f.subst(x)` substitutes the indeterminate of a polynomial with `x`.
+    subst: I64 -> Polynomial (Modular I64) -> I64;
+    subst = |x, f| (
+        let coeff = f.@coeff.to_iter.map(nonneg);
+        coeff.zip(Iterator::count_up(0)).map(|(c, i)|
+            c.@value * x.pow_by_U64(i.to_U64)
+        )
+        .fold(0, add)
+    );
+}
+
+
+//---------------------------------------
+
+test_modular_power: IO ();
+test_modular_power = (
+    let _ = *println("----------- test_modular_power -----------");
+    let m = 17;
+    let a = 3;
+    let a = Modular::make(a, m);
+    let one = Modular::make(1, m);
+    let x = *Iterator::range(0, m).fold_m(
+        one, |x, i|
+        let _ = *println((a, i, x, m).format("{}^{} = {} (mod {})"));
+        pure $ x * a
+    );
+    pure()
+);
+
+test_polynomial_power: IO ();
+test_polynomial_power = (
+    let _ = *println("----------- test_polynomial_power -----------");
+    let a = Polynomial::make([1, 3]);
+    let one = Polynomial::make([1]);
+    let x = *Iterator::range(0, 5).fold_m(
+        one, |x, i|
+        let _ = *println((a, i, x).format("({})^{} = {}"));
+        pure $ x * a
+    );
+    pure()
+);
+
+test_extended_euclid: IO ();
+test_extended_euclid = (
+    let _ = *println("----------- test_extended_euclid -----------");
+    let table = [
+        (5, 7),
+        (20, 32),
+        (40, 30)
+    ];
+    table.to_iter.fold_m(
+        (), |_, (a, b)|
+        let (x, y, d) = extended_euclid(a, b);
+        println([a, x, b, y, d].format("{} * {} + {} * {} = {}"))
+    )
+);
+
+test_modular_div: IO ();
+test_modular_div = (
+    let _ = *println("----------- test_modular_div -----------");
+    let m = 31;
+    let table = [
+        (5, 7),
+        (20, 12),
+        (10, 3)
+    ];
+    table.to_iter.fold_m(
+        (), |_, (a, b)|
+        let a = modulo(a, m);
+        let b = modulo(b, m);
+        let c = a / b;
+        let cc = c * b;
+        let d = b / a;
+        let dd = d * a;
+        println(
+            [a, b, c, cc].format("a={}, b={}, a/b={}, a/b*b={}") +
+            [m].format(" (modulo {})\n") +
+            [a, b, d, dd].format("a={}, b={}, b/a={}, b/a*a={}") +
+            [m].format(" (modulo {})\n") +
+            [cc == a, dd == b].format("ok={} {}\n")
+        )
+    )
+);
+
+test_polynomial_modular: IO ();
+test_polynomial_modular = (
+    let _ = *println("----------- test_polynomial_modular -----------");
+    let p = 3;
+    let f = polynomial([ modulo(1, p), modulo(2, p), modulo(1, p), modulo(1, p) ]);
+    let m = f.get_degree;
+    let q = p.pow_by_U64(m.to_U64);     // q = p ^ m
+    let a = polynomial([ modulo(0, p), modulo(1, p) ]);
+    let a = modulo(a, f);
+    let one_ = modulo(one, f);
+    let x = *Iterator::range(1, q).fold_m(
+        a, |x, i|
+        let is_one = if x == one_ { " !!!" } else { "" };
+        let _ = *println((a, i, x, f).format("{}^{} = {} (modulo {})") + is_one);
+        pure $ x * a
+    );
+    pure()    
+);
+
+test_primitive_polynomials: IO ();
+test_primitive_polynomials = (
+    let _ = *println("----------- test_primitive_polynomials -----------");
+    let p = 2;
+    let m = 8;
+    let _ = *println(
+        [m, p].format("Generating primitive polynomials of degree {} in GF({})")
+    );
+    generate_primitive_polynomials(p, m)
+    .foreach_m(|f|
+        println((f, f.subst(2)).format("{} (decimal={})"))
+    )
+);
+
+main: IO ();
+main = (
+    let _ = *test_modular_power;
+    let _ = *test_polynomial_power;
+    let _ = *test_extended_euclid;
+    let _ = *test_modular_div;
+    let _ = *test_polynomial_modular;
+    let _ = *test_primitive_polynomials;
+    pure()
+);

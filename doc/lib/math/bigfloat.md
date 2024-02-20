@@ -115,6 +115,8 @@ Convert a BigFloat to a string of exponential form with specified precision (i.e
 
 #### `impl BigFloat: Zero`
 
+#### `impl BigFloat: One`
+
 #### `impl BigFloat: Neg`
 
 #### `impl BigFloat: Add`

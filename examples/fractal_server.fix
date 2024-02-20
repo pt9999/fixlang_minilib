@@ -4,11 +4,11 @@ module Main;
 import AsyncTask;
 import Debug;
 
+import Minilib.App.Clap;
 import Minilib.Media.Image;
 import Minilib.Media.Png;
 import Minilib.Monad.FunctorM;
 import Minilib.Math.Complex;
-//import Minilib.Net.HTML;
 import Minilib.Net.HttpServer;
 import Minilib.Net.Request;
 import Minilib.Task.Future;
@@ -172,15 +172,29 @@ namespace AppState {
     );
 }
 
+command: Command;
+command = (
+    Command::new("fractal_server.out")
+    .version("0.1")
+    .about("An HTTP server that renders Mandelbrot fractal images.")
+    .arg(Arg::new("host").short('h').long("host").help("IP address to liten").takes_value.default_value("127.0.0.1"))
+    .arg(Arg::new("port").short('p').long("port").help("port number to listen").takes_value.default_value("8080"))
+);
+
 main: IO ();
 main = (
     do {
+        let matches = *command.get_matches;
+        let host = matches.get_one("host").as_some;
+        let port = matches.get_one("port").as_some;
+        let server_host_port = host + ":" + port;
+
         let app_state_var = *AppState::initialize;
         let app = App::make();
         let app = app.on("GET", "/", AppState::on_get_index(app_state_var));
         let app = app.on("GET", "/image", AppState::on_get_image(app_state_var));
-        let app = *app.listen("localhost:8080");
+        let app = *app.listen(server_host_port);
         pure()
     }
-    .try(|err| eprintln("ERROR: " + err))
+    .try(|err| eprintln(err))
 );

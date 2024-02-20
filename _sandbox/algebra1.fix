@@ -3,6 +3,7 @@ module Main;
 import Debug;
 
 import Minilib.Math.Types;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 
 //-------------------------------------------------------------
@@ -39,6 +40,15 @@ namespace Modular {
 
     is_zero: [a: Euclid] Modular a -> Bool;
     is_zero = |x| x.@value == zero;
+
+    nonneg: [a: Euclid, a: LessThan] Modular a -> Modular a;
+    nonneg = |x| (
+        if x.@modulus == zero { x };
+        if x.@value < zero {
+            modulo((x.@value + x.@modulus) % x.@modulus, x.@modulus)
+        };
+        x
+    );
 
     // Extended Euclidean algorithm
     // Solve a * x + b * y = d, where d = gcd(a, b)
@@ -374,7 +384,7 @@ namespace Polynomial {
         let a = polynomial([modulo(0, p), modulo(1, p)]);
         loop(
             (a, 1), |(x, i)|
-            eval debug_println((a, i, x, f).format("     {}^{} = {} (modulo {})"));
+            //eval debug_println((a, i, x, f).format("     {}^{} = {} (modulo {})"));
             if x == zero {
                 break $ false
             };
@@ -403,6 +413,15 @@ namespace Polynomial {
         );
         inner(m).map(to_array >> polynomial)
         .filter(|f| f.get_degree == m)
+    );
+
+    subst: I64 -> Polynomial (Modular I64) -> I64;
+    subst = |x, f| (
+        let coeff = f.@coeff.to_iter.map(nonneg);
+        coeff.zip(Iterator::count_up(0)).map(|(c, i)|
+            c.@value * x.pow_by_U64(i.to_U64)
+        )
+        .fold(0, add)
     );
 }
 
@@ -493,10 +512,17 @@ test5 = (
 
 test6: IO ();
 test6 = (
-    let p = 3;
-    let m = 2;
-    Polynomial::generate(p, m).fold_m(
-        (), |_, f|
+    let p = 2;      //3;
+    let m = 8;
+    Polynomial::generate(p, m)
+    .filter(is_primitive)
+    .foreach_m(|f|
+        println((f, f.subst(2)).format("{} (decimal={})"))
+    )
+    
+    /*
+    Polynomial::generate(p, m).foreach_m(|f|
+        let result = if f.is_primitive {
         let _ = *println("Checking " + f.to_string);
         let result = if f.is_primitive {
             "  PRIMITIVE"
@@ -504,6 +530,7 @@ test6 = (
         let _ = *println(result);
         pure()
     )
+    */
 );
 
 main: IO ();

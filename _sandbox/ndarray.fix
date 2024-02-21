@@ -24,6 +24,10 @@ trait a: ToNdCardinal {
     to_nd_cardinal: a -> Array I64;
 }
 
+impl I64: ToNdCardinal {
+    to_nd_cardinal = |a| [a];
+}
+
 impl Array I64: ToNdCardinal {
     to_nd_cardinal = |arr| arr;
 }
@@ -148,7 +152,7 @@ namespace NdArray {
         ndarray.reshape(shape)
     );
 
-    // `NdArray::scalar` is one-dimensional array with data `[a]`.
+    // `NdArray::scalar(a)` is one-dimensional array with data `[a]`.
     // It can be used as a constant with broadcasting.
     scalar: a -> NdArray a;
     scalar = |a| (
@@ -160,16 +164,20 @@ namespace NdArray {
         }
     );
 
+    // `Ndarray::from_array(array)` creates one-dimensional ndarray from `array`.
     from_array: Array a -> NdArray a;
     from_array = |array| (
         make([array.get_size], array)
     );
 
+    // `Ndarray::from_iter(iter)` creates one-dimensional ndarray from `iter`.
     from_iter: Iterator a -> NdArray a;
     from_iter = |iter| (
         from_array(iter.to_array)
     );
 
+    // `NdArray::fill(shape, value)` creates a new ndarray with shape `shape`
+    // and all of its elements are initialized by `value`.
     fill: Array I64 -> a -> NdArray a;
     fill = |shape, value| (
         let offset = 0;
@@ -183,47 +191,39 @@ namespace NdArray {
         }
     );
 
+    // `NdArray::zeros(shape)` creates a new ndarray with shape `shape`
+    // and all of its elements are initialized by zero.
     zeros: [a: Zero] Array I64 -> NdArray a;
     zeros = |shape| (
         NdArray::fill(shape, zero)
     );
 
+    // `NdArray::arange(begin, end)` creates a new one-dimensional ndarray
+    // such as `[begin, begin + 1, ..., end - 1]`.
     arange: I64 -> I64 -> NdArray I64;
     arange = |begin, end| (
-        if begin >= end { empty };
-        let n = end - begin;
-        let data = loop(
-            (Array::empty(n), begin), |(data, i)|
-            if i >= end { break $ data };
-            continue $ (data.push_back(i), i + 1)
-        );
-        NdArray {
-            data: data,
-            shape: [n],
-            strides: [1],
-            offset: 0
-        }
+        let iter = if begin < end { Iterator::range(begin, end) } else { Iterator::empty };
+        NdArray::from_iter(iter)
     );
 
+    // `NdArray::get_size` returns total count of elements in ndarray, which equals to
+    // the product of `@shape`.
     get_size: NdArray a -> I64;
     get_size = |ndarray| ndarray.@shape.to_iter.fold(1, |size, n| size * n);
 
+    // `NdArray::get_dim` returns the dimension of ndarray.
     get_dim: NdArray a -> I64;
     get_dim = |ndarray| ndarray.@shape.get_size;
 
-    // Returns shape except first dimension
-    get_shape_tail: NdArray a -> Array I64;
-    get_shape_tail = |ndarray| (
-        let shape = ndarray.@shape;
-        shape.get_sub(1, shape.get_size)
-    );
-
+    // Checks whether the dimension matches
     _assert_dim_equals: I64 -> NdArray a -> ();
     _assert_dim_equals = |dim, ndarray| (
         assert (|_| "dimension mismatch: " + dim.to_string + " != " + ndarray.get_dim.to_string,
                      dim == ndarray.get_dim)
     );
 
+    // `shape._calc_size_and_stride` calculates the size and the strides of ndarray.
+    // It returns `(size, strides)`.
     _calc_size_and_stride: Array I64 -> (I64, Array I64);
     _calc_size_and_stride = |shape| (
         let (size, strides) = shape.to_iter.reverse.fold (
@@ -251,6 +251,7 @@ namespace NdArray {
         )
     );
 
+    // `ndarray.get(idx)` gets an element at n-dimensional index `idx`.
     get: [i: ToNdCardinal] i -> NdArray a -> a;
     get = |idx, ndarray| (
         let idx = idx.to_nd_cardinal;
@@ -258,6 +259,7 @@ namespace NdArray {
         ndarray.@data.@(offset)
     );
 
+    // `ndarray.set(idx, value)` sets an element at n-dimensional index `idx`.
     set: [i: ToNdCardinal] i -> a -> NdArray a -> NdArray a;
     set = |idx, value, ndarray| (
         let idx = idx.to_nd_cardinal;
@@ -286,6 +288,8 @@ namespace NdArray {
         ).to_array
     );
 
+    // `ndarray.get_sub(range)` returns a subarray in n-dimensional range `range`.
+    // The original ndarray and a subarray shares `@data`.
     get_sub: [r: ToNdRange] r -> NdArray a -> NdArray a;
     get_sub = |range, ndarray| (
         let range: Array (I64, I64) = range.to_nd_range;
@@ -297,6 +301,8 @@ namespace NdArray {
         ndarray.set_offset(offset).set_shape(shape)
     );
 
+    // `ndarray.set_sub(range, sub)` updates `ndarray` with a subarray in n-dimensional range `range`.
+    // If `sub.shape` is narrower than `range`, it is repeated. (broadcasting)
     set_sub: [r: ToNdRange] r -> NdArray a -> NdArray a -> NdArray a;
     set_sub = |range, sub, ndarray| (
         let src = sub;
@@ -416,11 +422,13 @@ namespace NdArray {
         }
     );
 
+    // `ndarray.to_array` converts n-dimensitional ndarray to an array.
     to_array: NdArray a -> Array a;
     to_array = |src| (
         src.get_positions(src.@shape).map(|pos| src.@data.@(pos))
     );
 
+    // `ndarray.to_iter` converts n-dimensitional ndarray to an iterator.
     to_iter: NdArray a -> Iterator a;
     to_iter = |src| (
         src.to_array.to_iter
@@ -428,11 +436,35 @@ namespace NdArray {
 
     _map: (a -> b) -> NdArray a -> NdArray b;
     _map = |f, a| (
-         NdArray::from_iter(a.to_iter.map(f)).reshape(a.@shape)
+        if a.get_size == a.@data.get_size {     // optimization
+            NdArray {
+                data: a.@data.map(f),
+                shape: a.@shape,
+                strides: a.@strides,
+                offset: a.@offset
+            }
+        };
+        NdArray::from_iter(a.to_iter.map(f)).reshape(a.@shape)
     );
 
     _map2: ((a, b) -> c) -> NdArray a -> NdArray b -> NdArray c;
     _map2 = |f, a, b| (
+        if  a.@data.get_size == b.@data.get_size &&
+            a.@shape == b.@shape &&
+            a.@strides == b.@strides &&
+            a.@offset == b.@offset &&
+            a.get_size == a.@data.get_size
+        {     // optimization
+            let n = a.@data.get_size;
+            let data = a.@data.to_iter.zip(b.@data.to_iter).map(f).to_array;
+            NdArray {
+                data: data,
+                shape: a.@shape,
+                strides: a.@strides,
+                offset: a.@offset
+            }
+        };
+
         let (a, b) = loop(
             (a, b), |(a, b)|
             if a.get_dim < b.get_dim { continue $ (a.expand_dims(0), b) };
@@ -449,6 +481,7 @@ namespace NdArray {
         NdArray::make(dest_shape, dest_array)
     );
 
+    // `ndarray.reshape(shape)` changes shape of ndarray.
     reshape: Array I64 -> NdArray a -> NdArray a;
     reshape = |shape, ndarray| (
         if ndarray.@shape == shape {
@@ -655,6 +688,7 @@ namespace NdArray {
                 let output = output.push_back(v.to_string);
                 (output, idx)
             } else {
+                let output = if idx.@(dim) == 0 { output } else { output.push_back(",") };
                 ndarray._to_string_loop((output, idx), dim + 1)
             };
             continue $ (output, idx, i + 1)
@@ -702,4 +736,111 @@ impl [a: Div] NdArray a: Div {
 impl [a: Rem] NdArray a: Rem {
     rem = |a,b| _map2(|(a,b)| a % b, a, b);
 }
+
+//----------------------------------------------------------------------
+// Linalg
+//----------------------------------------------------------------------
+
+gen_fold: a -> (a -> a) -> (a -> Bool) -> b -> (b -> a -> b) -> b;
+gen_fold = |arg, next, end, output, f| (
+    if end(arg) {
+        output
+    };
+    let output = f(output, arg);
+    gen_fold(next(arg), next, end, output, f)
+);
+
+range_fold: I64 -> I64 -> a -> (a -> I64 -> a) -> a;
+range_fold = |begin, end, output, f| (
+    if begin >= end {
+        output
+    };
+    let output = f(output, begin);
+    range_fold(begin + 1, end, output, f)
+);
+
+range_map: I64 -> I64 -> (I64 -> a) -> Array a;
+range_map = |begin, end, f| (
+    let output = Array::empty(end - begin);
+    range_fold(begin, end, output, |output, i| output.push_back(f(i)))
+);
+
+index_fold: Array I64 -> I64 -> Array I64 -> a -> (a -> Array I64 -> a) -> a;
+index_fold = |shape, dim, index, output, f| (
+    if dim >= shape.get_size {
+        f(output, index)
+    };
+    range_fold(0, shape.@(dim),
+        output, |output, i|
+        let index = index.set(dim, i);
+        index_fold(shape, dim + 1, index, output, f)
+    )
+);
+
+array_copy: Array a -> I64 -> I64 -> Array a -> I64 -> Array a;
+array_copy = |src, src_begin, src_end, dest, dest_begin| (
+    range_fold(src_begin, src_end,
+        dest, |dest, src_index|
+        let dest_index = src_index - src_begin + dest_begin;
+        dest.set(dest_index, src.@(src_index))
+    )
+);
+
+// `a.dot(b)` calculates dot product of `a` and `b`.
+// If `a` is a matrix and `b` is a matrix, it is matrix multiplication.
+// If `a` is a matrix and `b` is a vector, it is matrix and vector multiplication.
+// If `a` is a vector and `b` is a vector, it is inner product of two vectors.
+dot: [a:Zero, a:Add, a:Mul, a:ToString] NdArray a -> NdArray a -> NdArray a;
+dot = |b, a| (
+    // TODO: implement when a and b are vectors
+    let a_shape = a.@shape;
+    let b_shape = b.@shape;
+    let a_dim = a_shape.get_size;
+    let b_dim = b_shape.get_size;
+    eval assert(|_| "invalid a_shape", a_dim > 0);
+    eval assert(|_| "invalid b_shape", b_dim > 0);
+    let b = if b_dim == 1 {
+        b 
+    } else { 
+        b.swapaxes(b_dim - 2, b_dim - 1)
+    };
+    let b_shape = b.@shape;
+    eval assert(|_| "vec_len mismatch",  a_shape.get_last == b_shape.get_last);
+    let vec_len = a_shape.get_last.as_some;
+    let a_shape1 = a_shape.pop_back;
+    let b_shape1 = b_shape.pop_back;
+    let c_shape = a_shape1.append(b_shape1);
+    //let c_shape = if c_shape.get_size == 0 { [1] } else { c_shape };
+    let a_dim1 = a_shape1.get_size;
+    let b_dim1 = b_shape1.get_size;
+    let a_index1 = Array::fill(a_dim1 + 1, 0).pop_back;
+    let b_index1 = Array::fill(b_dim1 + 1, 0).pop_back;
+    let c_index = a_index1.append(b_index1);
+    let c = NdArray::fill(c_shape, zero);
+    let c = index_fold(a_shape1, 0, a_index1,
+        c, |c, a_index1|
+        let a_index = a_index1.push_back(0);
+        let a_offset = a._calc_offset(a_index);
+        let a_stride = a.@strides.get_last.as_some;
+        index_fold(b_shape1, 0, b_index1,
+            c, |c, b_index1|
+            let b_index = b_index1.push_back(0);
+            let b_offset = b._calc_offset(b_index);
+            let b_stride = b.@strides.get_last.as_some;
+            //eval debug_eprintln("a_index="+a_index.to_string+" b_index="+b_index.to_string);
+            let c_sum = zero;
+            let c_sum = range_fold(0, vec_len, 
+                c_sum, |c_sum, i|
+                let a_val = a.@data.@(a_offset + a_stride * i);
+                let b_val = b.@data.@(b_offset + b_stride * i);
+                //eval debug_eprintln("a_val="+a_val.to_string+" b_val="+b_val.to_string);
+                c_sum + a_val * b_val
+            );
+            let c_index = array_copy(a_index1, 0, a_dim1, c_index, 0);
+            let c_index = array_copy(b_index1, 0, b_dim1, c_index, a_dim1);
+            c.set(c_index, c_sum)
+        )
+    );
+    c
+);
 

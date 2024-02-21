@@ -8,7 +8,7 @@ channel_test1:
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
 
 ndarray:
-	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix
+	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
 	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline

@@ -1,0 +1,71 @@
+module Sandbox.NdArray.Random;
+
+import Random;
+import Math;
+
+import Minilib.Text.StringEx;
+
+import Sandbox.NdArray;
+
+// `random._generate(shape, generator)` draws samples from a generator function.
+_generate: Array I64 -> (Random -> (a, Random)) -> Random -> (NdArray a, Random);
+_generate = |shape, generator, random| (
+    let (size, _) = NdArray::_calc_size_and_stride(shape);
+    let array = Array::empty(size);
+    let (array, random) = NdArray::range_fold(0, size,
+        (array, random), |(array, random), i|
+        let (u, random) = generator(random);
+        let array = array.push_back(u);
+        (array, random)
+    );
+    let ndarray = NdArray::make(shape, array);
+    (ndarray, random)
+);
+
+// `random.uniform(shape, low, high)` draws samples from a Uniform distribution (low=low, high=high, inclusive).
+uniform: Array I64 -> F64 -> F64 -> Random -> (NdArray F64, Random);
+uniform = |shape, low, high, random| (
+    let generator = |random| (
+        let (u, random) = random.generate_F64;  // [0, 1]-real-interval
+        let u = low + u * (high - low);
+        (u, random)
+    );
+    random._generate(shape, generator)
+);
+
+// `random.randn(shape)` draws samples from a standard Normal distribution (mean=0, stdev=1).
+randn: Array I64 -> Random -> (NdArray F64, Random);
+randn = standard_normal;
+
+// `random.standard_normal(shape)` draws samples from a standard Normal distribution (mean=0, stdev=1).
+standard_normal: Array I64 -> Random -> (NdArray F64, Random);
+standard_normal = |shape, random| (
+    let (size, _) = NdArray::_calc_size_and_stride(shape);
+    let size2 = (size + 1) / 2 * 2;
+    let array = Array::empty(size2);
+    let (array, random) = NdArray::range_fold(0, size2 / 2,
+        (array, random), |(array, random), i|
+        // [Box–Muller transform](https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform)
+        let (u1, random) = random.generate_F64_3;
+        let (u2, random) = random.generate_F64_3;
+        let r = Math::sqrt(-2.0 * Math::log(u1));
+        let th = 2.0 * Math::pi64 * u2;
+        let z0 = r * Math::cos(th);
+        let z1 = r * Math::sin(th);
+        let array = array.push_back(z0);
+        let array = array.push_back(z1);
+        (array, random)
+    );
+    let array = if size == size2 { array } else { array.pop_back };
+    let ndarray = NdArray::make(shape, array);
+    (ndarray, random)
+);
+
+// `random.normal(shape, mu, sigma)` draws samples from a Normal distribution (mean=mu, stdev=sigma).
+normal: Array I64 -> F64 -> F64 -> Random -> (NdArray F64, Random);
+normal = |shape, mu, sigma, random| (
+    let (ndarray, random) = random.standard_normal(shape);
+    let ndarray = ndarray * scalar(sigma) + scalar(mu);
+    (ndarray, random)
+);
+

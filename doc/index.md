@@ -90,9 +90,30 @@ Arbitrary-precision natural number. This is internal module of BigInt.
 
 Complex number.
 
+### [module Minilib.Math.Euclid (lib/math/euclid.fix)](lib/math/euclid.md)
+
+Utility functions for an [Euclidean domain](https://en.wikipedia.org/wiki/Euclidean_domain),
+which is a ring with following division-with-remainder.
+```
+forall a b, a = (a / b) * b + (a % b)
+```
+
+### [module Minilib.Math.Modular (lib/math/modular.fix)](lib/math/modular.md)
+
+[Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
+
+### [module Minilib.Math.Polynomial (lib/math/polynomial.fix)](lib/math/polynomial.md)
+
+
 ### [module Minilib.Math.Rational (lib/math/rational.fix)](lib/math/rational.md)
 
 Rational number
+
+### [module Minilib.Math.Ring (lib/math/ring.fix)](lib/math/ring.md)
+
+Utility functions for a [ring](https://en.wikipedia.org/wiki/Ring_(mathematics)),
+which has addition(`add`), subtraction(`sub`), additive inverse(`neg`), additive unit(`zero`),
+multiplication(`mul`), multiplicative unit(`one`).
 
 ### [module Minilib.Math.Types (lib/math/types.fix)](lib/math/types.md)
 

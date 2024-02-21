@@ -31,8 +31,8 @@ bigint_test1:
 bigfloat_test1:
 	../bin/fixautolink build -L ../lib -L . -f bigfloat_test1.fix
 
-algebra1:
-	../bin/fixautolink run -L ../lib -L . -f algebra1.fix
+algebra_test1:
+	../bin/fixautolink run -L ../lib -L . -f algebra_test1.fix
 
 clean:
 	rm -f *.out

@@ -40,7 +40,7 @@ namespace XmlDocument {
     _to_string: XmlDocument -> String;
     _to_string = |doc| (
         eval debug_eprintln("doc._to_string");
-        doc.@document_element.to_html
+        doc.@document_element._to_string
     );   
 }
 
@@ -88,10 +88,17 @@ namespace XmlElement {
         )
     );
 
-    // `el.add(child)` adds a child element to `el`.
+    // `parent.add(child)` adds a child element to `parent`.
     add: XmlElement -> XmlElement -> XmlElement;
-    add = |child, el| (
-        el.mod_children(push_back(element_node(child)))
+    add = |child, parent| (
+        parent.mod_children(push_back(element_node(child)))
+    );
+
+    // `parent.addF $ child` adds a child element to `parent`.
+    // This is a flipped version of `add`.
+    addF: XmlElement -> XmlElement -> XmlElement;
+    addF = |parent, child| (
+        parent.mod_children(push_back(element_node(child)))
     );
 
     // `el.text(txt)` adds a text node to `el`.
@@ -100,19 +107,18 @@ namespace XmlElement {
         el.mod_children(push_back(text_node(txt)))
     );
         
-    // `el.to_html` converts the element to XML string.
-    to_html: XmlElement -> String;
-    to_html = |el| (
-        el._output_html(Array::empty(100)).to_iter.concat_iter
+    // `el._to_string` converts the element to XML string.
+    _to_string: XmlElement -> String;
+    _to_string = |el| (
+        el._output_string(Array::empty(100)).to_iter.concat_iter
     );
 
-    // `el._output_html` output the element as XML string.
-    _output_html: Array String -> XmlElement -> Array String;
-    _output_html = |output, el| (
-        eval debug_eprintln("_output_html " + el.@tag);
+    // `el._output_string` output the element as XML string.
+    _output_string: Array String -> XmlElement -> Array String;
+    _output_string = |output, el| (
         let output = output.push_back("<" + el.@tag);
-        let output = el.@attrs.reverse._output_html(output);
-        let output = output.push_back(">");
+        let output = el.@attrs.reverse._output_string(output);
+        let output = output.push_back(">\n");
         let child_sep = if el.@children.get_size >= 2 { "\n" } else { "" };
         let output = output.push_back(child_sep);
         let output = el.@children.to_iter.fold(
@@ -121,29 +127,29 @@ namespace XmlElement {
                 output.push_back(escape_special(node.as_text_node))
                       .push_back(child_sep)
             } else if node.is_element_node {
-                node.as_element_node._output_html(output)
+                node.as_element_node._output_string(output)
                     .push_back(child_sep)
             } else {
                 eval assert(|_|"invalid node", false);
                 output
             }
         );
-        let output = output.push_back("</" + el.@tag + ">");
+        let output = output.push_back("</" + el.@tag + ">\n");
         output
     );
 }
 
 impl XmlElement: ToString {
-    to_string = to_html;
+    to_string = _to_string;
 }
 
 // A type that represents name and value of an attribute.
 type XmlAttribute = (String, String);
 
 namespace XmlAttribute {
-    // `attrs._output_html` output the attributes as XML string.
-    _output_html: Array String -> Iterator XmlAttribute -> Array String;
-    _output_html = |output, attrs| (
+    // `attrs._output_string` output the attributes as XML string.
+    _output_string: Array String -> Iterator XmlAttribute -> Array String;
+    _output_string = |output, attrs| (
         attrs.fold(
             output, |output, (name, value)|
             output

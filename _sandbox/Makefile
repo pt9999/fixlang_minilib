@@ -2,7 +2,7 @@
 	../bin/fixautolink build -o $@ -L ../lib -f $<
 
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
-	png.out ndarray_calc.out pi.out
+	png.out ndarray_calc.out
 
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
@@ -21,9 +21,6 @@ png:
 
 png.out: 
 	../bin/fixautolink build -o $@ -L ../lib -L . -f png_test.fix -d png -d z
-
-mandelbrot: 
-	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
 
 test_state_monad:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix

@@ -31,6 +31,8 @@ This library is still in alpha stage.
   - BigInt
   - BigFloat (currently not well tested)
   - Prime generator using BigInt
+  - Rational number
+  - Algebra (Ring, Field, Euclid, Modular, Polynomial)
 - Networking
   - TCP/IP Socket (IPv4 only)
   - URL, URI

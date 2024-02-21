@@ -24,20 +24,19 @@ namespace Vertex {
 // 0-based index
 type Face = Array I64;
 
+// 0-based index
+type Line = Array I64;
+
 type Object = unbox struct {
     vertices: Array Vertex,
-    faces: Array Face
+    faces: Array Face,
+    lines: Array Line
 };
 
 namespace Object {
     empty: Object;
     empty = (
-        Object { vertices: [], faces: [] }
-    );
-
-    make: Array Vertex -> Array Face -> Object;
-    make = |vertices, faces| (
-        Object { vertices: vertices, faces: faces }
+        Object { vertices: [], faces: [], lines: [] }
     );
 
     write_file: Path -> Object -> IOFail ();
@@ -49,6 +48,9 @@ namespace Object {
             );
             let _ = *obj.@faces.foreach_m(|f|
                 write_string(fh, "f " + f.to_iter.map(add(1)).map(to_string).join(" ") + "\n")
+            );
+            let _ = *obj.@lines.foreach_m(|l|
+                write_string(fh, "l " + l.to_iter.map(add(1)).map(to_string).join(" ") + "\n")
             );
             pure()
         )
@@ -69,6 +71,7 @@ namespace Object {
         let nv = obj1.@vertices.get_size;
         obj1.mod_vertices(append(obj2.@vertices))
         .mod_faces(append(obj2.@faces.map(map(add(nv)))))
+        .mod_lines(append(obj2.@lines.map(map(add(nv)))))
     );
 
     appendF: Object -> Object -> Object;
@@ -93,7 +96,7 @@ cube = (
         [0, 4, 5, 1],
         [2, 3, 7, 6]
     ];
-    Object::make(vertices, faces)
+    Object::empty.set_vertices(vertices).set_faces(faces)
 );
 
 frame: Object;
@@ -138,9 +141,29 @@ frame2 = (
     iter.fold(Object::empty, Object::append)
 );
 
+grid1: Object;
+grid1 = (
+    let centers = Iterator::range(0, 27).map(|i|
+        [ i, i / 3, i / 9 ].map(|i| i % 3).map(to_F64)
+    );
+    let cubes = centers.map(|center|
+        let sz = 0.1;
+        cube.scale([ sz, sz, sz ]).translate(center)
+    );
+    let grid = cubes.fold(Object::empty, Object::append);
+    let path = [
+        1, 3, 9, 23, 22, 19, 10, 26, 4, 12, 5, 15, 14, 2, 6, 18, 16, 17, 11, 20, 13, 8, 24, 7, 21, 25, 1
+    ];
+    let lines = Object::empty
+        .set_vertices(centers.to_array)
+        .set_lines([path]); 
+    grid.append(lines)
+);
+
+
 main: IO ();
 main = (
-    let obj = frame;
+    let obj = grid1;
     do {
         obj.write_file("tmp.obj".parse.as_some)
     }

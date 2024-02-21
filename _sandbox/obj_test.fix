@@ -8,27 +8,35 @@ import Math;
 
 import Minilib.Monad.FunctorM;
 
+// 3D vector
 type Vec3 = Array F64;
+
+// Vertex of polygons or polylines.
 type Vertex = Vec3;
 
 namespace Vertex {
+    // `vertex.scale([sx, sy, sz])` scales each coordinate of a vertex.
     scale: Vec3 -> Vertex -> Vertex;
     scale = |s, v| (
         s.to_iter.zip(v.to_iter).map(|(a,b)| a * b).to_array
     );
 
+    // `vertex.translate([tx, ty, tz])` translates each coordinate of a vertex.
     translate: Vec3 -> Vertex -> Vertex;
     translate = |t, v| (
         t.to_iter.zip(v.to_iter).map(|(a,b)| a + b).to_array
     );
 }
 
-// 0-based index
+// Face of a polygon.
+// It is an array of vertex index (0-based).
 type Face = Array I64;
 
-// 0-based index
+// Polyline.
+// It is an array of vertex index (0-based).
 type Line = Array I64;
 
+// 3D Object that can be exported to a Wavefront obj file.
 type Object = unbox struct {
     vertices: Array Vertex,
     faces: Array Face,
@@ -36,11 +44,13 @@ type Object = unbox struct {
 };
 
 namespace Object {
+    // An empty object.
     empty: Object;
     empty = (
         Object { vertices: [], faces: [], lines: [] }
     );
 
+    // `obj.write_file(file_path)` writes a Wavefront obj file.
     write_file: Path -> Object -> IOFail ();
     write_file = |file_path, obj| (
         let _ = *eprintln("writing file: " + file_path.to_string).lift;
@@ -58,16 +68,19 @@ namespace Object {
         )
     );
 
+    // Scales all vertices of an object.
     scale: Vec3 -> Object -> Object;
     scale = |s, obj| (
         obj.mod_vertices(map(scale(s)))
     );
 
+    // Translates all vertices of an object.
     translate: Vec3 -> Object -> Object;
     translate = |t, obj| (
         obj.mod_vertices(map(translate(t)))
     );
 
+    // `obj1.append(obj2) appends `obj2` after `obj1`.
     append: Object -> Object -> Object;
     append = |obj2, obj1| (
         let nv = obj1.@vertices.get_size;
@@ -75,13 +88,9 @@ namespace Object {
         .mod_faces(append(obj2.@faces.map(map(add(nv)))))
         .mod_lines(append(obj2.@lines.map(map(add(nv)))))
     );
-
-    appendF: Object -> Object -> Object;
-    appendF = |obj1, obj2| (
-        obj1.append(obj2)
-    );
 }
 
+// A cube of [-1,-1,-1]..[1,1,1].
 cube: Object;
 cube = (
     let vertices = Iterator::range(0, 8).map(|i|

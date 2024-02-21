@@ -58,6 +58,9 @@ algebra_test1:
 monoid_test1:
 	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix
 
+xml_test1:
+	../bin/fixautolink run -L ../lib -L . -f xml_test1.fix -O minimum
+
 clean:
 	rm -f *.out
 

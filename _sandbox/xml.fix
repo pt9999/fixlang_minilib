@@ -1,0 +1,236 @@
+// XML handling, such as:
+// - Very simple DOM model (XmlDocument, XmlElement)
+// - Escape/unescape special characters
+module Sandbox.Xml;
+
+import Debug;
+import Character;
+
+import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
+
+// A type that represents an XML document.
+type XmlDocument = unbox struct {
+    document_element: XmlElement           // document element
+};
+
+namespace XmlDocument {
+    // An empty XML document.
+    empty: XmlDocument;
+    empty = (
+        XmlDocument {
+            document_element: XmlElement::make("root")      // dummy
+        }
+    );
+
+    make: XmlElement -> XmlDocument;
+    make = |document_element| (
+        XmlDocument {
+            document_element: document_element
+        }
+    );
+
+    // Adds a child element to document element.
+    add: XmlElement -> XmlDocument -> XmlDocument;
+    add = |child, doc| (
+        doc.mod_document_element(add(child))
+    );
+
+    // Converts the XML document to XML string.
+    _to_string: XmlDocument -> String;
+    _to_string = |doc| (
+        eval debug_eprintln("doc._to_string");
+        doc.@document_element.to_html
+    );   
+}
+
+impl XmlDocument: ToString {
+    to_string = _to_string;
+}
+
+// A type that represents an XML node.
+type XmlNode = box union {
+    element_node: XmlElement,      // XML element
+    text_node: String              // text node
+};
+
+// A type that represents an XML element.
+type XmlElement = unbox struct {
+    tag: String,                   // tag name
+    attrs: Iterator XmlAttribute,  // attributes (reversed iterator)
+    children: Array XmlNode        // child nodes
+};
+
+namespace XmlElement {
+
+    // `XmlElement::make(tag)` creates an empty element with specified tag name.
+    make: String -> XmlElement;
+    make = |tag| (
+        XmlElement {
+            tag: tag,
+            attrs: Iterator::empty,
+            children: Array::empty(0)
+        }
+    );
+
+    // Synonym for `XmlElement::make`.
+    element: String -> XmlElement;
+    element = make;
+
+    // `el.attr(name,value)` adds an attribute to `el`.
+    // If an attribute of same name exists, it will be removed first.
+    // NOTE: validity of attribute names are not checked.
+    attr: String -> String -> XmlElement -> XmlElement;
+    attr = |name, value, el| (
+        el.mod_attrs(|attrs|
+            attrs.filter(|(n,v)| n != name)
+                 .push_front((name,value))
+        )
+    );
+
+    // `el.add(child)` adds a child element to `el`.
+    add: XmlElement -> XmlElement -> XmlElement;
+    add = |child, el| (
+        el.mod_children(push_back(element_node(child)))
+    );
+
+    // `el.text(txt)` adds a text node to `el`.
+    text: String -> XmlElement -> XmlElement;
+    text = |txt, el| (
+        el.mod_children(push_back(text_node(txt)))
+    );
+        
+    // `el.to_html` converts the element to XML string.
+    to_html: XmlElement -> String;
+    to_html = |el| (
+        el._output_html(Array::empty(100)).to_iter.concat_iter
+    );
+
+    // `el._output_html` output the element as XML string.
+    _output_html: Array String -> XmlElement -> Array String;
+    _output_html = |output, el| (
+        eval debug_eprintln("_output_html " + el.@tag);
+        let output = output.push_back("<" + el.@tag);
+        let output = el.@attrs.reverse._output_html(output);
+        let output = output.push_back(">");
+        let child_sep = if el.@children.get_size >= 2 { "\n" } else { "" };
+        let output = output.push_back(child_sep);
+        let output = el.@children.to_iter.fold(
+            output, |output, node|
+            if node.is_text_node {
+                output.push_back(escape_special(node.as_text_node))
+                      .push_back(child_sep)
+            } else if node.is_element_node {
+                node.as_element_node._output_html(output)
+                    .push_back(child_sep)
+            } else {
+                eval assert(|_|"invalid node", false);
+                output
+            }
+        );
+        let output = output.push_back("</" + el.@tag + ">");
+        output
+    );
+}
+
+impl XmlElement: ToString {
+    to_string = to_html;
+}
+
+// A type that represents name and value of an attribute.
+type XmlAttribute = (String, String);
+
+namespace XmlAttribute {
+    // `attrs._output_html` output the attributes as XML string.
+    _output_html: Array String -> Iterator XmlAttribute -> Array String;
+    _output_html = |output, attrs| (
+        attrs.fold(
+            output, |output, (name, value)|
+            output
+            .push_back(" ")
+            .push_back(escape_special(name))
+            .push_back("=\"")
+            .push_back(escape_special(value))
+            .push_back("\"")
+        )
+    );
+}
+
+namespace XmlHelpers {
+    // Escapes XML special characters.
+    // eg. `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
+    escape_special: String -> String;
+    escape_special = |str| (
+        str.replace_all("&", "&amp;")
+            .replace_all("<", "&lt;")
+            .replace_all(">", "&gt;")
+            .replace_all("\"", "&quot;")
+            .replace_all("'", "&#039;")
+    );
+
+    // Unescapes XML special characters.
+    // eg. `&amp;` -> `&`, `&lt;` -> `<`, `&gt;` -> `>`, `&quot;` -> `\"`, `&#039;` -> `'`.
+    // NOTE: Other character references is also converted.
+    unescape_special: String -> String;
+    unescape_special = |str| (
+        let input = str.get_bytes.pop_back;
+        let output: Array U8 = Array::empty(input.get_size);
+        let output = loop(
+            (output, 0), |(output, i)|
+            if i >= input.get_size {
+                break $ output
+            };
+            let c = input.@(i);
+            if c != '&' {
+                continue $ (output.push_back(c), i + 1)
+            };
+            if str.substring(i, i + 5) == "&amp;" {
+                continue $ (output.push_back('&'), i + 5)
+            };
+            if str.substring(i, i + 4) == "&lt;" {
+                continue $ (output.push_back('<'), i + 4)
+            };
+            if str.substring(i, i + 4) == "&gt;" {
+                continue $ (output.push_back('>'), i + 4)
+            };
+            if str.substring(i, i + 6) == "&quot;" {
+                continue $ (output.push_back("\"".get_bytes.@(0)), i + 6)
+            };
+            let opt = _match_char_reference(input, i);
+            if opt.is_some {
+                let (codepoint, i) = opt.as_some;
+                let output = encode_code_point_to_utf8(codepoint, output);
+                continue $ (output, i)
+            };
+            continue $ (output.push_back(c), i + 1)
+        );
+        output._unsafe_to_string
+    );
+
+    _match_char_reference: Array U8 -> I64 -> Option (U32, I64);
+    _match_char_reference = |input, i| (
+        let n = input.get_size;
+        if !(i < n && input.@(i) == '&') { none() };
+        let i = i + 1;
+        if !(i < n && input.@(i) == '#') { none() };
+        let i = i + 1;
+        let start = i;
+        let i = loop(
+            i, |i|
+            if !(i < n && input.@(i).is_digit) {
+                break $ i
+            };
+            continue $ i + 1
+        );
+        let end = i;
+        if end == start { none() };
+        if !(i < n && input.@(i) == ';') { none() };
+        let i = i + 1;
+        let codepoint: Result ErrMsg U32 = from_string(input.get_sub(start, end)._unsafe_to_string);
+        if codepoint.is_err { none() };
+
+        some $ (codepoint.as_ok, i + 1)
+    );
+}
+
+

@@ -20,7 +20,7 @@ bin/fixdoc: bin/fixautolink
 	bin/fixautolink build -o $@ -L ./lib -f tools/fixdoc.fix
 
 test: bin/fixautotest
-	bin/fixautotest -L ./lib -T ./tests
+	bin/fixautotest -L ./lib -T ./tests -O minimum
 
 document: bin/fixdoc
 	bin/fixdoc -i lib -o doc

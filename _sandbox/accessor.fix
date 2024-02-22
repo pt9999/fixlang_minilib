@@ -1,30 +1,47 @@
 module Main;
 
-type Accessor c a = unbox struct {
-    getter: c -> a,
-    modifier: (a -> a) -> c -> c
+import Sandbox.StateMonad;
+
+type Accessor a b = unbox struct {
+    getter: a -> b,
+    modifier: (b -> b) -> a -> a
 };
 
 namespace Accessor {
-    make: (c -> a) -> ((a -> a) -> c -> c) -> Accessor c a;
+    make: (a -> b) -> ((b -> b) -> a -> a) -> Accessor a b;
     make = |getter, modifier| (
         Accessor { getter: getter, modifier: modifier }
     );
 
-    get: c -> Accessor c a -> a;
-    get = |c, acc| (acc.@getter)(c);
-    
-    mod: (a -> a) -> c -> Accessor c a -> c;
-    mod = |f, c, acc| (acc.@modifier)(f, c);
-    
-    set: a -> c -> Accessor c a -> c;
-    set = |a, c, acc| acc.mod(|_| a, c);
+    accessor: (a -> b) -> ((b -> b) -> a -> a) -> Accessor a b;
+    accessor = make;
 
-    comp: (a -> b) -> ((b -> b) -> a -> a) -> Accessor c a -> Accessor c b;
-    comp = |g, m, acc| (
-        Accessor { getter: acc.@getter >> g, modifier: acc.@modifier << m }
+    get: a -> Accessor a b -> b;
+    get = |a, acc| (acc.@getter)(a);
+    
+    mod: (b -> b) -> a -> Accessor a b -> a;
+    mod = |f, a, acc| (acc.@modifier)(f, a);
+    
+    set: b -> a -> Accessor a b -> a;
+    set = |b, a, acc| acc.mod(|_| b, a);
+
+    compose: Accessor b c -> Accessor a b -> Accessor a c;
+    compose = |acc2, acc1| (
+        Accessor { 
+            getter: acc1.@getter >> acc2.@getter, 
+            modifier: acc1.@modifier << acc2.@modifier 
+         }
     );
 }
+
+liftState: Accessor s t -> State t a -> State s a;
+liftState = |accessor, state| (
+    make_state_monad $ |s|
+    let t = accessor.get(s);
+    let (a, t) = state.run_state(t);
+    let s = accessor.set(t, s);
+    (a, s)
+);
 
 //-------------------
 
@@ -43,9 +60,9 @@ type Baz = unbox struct {
 
 test1: IO ();
 test1 = (
-    let acc = Accessor::make(Foo::@bar, Foo::mod_bar);
-    let acc = acc.comp(Bar::@baz, Bar::mod_baz);
-    let acc = acc.comp(Baz::@n, Baz::mod_n);
+    let acc = accessor(Foo::@bar, Foo::mod_bar);
+    let acc = acc.compose(accessor(Bar::@baz, Bar::mod_baz));
+    let acc = acc.compose(accessor(Baz::@n, Baz::mod_n));
     
     let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
     let foo = acc.set(3, foo);
@@ -74,5 +91,5 @@ test2 = (
 );
 
 main: IO ();
-main = test2;
+main = test1;
 

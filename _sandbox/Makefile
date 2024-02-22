@@ -22,6 +22,12 @@ png:
 png.out: 
 	../bin/fixautolink build -o $@ -L ../lib -L . -f png_test.fix -d png -d z
 
+mandelbrot: 
+	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
+
+accessor:
+	../bin/fixautolink run -L ../lib -L . -f accessor.fix
+
 test_state_monad:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
 

@@ -3,6 +3,7 @@ module Main;
 import Hash;
 import HashMap;
 
+import Sandbox.Common;
 import Sandbox.StateMonad;
 import Minilib.Text.StringEx;
 
@@ -94,9 +95,9 @@ type Baz = unbox struct {
 
 test1: IO ();
 test1 = (
-    let acc = accessor(Foo::@bar, Foo::mod_bar);
-    let acc = acc.compose(accessor(Bar::@baz, Bar::mod_baz));
-    let acc = acc.compose(accessor(Baz::@n, Baz::mod_n));
+    let acc = accessor(Foo::@bar, Foo::mod_bar).apply $
+                accessor(Bar::@baz, Bar::mod_baz).compose >>
+                accessor(Baz::@n, Baz::mod_n).compose;
 
     let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
     let foo = acc.set(3, foo);
@@ -140,7 +141,8 @@ namespace User {
     };
 
     add_favo: String -> User -> User;
-    add_favo = |book_name| mod_favo_books(push_back(book_name));
+    //add_favo = |book_name| mod_favo_books(push_back(book_name));
+    add_favo = mod_favo_books << push_back;
 
     state_add_favo: String -> State (Option User) ();
     state_add_favo = |book_name| (
@@ -253,11 +255,13 @@ namespace App {
     );
 
     // Using state monads
-    add_fabo_book4: String -> String -> State App ();
-    add_fabo_book4 = |user_name, book_name| (
-        let _ = *user(user_name).map_state(state_add_favo(book_name));
-        let _ = *book(book_name).map_state(state_add_likes(1));
-        pure()
+    add_fabo_book4: String -> String -> App -> App;
+    add_fabo_book4 = |user_name, book_name, app| (
+        do {
+            let _ = *user(user_name).map_state(state_add_favo(book_name));
+            let _ = *book(book_name).map_state(state_add_likes(1));
+            pure()
+        }.run_state(app).@1
     );
 }
 
@@ -274,18 +278,23 @@ impl App: ToString {
 
 test_app: IO ();
 test_app = (
-    let app = App::empty;
-    let app = app.add_user("taro");
-    let app = app.add_user("jiro");
-    let app = app.add_book("book1");
-    let app = app.add_book("book2");
-    let app = app.add_fabo_book("taro", "book1");
-    let app = app.add_fabo_book2("jiro", "book1");
-    let app = app.add_fabo_book("taro", "book2");
-    let app = @1 << run_state(app) $ add_fabo_book4("jiro", "book2");
+    let app = App::empty.apply $
+        add_user("taro") >>
+        add_user("jiro") >>
+        add_book("book1") >>
+        add_book("book2") >>
+        add_fabo_book("taro", "book1") >>
+        add_fabo_book2("jiro", "book1") >>
+        add_fabo_book("taro", "book2") >>
+        add_fabo_book4("jiro", "book2");
     println(app.to_string)
 );
 
 main: IO ();
-main = test_app;
+main = (
+    let _ = *test1;
+    let _ = *test2;
+    let _ = *test_app;
+    pure()
+);
 

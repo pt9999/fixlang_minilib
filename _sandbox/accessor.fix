@@ -1,31 +1,84 @@
 module Main;
 
-type Accessor c a = unbox struct {
-    getter: c -> a,
-    modifier: (a -> a) -> c -> c
+import Hash;
+import HashMap;
+
+import Sandbox.Common;
+import Sandbox.StateMonad;
+import Minilib.Text.StringEx;
+
+// Simple Lens
+type Accessor a b = unbox struct {
+    getter: a -> b,
+    modifier: (b -> b) -> a -> a
 };
 
 namespace Accessor {
-    make: (c -> a) -> ((a -> a) -> c -> c) -> Accessor c a;
+    make: (a -> b) -> ((b -> b) -> a -> a) -> Accessor a b;
     make = |getter, modifier| (
         Accessor { getter: getter, modifier: modifier }
     );
 
-    get: c -> Accessor c a -> a;
-    get = |c, acc| (acc.@getter)(c);
-    
-    mod: (a -> a) -> c -> Accessor c a -> c;
-    mod = |f, c, acc| (acc.@modifier)(f, c);
-    
-    set: a -> c -> Accessor c a -> c;
-    set = |a, c, acc| acc.mod(|_| a, c);
+    accessor: (a -> b) -> ((b -> b) -> a -> a) -> Accessor a b;
+    accessor = make;
 
-    comp: (a -> b) -> ((b -> b) -> a -> a) -> Accessor c a -> Accessor c b;
-    comp = |g, m, acc| (
-        Accessor { getter: acc.@getter >> g, modifier: acc.@modifier << m }
+    get: a -> Accessor a b -> b;
+    get = |a, acc| (acc.@getter)(a);
+    
+    mod: (b -> b) -> a -> Accessor a b -> a;
+    mod = |f, a, acc| (acc.@modifier)(f, a);
+    
+    // Flipped version of `mod`.
+    modF: (b -> b) -> Accessor a b -> (a -> a);
+    modF = |f, acc, a| acc.mod(f, a);
+
+    set: b -> a -> Accessor a b -> a;
+    set = |b, a, acc| acc.mod(|_| b, a);
+
+    compose: Accessor b c -> Accessor a b -> Accessor a c;
+    compose = |acc2, acc1| (
+        Accessor { 
+            getter: acc1.@getter >> acc2.@getter, 
+            modifier: acc1.@modifier << acc2.@modifier 
+        }
     );
+
+    zip: Accessor a c -> Accessor a b -> Accessor a (b, c);
+    zip = |acc2, acc1| (
+        Accessor {
+            getter: |a| (acc1.get(a), acc2.get(a)),
+            modifier: |f, a| (
+                let bc = (acc1.get(a), acc2.get(a));
+                let bc = f(bc);
+                acc2.set(bc.@1, acc1.set(bc.@0, a))
+            )
+        }
+    );
+
+    map_state: State t a -> Accessor s t -> State s a;
+    map_state = |state, accessor| (
+        make_state_monad $ |s|
+        let t = accessor.get(s);
+        let (a, t) = state.run_state(t);
+        let s = accessor.set(t, s);
+        (a, s)
+    );
+
+    of_key: [k: HashKey] k -> Accessor (HashMap k v) (Option v);
+    of_key = |k| (
+        let getter = HashMap::find(k);
+        let modifier = |f, map| (
+            let v = map.HashMap::find(k);
+            let v = f(v);
+            if v.is_none { map.erase(k) } else { map.insert(k, v.as_some) }
+        );
+        accessor(getter, modifier)
+    );
+
 }
 
+//-------------------
+// Simple test
 //-------------------
 
 type Foo = unbox struct {
@@ -40,13 +93,12 @@ type Baz = unbox struct {
     n: I64
 };
 
-
 test1: IO ();
 test1 = (
-    let acc = Accessor::make(Foo::@bar, Foo::mod_bar);
-    let acc = acc.comp(Bar::@baz, Bar::mod_baz);
-    let acc = acc.comp(Baz::@n, Baz::mod_n);
-    
+    let acc = accessor(Foo::@bar, Foo::mod_bar).apply $
+                accessor(Bar::@baz, Bar::mod_baz).compose >>
+                accessor(Baz::@n, Baz::mod_n).compose;
+
     let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
     let foo = acc.set(3, foo);
     let foo = acc.mod(add(1), foo);
@@ -73,6 +125,176 @@ test2 = (
     println(a.to_string)
 );
 
+//-------------------
+// Mock application
+//-------------------
+
+type User = unbox struct {
+    name: String,
+    favo_books: Array String
+};
+
+namespace User {
+    make: String -> Array String -> User;
+    make = |name, favo_books| User {
+        name: name, favo_books: favo_books
+    };
+
+    add_favo: String -> User -> User;
+    //add_favo = |book_name| mod_favo_books(push_back(book_name));
+    add_favo = mod_favo_books << push_back;
+
+    state_add_favo: String -> State (Option User) ();
+    state_add_favo = |book_name| (
+        mod_state_(map $ add_favo(book_name))
+    );
+}
+
+impl User: ToString {
+    to_string = |u| (u.@name, u.@favo_books).format(
+        "User { name={}, favo_books={} }"
+    );
+}
+
+type Book = unbox struct {
+    name: String,
+    likes: I64
+};
+
+namespace Book {
+    make: String -> I64 -> Book;
+    make = |name, likes| Book {
+        name: name, likes: likes
+    };
+
+    add_likes: I64 -> Book -> Book;
+    add_likes = |n| mod_likes(add(n));
+
+    state_add_likes: I64 -> State (Option Book) ();
+    state_add_likes = |n| (
+        mod_state_(map $ add_likes(n))
+    );
+}
+
+impl Book: ToString {
+    to_string = |b| (b.@name, b.@likes).format(
+        "Book { name={}, likes={} }"
+    );
+}
+
+
+type App = unbox struct {
+    users: HashMap String User,
+    books: HashMap String Book
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        users: HashMap::empty(0),
+        books: HashMap::empty(0)
+    };
+
+    users: Accessor App (HashMap String User);
+    users = accessor(@users, mod_users);
+
+    books: Accessor App (HashMap String Book);
+    books = accessor(@books, mod_books);
+
+    user: String -> Accessor App (Option User);
+    user = |name| users.compose(of_key(name));
+
+    book: String -> Accessor App (Option Book);
+    book = |name| books.compose(of_key(name));
+
+    add_user: String -> App -> App;
+    add_user = |user_name, app| (
+        let user = User::make(user_name, []);
+        app.mod_users(insert(user.@name, user))
+    );
+
+    add_book: String -> App -> App;
+    add_book = |book_name, app| (
+        let book = Book::make(book_name, 0);
+        app.mod_books(insert(book.@name, book))
+    );
+
+    // Simple implementation
+    add_fabo_book: String -> String -> App -> App;
+    add_fabo_book = |user_name, book_name, app| (
+        let app = do {
+            let user = *app.@users.find(user_name);
+            let user = user.add_favo(book_name);
+            pure $ app.mod_users(insert(user.@name, user))
+        }.as_some_or(app);
+        let app = do {
+            let book = *app.@books.find(book_name);
+            let book = book.add_likes(1);
+            pure $ app.mod_books(insert(book.@name, book))
+        }.as_some_or(app);
+        app
+    );
+
+    // Using `Accessor::modF()` and a function composition
+    add_fabo_book2: String -> String -> App -> App;
+    add_fabo_book2 = |user_name, book_name| (
+        user(user_name).modF(map(add_favo(book_name)))
+        >>
+        book(book_name).modF(map(add_likes(1)))
+    );
+
+    // Using `Accessor::zip()`
+    add_fabo_book3: String -> String -> App -> App;
+    add_fabo_book3 = |user_name, book_name| (
+        user(user_name).zip(book(book_name))
+        .modF(|(user, book)|
+            let user = user.map(add_favo(book_name));
+            let book = book.map(add_likes(1));
+            (user, book)
+        )
+    );
+
+    // Using state monads
+    add_fabo_book4: String -> String -> App -> App;
+    add_fabo_book4 = |user_name, book_name, app| (
+        do {
+            let _ = *user(user_name).map_state(state_add_favo(book_name));
+            let _ = *book(book_name).map_state(state_add_likes(1));
+            pure()
+        }.run_state(app).@1
+    );
+}
+
+impl App: ToString {
+    to_string = |app| (
+        (app.@users, app.@books).format(
+            "App {\n" +
+            "  users={},\n" +
+            "  books={}\n" +
+            "}"
+        )
+    );
+}
+
+test_app: IO ();
+test_app = (
+    let app = App::empty.apply $
+        add_user("taro") >>
+        add_user("jiro") >>
+        add_book("book1") >>
+        add_book("book2") >>
+        add_fabo_book("taro", "book1") >>
+        add_fabo_book2("jiro", "book1") >>
+        add_fabo_book("taro", "book2") >>
+        add_fabo_book4("jiro", "book2");
+    println(app.to_string)
+);
+
 main: IO ();
-main = test2;
+main = (
+    let _ = *test1;
+    let _ = *test2;
+    let _ = *test_app;
+    pure()
+);
 

@@ -4,6 +4,9 @@
 
 extern void *fixruntime_run_function(void *function);
 
+//-------------------------------------------------------------
+//  FixのBoxedオブジェクトをC側に渡す仕組み
+
 typedef void (*RetainFunc)(void*);
 typedef void (*ReleaseFunc)(void*);
 
@@ -43,6 +46,20 @@ void boxedvalue_unregister (BoxedValue* b)
     free(b);
 }
 
+//-------------------------------------------------------------
+// Fixの関数をCから呼ぶ仕組み
+
+typedef struct CallbackFunc {
+    BoxedValue* func;
+    void* args;
+    void* result;
+} CallbackFunc;
+
+CallbackFunc* cb_create()
+{
+
+}
+
 void boxedvalue_call(BoxedValue* b)
 {
     if (b == NULL) return;
@@ -51,6 +68,10 @@ void boxedvalue_call(BoxedValue* b)
     void* ret = fixruntime_run_function(b->value);
     // TODO: release ret
 }
+
+//----------------------------
+// use case
+//
 
 //----------------------------
 

@@ -1,0 +1,56 @@
+module Main;
+
+import Debug;
+
+boxed: a -> Boxed a;
+boxed = |value| Boxed { value: value };
+
+boxedvalue_register_func: (() -> a) -> IO Ptr;
+boxedvalue_register_func = |f| (
+    //let boxed_f = Boxed{ value: |_: ()| Boxed{ value: f() } };
+    let boxed_f = boxed $ |_: ()| boxed(f());
+    let _ = *pure();
+    let ptr = *boxedvalue_register(boxed_f);
+    eval boxed_f;
+    pure $ ptr
+);
+
+boxedvalue_register: Boxed a -> IO Ptr;
+boxedvalue_register = |boxed| (
+    let _ = *pure();
+    let p_value = unsafe_get_retained_ptr_of_boxed_value(boxed);
+    let p_retain = unsafe_get_retain_function_of_boxed_value(boxed);
+    let p_release = unsafe_get_release_function_of_boxed_value(boxed);
+    let ptr = CALL_C[
+        Ptr boxedvalue_register(Ptr, Ptr, Ptr),
+        p_value, p_retain, p_release
+    ];
+    eval p_value;
+    eval p_retain;
+    eval p_release;
+    pure $ ptr
+);
+
+boxedvalue_unregister: Ptr -> IO ();
+boxedvalue_unregister = |ptr| (
+    let _ = *pure();
+    let _ = CALL_C[
+        () boxedvalue_unregister(Ptr),
+        ptr
+    ];
+    pure $ ()
+);
+
+
+main: IO ();
+main = (
+    let _ = *pure();
+    let callback = |_| (
+        eval debug_eprintln("callback is called");
+        ()
+    );
+    let ptr = *boxedvalue_register_func(callback);
+    eval CALL_C[() set_callback(Ptr), ptr];
+    eval CALL_C[() test1(I32), 123_I32];
+    pure()
+);

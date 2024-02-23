@@ -28,8 +28,11 @@ mandelbrot:
 accessor:
 	../bin/fixautolink run -L ../lib -L . -f accessor.fix
 
-test_state_monad:
+state_monad_test:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
+
+state_monad_test2:
+	../bin/fixautolink run -L ../lib -f state_monad_test2.fix state_monad.fix
 
 bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix

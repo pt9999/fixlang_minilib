@@ -1,0 +1,41 @@
+// Reader Monad. (a.k.a Traced, CoWriter Comonad)
+//
+// cf. https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/
+module Minilib.Monad.Reader;
+
+import Minilib.Trait.Monoid;
+import Minilib.Trait.Comonad;
+
+type Reader e a = unbox struct {
+    data: e -> a
+};
+
+type Traced e a = Reader e a;
+
+namespace Reader {
+    reader: (e -> a) -> Reader e a;
+    reader = |f| Reader { data: f };
+
+    run_reader: e -> Reader e a -> a;
+    run_reader = |e, ma| (ma.@data)(e);
+
+    read: Reader e e;
+    read = reader(|e| e);
+}
+
+impl Reader e: Functor {
+    map = |f, ma| reader(ma.@data >> f);
+}
+
+impl Reader e: Monad {
+    pure = |a| reader(|_| a);
+    bind = |f, ma| reader(|e| f(ma.run_reader(e)).run_reader(e));
+}
+
+impl [e: Monoid] Reader e: Comonad {
+    extract = |wa| wa.run_reader(mempty);
+    extend = |f, wb| (
+        let shift = |t, rr, s| rr.run_reader(s.mconcat(t));
+        reader $ |t| (f << shift(t)) (wb)
+    );
+}

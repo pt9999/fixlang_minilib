@@ -1,0 +1,98 @@
+module Main;
+
+import HashMap;
+
+import Minilib.Trait.Monoid;
+import Minilib.Trait.Comonad;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Writer;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+
+type Config = HashMap String String;
+
+namespace ReaderTest {
+    get_value: String -> Reader Config String;
+    get_value = |key| (
+        let config = *Reader::read;
+        pure $ config.find(key).as_some_or("")
+    );
+
+    get_key1: Reader Config String;
+    get_key1 = get_value("key1");
+
+    test_reader: IO ();
+    test_reader = (
+        let config = HashMap::empty(0).insert("key1", "value1");
+        let value = get_key1.run_reader(config);
+        println(value)
+    );
+}
+
+namespace WriterTest {
+    type LogWriter = Writer (Array String);
+
+    write_log: String -> LogWriter ();
+    write_log = |message| (
+        Writer::write([message])
+    );
+
+    write_lines: LogWriter I64;
+    write_lines = (
+        let sum = *Iterator::range(0, 10).fold_m(
+            0, |sum, i|
+            let _ = *write_log(i.to_string);
+            pure $ sum + i
+        );
+        pure $ sum
+    );
+
+    test_writer: IO ();
+    test_writer = (
+        let (lines, sum) = write_lines.run_writer;
+        let _ = *lines.to_iter.foreach_m(|message|
+            println(message)
+        );
+        println("sum="+sum.to_string)
+    );
+}
+
+
+//----------------------------
+
+namespace EnvTest {
+    type ConfigEnv a = Env Config a;
+
+    get_foo: ConfigEnv () -> String;
+    get_foo = |wc| (
+        wc.ask.find("foo").as_some
+    );
+
+    get_bar: ConfigEnv () -> String;
+    get_bar = |wc| (
+        wc.ask.find("bar").as_some
+    );
+
+    get_foo_bar:  ConfigEnv () -> Array String;
+    get_foo_bar = |wc| (
+        let foo: ConfigEnv String = wc.extend(get_foo);
+        let bar: ConfigEnv String = wc.extend(get_bar);
+        [foo.extract, bar.extract]
+    );
+
+    test_env: IO ();
+    test_env = (
+        let config = HashMap::empty(0)
+        .insert("foo", "aaa")
+        .insert("bar", "bbb");
+
+        //let foo = env(config, ()).get_foo;
+        //println(foo)
+        let foo_bar = env(config, ()).get_foo_bar;
+        println(foo_bar.to_string)
+    );
+
+}
+
+main: IO ();
+main = test_env;

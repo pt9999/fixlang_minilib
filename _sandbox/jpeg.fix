@@ -1,0 +1,141 @@
+module Main;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+import Minilib.IO.IOEx;
+import Minilib.Media.Image;
+
+write_jpeg_file: String -> Image -> IOFail ();
+write_jpeg_file = |filepath, image| (
+    IO::with_file(filepath.parse.as_some, |fh|
+        let cinfo = JpegCompress::make();
+        let cinfo = cinfo.set_studio_dest(fh);
+        let cinfo = cinfo.set_width(image.@width);
+        let cinfo = cinfo.set_height(image.@height);
+        let cinfo = cinfo.set_format(JpegCompress::parse_format(image.@format));
+        let cinfo = cinfo.set_defaults;
+        let cinfo = cinfo.start_compress;
+        let row_stride = image.@width * image.@channels;
+        cinfo.write_to_file(filepath, false, image.@data, row_stride)
+    )
+);
+
+_to_jpeg_compress: Image -> JpegCompress;
+_to_jpeg_compress = |image| (
+    cinfo
+);
+
+//----------------------------------------------------
+
+type JpegCompress = unbox struct {
+    data: ByteBuffer
+};
+
+namespace JpegCompress {
+
+    make: () -> JpegCompress;
+    make = |_|(
+        let data = ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_compress_struct, 0_U8, Platform::byte_order);
+        let _ = cinfo.@data.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_create_compress(Ptr), p_cinfo];
+        )
+        let cinfo = JpegCompress {
+            data: data
+        };
+        cinfo
+    );
+
+    set_studio_dest: FileHandle -> JpegCompress -> JpegCompress;
+    set_studio_dest = |fh, cinfo| (
+        eval cinfo.@data.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_stdio_dest(Ptr, Ptr), p_cinfo, fh._file_ptr]
+        );
+        cinfo
+    );
+
+    set_width: I64 -> JpegCompress -> JpegCompress;
+    set_width = |n, cinfo| cinfo.mod_data(set_u32(_def_jpeg_compress.@offsetof_image_width, n.to_U32));
+
+    set_height: I64 -> JpegCompress -> JpegCompress;
+    set_height = |n, cinfo| cinfo.mod_data(set_u32(_def_jpeg_compress.@offsetof_image_height, n.to_U32));
+
+    set_format: (I64, I64) -> JpegCompress -> JpegCompress;
+    set_format = |(ic, ics), cinfo| (
+        cinfo.mod_data(set_u32(_def_jpeg_compress.@offsetof_input_components, ic.to_U32))
+           .mod_data(set_u32(_def_jpeg_compress.@offsetof_in_color_space, ics.to_U32))
+    );
+
+    parse_format: String -> (I64, I64);
+    parse_format = |str| (
+        if str == "GRAY" { (1, /*JCS_GRAYSCALE*/ 1) };
+        if str == "RGB" { (3, /*JCS_RGB*/ 2) };
+        eval debug_eprintln ("invalid format: " + str);
+        0
+    );
+
+    set_defaults: JpegCompress -> JpegCompress;
+    set_defaults = |cinfo| (
+        eval cinfo.@data.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_set_defaults(Ptr), p_cinfo]
+        );
+        cinfo
+    );
+
+    start_compress: JpegCompress -> JpegCompress;
+    start_compress = |cinfo| (
+        eval cinfo.@data.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_start_compress(Ptr, I32), p_cinfo, 1_I32]
+        );
+        cinfo
+    );
+
+    write_scanlines: I64 -> I64 -> Array U8 -> JpegCompress -> JpegCompress;
+    write_scanlines = |row_stride, height, buffer, cinfo| (
+
+    );
+
+    write_to_file: String -> Bool -> Array U8 -> I64 -> JpegCompress -> IOFail ();
+    write_to_file = |filepath, convert_to_8bit, buffer, row_stride, cinfo| (
+
+            cinfo.@data.borrow_ptr(|p_cinfo|
+                eval CALL_C[() jpeg_stdio_dest(Ptr, Ptr), p_cinfo, fh._file_ptr];
+
+            )
+        )
+        let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
+        let colormap = nullptr;
+        let res =
+            png_imageio.@data.borrow_ptr(|p_png_imageio|
+              filepath.borrow_c_str(|p_filepath|
+                buffer.borrow_ptr(|p_buffer|
+                    CALL_C[I32 png_image_write_to_file(Ptr, Ptr, I32, Ptr, I32, Ptr),
+                        p_png_imageio, p_filepath, convert_to_8bit,
+                        p_buffer, row_stride.to_I32, colormap]
+                )
+              )
+            );
+        png_imageio._check_warning_or_error("write_to_file", res)
+    );
+
+
+    // `jpeg_compress` structure layout
+    type DefJpegCompress = unbox struct {
+        offsetof_err: I64,
+        offsetof_image_width: I64,
+        offsetof_image_height: I64,
+        offsetof_input_components: I64,
+        offsetof_in_color_space: I64,
+        sizeof_struct_jpeg_compress_struct: I64
+    };
+
+    _def_jpeg_compress: DefJpegCompress;
+    _def_jpeg_compress = DefJpegCompress {
+        offsetof_err: 0,
+        offsetof_image_width: 48,
+        offsetof_image_height: 52,
+        offsetof_input_components: 56,
+        offsetof_in_color_space: 60,
+        sizeof_struct_jpeg_compress_struct: 584
+    };
+}

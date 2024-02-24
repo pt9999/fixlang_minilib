@@ -24,6 +24,8 @@ This library is still in alpha stage.
 - Encoding
   - Binary
   - JSON
+- Functional
+  - Endo (endomorphism)
 - IO
   - IO extension
 - Math
@@ -31,6 +33,10 @@ This library is still in alpha stage.
   - BigInt
   - BigFloat (currently not well tested)
   - Prime generator using BigInt
+- Monad
+  - Reader Monad
+  - Writer Monad
+  - Functor for Monad (map_m, foreach_m)
 - Networking
   - TCP/IP Socket (IPv4 only)
   - URL, URI
@@ -45,6 +51,9 @@ This library is still in alpha stage.
   - String extension
   - Regular expression
   - Unicode (UTF8/UTF16/UTF32) conversion
+- Trait
+  - Monoid
+  - Comonad
 
 ## How to use
 

@@ -10,8 +10,6 @@ type Reader e a = unbox struct {
     data: e -> a
 };
 
-type Traced e a = Reader e a;
-
 namespace Reader {
     reader: (e -> a) -> Reader e a;
     reader = |f| Reader { data: f };
@@ -21,6 +19,16 @@ namespace Reader {
 
     read: Reader e e;
     read = reader(|e| e);
+}
+
+type Traced e a = Reader e a;
+
+namespace Traced {
+    traced: (e -> a) -> Traced e a;
+    traced = Reader::reader;
+
+    run_traced: e -> Traced e a -> a;
+    run_traced = Reader::run_reader;
 }
 
 impl Reader e: Functor {
@@ -33,9 +41,14 @@ impl Reader e: Monad {
 }
 
 impl [e: Monoid] Reader e: Comonad {
-    extract = |wa| wa.run_reader(mempty);
+    extract = |wa| wa.run_traced(mempty);
+    /*
     extend = |f, wb| (
-        let shift = |t, rr, s| rr.run_reader(s.mconcat(t));
+        let shift = |t, rr, s| rr.run_traced(s.mconcat(t));
         reader $ |t| (f << shift(t)) (wb)
+    );
+    */
+    extend = |f, w| traced $ |c| (
+        f (traced $ |c1| w.run_traced(c.mconcat(c1)))
     );
 }

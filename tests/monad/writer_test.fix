@@ -1,0 +1,83 @@
+module Main;
+
+import Debug;
+
+import Minilib.Monad.Writer;
+import Minilib.Trait.Monoid;
+import Minilib.Trait.Comonad;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_writer_functor: TestCase;
+test_writer_functor = (
+    make_test("test_writer_functor") $ |_|
+    let w = writer(["a"], 2);
+    let w = w.map(add(1));
+    let w = w.map(to_string);
+    assert_equal("eq", (["a"], "3"), w.run_writer)
+);
+
+test_writer_monad: TestCase;
+test_writer_monad = (
+    make_test("test_writer_monad") $ |_|
+    let w = do {
+        let x = *pure(2);
+        let _ = *write(["a"]);
+        let _ = *write(["b","c"]);
+        pure(x + 1)
+    };
+    assert_equal("eq", (["a", "b", "c"], 3), w.run_writer)
+);
+
+test_env_functor: TestCase;
+test_env_functor = (
+    make_test("test_env_functor") $ |_|
+    let e = env(["a"], 2);
+    let e = e.map(add(1));
+    let e = e.map(to_string);
+    assert_equal("eq", (["a"], "3"), e.to_tuple)
+);
+
+type User = unbox struct {
+    name: String,
+    age: I64
+};
+
+user: String -> I64 -> User;
+user = |name, age| User { name: name, age: age };
+
+add_name: Env User (Array String) -> Array String;
+add_name = |e| e.get_value.push_back("name=" + e.get_env.@name);
+
+add_age: Env User (Array String) -> Array String;
+add_age = |e| e.get_value.push_back("age=" + e.get_env.@age.to_string);
+
+get_profile: Env User a -> String;
+get_profile = |e| (
+    let e = e.map(|_| []);
+    let e = e.extend(add_name).extend(add_age);
+    e.get_value.to_iter.join(",")
+);
+
+test_env_comonad: TestCase;
+test_env_comonad = (
+    make_test("test_env_comonad") $ |_|
+    let e = env(user("taro", 12), ());
+    let _ = *assert_equal("eq", "name=taro,age=12", e.get_profile);
+    let e = env(user("hanako", 11), ());
+    let _ = *assert_equal("eq", "name=hanako,age=11", e.get_profile);
+    pure()
+);
+
+
+main: IO ();
+main = (
+    [
+        test_writer_functor,
+        test_writer_monad,
+        test_env_functor,
+        test_env_comonad,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

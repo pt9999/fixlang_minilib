@@ -22,6 +22,9 @@ png:
 png.out: 
 	../bin/fixautolink build -o $@ -L ../lib -L . -f png_test.fix -d png -d z
 
+obj_test:
+	../bin/fixautolink run -L ../lib -L . -f obj_test.fix -O minimum
+
 mandelbrot: 
 	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
 

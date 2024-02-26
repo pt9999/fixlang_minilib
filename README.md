@@ -24,8 +24,6 @@ This library is still in alpha stage.
 - Encoding
   - Binary
   - JSON
-- Functional
-  - Endo (endomorphism)
 - IO
   - IO extension
 - Math

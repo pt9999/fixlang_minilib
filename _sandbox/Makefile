@@ -46,8 +46,8 @@ bigfloat_test1:
 algebra1:
 	../bin/fixautolink run -L ../lib -L . -f algebra1.fix
 
-endo_test1:
-	../bin/fixautolink run -L ../lib -L . -f endo_test1.fix
+monoid_test1:
+	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix
 
 clean:
 	rm -f *.out

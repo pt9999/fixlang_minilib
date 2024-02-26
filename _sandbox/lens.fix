@@ -1,3 +1,4 @@
+// Simple lens.
 module Main;
 
 import Hash;
@@ -7,34 +8,41 @@ import Sandbox.StateMonad;
 import Minilib.Common.Common;
 import Minilib.Text.StringEx;
 
-// Simple Lens
+// Simple lens.
+// A lens is a pair of a getter and a modifier.
 type Lens a b = unbox struct {
     getter: a -> b,
     modifier: (b -> b) -> a -> a
 };
 
 namespace Lens {
+    // `Lens::make(getter, modifier)` makes a lens from a getter and a modifier.
     make: (a -> b) -> ((b -> b) -> a -> a) -> Lens a b;
     make = |getter, modifier| (
         Lens { getter: getter, modifier: modifier }
     );
 
+    // `Lens::lens` is symonym for `Len::make`.
     lens: (a -> b) -> ((b -> b) -> a -> a) -> Lens a b;
     lens = make;
 
+    // `lens.get(a)` calls `lens.@getter`.
     get: a -> Lens a b -> b;
     get = |a, lens| (lens.@getter)(a);
     
+    // `lens.mod(f)` calls `lens.@modifier`.
     mod: (b -> b) -> a -> Lens a b -> a;
     mod = |f, a, lens| (lens.@modifier)(f, a);
     
-    // Flipped version of `mod`.
+    // Flipped version of `Lens::mod`.
     modF: (b -> b) -> Lens a b -> (a -> a);
     modF = |f, lens, a| lens.mod(f, a);
 
+    // `lens.set(b, a)` calls `lens.mod(|_| b, a)`.
     set: b -> a -> Lens a b -> a;
     set = |b, a, lens| lens.mod(|_| b, a);
 
+    // `lens1.compose(lens2)` composes two lenses.
     compose: Lens b c -> Lens a b -> Lens a c;
     compose = |lens2, lens1| (
         Lens {
@@ -43,6 +51,7 @@ namespace Lens {
         }
     );
 
+    // `lens1.zip(lens2)` zips two lenses.
     zip: Lens a c -> Lens a b -> Lens a (b, c);
     zip = |lens2, lens1| (
         Lens {
@@ -55,6 +64,7 @@ namespace Lens {
         }
     );
 
+    // `lens.map_state(state)` transforms a state monad.
     map_state: State t a -> Lens s t -> State s a;
     map_state = |state, lens| (
         make_state_monad $ |s|
@@ -64,6 +74,7 @@ namespace Lens {
         (a, s)
     );
 
+    // `Lens::of_key(k)` creates a lens from a hashmap to a value of the key.
     of_key: [k: HashKey] k -> Lens (HashMap k v) (Option v);
     of_key = |k| (
         let getter = HashMap::find(k);

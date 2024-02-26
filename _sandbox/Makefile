@@ -25,8 +25,8 @@ png.out:
 mandelbrot: 
 	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
 
-accessor:
-	../bin/fixautolink run -L ../lib -L . -f accessor.fix
+lens:
+	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
 state_monad_test:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix

@@ -52,6 +52,7 @@ This library is still in alpha stage.
   - Regular expression
   - Unicode (UTF8/UTF16/UTF32) conversion
 - Trait
+  - Semigroup
   - Monoid
   - Comonad
 

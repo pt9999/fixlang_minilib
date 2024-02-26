@@ -28,14 +28,17 @@ obj_test:
 mandelbrot: 
 	../bin/fixautolink run -L ../lib -L . -f mandelbrot.fix -d png -d z
 
-accessor:
-	../bin/fixautolink run -L ../lib -L . -f accessor.fix
+lens:
+	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
 state_monad_test:
 	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
 
 state_monad_test2:
 	../bin/fixautolink run -L ../lib -f state_monad_test2.fix state_monad.fix
+
+reader_writer_test:
+	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
 
 bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix
@@ -45,6 +48,9 @@ bigfloat_test1:
 
 algebra1:
 	../bin/fixautolink run -L ../lib -L . -f algebra1.fix
+
+monoid_test1:
+	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix
 
 clean:
 	rm -f *.out

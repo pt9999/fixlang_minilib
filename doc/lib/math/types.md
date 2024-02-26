@@ -4,11 +4,6 @@
 
 Type definitions for mathematical concepts.
 
-### trait Monoid = Zero + Add;
-
-A trait that represents a [monoid](https://en.wikipedia.org/wiki/Monoid),
-where the additive unit is `zero`.
-
 ### trait AdditiveGroup = Eq + Zero + Neg + Add + Sub;
 
 A trait that represents an [additive group](https://en.wikipedia.org/wiki/Additive_group),

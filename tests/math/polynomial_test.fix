@@ -1,5 +1,6 @@
 module Main;
 
+import Random;
 import Debug;
 
 import Minilib.Math.Types;
@@ -38,6 +39,130 @@ test_at_degree = (
     )
 );
 
+test_get: TestCase;
+test_get = (
+    make_table_test("test_get",
+        [
+            ([10, 11, 12], 2, 12),
+            ([10, 11, 12], 3, 0),
+            ([10, 11, 12], -1, 0),
+            ([0], 0, 0)
+        ],
+        |(a, n, expected)|
+        let f = Polynomial::make(a);
+        assert_equal("expected", expected, f.get(n))
+    )
+);
+
+test_set: TestCase;
+test_set = (
+    make_table_test("test_set",
+        [
+            ([10, 11, 12], 2, 22, [10, 11, 22]),
+            ([10, 11, 12], 4, 24, [10, 11, 12, 0, 24]),
+            ([0], 1, 3, [0, 3]),
+            ([0], 0, 0, [0])
+        ],
+        |(a, n, x, expected)|
+        let f = Polynomial::make(a);
+        let f = f.set(n, x);
+        assert_equal("expected", expected, f.@coeff)
+    )
+);
+
+test_get_degree: TestCase;
+test_get_degree = (
+    make_table_test("test_get_degree",
+        [
+            ([10, 11, 12], 2),
+            ([10, 11, 0], 1),
+            ([1], 0),
+            ([0], 0)
+        ],
+        |(a, expected)|
+        let f = Polynomial::make(a);
+        assert_equal("expected", expected, f.get_degree)
+    )
+);
+
+test_divmod_rational: TestCase;
+test_divmod_rational = (
+    let r = rational;
+    let ri = |i| rational(i, 1);
+    make_table_test("test_divmod_rational",
+        [
+            ([ri(5), ri(2), ri(1)], [ri(-1), ri(1)], [ri(3), ri(1)], [ri(8)]),
+            ([ri(5), ri(2), ri(1)], [ri(-2), ri(2)], [r(3,2), r(1,2)], [ri(8)]),
+            ([ri(0)], [ri(1)], [ri(0)], [ri(0)])
+        ],
+        |(num, den, exp_quo, exp_rem)|
+        let num = Polynomial::make(num);
+        let den = Polynomial::make(den);
+        let exp_quo = Polynomial::make(exp_quo);
+        let exp_rem = Polynomial::make(exp_rem);
+        let (quo, rem) = divmod(num, den);
+        let _ = *assert_equal("quo", exp_quo, quo);
+        assert_equal("rem", exp_rem, rem)
+    )
+);
+
+test_divmod_F64: TestCase;
+test_divmod_F64 = (
+    make_table_test("test_divmod_F64",
+        [
+            ([5.0, 2.0, 1.0], [-1.0, 1.0], [3.0, 1.0], [8.0]),
+            ([5.0, 2.0, 1.0], [-0.01, 0.01], [300.0, 100.0], [8.0]),
+            ([2.0], [10.0], [0.2], [0.0])
+        ],
+        |(num, den, exp_quo, exp_rem)|
+        let num = Polynomial::make(num);
+        let den = Polynomial::make(den);
+        let exp_quo = Polynomial::make(exp_quo);
+        let exp_rem = Polynomial::make(exp_rem);
+        let (quo, rem) = divmod(num, den);
+        let _ = *assert_equal("quo", exp_quo, quo);
+        assert_equal("rem", exp_rem, rem)
+    )
+);
+
+gen_polynomial_F64: I64 -> Random -> (Polynomial F64, Random);
+gen_polynomial_F64 = |max_degree, random| (
+    let (r, random) = random.generate_U64;
+    let degree = (r % (max_degree - 1).to_U64).to_I64 + 1;
+    let coeff = Array::fill(degree + 1, 0.0);
+    let (coeff, random) = loop(
+        (coeff, random, 0), |(coeff, random, i)|
+        if i >= coeff.get_size { break $ (coeff, random) };
+        let (r, random) = random.generate_F64;
+        let r = r * 2.0 - 1.0;
+        let coeff = coeff.set(i, r);
+        continue $ (coeff, random, i + 1)
+    );
+    (Polynomial::make(coeff), random)
+);
+
+test_divmod_F64_random: TestCase;
+test_divmod_F64_random = (
+    make_table_test("test_divmod_F64_random",
+        loop(
+            ([], Random::init_by_seed(123_U64), 0),
+            |(table, random, i)|
+            if i >= 10 { break $ table };
+            let (num, random) = gen_polynomial_F64(5, random);
+            let (den, random) = gen_polynomial_F64(3, random);
+            let table = table.push_back((num, den));
+            continue $ (table, random, i + 1)
+        ),
+        |(num, den)|
+        let (quo, rem) = divmod(num, den);
+        //assert_equal("num", expected, num)
+        let residue = num - (den * quo + rem);
+        let residue_abs = residue.@coeff.to_iter.map(abs).fold(0.0, add);
+        assert_true("residue_abs=" + residue_abs.to_string_exp,
+                residue_abs < 1.0e-15)
+    )
+);
+
 // TODO: add tests
 
 main: IO ();
@@ -45,6 +170,11 @@ main = (
     [
         test_make,
         test_at_degree,
+        test_get,
+        test_set,
+        test_divmod_rational,
+        test_divmod_F64,
+        test_divmod_F64_random,
         TestCase::empty
     ]
     .run_test_driver

@@ -2,7 +2,7 @@
 
 ## module Minilib.Math.Types
 
-Type definitions for mathematical concepts.
+Type definitions for mathematical concepts, for example AdditiveGroup, Ring, Field.
 
 ### trait AdditiveGroup = Eq + Zero + Neg + Add + Sub;
 

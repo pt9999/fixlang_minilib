@@ -108,6 +108,11 @@ forall a b, a = (a / b) * b + (a % b)
 
 ### [module Minilib.Math.Polynomial (lib/math/polynomial.fix)](lib/math/polynomial.md)
 
+Polynomial over a ring.
+
+### [module Minilib.Math.RandomEx (lib/math/random_ex.fix)](lib/math/random_ex.md)
+
+Extension of `Random`, eg. generating a random integer in range, or a random array.
 
 ### [module Minilib.Math.Rational (lib/math/rational.fix)](lib/math/rational.md)
 
@@ -140,7 +145,7 @@ Reader monad. (a.k.a Traced, CoWriter comonad)
 
 ### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
 
-State Monad. NOTE that currently this interface is unstable.
+State Monad which maintains a mutable state.
 
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 

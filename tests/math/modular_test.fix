@@ -7,23 +7,24 @@ import Minilib.Math.Types;
 import Minilib.Testing.UnitTest;
 import Minilib.Text.StringEx;
 
+to_tuple: Modular a -> (a, a);
+to_tuple = |m| (m.@value, m.@modulus);
+
 test_make: TestCase;
 test_make = (
     make_table_test("test_make",
         [
-            (1, 6, 1, 6),
-            (7, 6, 1, 6),
-            (-11, 6, -5, 6),
-            (1, -6, 1, -6),
-            (7, -6, 1, -6),
-            (-11, -6, -5, -6),
-            (1, 0, 1, 0)
+            ((1, 6), (1, 6)),
+            ((7, 6), (1, 6)),
+            ((-11, 6), (-5, 6)),
+            ((1, -6), (1, -6)),
+            ((7, -6), (1, -6)),
+            ((-11, -6), (-5, -6)),
+            ((1, 0), (1, 0))
         ],
-        |(a, m, exp_a, exp_m)|
-        let mod = Modular::make(a, m);
-        let _ = *assert_equal("value", exp_a, mod.@value);
-        let _ = *assert_equal("modulus", exp_m, mod.@modulus);
-        pure()
+        |(a, expected)|
+        let m = Modular::make(a.@0, a.@1);
+        assert_equal("expected", expected, m.to_tuple)
     )
 );
 
@@ -31,19 +32,17 @@ test_modulo: TestCase;
 test_modulo = (
     make_table_test("test_modulo",
         [
-            (1, 6, 1, 6),
-            (7, 6, 1, 6),
-            (-11, 6, -5, 6),
-            (1, -6, 1, -6),
-            (7, -6, 1, -6),
-            (-11, -6, -5, -6),
-            (1, 0, 1, 0)
+            ((1, 6), (1, 6)),
+            ((7, 6), (1, 6)),
+            ((-11, 6), (-5, 6)),
+            ((1, -6), (1, -6)),
+            ((7, -6), (1, -6)),
+            ((-11, -6), (-5, -6)),
+            ((1, 0), (1, 0))
         ],
-        |(a, m, exp_a, exp_m)|
-        let mod = modulo(a, m);
-        let _ = *assert_equal("value", exp_a, mod.@value);
-        let _ = *assert_equal("modulus", exp_m, mod.@modulus);
-        pure()
+        |(a, expected)|
+        let m = modulo(a.@0, a.@1);
+        assert_equal("expected", expected, m.to_tuple)
     )
 );
 
@@ -56,11 +55,10 @@ test_get_modulus = (
             ((1,0), (2,6), 6),
             ((1,0), (2,0), 0)
         ],
-        |(a, b, m)|
+        |(a, b, expected)|
         let ma = Modular::make(a.@0, a.@1);
         let mb = Modular::make(b.@0, b.@1);
-        let actual = _get_modulus(ma,mb);
-        assert_equal("eq", m, actual)
+        assert_equal("expected", expected, _get_modulus(ma,mb))
     )
 );
 
@@ -82,9 +80,7 @@ test_nonneg = (
         |(a, expected)|
         let ma = Modular::make(a.@0, a.@1);
         let ma = ma.nonneg;
-        let _ = *assert_equal("value", expected.@0, ma.@value);
-        let _ = *assert_equal("modulus", expected.@1, ma.@modulus);
-        pure()
+        assert_equal("expected", expected, ma.to_tuple)
     )
 );
 
@@ -100,7 +96,7 @@ test_to_string = (
         ],
         |(a, expected)|
         let ma = Modular::make(a.@0, a.@1);
-        assert_equal("to_string", expected, ma.to_string)
+        assert_equal("expected", expected, ma.to_string)
     )
 );
 
@@ -126,7 +122,113 @@ test_eq = (
     )
 );
 
-// TODO: add tests
+test_zero: TestCase;
+test_zero = (
+    make_test("test_zero") $ |_|
+    assert_equal("expected", (0, 0), zero.to_tuple)
+);
+
+test_one: TestCase;
+test_one = (
+    make_test("test_one") $ |_|
+    assert_equal("expected", (1, 0), one.to_tuple)
+);
+
+test_neg: TestCase;
+test_neg = (
+    make_table_test("test_neg",
+        [
+            ((14,6), (-2,6)),
+            ((-14,6), (2,6)),
+            ((14,-6), (-2,-6)),
+            ((-14,-6), (2,-6)),
+            ((1,0), (-1,0)),
+            ((-1,0), (1,0)),
+            ((0,0), (0,0))
+        ],
+        |(a, expected)|
+        let ma = Modular::make(a.@0, a.@1);
+        assert_equal("expected", expected, (-ma).to_tuple)
+    )
+);
+
+test_add: TestCase;
+test_add = (
+    make_table_test("test_add",
+        [
+            ((2,6), (4,6), (0,6)),
+            ((14,6), (15,6), (5,6)),
+            ((-14,6), (-15,6), (-5,6)),
+            ((-17,6), (2,6), (-3,6)),
+            ((17,6), (-2,6), (3,6)),
+            ((2,-6), (4,-6), (0,-6)),
+            ((14,-6), (15,-6), (5,-6)),
+            ((-14,-6), (-15,-6), (-5,-6)),
+            ((-17,-6), (2,-6), (-3,-6)),
+            ((2,0), (-5,0), (-3,0)),
+            ((0,0), (0,0), (0,0))
+        ],
+        |(a, b, expected)|
+        let ma = Modular::make(a.@0, a.@1);
+        let mb = Modular::make(b.@0, b.@1);
+        assert_equal("eq", expected, (ma + mb).to_tuple)
+    )
+);
+
+test_sub: TestCase;
+test_sub = (
+    make_table_test("test_sub",
+        [
+            ((2,6), (-4,6), (0,6)),
+            ((14,6), (-15,6), (5,6)),
+            ((-14,6), (15,6), (-5,6)),
+            ((-17,6), (-2,6), (-3,6)),
+            ((17,6), (2,6), (3,6)),
+            ((2,-6), (-4,-6), (0,-6)),
+            ((14,-6), (-15,-6), (5,-6)),
+            ((-14,-6), (15,-6), (-5,-6)),
+            ((-17,-6), (-2,-6), (-3,-6)),
+            ((2,0), (5,0), (-3,0)),
+            ((0,0), (0,0), (0,0))
+        ],
+        |(a, b, expected)|
+        let ma = Modular::make(a.@0, a.@1);
+        let mb = Modular::make(b.@0, b.@1);
+        assert_equal("eq", expected, (ma - mb).to_tuple)
+    )
+);
+
+test_mul_div: TestCase;
+test_mul_div = (
+    make_table_test("test_mul_div",
+        [
+            ((2,7), (4,7), (1,7)),
+            ((2,7), (-4,7), (-1,7)),
+            ((8,7), (18,7), (4,7)),
+            ((-8,7), (18,7), (-4,7)),
+            ((14,7), (15,7), (0,7)),
+            ((2,-7), (4,-7), (1,-7)),
+            ((2,-7), (-4,-7), (-1,-7)),
+            ((8,-7), (18,-7), (4,-7)),
+            ((-8,-7), (18,-7), (-4,-7)),
+            ((14,-7), (15,-7), (0,-7)),
+            ((1,0), (1,0), (1,0))
+        ],
+        |(a, b, c)|
+        let ma = Modular::make(a.@0, a.@1);
+        let mb = Modular::make(b.@0, b.@1);
+        let mc = Modular::make(c.@0, c.@1);
+        let _ = *assert_equal("c == a * b", mc, ma * mb);
+        let _ = *if mb == zero { pure() } else {
+            assert_equal("a == c / b", ma, mc / mb)
+        };
+        let _ = *if ma == zero { pure() } else {
+            assert_equal("b == c / a", mb, mc / ma)
+        };
+        pure()
+    )
+);
+
 
 main: IO ();
 main = (
@@ -137,6 +239,12 @@ main = (
         test_nonneg,
         test_to_string,
         test_eq,
+        test_zero,
+        test_one,
+        test_neg,
+        test_add,
+        test_sub,
+        test_mul_div,
         TestCase::empty
     ]
     .run_test_driver

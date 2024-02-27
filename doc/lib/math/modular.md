@@ -2,7 +2,9 @@
 
 ## module Minilib.Math.Modular
 
-[Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
+This is an arithmetic with a modulus (modulo), for example `2 * 5 = 10 = 3 (mod 7)`.
+
+For details, see [Wikipedia: Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
 
 ### type Modular
 

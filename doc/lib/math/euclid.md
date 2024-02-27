@@ -2,11 +2,14 @@
 
 ## module Minilib.Math.Euclid
 
-Utility functions for an [Euclidean domain](https://en.wikipedia.org/wiki/Euclidean_domain),
-which is a ring with following division-with-remainder.
+Euclid algorithms, such as `gcd` (greatest common divisor).
+
+`Euclid` represents a Euclidean domain, which is a Ring with following division-with-remainder.
 ```
 forall a b, a = (a / b) * b + (a % b)
 ```
+
+For details, see [Wikipedia: Euclidean domain](https://en.wikipedia.org/wiki/Euclidean_domain).
 
 #### gcd: [a: Euclid] a -> a -> a;
 

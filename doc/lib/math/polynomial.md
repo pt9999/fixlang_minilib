@@ -2,7 +2,7 @@
 
 ## module Minilib.Math.Polynomial
 
-Polynomial over a ring.
+Polynomial of one variable, for example `x^2 + 2x + 1`. The coefficients can be any ring.
 
 ### type Polynomial
 

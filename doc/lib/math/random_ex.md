@@ -2,7 +2,7 @@
 
 ## module Minilib.Math.RandomEx
 
-Extension of `Random`, eg. generating a random integer in range, or a random array.
+Extension of `Random` module. For example, generating a random integer in range, or a random array.
 
 #### generate_I64_range: I64 -> I64 -> Random -> (I64, Random);
 

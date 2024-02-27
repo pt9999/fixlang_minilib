@@ -2,9 +2,13 @@
 
 ## module Minilib.Math.Ring
 
-Utility functions for a [ring](https://en.wikipedia.org/wiki/Ring_(mathematics)),
-which has addition(`add`), subtraction(`sub`), additive inverse(`neg`), additive unit(`zero`),
+Functions for a ring, for example multiplication or exponent with an integer.
+
+A ring is a mathematical structure which has addition(`add`), subtraction(`sub`),
+additive inverse(`neg`), additive unit(`zero`),
 multiplication(`mul`), multiplicative unit(`one`).
+
+For details, see [Wikipedia: Ring](https://en.wikipedia.org/wiki/Ring_(mathematics)).
 
 #### repeat_by_U64: (a -> a -> a) -> a -> a -> U64 -> a;
 

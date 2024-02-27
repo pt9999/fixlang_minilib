@@ -92,41 +92,35 @@ Arbitrary-precision natural number. This is internal module of BigInt.
 
 ### [module Minilib.Math.Complex (lib/math/complex.fix)](lib/math/complex.md)
 
-Complex number.
+Complex number, for example `1 + 2i`.
 
 ### [module Minilib.Math.Euclid (lib/math/euclid.fix)](lib/math/euclid.md)
 
-Utility functions for an [Euclidean domain](https://en.wikipedia.org/wiki/Euclidean_domain),
-which is a ring with following division-with-remainder.
-```
-forall a b, a = (a / b) * b + (a % b)
-```
+Euclid algorithms, such as `gcd` (greatest common divisor).
 
 ### [module Minilib.Math.Modular (lib/math/modular.fix)](lib/math/modular.md)
 
-[Modular Arithmetic](https://en.wikipedia.org/wiki/Modular_arithmetic).
+This is an arithmetic with a modulus (modulo), for example `2 * 5 = 10 = 3 (mod 7)`.
 
 ### [module Minilib.Math.Polynomial (lib/math/polynomial.fix)](lib/math/polynomial.md)
 
-Polynomial over a ring.
+Polynomial of one variable, for example `x^2 + 2x + 1`. The coefficients can be any ring.
 
 ### [module Minilib.Math.RandomEx (lib/math/random_ex.fix)](lib/math/random_ex.md)
 
-Extension of `Random`, eg. generating a random integer in range, or a random array.
+Extension of `Random` module. For example, generating a random integer in range, or a random array.
 
 ### [module Minilib.Math.Rational (lib/math/rational.fix)](lib/math/rational.md)
 
-Rational number
+Rational number arithmetic, for example `1/2 + 1/3 = 5/6`.
 
 ### [module Minilib.Math.Ring (lib/math/ring.fix)](lib/math/ring.md)
 
-Utility functions for a [ring](https://en.wikipedia.org/wiki/Ring_(mathematics)),
-which has addition(`add`), subtraction(`sub`), additive inverse(`neg`), additive unit(`zero`),
-multiplication(`mul`), multiplicative unit(`one`).
+Functions for a ring, for example multiplication or exponent with an integer.
 
 ### [module Minilib.Math.Types (lib/math/types.fix)](lib/math/types.md)
 
-Type definitions for mathematical concepts.
+Type definitions for mathematical concepts, for example AdditiveGroup, Ring, Field.
 
 ### [module Minilib.Media.Image (lib/media/image.fix)](lib/media/image.md)
 

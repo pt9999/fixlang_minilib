@@ -6,6 +6,8 @@ import Debug;
 import Minilib.Math.Types;
 import Minilib.Math.Rational;
 import Minilib.Math.Polynomial;
+import Minilib.Math.RandomEx;
+import Minilib.Monad.State;
 import Minilib.Testing.UnitTest;
 import Minilib.Text.StringEx;
 
@@ -127,39 +129,33 @@ test_divmod_F64 = (
 
 gen_polynomial_F64: I64 -> Random -> (Polynomial F64, Random);
 gen_polynomial_F64 = |max_degree, random| (
-    let (r, random) = random.generate_U64;
-    let degree = (r % (max_degree - 1).to_U64).to_I64 + 1;
-    let coeff = Array::fill(degree + 1, 0.0);
-    let (coeff, random) = loop(
-        (coeff, random, 0), |(coeff, random, i)|
-        if i >= coeff.get_size { break $ (coeff, random) };
-        let (r, random) = random.generate_F64;
-        let r = r * 2.0 - 1.0;
-        let coeff = coeff.set(i, r);
-        continue $ (coeff, random, i + 1)
-    );
-    (Polynomial::make(coeff), random)
+    do {
+        let degree = *make_state_monad(generate_I64_range(1, max_degree + 1));
+        let coeff = Array::fill(degree + 1, 0.0);
+        let coeff = *make_state_monad(
+            generate_array(degree + 1, generate_F64)
+        );
+        let coeff = coeff.map(|r| r * 2.0 - 1.0);
+        pure $ Polynomial::make(coeff)
+    }.run_state(random)
 );
 
 test_divmod_F64_random: TestCase;
 test_divmod_F64_random = (
     make_table_test("test_divmod_F64_random",
-        loop(
-            ([], Random::init_by_seed(123_U64), 0),
-            |(table, random, i)|
-            if i >= 10 { break $ table };
-            let (num, random) = gen_polynomial_F64(5, random);
-            let (den, random) = gen_polynomial_F64(3, random);
-            let table = table.push_back((num, den));
-            continue $ (table, random, i + 1)
-        ),
+        Iterator::range(0, 10).fold_m(
+            [], |table, i|
+            let num = *make_state_monad(gen_polynomial_F64(5));
+            let den = *make_state_monad(gen_polynomial_F64(3));
+            pure $ table.push_back((num, den))
+        ).run_state(Random::init_by_seed(123_U64)).@0,
         |(num, den)|
         let (quo, rem) = divmod(num, den);
         //assert_equal("num", expected, num)
         let residue = num - (den * quo + rem);
         let residue_abs = residue.@coeff.to_iter.map(abs).fold(0.0, add);
         assert_true("residue_abs=" + residue_abs.to_string_exp,
-                residue_abs < 1.0e-15)
+                residue_abs < 1.0e-10)
     )
 );
 

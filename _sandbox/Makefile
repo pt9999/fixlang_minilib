@@ -32,10 +32,10 @@ lens:
 	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
 state_monad_test:
-	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
+	../bin/fixautolink run -L ../lib -f state_monad_test.fix
 
 state_monad_test2:
-	../bin/fixautolink run -L ../lib -f state_monad_test2.fix state_monad.fix
+	../bin/fixautolink run -L ../lib -f state_monad_test2.fix
 
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix

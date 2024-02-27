@@ -11,10 +11,10 @@ ndarray:
 	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
-	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
+	../bin/fixautolink run -L ../lib -L . -f ndarray_calc.fix -d readline -O minimum
 
 ndarray_calc.out:
-	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
+	../bin/fixautolink build -o $@ -L ../lib -L . -f ndarray_calc.fix -d readline
 
 png: 
 	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z

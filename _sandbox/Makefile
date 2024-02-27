@@ -40,6 +40,9 @@ state_monad_test2:
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
 
+lnum:
+	../bin/fixautolink build -L ../lib -f lnum.fix
+
 bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix
 

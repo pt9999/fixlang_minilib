@@ -33,6 +33,10 @@ This library is still in alpha stage.
   - Prime generator using BigInt
   - Rational number
   - Algebra (Ring, Field, Euclid, Modular, Polynomial)
+- Monad
+  - Reader Monad
+  - Writer Monad
+  - Functor for Monad (map_m, foreach_m)
 - Networking
   - TCP/IP Socket (IPv4 only)
   - URL, URI
@@ -47,6 +51,10 @@ This library is still in alpha stage.
   - String extension
   - Regular expression
   - Unicode (UTF8/UTF16/UTF32) conversion
+- Trait
+  - Semigroup
+  - Monoid
+  - Comonad
 
 ## How to use
 

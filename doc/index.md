@@ -30,6 +30,10 @@ TreeMap is a map that manages keys in sorted order.
 
 TreeSet is a set that manages elements in sorted order.
 
+### [module Minilib.Common.Common (lib/common/common.fix)](lib/common/common.md)
+
+Common functions such as `id` and `flip`.
+
 ### [module Minilib.Crypto.SHA1 (lib/crypto/sha1.fix)](lib/crypto/sha1.md)
 
 SHA-1 secure hash function.
@@ -130,6 +134,14 @@ PNG image I/O.
 
 `map_m`, `foreach_m` for Array and Iterator.
 
+### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
+
+Reader monad. (a.k.a Traced, CoWriter comonad)
+
+### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
+
+Writer monad. (a.k.a Env, CoReader comonad)
+
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
 HTML handling, such as:
@@ -219,4 +231,16 @@ String extensions, such as:
 ### [module Minilib.Text.Unicode (lib/text/unicode.fix)](lib/text/unicode.md)
 
 Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
+
+### [module Minilib.Trait.Comonad (lib/trait/comonad.fix)](lib/trait/comonad.md)
+
+Comonad trait and associated functions.
+
+### [module Minilib.Trait.Monoid (lib/trait/monoid.fix)](lib/trait/monoid.md)
+
+Monoid trait and its several implementations (Array, Iterator, String etc).
+
+### [module Minilib.Trait.Semigroup (lib/trait/semigroup.fix)](lib/trait/semigroup.md)
+
+Semigroup trait and its several implementations (Array, Iterator, String etc).
 

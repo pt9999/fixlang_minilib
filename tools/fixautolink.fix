@@ -343,9 +343,59 @@ namespace App {
     execute_fix_command = |app| (
         let cmd = "fix";
         let args = app.@args;
-        execute_command(cmd, args)
+
+        // Because stdin, stdout, stderr should not be buffered or closed,
+        // using only `exec()` is better than using both `fork()` and `exec()`.
+        execvp(cmd, args)
+        //execute_command(cmd, args)
+    );
+}
+
+namespace ExecuteCommand {
+    // Borrow a pointer array from a string array, then borrow a pointer of the pointer array.
+    // The pointer array will be NULL-terminated.
+    _borrow_string_array_ptr: (Ptr -> a) -> Array String -> a;
+    _borrow_string_array_ptr = |f, string_array| (
+        let n = string_array.get_size;
+        let inner = |loop, i, ptr_array| (
+            if (i >= n) {
+                let ptr_array = ptr_array.push_back!(nullptr);  // NULL-terminate
+                ptr_array.borrow_ptr(|ptr_array_ptr| f(ptr_array_ptr))
+            };
+            let str = string_array.@(i);
+            str.borrow_c_str(|ptr|
+                let ptr_array = ptr_array.push_back!(ptr);
+                loop(i + 1, ptr_array)
+            )
+        );
+
+        let ptr_array: Array Ptr = Array::empty(n);
+        (fix $ inner)(0, ptr_array)
     );
 
+    // Calls a system call `execvp()`.
+    // For details, see [Linux manual page: exec(3)](https://manpages.debian.org/bookworm/manpages-dev/execvp.3.en.html).
+    execvp: String -> Array String -> IOFail ();
+    execvp = |cmd, args| (
+        if (cmd == "") {
+            throw $ "cmd is empty"
+        };
+        if (args.get_size == 0) {
+            throw $ "args is empty"
+        };
+        let command_line = args.to_iter.join(" ");
+        let _ = *eprintln("executing: " + command_line).lift;
+        cmd.borrow_c_str (|cmd_ptr|
+            args._borrow_string_array_ptr(|args_ptr|
+                let ret = CALL_C[I32 execvp(Ptr, Ptr), cmd_ptr, args_ptr];
+                if (ret != 0_I32) {
+                    throw $ "exec failed!"
+                };
+                pure()
+        ))
+    );
+
+/*
     execute_command: String -> Array String -> IOFail ();
     execute_command = |cmd, args| (
         let command_line = args.to_iter.join(" ");
@@ -374,17 +424,18 @@ namespace App {
             pure()
         );
         if exit_status.is_exit && exit_status.as_exit != 0_U8 {
-            throw $ "program exited with exit code " + exit_status.as_exit.to_string
+            throw $ "fixautolink: program exited with exit code " + exit_status.as_exit.to_string
         };
         if exit_status.is_signaled {
-            throw $ "program exited with signal " + exit_status.as_signaled.to_string
+            throw $ "fixautolink: program exited with signal " + exit_status.as_signaled.to_string
         };
         if exit_status.is_wait_failed {
-            throw $ "waiting for program failed!"
+            throw $ "fixautolink: waiting for program failed!"
         };
         let _ = *println("").lift;
         pure()
     );
+*/
 }
 
 main: IO ();

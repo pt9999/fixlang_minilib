@@ -14,25 +14,33 @@ trait [m: * -> *] m: FromIOFail {
 // State Monad
 //-------------------------------------------------------
 
-type State s a = unbox struct { _data: s -> (a, s) };
+// State monad wraps a function from a initial state to a pair of a value and a final state.
+type State s a = unbox struct {
+    _data: s -> (a, s)
+};
 
 namespace State {
+    // Creates a State monad from a function.
     make_state_monad: (s -> (a, s)) -> State s a;
     make_state_monad = |f| State { _data: f };
 
+    // Runs a State monad with the supplied initial state.
     run_state: s -> State s a -> (a, s);
     run_state = |s, ma| (ma.@_data) (s);
 
+    // A State monad that returns the current state as a value.
     get_state_: State s s;
     get_state_ = make_state_monad $ |s| (s, s);
 
+    // Creates a State monad of the specified state.
     put_state_: s -> State s ();
     put_state_ = |s| make_state_monad $ |_| ((), s);
 
+    // Creates a State monad that changes the state with the specified function.
     mod_state_: (s -> s) -> State s ();
     mod_state_ = |f| put_state_ $ f $ *get_state_;
 
-    // Lift a state monad.
+    // Lift a State monad.
     liftS: [f: Functor] State s a -> State (f s) (f a);
     liftS = |state| (
         make_state_monad $ |fs|
@@ -54,20 +62,28 @@ impl State s: Functor {
         (f(a), ss);
 }
 
+// A trait to get and put a state.
 // This is a weak typing because `[m: GetPutState]` does not have `s`.
+// If the type of `s` does not match, undefined behavior may occur.
 trait [m: * -> *] m: GetPutState {
+    // `get_state` is a monad that returns the current state.
     get_state: m s;
+    // `put_state(s)` is a monad that changes the state to `s`.
     put_state: s -> m ();
 }
 
+// A trait of generic state monad.
 trait StateMonad = Functor + Monad + GetPutState;
 
+// An implementation of `GetPutState` for the state monad.
 impl State s: GetPutState {
     get_state = State::get_state_;
     put_state = State::put_state_;
 }
 
+// `mod_state(f)` is a monad that modifies the state with `f`.
 // This is a weak typing because `[m: StateMonad]` does not have `s`.
+// If the type of `s` does not match, undefined behavior may occur.
 mod_state: [m: StateMonad] (s -> s) -> m ();
 mod_state = |f| put_state $ f $ *get_state;
 
@@ -76,26 +92,22 @@ trait [m: * -> *] m: ToState {
     to_state: m a -> State s a;
 }
 
-/*
-impl Option: ToState {
-    to_state = |ma| make_state_monad $ |s| pure $ (*ma, s);
-}
-
-impl Result e: ToState {
-    to_state = |ma| make_state_monad $ |s| pure $ (*ma, s);
-}
-*/
-
 //-------------------------------------------------------
 // StateIO Monad
 //-------------------------------------------------------
 
-type StateIO s a = unbox struct { _data: s -> IO (a, s) };
+// StateIO monad wraps a function from a initial state to an IO monad
+// of a pair of a value and a final state.
+type StateIO s a = unbox struct {
+    _data: s -> IO (a, s)
+};
 
 namespace StateIO {
+    // Creates a StateIO monad from a function.
     make_stateio_monad: (s -> IO (a, s)) -> StateIO s a;
     make_stateio_monad = |f| StateIO { _data: f };
 
+    // Runs a StateIO monad with the supplied initial state.
     run_stateio: s -> StateIO s a -> IO (a, s);
     run_stateio = |s, ma| (ma.@_data) (s);
 }
@@ -118,6 +130,7 @@ impl StateIO s: GetPutState {
     put_state = |s| make_stateio_monad $ |_| pure $ ((), s);
 }
 
+// A trait that converts a generic monad to a StateIO monad.
 trait [m: * -> *] m: ToStateIO {
     to_stateio: m a -> StateIO s a;
 }
@@ -139,12 +152,18 @@ trait StateIOMonad = StateMonad + FromIO;
 // StateIOF Monad
 //-------------------------------------------------------
 
-type StateIOF s a = unbox struct { _data: s -> IOFail (a, s) };
+// StateIOF monad wraps a function from a initial state to an IOFail monad
+// of a pair of a value and a final state.
+type StateIOF s a = unbox struct {
+    _data: s -> IOFail (a, s)
+};
 
 namespace StateIOF {
+    // Creates a StateIOF monad from a function.
     make_stateiof_monad: (s -> IOFail (a, s)) -> StateIOF s a;
     make_stateiof_monad = |f| StateIOF { _data: f };
 
+    // Runs a StateIOF monad with the supplied initial state.
     run_stateiof: s -> StateIOF s a -> IOFail (a, s);
     run_stateiof = |s, ma| (ma.@_data) (s);
 }
@@ -167,6 +186,7 @@ impl StateIOF s: GetPutState {
     put_state = |s| make_stateiof_monad $ |_| pure $ ((), s);
 }
 
+// A trait that converts a generic monad to a StateIOF monad.
 trait [m: * -> *] m: ToStateIOF {
     to_stateiof: m a -> StateIOF s a;
 }

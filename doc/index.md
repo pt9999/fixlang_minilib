@@ -117,6 +117,10 @@ PNG image I/O.
 
 Reader monad. (a.k.a Traced, CoWriter comonad)
 
+### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
+
+State Monad. NOTE that currently this interface is unstable.
+
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
 Writer monad. (a.k.a Env, CoReader comonad)

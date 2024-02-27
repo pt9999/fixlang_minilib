@@ -89,6 +89,7 @@ test_get_degree = (
 
 test_divmod_rational: TestCase;
 test_divmod_rational = (
+    // divmod() requires `[a: Field]`, so we use Rational here.
     let r = rational;
     let ri = |i| rational(i, 1);
     make_table_test("test_divmod_rational",
@@ -159,6 +160,96 @@ test_divmod_F64_random = (
     )
 );
 
+test_to_string: TestCase;
+test_to_string = (
+    make_table_test("test_to_string",
+        [
+            ([10, 11, 12], "12x^2 + 11x + 10"),
+            ([0, 1, 1], "x^2 + x"),
+            // In general, a ring cannot determine its sign (positive or negative).
+            ([-1, -1, -1], "-1x^2 + -1x + -1"),
+            ([0], "0")
+        ],
+        |(a, expected)|
+        let f = Polynomial::make(a);
+        assert_equal("expected", expected, f.to_string)
+    )
+);
+
+test_eq: TestCase;
+test_eq = (
+    make_table_test("test_eq",
+        [
+            ([10, 11, 12], [10, 11, 12, 0], true),
+            ([0, 0, 1], [0, 1, 1], false),
+            ([0], [0], true)
+        ],
+        |(a, b, expected)|
+        let f = Polynomial::make(a);
+        let g = Polynomial::make(b);
+        assert_equal("expected", expected, f == g)
+    )
+);
+
+test_zero: TestCase;
+test_zero = (
+    make_test("test_zero") $ |_|
+    assert_equal("expected", [0.0], zero.@coeff)
+);
+
+test_one: TestCase;
+test_one = (
+    make_test("test_one") $ |_|
+    assert_equal("expected", [1.0], one.@coeff)
+);
+
+test_neg: TestCase;
+test_neg = (
+    make_table_test("test_neg",
+        [
+            ([10, -11, 12], [-10, 11, -12]),
+            ([1], [-1])
+        ],
+        |(a, expected)|
+        let f = Polynomial::make(a);
+        let expected = Polynomial::make(expected);
+        assert_equal("expected", expected, -f)
+    )
+);
+
+test_add: TestCase;
+test_add = (
+    make_table_test("test_add",
+        [
+            ([10, -11, 12], [3], [13, -11, 12]),
+            ([10, -11, 12], [3, 4], [13, -7, 12]),
+            ([1], [-3, 0, 0, 4], [-2, 0, 0, 4])
+        ],
+        |(a, b, expected)|
+        let f = Polynomial::make(a);
+        let g = Polynomial::make(b);
+        let expected = Polynomial::make(expected);
+        assert_equal("expected", expected, f + g)
+    )
+);
+
+test_sub: TestCase;
+test_sub = (
+    make_table_test("test_sub",
+        [
+            ([10, -11, 12], [3], [7, -11, 12]),
+            ([10, -11, 12], [3, 4, 12], [7, -15]),
+            ([10, -11, 12], [3, 4, 12, 5], [7, -15, 0, -5]),
+            ([1], [-3, 0, 0, 4], [4, 0, 0, -4])
+        ],
+        |(a, b, expected)|
+        let f = Polynomial::make(a);
+        let g = Polynomial::make(b);
+        let expected = Polynomial::make(expected);
+        assert_equal("expected", expected, f - g)
+    )
+);
+
 // TODO: add tests
 
 main: IO ();
@@ -171,6 +262,13 @@ main = (
         test_divmod_rational,
         test_divmod_F64,
         test_divmod_F64_random,
+        test_to_string,
+        test_eq,
+        test_zero,
+        test_one,
+        test_neg,
+        test_add,
+        test_sub,
         TestCase::empty
     ]
     .run_test_driver

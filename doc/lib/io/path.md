@@ -12,6 +12,10 @@ Checks if the byte is a path separator. Currently only '/' is supported.
 
 `join_paths(path_segments)` joins segments into a path.
 
+#### basename: String -> String;
+
+`basename(path)` returns the last non-slash component. The trailing slashes are removed.
+
 #### dirname: String -> String;
 
 `dirname(path)` returns the path with its last non-slash component and trailing slashes removed.

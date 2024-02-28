@@ -64,15 +64,14 @@ Definition of the structure of a JSON value.
 
 A Channel that can be used for the communication of threads.
 
-### [module Minilib.IO.IOEx (lib/io/io_ex.fix)](lib/io/io_ex.md)
+### [module Minilib.IO.FileSystem (lib/io/file_system.fix)](lib/io/file_system.md)
 
-IO extensions, such as:
-- Create or delete files and directories
-- Directory listing
-- Find files under directory
-- Checks if file or directory exists
-- Retrieve file information, such as file size and time stamps
-- Get kernel information such as system name, machine archtecture
+File system module. For example, finding files, checks if file or directory exists,
+getting file size and last modified time.
+
+### [module Minilib.IO.Platform (lib/io/platform.fix)](lib/io/platform.md)
+
+Get kernel information such as system name, machine archtecture.
 
 ### [module Minilib.Math.BigFloat (lib/math/bigfloat.fix)](lib/math/bigfloat.md)
 
@@ -195,9 +194,9 @@ A task pool that can be used parallel computation.
 
 Array utility functions for testing.
 
-### [module Minilib.Testing.Timeit (lib/testing/timeit.fix)](lib/testing/timeit.md)
+### [module Minilib.Testing.Time (lib/testing/time.fix)](lib/testing/time.md)
 
-Measures execution time. Similar to `timeit` module of Python.
+Timing module, such as sleep for a while, and measuring execution time.
 
 ### [module Minilib.Testing.UnitTest (lib/testing/unit_test.fix)](lib/testing/unit_test.md)
 

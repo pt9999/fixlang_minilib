@@ -87,10 +87,10 @@ A type that represents an HTTP response.
 ```
 type Response = unbox struct {
     request: Request,         // HTTP request
-    connection: IOHandle,       // An IOHandle of the socket 
+    connection: IOHandle,       // An IOHandle of the socket
     http_version: String,       // eg. "HTTP/1.1"
     status: I64,                // HTTP status (eg. 404)
-    reason: String,             // reason phrase (eg. "Not Found") 
+    reason: String,             // reason phrase (eg. "Not Found")
     headers: Headers,           // response headers
     headersSent: Bool           // true iff response headers are sent
 };

@@ -1,6 +1,7 @@
 // $ ../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z
 module Main;
 
+import Math;
 import Minilib.Media.Image;
 import Minilib.Media.Png;
 import Sandbox.NdArray;
@@ -25,18 +26,49 @@ namespace NdArrayIO {
     );
 }
 
+render: F64 -> F64 -> (F64, F64, F64);
+render = |x, y| (
+    let frac = |f| f - Math::floor(f);
+    let noise = 0;
+    let (x, y) = if noise == 0 {
+        (x, y)
+    } else if noise == 1 {   // add jitter noise
+        let bx = frac(x*34567.0);
+        let by = frac(y*12345.0);
+        (x + by * 0.06, y + bx * 0.06)
+    } else {            // add jitter noise
+        let bx = (x * 0x123456789ABCDE_U64.to_F64).to_U64;
+        let by = (y * 0xABC123ABC123FF_U64.to_F64).to_U64;
+        let b = bx.bit_xor(by);
+        let bx = b.shift_right(16_U64).bit_and(0xFFFF_U64).to_F64 / 65535.0;
+        let by = b.shift_right(0_U64).bit_and(0xFFFF_U64).to_F64 / 65535.0;
+        (x + bx * 0.02, y + by * 0.02)
+    };
+    let angle = Math::atan2(y, x) / (2.0 * Math::pi64);
+    let radius = Math::sqrt(x * x + y * y);
+    let c1 = frac(5.0 * (angle + 0.3 / (radius + 0.1)));
+    let c2 = frac(4.0 * (angle - 0.4 / (radius + 0.05)));
+    (0.9 * c1 + 0.5 * c2,
+     0.5 * c1 + 0.7 * c2,
+     0.3 * c1 + 1.2 * c2)
+);
+
 test_image: IO ();
 test_image = (
     do {
         let width = 512;
         let height = 512;
+        let to_byte = |f| max(0.0, min(255.0, f * 255.0)).to_U8;
         let image = Image::make(width, height, "RGB");
         let image = Iterator::range(0, height).fold(
             image, |image, y|
+            let fy = (y.to_F64 / height.to_F64) * 2.0 - 1.0;
             Iterator::range(0, width).fold (
                 image, |image, x|
+                let fx = (x.to_F64 / width.to_F64) * 2.0 - 1.0;
+                let rgb = render(fx, fy);
                 let index = image.calc_index(x, y, 0);
-                image.set_rgb(index, (x.to_U8, y.to_U8, 0_U8))
+                image.set_rgb(index, (rgb.@0.to_byte, rgb.@1.to_byte, rgb.@2.to_byte))
             )
         );
         let filepath = "tmp.test.png";

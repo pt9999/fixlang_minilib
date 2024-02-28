@@ -31,9 +31,10 @@ This library is still in alpha stage.
   - BigInt
   - BigFloat (currently not well tested)
   - Prime generator using BigInt
+  - Rational number
+  - Algebra (Ring, Field, Euclid, Modular, Polynomial)
 - Monad
-  - Reader Monad
-  - Writer Monad
+  - State / Reader / Writer Monad
   - Functor for Monad (map_m, foreach_m)
 - Networking
   - TCP/IP Socket (IPv4 only)

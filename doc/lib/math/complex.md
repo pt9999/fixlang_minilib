@@ -2,7 +2,7 @@
 
 ## module Minilib.Math.Complex
 
-Complex number.
+Complex number, for example `1 + 2i`.
 
 ### type Complex
 

@@ -5,8 +5,9 @@
 - 巨大数は `{仮数部}E{指数部}`という形式とする。
   - 上記の値は{仮数部}*10^{指数部}となる。
   - 巨大数を正規化すると以下のようになる。
-    - 仮数部: -10.0 < m < 10.0 を満たす浮動小数点数m
-    - 指数部: 巨大数または0
+    - 仮数部: 1.0 <= abs(m) < 10.0 を満たす浮動小数点数m
+    - 指数部: 整数の巨大数, または0
+  - LNum は基本的には正規化した状態にする。正規化されていない場合は不正とする。
 - 例
   - 1     = 1E0
   - 1E10  = 1E1E1E0
@@ -24,6 +25,9 @@ module Main;
 import Debug;
 import Math;
 
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
 type LNum = box union {
     zero: (),           // 0
     num: (F64, LNum)    // m * 10^e
@@ -32,24 +36,31 @@ type LNum = box union {
 impl LNum: FromString {
     from_string = |s| (
         if s == "0" {
-            ok $ zero()
+            ok $ LNum::_zero
         };
-        let index: Option I64 = s.find("E", 0);
+        let index: Option I64 = s.get_bytes.pop_back.find_by(
+            |c| c == 'E' || c == 'e'
+        );
         if index.is_none {
-            err $ "LNum format error: " + s
+            let m_str = s;
+            let m = m_str.from_string;
+            if m.is_err {
+                err $ m.as_err
+            };  
+            ok $ LNum::make(m.as_ok, LNum::_zero)
         };
         let index = index.as_some;
         let m_str = s.get_sub(0, index);
         let e_str = s.get_sub(index + 1, s.get_size);
         let m = m_str.from_string;
         if m.is_err {
-            err $ m.as_err + ": m_str="+m_str
+            err $ m.as_err
         };
         let e: Result ErrMsg LNum = e_str.from_string;
         if e.is_err {
-            err $ e.as_err + ": e_str="+e_str
+            err $ e.as_err
         };
-        ok $ num $ (m.as_ok, e.as_ok)
+        ok $ LNum::make(m.as_ok, e.as_ok)
     );
 }
 
@@ -57,10 +68,20 @@ impl LNum: ToString {
     to_string = |n| (
         if n.is_zero {
             "0"
-        } else {
+        };
+        let fallback = |_| (
             let (m, e) = n.as_num;
             trim_fractional(m.to_string) + "E" + e.to_string
-        }
+        );
+        let f64 = n.to_F64_opt;
+        if f64.is_some {
+            let f64 = f64.as_some;
+            if 1.0e-6 < f64.abs && f64.abs < 1.0e6 {
+                f64.to_string.trim_fractional
+            };
+            fallback()
+        };
+        fallback()
     );
 }
 
@@ -111,19 +132,58 @@ namespace F64 {
 }
 
 namespace LNum {
+    _zero: LNum;
+    _zero = zero();
+
+    _one: LNum;
+    _one = LNum::from_F64(1.0);
+
+    make: F64 -> LNum -> LNum;
+    make = |m, e| (
+        //eval debug_eprintln("LNum::make: m="+m.to_string+" e="+e.to_string);
+        if m == 0.0 {
+            LNum::_zero
+        };
+        let (e, efrac) = e._int_frac;
+        //eval debug_eprintln("LNum::make: after int_frac: e="+e.to_string+" efrac="+efrac.to_string);
+        let sign_m = m.sign.to_F64;
+        let m: F64 = abs(m) * pow10(efrac);
+        let log10_m = Math::floor(Math::log10(m));
+        let m = sign_m * m * pow10(-log10_m);
+        //eval debug_eprintln("LNum::make: pre add: e="+e.to_string+" log10_m="+log10_m.to_string);
+        let e = add(e, from_F64(log10_m));
+        //eval debug_eprintln("LNum::make: post add: e="+e.to_string);
+        num $ (m, e)
+    );
+
+    from_F64: F64 -> LNum;
+    from_F64 = |x| (
+        LNum::make(x, _zero)
+    );
+
+    // Convert LNum to F64.
+    // If the exponent is greater than or equal to 300, return `none()`.
+    // If the exponent is smaller than or equal to -300, return `some(0.0)`.
     to_F64_opt: LNum -> Option F64;
     to_F64_opt = |n| (
         if n.is_zero {
           some(0.0)
         };
         let (m, e) = n.as_num;
-        let e = e.to_F64_opt;
-        if e.is_none {
+        let e_sign = e.sign;
+        let e_f64 = e.to_F64_opt;
+        if e_f64.is_none {      // e < -1e300 or 1e300 < e
+            if e_sign >= 0 {
+                none()          // 1e300 < e, so 1e1e300 < n
+            };
+            some(0.0)           // e < 1e-300, so n < 1e1e-300
+        };
+        let e = e_f64.as_some;
+        if e >= 300.0 {
             none()
         };
-        let e = e.as_some;
-        if e < -300.0 || 300.0 < e {
-            none()
+        if e <= -300.0 {
+            some(0.0)
         };
         let x = m * pow10(e);
         some(x)
@@ -143,12 +203,6 @@ namespace LNum {
     // Return -1 if n1 < n2, 0 if n1 == n2, 1 if n1 > n2.
     compare: (LNum, LNum) -> I64;
     compare = |(n1, n2)| (
-        _compare_canon $ (canon(n1), canon(n2))
-    );
-    _compare_canon: (LNum, LNum) -> I64;
-    _compare_canon = |(n1, n2)| (
-        eval assert(|_| "n1 is not canonicalized", n1.is_canon);
-        eval assert(|_| "n2 is not canonicalized", n2.is_canon);
         if n1.is_zero && n2.is_zero {
             0
         };
@@ -172,33 +226,113 @@ namespace LNum {
         }
     );
 
-    is_canon: LNum -> Bool;
-    is_canon = |n| (
+    // Split a LNum to the integer part (floor) and the fractional part.
+    // The fractional part is 0 <= frac < 1.
+    // The input number should be canonicalized.
+    // The returned values will not be canonicalized.
+    _int_frac: LNum -> (LNum, F64);
+    _int_frac = |n| (
         if n.is_zero {
-            true
+            (_zero, 0.0)
         };
         let (m, e) = n.as_num;
-        if m <= -10.0 || m >= 10.0 || m == 0.0 {
-            false
+        // `e` should be an integer.
+        // IEEE 754 double-precision floating number has 52-bit precision,
+        // which is about 10^15.65.
+        // so 1.0E16 or above has no fractional part.
+        let e_sign = e.sign;
+        let e_f64 = e.to_F64_opt;
+        if e_sign >= 0 && (e_f64.is_none || e_f64.as_some > 15.0) {
+            (n, 0.0)
         };
-        e.is_canon
+        // If e < -1.0, then 0.0 < n < 1.0, because 1.0 <= m < 10.0
+        if e_sign < 0 && (e_f64.is_none || e_f64.as_some < -1.0) {
+            let n = n.to_F64_opt.as_some;
+            eval assert(|_| "n is out of range: n=" + n.to_string
+                + " m="+m.to_string+" e="+e.to_string
+            , 0.0 <= n && n < 1.0);
+            (_zero, n)
+        };
+        // 0 <= e <= 15
+        let e: F64 = e.to_F64_opt.as_some;
+        let x: F64 = m * pow10(e);
+        let int_part: F64 = Math::floor(x);
+        let frac_part: F64 = x - int_part;
+        if frac_part == 0.0 {
+            (n, 0.0)
+        };
+        let int_part: LNum = LNum::from_F64(int_part);
+        (int_part, frac_part)
     );
-    // Canonicalize a large number.
-    canon: LNum -> LNum;
-    canon = |n| (
-        if n.is_canon {
-            n
+
+    is_integer: LNum -> Bool;
+    is_integer = |n| (
+        let (int_part, frac_part) = n._int_frac;
+        frac_part.is_zero
+    );
+
+    _E: LNum;
+    _E = LNum::from_F64(exp(1.0));
+
+    _log10_E: LNum;
+    _log10_E = log10(_E);
+
+    exp: LNum -> LNum;
+    exp = |n| (
+        _E.pow(n)
+    );
+
+    sqrt: LNum -> LNum;
+    sqrt = |n| (
+        n.pow(LNum::from_F64(0.5))
+    );
+
+    // `x.pow(y)` evaluates to `x^y`.
+    pow: LNum -> LNum -> LNum;
+    pow = |y, x| (
+        if x.is_zero {
+            x
         };
+        if y.is_zero {
+            LNum::_one
+        };
+        let log10_x = x.log10;
+        LNum::make(1.0, y * log10_x)
+    );
+
+    // `x.pow10` evaluates to `10^x`.
+    pow10: LNum -> LNum;
+    pow10 = |n| (
+        LNum::make(1.0, n)
+    );
+
+    // Calculates natural logarithm.
+    log: LNum -> LNum;
+    log = |n| (
+        log10(n) / _log10_E
+    );
+
+    // Calculates base-10 logarithm.
+    log10: LNum -> LNum;
+    log10 = |n| (
+        eval assert(|_| "n must be positive", n.sign > 0);
         let (m, e) = n.as_num;
-        let sign_m = m.sign;
-        if sign_m == 0 {
-            zero()
+        add(e, LNum::from_F64(Math::log10(m)))
+    );
+
+    // Calculates `n!`.
+    factorial: LNum -> LNum;
+    factorial = |n| (
+        eval assert(|_| "n must be non-negative", n.sign >= 0);
+        let opt = n.to_F64_opt;
+        if opt.is_some && opt.as_some <= 170.0 {
+            let n = Math::floor(opt.as_some).to_I64;
+            let f64 = Iterator::range(0,n).fold(1.0, |prod, k| prod * (k+1).to_F64);
+            LNum::from_F64(f64)
         };
-        let m: F64 = abs(m);
-        let log10_m = floor(log10(m));
-        let m = sign_m.to_F64 * m / pow10(log10_m);
-        let e = add(e, num $ (log10_m, zero()));
-        num $ (m, e)
+        // Stirling's formula, sqrt(2*pi*n) * (n/e) ^ n
+        let two_pi = LNum::from_F64(2.0 * Math::pi64);
+        sqrt(two_pi * n) * (n / _E).pow(n)
     );
 }
 
@@ -220,6 +354,14 @@ impl LNum: LessThan
     );
 }
 
+impl LNum: LessThanOrEq
+{
+    less_than_or_eq = |n1, n2| (
+        let c = (compare $ (n1, n2));
+        c <= 0
+    );
+}
+
 impl LNum: Neg
 {
     neg = |n| (
@@ -227,7 +369,7 @@ impl LNum: Neg
             n
         };
         let (m, e) = n.as_num;
-        num((-m, e))
+        LNum::make(-m, e)
     );
 }
 
@@ -246,7 +388,7 @@ impl LNum: Add
         let ec = compare $ (e1, e2);
         if ec == 0 {
             // if exponents are same, add two mantissas, then canonicalize the result.
-            canon << num $ (m1 + m2, e1)
+            LNum::make(m1 + m2, e1)
         };
         // Exponents are not same, so we need to equalize.
         let (n1, n2) = if ec > 0 {
@@ -266,7 +408,14 @@ impl LNum: Add
         };
         let ed = ed.as_some;
         let m = m1 + m2 * pow10(-ed);
-        canon << num $ (m, e1)
+        LNum::make(m, e1)
+    );
+}
+
+impl LNum: Sub
+{
+    sub = |n1, n2| (
+        add(n1, neg(n2))
     );
 }
 
@@ -274,10 +423,10 @@ impl LNum: Mul
 {
     mul = |n1, n2| (
         if n1.is_zero {
-            zero()
+            LNum::_zero
         };
         if n2.is_zero {
-            zero()
+            LNum::_zero
         };
         let (m1, e1) = n1.as_num;
         let (m2, e2) = n2.as_num;
@@ -287,32 +436,75 @@ impl LNum: Mul
         // Add two exponents.
         let e = add(e1, e2);
         // Return a canonicalized result.
-        canon(num((m, e)))
+        LNum::make(m, e)
     );
 }
 
+impl LNum: Div 
+{
+    div = |n1, n2| (
+        eval assert(|_| "Divide by zero", !n2.is_zero); 
+        if n1.is_zero {
+            LNum::_zero
+        };
+        let (m1, e1) = n1.as_num;
+        let (m2, e2) = n2.as_num;
 
-test_to_string: IOFail ();
-test_to_string = (
-    let n: LNum = num $ (1.0_F64, num $ (1.0_F64, zero()));
-    lift $ println ("n="+ n.to_string)
+        // Divide two mantissas.
+        let m = m1 / m2;
+        // Sub two exponents.
+        let e = sub(e1, e2);
+        // Return a canonicalized result.
+        LNum::make(m, e)
+    );
+}
+
+test_from_to_string: TestCase;
+test_from_to_string = (
+    make_table_test("test_from_string",
+        [
+            ("1E1E0", ok $ "10"),
+            ("1.0e200", ok $ "1E200"),
+            ("34.5670", ok $ "34.567"),
+            ("1.0E7e6e5e0", ok $ "1E7E600000"),
+            ("1.0Eabc", err $ "Failed to convert string to number (invalid format): abc"),
+            ("xyzE345", err $ "Failed to convert string to number (invalid format): xyz")
+        ],
+        |(n_str, expected)|
+        let res: Result ErrMsg LNum = n_str.from_string;
+        let actual = res.map(to_string);
+        assert_equal(n_str, expected, actual)
+    )
 );
 
-test_to_F64_opt: IOFail ();
+test_to_F64_opt: TestCase;
 test_to_F64_opt = (
-    let m: Result ErrMsg LNum = "1E2E2E0".from_string;
-    if m.is_err {
-        throw $ ("m: " + m.as_err)
-    };
-    let m = m.as_ok;
-    let _ = *(lift $ println("m=" + m.to_string));
-    let x = m.to_F64_opt;
-    if x.is_none {
-        throw $ ("m: to_F64_opt failed")
-    };
-    let x = x.as_some;
-    let _ = *(lift $ println("x=" + x.to_string_exp));
-    pure()
+    make_table_test("test_from_string",
+        [
+            ("1E1E0", "some(10)"),
+            ("3.4567E3E0", "some(3456.7)"),
+            ("1e2e2e0", "some(1E200)"),
+            ("9.999e299", "some(9.999E299)"),
+            ("1e300", "none()"),
+            ("1e3e2", "none()"),
+            ("-1e3e2", "none()"),
+            ("3e-2e2e0", "some(3E-200)"),
+            ("1e-299", "some(1E-299)"),
+            ("-1e-299", "some(-1E-299)"),
+            ("9.99e-300", "some(0)"),
+            ("9.99e-3.00e2", "some(0)"),
+            ("-9.99e-3.00e2", "some(0)"),
+            ("-9.99e-1e1000", "some(0)"),
+            ("0e0e10000", "some(0)")
+        ],
+        |(n_str, expected)|
+        let n: LNum = *n_str.from_string.from_result;
+        // to avoid fractional error
+        let f64_opt = n.to_F64_opt;
+        let lnum_opt: Option LNum = f64_opt.map(LNum::from_F64);
+        let actual = lnum_opt.to_string;        
+        assert_equal(n_str, expected, actual)
+    )
 );
 
 test_add: IOFail ();
@@ -331,71 +523,96 @@ test_mul = (
     lift $ println("n="+ n.to_string)
 );
 
-check_equal: [a: Eq, a: ToString] String -> a -> a -> IOFail ();
-check_equal = |expression, actual, expected| (
-    let ok = if expected == actual { "[OK]" } else { "[NG]" };
-    let message = ok + " " + expression + " = " + 
-        actual.to_string + 
-        " (expected: " + expected.to_string + ")";
-    // format("{} = {}") << expression << actual のように書きたい。
-
-    lift $ println(message)
+test_div: IOFail ();
+test_div = (
+    let n1: IOFail LNum = from_result $ "1E1E2E0".from_string;
+    let n2: IOFail LNum = from_result $ "-4E1E3E0".from_string;
+    let n = *n1 / *n2;
+    lift $ println("n="+ n.to_string)
 );
 
-to_num: String -> IOFail LNum;
-to_num = |str| (
-    from_result $ str.from_string
+test_log_pow: IOFail ();
+test_log_pow = (
+    let a: LNum = *"3.3E1E2E0".from_string.from_result;
+    let b: LNum = *"4E1E3E0".from_string.from_result;
+    let _ = *println((a, a.log10).format("{}.log10={}")).lift;
+    let _ = *println((a, a.log10.pow10).format("{}.log10.pow10={}")).lift;
+    let _ = *println((a, b, a.pow(b)).format("{}.pow({})={}")).lift;
+    let _ = *println((a, b, a.pow(b).log10.pow10).format("{}.pow({}).log10.pow10={}")).lift;
+    let _ = *println((a, b, a.pow(b).log.exp).format("{}.pow({}).log.exp={}")).lift;
+    let _ = *println((a, b, a.pow(b).exp).format("{}.pow({}).exp={}")).lift;
+    let _ = *println((a, b, a.pow(b).exp.log10).format("{}.pow({}).exp.log10={}")).lift;
+    let _ = *println((a, b, a.pow(b).exp.log).format("{}.pow({}).exp.log={}")).lift;
+    pure()
 );
 
-to_num2: (String, String) -> IOFail (LNum, LNum);
-to_num2 = |(n1_str, n2_str)| (
-    let n1 = to_num (n1_str);
-    let n2 = to_num (n2_str);
-    pure $ (*n1, *n2)
+test_factorial: IOFail ();
+test_factorial = (
+    let a: LNum = LNum::from_F64(100.0);
+    let _ = *println((a, a.factorial).format("{}.factorial={}")).lift;
+    let _ = *println((a, a.factorial.factorial).format("{}.factorial.factorial={}")).lift;
+    let _ = *println((a, a.factorial.factorial.factorial).format("{}.factorial.factorial.factorial={}")).lift;
+    let a: LNum = LNum::from_F64(170.0);
+    let _ = *println((a, a.factorial).format("{}.factorial={}")).lift;
+    let a: LNum = LNum::from_F64(180.0);
+    let _ = *println((a, a.factorial).format("{}.factorial={}")).lift;
+    let a: LNum = *"1E1E2E0".from_string.from_result;
+    let _ = *println((a, a.factorial).format("{}.factorial={}")).lift;
+    let _ = *println((a, a.pow10.factorial).format("{}.pow10.factorial={}")).lift;
+    pure()
 );
-test_compare: IOFail ();
+
+test_compare: TestCase;
 test_compare = (
-    let _ = *(lift $ println ("=== test_compare ==="));
-    let test = |n1_str, n2_str, expected| (
-        let expression = "compare(" + n1_str + "," + n2_str + ")";
-        let actual = compare $ *(to_num2 $ (n1_str, n2_str));
-        check_equal (expression, actual, expected)
-    );
-    let _ = *(test("1E1E0", "10E0", 0));
-    let _ = *(test("1E11E0", "9E10E0", 1));
-    let _ = *(test("99E99E99E0", "100E100E100E0", -1));
-    pure()    
+    make_table_test("test_compare",
+        [
+            ("1E1E0", "10E0", 0),
+            ("1E11E0", "9E10E0", 1),
+            ("99E99E99E0", "100E100E100E0", -1)
+        ],
+        |(n1_str, n2_str, expected)|
+        let expression = (n1_str, n2_str).format("compare({}, {})");
+        let n1: LNum = *n1_str.from_string.from_result;
+        let n2: LNum = *n2_str.from_string.from_result;
+        let actual = compare $ (n1, n2);
+        assert_equal (expression, actual, expected)
+    )
 );
 
-test_less_than: IOFail ();
+test_less_than: TestCase;
 test_less_than = (
-    let _ = *(lift $ println ("=== test_less_than ==="));
-    let test = |n1_str, n2_str, expected| (
-        let expression = "(" + n1_str + "<" + n2_str + ")";
-        let n1 = to_num $ n1_str;
-        let n2 = to_num $ n2_str;
-        let actual = *n1 < *n2;
-        check_equal (expression, actual, expected)
-    );
-    let _ = *(test("1E1E0", "10E0", false));
-    let _ = *(test("1E11E0", "9E10E0", false));
-    let _ = *(test("99E99E99E0", "100E100E100E0", true));
-    pure()    
+    make_table_test("test_less_than",
+        [
+            ("1E1E0", "10E0", false),
+            ("1E11E0", "9E10E0", false),
+            ("99E99E99E0", "100E100E100E0", true)
+        ],
+        |(n1_str, n2_str, expected)|
+        let expression = (n1_str, n2_str).format("{} < {}");
+        let n1: LNum = *n1_str.from_string.from_result;
+        let n2: LNum = *n2_str.from_string.from_result;
+        let actual = n1 < n2;
+        assert_equal (expression, expected, actual)
+    )
 );
 
 main: IO ();
 main = (
-    do {
-        let n = *(to_num $ "100E100E100E0");
-        eval *(lift $ println (n.to_string));
-        eval *(lift $ println (canon(n).to_string));        
-        eval *test_to_string;
-        eval *test_to_F64_opt;
+    let _ = *do {
         eval *test_add;
         eval *test_mul;
-        eval *test_compare;
-        eval *test_less_than;
+        eval *test_div;
+        eval *test_log_pow;
+        eval *test_factorial;
         pure()
-    }.try(|err| println(err))
+    }.try(|err| println(err));
+    [
+        test_from_to_string,
+        test_to_F64_opt,
+        test_compare,
+        test_less_than,
+        TestCase::empty
+    ]
+    .run_test_driver
 );
 

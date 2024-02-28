@@ -2,7 +2,7 @@
 
 ## module Minilib.Math.Rational
 
-Rational number
+Rational number arithmetic, for example `1/2 + 1/3 = 5/6`.
 
 ### type Rational
 

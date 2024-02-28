@@ -32,13 +32,16 @@ lens:
 	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
 state_monad_test:
-	../bin/fixautolink run -L ../lib -f state_monad_test.fix state_monad.fix
+	../bin/fixautolink run -L ../lib -f state_monad_test.fix
 
 state_monad_test2:
-	../bin/fixautolink run -L ../lib -f state_monad_test2.fix state_monad.fix
+	../bin/fixautolink run -L ../lib -f state_monad_test2.fix
 
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
+
+lnum:
+	../bin/fixautolink build -L ../lib -f lnum.fix
 
 bigint_test1:
 	../bin/fixautolink build -L ../lib -f bigint_test1.fix
@@ -46,8 +49,8 @@ bigint_test1:
 bigfloat_test1:
 	../bin/fixautolink build -L ../lib -L . -f bigfloat_test1.fix
 
-algebra1:
-	../bin/fixautolink run -L ../lib -L . -f algebra1.fix
+algebra_test1:
+	../bin/fixautolink run -L ../lib -L . -f algebra_test1.fix
 
 monoid_test1:
 	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix

@@ -54,9 +54,9 @@ is_all = |f, array| (
 
 type Expr = box union {
     ex_none: (),
-    ex_ident: String,
+    ex_var: String,
     ex_float: F64,
-    ex_funcall: (String, Array Expr),
+    ex_apply: (String, Array Expr),
     ex_array: Array Expr,
     ex_subsc: (Expr, Array Expr),
     ex_range: (Option Expr, Option Expr),
@@ -67,10 +67,10 @@ type Expr = box union {
 
 impl Expr: ToString {
     to_string = |ex| (
-        if ex.is_ex_ident { ex.as_ex_ident };
+        if ex.is_ex_var { ex.as_ex_var };
         if ex.is_ex_float { ex.as_ex_float.to_string };
-        if ex.is_ex_funcall {
-            let (name, args) = ex.as_ex_funcall;
+        if ex.is_ex_apply {
+            let (name, args) = ex.as_ex_apply;
             name + "(" + args.to_iter.map(to_string).join(",") + ")"
         };
         if ex.is_ex_array {
@@ -101,7 +101,7 @@ impl Expr: ToString {
 }
 
 // num_lit
-// ident
+// var
 // "(" expr ")"
 // expr "(" (expr ("," expr)*)? ")"
 // "[" (expr ("," expr)*)? "]"
@@ -209,7 +209,7 @@ namespace Expr {
 
     _parse_term: Parser Expr;
     _parse_term = do {
-        _parse_funcall
+        _parse_apply
         .or_else(_parse_array)
         .or_else(_parse_subsc)
         .or_else(_parse_paren)
@@ -231,17 +231,17 @@ namespace Expr {
         pure $ [a].append(rest)
     };
 
-    _parse_funcall: Parser Expr;
-    _parse_funcall = do {
+    _parse_apply: Parser Expr;
+    _parse_apply = do {
         let _ = *_skip_whitespaces;
-        let name = *_parse_ident;
-        let name = name.as_ex_ident;
+        let name = *_parse_var;
+        let name = name.as_ex_var;
         let _ = *_skip_whitespaces;
         let _ = *match_char('(');
         let args = *_parse_expr_list;
         let _ = *_skip_whitespaces;
         let _ = *match_char(')').or_error("')' is missing");
-        pure $ ex_funcall $ (name, args)
+        pure $ ex_apply $ (name, args)
     };
 
     _parse_array: Parser Expr;
@@ -256,9 +256,9 @@ namespace Expr {
 
     _parse_subsc: Parser Expr;
     _parse_subsc = do {
-        let ident = *_parse_ident;
+        let var = *_parse_var;
         loop_m(
-            ident, |expr|
+            var, |expr|
             let _ = *_skip_whitespaces;
             let lbracket = *match_char('[').if_exists;
             if lbracket.is_none {
@@ -279,12 +279,12 @@ namespace Expr {
         pure $ expr
     };
 
-    _parse_ident: Parser Expr;
-    _parse_ident = do {
+    _parse_var: Parser Expr;
+    _parse_var = do {
         let c = *match_char_class(|c| is_alpha(c) || c == '_');
         let rest = *repeat(match_char_class(is_alnum));
         let str = [c].append(rest)._unsafe_to_string;
-        pure $ ex_ident(str)
+        pure $ ex_var(str)
     };
  
     _parse_number_lit: Parser Expr;
@@ -360,7 +360,10 @@ impl Value: ToString {
     to_string = |v| (
         if v.is_v_none { "" };
         if v.is_v_err { "ERR:" + v.as_v_err };
-        if v.is_v_float { v.as_v_float.to_string };
+        if v.is_v_float {
+            let str = v.as_v_float.to_string;
+            str.strip_last_bytes(|c| c == '0').strip_last_bytes(|c| c == '.')
+        };
         if v.is_v_range { 
             let (lhs, rhs) = v.as_v_range;
             lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
@@ -439,8 +442,8 @@ namespace Evaluator
 
     evaluate: Expr -> Evaluator -> IOFail Value;
     evaluate = |expr, ev| (
-        if expr.is_ex_ident {
-            ev._eval_ident(expr.as_ex_ident)
+        if expr.is_ex_var {
+            ev._eval_var(expr.as_ex_var)
         };
         if expr.is_ex_assign {
             ev._eval_assign(expr.as_ex_assign)
@@ -448,8 +451,8 @@ namespace Evaluator
         if expr.is_ex_range {
             ev._eval_range(expr.as_ex_range)
         };
-        if expr.is_ex_funcall {
-            ev._eval_funcall(expr.as_ex_funcall)
+        if expr.is_ex_apply {
+            ev._eval_apply(expr.as_ex_apply)
         };
         if expr.is_ex_array {
             ev._eval_array(expr.as_ex_array)
@@ -482,8 +485,8 @@ namespace Evaluator
         )
     );
 
-    _eval_ident: String -> Evaluator -> IOFail Value;
-    _eval_ident = |name, ev| (
+    _eval_var: String -> Evaluator -> IOFail Value;
+    _eval_var = |name, ev| (
         let env: Environ = *ev.get_environ;
         let opt = env.find(name);
         if opt.is_none {
@@ -494,8 +497,8 @@ namespace Evaluator
     
     _eval_assign: (Expr, Expr) -> Evaluator -> IOFail Value;
     _eval_assign = |(lhs, rhs), ev| (
-        if lhs.is_ex_ident {
-            let lhs = lhs.as_ex_ident;
+        if lhs.is_ex_var {
+            let lhs = lhs.as_ex_var;
             let rhs = *ev.evaluate(rhs);
             let _ = *ev.mod_environ(insert(lhs, rhs));
             pure $ v_none()
@@ -503,9 +506,9 @@ namespace Evaluator
         throw $ "assign type mismatch"
     );
 
-    _eval_funcall: (String, Array Expr) -> Evaluator -> IOFail Value;
-    _eval_funcall = |(name, args), ev| (
-        let f = *ev._eval_ident(name);
+    _eval_apply: (String, Array Expr) -> Evaluator -> IOFail Value;
+    _eval_apply = |(name, args), ev| (
+        let f = *ev._eval_var(name);
         args.to_iter.fold_m(
             f, |f, arg|
             if !f.is_v_func {

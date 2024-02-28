@@ -69,6 +69,10 @@ A Channel that can be used for the communication of threads.
 File system module. For example, finding files, checks if file or directory exists,
 getting file size and last modified time.
 
+### [module Minilib.IO.Path (lib/io/path.fix)](lib/io/path.md)
+
+File Path handling, such as joining paths and retrieving directory name.
+
 ### [module Minilib.IO.Platform (lib/io/platform.fix)](lib/io/platform.md)
 
 Get kernel information such as system name, machine archtecture.

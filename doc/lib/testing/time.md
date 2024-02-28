@@ -1,8 +1,13 @@
-# timeit.fix
+# time.fix
 
-## module Minilib.Testing.Timeit
+## module Minilib.Testing.Time
 
-Measures execution time. Similar to `timeit` module of Python.
+Timing module, such as sleep for a while, and measuring execution time.
+
+#### usleep: U32 -> IOFail ();
+
+Sleeps for specified micro-seconds.
+For details, see Linux manual page for [usleep()](https://man7.org/linux/man-pages/man3/usleep.3.html).
 
 #### timeit: [a: ToString] String -> (() -> a) -> IO a;
 

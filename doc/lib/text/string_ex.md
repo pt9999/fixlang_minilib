@@ -163,16 +163,3 @@ Converts a 64bit number to a hex string.
 
 Converts a hex string to a 64bit number.
 
-#### is_path_sep: U8 -> Bool;
-
-Checks if the byte is a path separator. Currently only '/' is supported.
-
-#### join_paths: Array String -> String;
-
-`join_paths(path_segments)` joins segments into a path.
-
-#### dirname: String -> String;
-
-`dirname(path)` returns the path with its last non-slash component and trailing slashes removed.
-if `path` contains no `/`s, returns `"."`.
-

@@ -25,7 +25,9 @@ This library is still in alpha stage.
   - Binary
   - JSON
 - IO
-  - IO extension
+  - File system
+  - Platform information
+  - Channel
 - Math
   - Complex number
   - BigInt
@@ -45,6 +47,7 @@ This library is still in alpha stage.
   - Future
 - Testing
   - Unit test
+  - Time
 - Text
   - Simple parser
   - String extension

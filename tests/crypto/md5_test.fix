@@ -1,0 +1,72 @@
+module Main;
+
+import Debug;
+import Random;
+
+import Minilib.Crypto.MD5;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+bytes_to_string_hex: Array U8 -> String;
+bytes_to_string_hex = |u8array| (
+    u8array.to_iter.fold(
+        [], |output, u8|
+        output.push_back(u8.shift_right(4_U8).bit_and(15_U8).encode_hex_char)
+              .push_back(u8.shift_right(0_U8).bit_and(15_U8).encode_hex_char)
+    ).push_back(0_U8)._unsafe_from_c_str.to_lower
+);
+
+make_random_bytes: I64 -> I64 -> Array U8;
+make_random_bytes = |size, seed| (
+    let random = Random::init_by_seed(seed.to_U64);
+    let iter = Iterator::generate(random, generate_U64 >> some);
+    iter.map(to_U8).take(size).to_array
+);
+
+test_digest: TestCase;
+test_digest = (
+    make_table_test("test_digest",
+        [
+            ("empty", [], "d41d8cd98f00b204e9800998ecf8427e"),
+            ("abcdefg", "abcdefg".get_bytes.pop_back, "7ac66c0f148de9519b8bd264312c4d64"),
+            ("0-255", Array::from_map(256, |i| i.to_U8), "e2c865db4162bed963bfaa9ef6ac18f0"),
+            ("random_567", make_random_bytes(100000, 567), "93e1786a485e1dcfa6b46b98069f3b93")
+        ],
+        |(name, bytes, expected)|
+        //let _ = *write_file_bytes(Path::parse("tmp." + name).as_some, bytes);
+        let actual = MD5::digest(bytes).bytes_to_string_hex;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+// RFC1321 A.5 Test suite
+test_rfc1321: TestCase;
+test_rfc1321 = (
+    make_table_test("test_rfc1321",
+        [
+            ("", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("a", "0cc175b9c0f1b6a831c399e269772661"),
+            ("abc", "900150983cd24fb0d6963f7d28e17f72"),
+            ("message digest", "f96b697d7cb7938d525a2f31aaf161d0"),
+            ("abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b"),
+            ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+             "d174ab98d277d9f5a5611c2c9f419d9f"),
+            ("12345678901234567890123456789012345678901234567890123456789012345678901234567890",
+             "57edf4a22be3c955ac49da2e2107b67a")
+        ],
+        |(str, expected)|
+        let bytes = str.get_bytes.pop_back;
+        let actual = MD5::digest(bytes).bytes_to_string_hex;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_digest,
+        test_rfc1321,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

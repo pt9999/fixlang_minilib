@@ -1,0 +1,251 @@
+// MD5 secure hash function.
+module Minilib.Crypto.MD5;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+
+// `MD5::digest(bytes)` computes MD5 secure hash function of `bytes`.
+digest: Array U8 -> Array U8;
+digest = |bytes| (
+    MD5::empty.update(bytes).finalize
+);
+
+// MD5 hasher.
+// Usually it is sufficient to simply call `MD5:digest(bytes)` without using this structure.
+type MD5 = unbox struct {
+    hash: Array U32,
+    msglen: U64,
+    msgbuf: Array U8
+};
+
+// An empty MD5 hasher.
+empty: MD5;
+empty = MD5 {
+    hash: _init_hash,
+    msglen: 0_U64,
+    msgbuf: Array::empty(64)
+};
+
+// `md5.update(bytes)` processes `bytes`, and updates its internal state.
+update: Array U8 -> MD5 -> MD5;
+update = |bytes, md5| (
+    md5._update_inner(bytes, bytes.get_size.to_U64)
+);
+
+// `md5._update_inner(input, msglen_inc)` updates the message buffer with input.
+// And it increments the message length by `msglen_inc`.
+// When the message buffer is full (64 bytes), it updates hash with the message
+// and clears the messsage buffer.
+_update_inner: Array U8 -> U64 -> MD5 -> MD5;
+_update_inner = |input, msglen_inc, md5| (
+    let n_input = input.get_size;
+    let n_msgbuf = 64;
+    let md5 = loop(
+        (md5, 0), |(md5, i_input)|
+        if i_input >= n_input {
+            break $ md5
+        };
+        let md5 = md5.mod_msgbuf(push_back(input.@(i_input)));
+        let i_input = i_input + 1;
+        if md5.@msgbuf.get_size < n_msgbuf {
+            continue $ (md5, i_input)
+        };
+        let message = ByteBuffer::make(md5.@msgbuf, ByteOrder::little_endian()).to_u32_array;
+        //let message = U32_U8::convert(md5.@msgbuf, ByteOrder::little_endian());
+        let md5 = md5.mod_hash(_update_hash(message));
+        let md5 = md5.mod_msgbuf(truncate(0));
+        continue $ (md5, i_input)    
+    );
+    let md5 = md5.mod_msglen(|len| len + msglen_inc);
+    md5
+);
+
+// `md5.finalize` retrieves a final MD5 hash value.
+finalize: MD5 -> Array U8;
+finalize = |md5| (
+    // 3.1 Step 1. Append Padding Bits
+    let md5 = md5._update_inner([0x80_U8], 0_U64);
+    let md5 = loop(
+        md5, |md5|
+        if md5.@msgbuf.get_size == 448/8 {
+            break $ md5
+        };
+        continue $ md5._update_inner([0x00_U8], 0_U64)
+    );
+    // 3.2 Step 2. Append Length
+    let msglen_bits: U64 = md5.@msglen * 8_U64;
+    let buf = ByteBuffer::fill(8, 0_U8, ByteOrder::little_endian());
+    let buf = buf.set_u64(0, msglen_bits);
+    let md5 = md5._update_inner(buf.to_u8_array, 0_U64);
+
+    eval assert(|_| "padding failed", md5.@msgbuf.get_size == 0);
+
+    let digest = ByteBuffer::from_u32_array(md5.@hash, ByteOrder::little_endian()).to_u8_array;
+    //let digest = U8_U32::convert(md5.@hash, ByteOrder::little_endian());
+    digest
+);
+
+//---------------------------------------------------------------
+// implementation details
+//---------------------------------------------------------------
+
+// For details, see [RFC 1321 MD5 Message-Digest Algorithm](https://www.rfc-editor.org/rfc/rfc1321.txt).
+
+// 2. Terminology and Notation
+
+// bitwise complement
+_bit_not: U32 -> U32;
+_bit_not = |x| x.bit_xor(0xFFFFFFFF_U32);
+
+// rotate left
+_rotl: U32 -> U32 -> U32;
+_rotl = |n, x| (
+    x.shift_left(n).bit_or(x.shift_right(32_U32 - n))
+);
+
+// 3.4 Step 4. Process Message in 16-Word Blocks
+_f: U32 -> U32 -> U32 -> U32; 
+_f = |x, y, z| (
+    x.bit_and(y).bit_or(x._bit_not.bit_and(z)) 
+);
+
+_g: U32 -> U32 -> U32 -> U32; 
+_g = |x, y, z| (
+    x.bit_and(z).bit_or(y.bit_and(z._bit_not)) 
+);
+
+_h: U32 -> U32 -> U32 -> U32; 
+_h = |x, y, z| (
+    x.bit_xor(y).bit_xor(z)
+);
+
+_i: U32 -> U32 -> U32 -> U32; 
+_i = |x, y, z| (
+    y.bit_xor(x.bit_or(z._bit_not))
+);
+
+// 3.4 Step 4. Process Message in 16-Word Blocks
+
+_t: Array U32;
+_t = [
+    0xd76aa478_U32, 0xe8c7b756_U32, 0x242070db_U32, 0xc1bdceee_U32,
+    0xf57c0faf_U32, 0x4787c62a_U32, 0xa8304613_U32, 0xfd469501_U32,
+    0x698098d8_U32, 0x8b44f7af_U32, 0xffff5bb1_U32, 0x895cd7be_U32,
+    0x6b901122_U32, 0xfd987193_U32, 0xa679438e_U32, 0x49b40821_U32,
+    0xf61e2562_U32, 0xc040b340_U32, 0x265e5a51_U32, 0xe9b6c7aa_U32,
+    0xd62f105d_U32, 0x02441453_U32, 0xd8a1e681_U32, 0xe7d3fbc8_U32,
+    0x21e1cde6_U32, 0xc33707d6_U32, 0xf4d50d87_U32, 0x455a14ed_U32,
+    0xa9e3e905_U32, 0xfcefa3f8_U32, 0x676f02d9_U32, 0x8d2a4c8a_U32,
+    0xfffa3942_U32, 0x8771f681_U32, 0x6d9d6122_U32, 0xfde5380c_U32,
+    0xa4beea44_U32, 0x4bdecfa9_U32, 0xf6bb4b60_U32, 0xbebfbc70_U32,
+    0x289b7ec6_U32, 0xeaa127fa_U32, 0xd4ef3085_U32, 0x04881d05_U32,
+    0xd9d4d039_U32, 0xe6db99e5_U32, 0x1fa27cf8_U32, 0xc4ac5665_U32,
+    0xf4292244_U32, 0x432aff97_U32, 0xab9423a7_U32, 0xfc93a039_U32,
+    0x655b59c3_U32, 0x8f0ccc92_U32, 0xffeff47d_U32, 0x85845dd1_U32,
+    0x6fa87e4f_U32, 0xfe2ce6e0_U32, 0xa3014314_U32, 0x4e0811a1_U32,
+    0xf7537e82_U32, 0xbd3af235_U32, 0x2ad7d2bb_U32, 0xeb86d391_U32
+];
+
+// 3.3 Step 3. Initialize MD Buffer
+_init_hash: Array U32;
+_init_hash = (
+    Array::empty(4)
+    .push_back(0x67452301_U32)
+    .push_back(0xefcdab89_U32)
+    .push_back(0x98badcfe_U32)
+    .push_back(0x10325476_U32)
+);
+
+// 3.4 Step 4. Process Message in 16-Word Blocks
+_update_hash: Array U32 -> Array U32 -> Array U32;
+_update_hash = |message, hash| (
+    eval assert (|_| "invalid size: message", message.get_size == 16);
+    eval assert (|_| "invalid size: hash", hash.get_size == 4);
+
+    let x = message;
+    let a = hash.@(0);
+    let b = hash.@(1);
+    let c = hash.@(2);
+    let d = hash.@(3);
+    let aa = a;
+    let bb = b;
+    let cc = c;
+    let dd = d;
+
+    let op: U32 -> U32 -> U32 -> U32 -> I64 -> I64 -> I64 -> (U32 -> U32 -> U32 -> U32) -> U32 =
+        |a, b, c, d, k, s, i, f| (
+        b + ((a + f(b,c,d) + x.@(k) + _t.@(i-1))._rotl(s.to_U32))
+    );
+    
+    let a = op(a,b,c,d,0,7,1,_f);
+    let d = op(d,a,b,c,1,12,2,_f);
+    let c = op(c,d,a,b,2,17,3,_f);
+    let b = op(b,c,d,a,3,22,4,_f);
+    let a = op(a,b,c,d,4,7,5,_f);
+    let d = op(d,a,b,c,5,12,6,_f);
+    let c = op(c,d,a,b,6,17,7,_f);
+    let b = op(b,c,d,a,7,22,8,_f);
+    let a = op(a,b,c,d,8,7,9,_f);
+    let d = op(d,a,b,c,9,12,10,_f);
+    let c = op(c,d,a,b,10,17,11,_f);
+    let b = op(b,c,d,a,11,22,12,_f);
+    let a = op(a,b,c,d,12,7,13,_f);
+    let d = op(d,a,b,c,13,12,14,_f);
+    let c = op(c,d,a,b,14,17,15,_f);
+    let b = op(b,c,d,a,15,22,16,_f);
+    let a = op(a,b,c,d,1,5,17,_g);
+    let d = op(d,a,b,c,6,9,18,_g);
+    let c = op(c,d,a,b,11,14,19,_g);
+    let b = op(b,c,d,a,0,20,20,_g);
+    let a = op(a,b,c,d,5,5,21,_g);
+    let d = op(d,a,b,c,10,9,22,_g);
+    let c = op(c,d,a,b,15,14,23,_g);
+    let b = op(b,c,d,a,4,20,24,_g);
+    let a = op(a,b,c,d,9,5,25,_g);
+    let d = op(d,a,b,c,14,9,26,_g);
+    let c = op(c,d,a,b,3,14,27,_g);
+    let b = op(b,c,d,a,8,20,28,_g);
+    let a = op(a,b,c,d,13,5,29,_g);
+    let d = op(d,a,b,c,2,9,30,_g);
+    let c = op(c,d,a,b,7,14,31,_g);
+    let b = op(b,c,d,a,12,20,32,_g);
+    let a = op(a,b,c,d,5,4,33,_h);
+    let d = op(d,a,b,c,8,11,34,_h);
+    let c = op(c,d,a,b,11,16,35,_h);
+    let b = op(b,c,d,a,14,23,36,_h);
+    let a = op(a,b,c,d,1,4,37,_h);
+    let d = op(d,a,b,c,4,11,38,_h);
+    let c = op(c,d,a,b,7,16,39,_h);
+    let b = op(b,c,d,a,10,23,40,_h);
+    let a = op(a,b,c,d,13,4,41,_h);
+    let d = op(d,a,b,c,0,11,42,_h);
+    let c = op(c,d,a,b,3,16,43,_h);
+    let b = op(b,c,d,a,6,23,44,_h);
+    let a = op(a,b,c,d,9,4,45,_h);
+    let d = op(d,a,b,c,12,11,46,_h);
+    let c = op(c,d,a,b,15,16,47,_h);
+    let b = op(b,c,d,a,2,23,48,_h);
+    let a = op(a,b,c,d,0,6,49,_i);
+    let d = op(d,a,b,c,7,10,50,_i);
+    let c = op(c,d,a,b,14,15,51,_i);
+    let b = op(b,c,d,a,5,21,52,_i);
+    let a = op(a,b,c,d,12,6,53,_i);
+    let d = op(d,a,b,c,3,10,54,_i);
+    let c = op(c,d,a,b,10,15,55,_i);
+    let b = op(b,c,d,a,1,21,56,_i);
+    let a = op(a,b,c,d,8,6,57,_i);
+    let d = op(d,a,b,c,15,10,58,_i);
+    let c = op(c,d,a,b,6,15,59,_i);
+    let b = op(b,c,d,a,13,21,60,_i);
+    let a = op(a,b,c,d,4,6,61,_i);
+    let d = op(d,a,b,c,11,10,62,_i);
+    let c = op(c,d,a,b,2,15,63,_i);
+    let b = op(b,c,d,a,9,21,64,_i);
+
+    hash.set(0, a + aa)
+        .set(1, b + bb)
+        .set(2, c + cc)
+        .set(3, d + dd)
+);
+

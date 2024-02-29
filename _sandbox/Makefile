@@ -4,6 +4,9 @@
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
 	png.out ndarray_calc.out
 
+md5_test1.out:
+	../bin/fixautolink build -o $@ -L ../lib -L . -f md5_test1.fix
+
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
 

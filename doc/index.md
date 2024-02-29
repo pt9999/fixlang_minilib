@@ -34,6 +34,10 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Crypto.MD5 (lib/crypto/md5.fix)](lib/crypto/md5.md)
+
+MD5 secure hash function.
+
 ### [module Minilib.Crypto.SHA1 (lib/crypto/sha1.fix)](lib/crypto/sha1.md)
 
 SHA-1 secure hash function.

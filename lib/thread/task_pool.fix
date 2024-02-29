@@ -16,7 +16,7 @@ import Minilib.Thread.Future;
 
 // A task pool that manages a collection of IOTasks.
 type TaskPool = unbox struct {
-    chan: Channel (IO ()),
+    chan: Channel FutureToken,
     tasks: Array (IOTask ())
 };
 
@@ -33,10 +33,11 @@ make = |task_count| (
     }
 );
 
-// Sends `io` to the channel.
-_send: IO () -> TaskPool -> IOFail ();
-_send = |io, pool| (
-    pool.@chan.send(io)
+// Register a future.
+// It sends a future token to the channel.
+register_future: FutureToken -> TaskPool -> IOFail ();
+register_future = |token, pool| (
+    pool.@chan.send(token)
 );
 
 // Clears the queue of futures.
@@ -45,23 +46,43 @@ clear = |pool| (
     pool.@chan.clear
 );
 
+// Checks whether the taskpool has been shutdown.
+is_shutdown: TaskPool -> IO Bool;
+is_shutdown = |pool| (
+    pool.@chan.is_closed
+);
+
 // Shutdowns a taskpool.
 shutdown: TaskPool -> IO TaskPool;
 shutdown = |pool| (
+    // Close the channel
     let _ = *pool.@chan.close;
+
+    // Wait for all tasks to finish
     let _ = *pool.@tasks.foreach_m(
         |task| pure $ task.get
     );
-    pure $ pool.set_tasks([])
+    let pool = pool.set_tasks([]);
+
+    // Cancell all pending futures
+    let tokens = *pool.@chan.take_and_clear;
+    let _ = *tokens.fold_m(
+        (), |_, token|
+        token.set_state(FutureState::canceled())
+    );
+
+    pure $ pool
 );
 
 // The task function of the taskpool.
-_task_func: Channel (IO ()) -> IO ();
+_task_func: Channel FutureToken -> IO ();
 _task_func = |chan| (
     loop_m(
         (), |_|
-        let io = *chan.recv;
-        let _ = *io.lift;
+        let token = *chan.recv;
+        let _ = *token.set_state(FutureState::running()).lift;
+        let _ = *token.@io_unit.lift;
+        let _ = *token.set_state(FutureState::completed()).lift;
         continue_m $ ()
     )
     .try(|err|
@@ -71,7 +92,3 @@ _task_func = |chan| (
         eprintln(err)
     )
 );
-
-impl TaskPool: FutureRunner {
-    run_future = _send;
-}

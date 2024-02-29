@@ -1,6 +1,6 @@
 # future.fix
 
-## module Minilib.Task.Future
+## module Minilib.Thread.Future
 
 A computation that is performed in a TaskPool in parallel.
 

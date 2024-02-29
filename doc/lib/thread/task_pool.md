@@ -1,6 +1,6 @@
 # task_pool.fix
 
-## module Minilib.Task.TaskPool
+## module Minilib.Thread.TaskPool
 
 A task pool that can be used parallel computation.
 

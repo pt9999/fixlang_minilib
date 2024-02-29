@@ -190,14 +190,6 @@ TCP operation, such as:
 
 URL and URI parsing
 
-### [module Minilib.Task.Future (lib/task/future.fix)](lib/task/future.md)
-
-A computation that is performed in a TaskPool in parallel.
-
-### [module Minilib.Task.TaskPool (lib/task/task_pool.fix)](lib/task/task_pool.md)
-
-A task pool that can be used parallel computation.
-
 ### [module Minilib.Testing.TestUtilArray (lib/testing/test_util_array.fix)](lib/testing/test_util_array.md)
 
 Array utility functions for testing.
@@ -241,6 +233,14 @@ String extensions, such as:
 ### [module Minilib.Text.Unicode (lib/text/unicode.fix)](lib/text/unicode.md)
 
 Unicode conversions (UTF8 <-> UTF32 <-> UTF16)
+
+### [module Minilib.Thread.Future (lib/thread/future.fix)](lib/thread/future.md)
+
+A computation that is performed in a TaskPool in parallel.
+
+### [module Minilib.Thread.TaskPool (lib/thread/task_pool.fix)](lib/thread/task_pool.md)
+
+A task pool that can be used parallel computation.
 
 ### [module Minilib.Trait.Comonad (lib/trait/comonad.fix)](lib/trait/comonad.md)
 

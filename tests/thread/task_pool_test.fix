@@ -85,6 +85,7 @@ test_is_shutdown = (
     pure()
 );
 
+// Tests that `Future::make` throws closed_error after shutdown
 test_shutdown_future_make: TestCase;
 test_shutdown_future_make = (
     make_test("test_shutdown_future_make") $ |_|
@@ -98,59 +99,43 @@ test_shutdown_future_make = (
     pure()
 );
 
+// Tests that the pending futures are canceled on shutdown
 test_shutdown_future_cancel: TestCase;
 test_shutdown_future_cancel = (
     make_test("test_shutdown_future_cancel") $ |_|
-    let _ = *eprintln("test_shutdown_future_cancel").lift;
     let var_int = *Var::make(0).lift;
     let pool = *TaskPool::make(1).lift;
     let future1 = *Future::make(pool, do {
-        let _ = *eprintln("*** future1 start");
         let _ = *var_int.wait(|i| i == 1);
         let _ = *var_int.Var::set(2);
         let _ = *var_int.wait(|i| i == 3);
-        let _ = *eprintln("*** future1 end");
         pure(true)
     });
     let future2 = *Future::make(pool, do {
-        let _ = *eprintln("*** future2 start");
         let _ = *var_int.wait(|i| i == 3);
         let _ = *var_int.Var::set(4);
-        let _ = *eprintln("*** future2 end");
         pure(true)
     });
-    let _ = *eprintln("set 1").lift;
     let _ = *var_int.Var::set(1).lift;
-    let _ = *eprintln("wait 2").lift;
     let _ = *var_int.Var::wait(|i| i == 2).lift;     // future1 running
-    let _ = *eprintln("close channel").lift;
-    let _ = *pool.@chan.close.lift;             // hack for testing
-    let _ = *eprintln("set 3").lift;
+    let _ = *pool.@chan.close.lift;                  // hack for testing !!!
     let _ = *var_int.Var::set(3).lift;               // future1 end, future2 will not start
-    let _ = *eprintln("shutdown").lift;
     let pool = *pool.shutdown.lift;
-    let _ = *eprintln("future1 get").lift;
     let result1 = *future1.get.to_result.lift;
-    let _ = *eprintln("future2 get").lift;
     let result2 = *future2.get.to_result.lift;
-    let _ = *eprintln("done").lift;
     let _ = *assert_equal("result1", ok(true), result1);
     let _ = *assert_equal("result2", err("canceled"), result2);
     pure()
 );
 
-// TODO: shutdown test
-
 main: IO ();
 main = (
     [
-        /*
         test_task_count,
         test_simple,
         test_lock,
         test_is_shutdown,
         test_shutdown_future_make,
-        */
         test_shutdown_future_cancel,
         TestCase::empty
     ].run_test_driver

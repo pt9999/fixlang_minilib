@@ -128,6 +128,32 @@ test_shutdown_future_cancel = (
     pure()
 );
 
+test_cancel_all_pending_futures: TestCase;
+test_cancel_all_pending_futures = (
+    make_test("test_cancel_all_pending_futures") $ |_|
+    let var_int = *Var::make(0).lift;
+    let pool = *TaskPool::make(1).lift;
+    let io_a = do {
+        let _ = *var_int.Var::set(1);
+        let _ = *var_int.wait(|i| i == 2);
+        pure(true)
+    };
+    let future1 = *Future::make(pool, io_a);
+    let future2 = *Future::make(pool, io_a);
+    let future3 = *Future::make(pool, io_a);
+    let _ = *var_int.Var::wait(|i| i == 1).lift;     // future1 running
+    let _ = *pool.cancel_all_pendings_futures.lift;
+    let _ = *var_int.Var::set(2).lift;
+    let result1 = *future1.get.to_result.lift;
+    let result2 = *future2.get.to_result.lift;
+    let result3 = *future3.get.to_result.lift;
+    let _ = *assert_equal("result1", ok(true), result1);
+    let _ = *assert_equal("result2", err("canceled"), result2);
+    let _ = *assert_equal("result3", err("canceled"), result3);
+    let pool = *pool.shutdown.lift;
+    pure()
+);
+
 main: IO ();
 main = (
     [
@@ -137,6 +163,7 @@ main = (
         test_is_shutdown,
         test_shutdown_future_make,
         test_shutdown_future_cancel,
+        test_cancel_all_pending_futures,
         TestCase::empty
     ].run_test_driver
 );

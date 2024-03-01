@@ -40,10 +40,16 @@ register_future = |token, pool| (
     pool.@chan.send(token)
 );
 
-// Clears the queue of futures.
-clear: TaskPool -> IO ();
-clear = |pool| (
-    pool.@chan.clear
+// Cancel all pending futures and clears the queue.
+cancel_all_pendings_futures: TaskPool -> IO ();
+cancel_all_pendings_futures = |pool| (
+    // Cancell all pending futures
+    let tokens = *pool.@chan.take_and_clear;
+    let _ = *tokens.fold_m(
+        (), |_, token|
+        token.set_state(FutureState::canceled())
+    );
+    pure()
 );
 
 // Checks whether the taskpool has been shutdown.
@@ -64,12 +70,8 @@ shutdown = |pool| (
     );
     let pool = pool.set_tasks([]);
 
-    // Cancell all pending futures
-    let tokens = *pool.@chan.take_and_clear;
-    let _ = *tokens.fold_m(
-        (), |_, token|
-        token.set_state(FutureState::canceled())
-    );
+    // Cancell all pending futures and clears the queue.
+    let _ = *pool.cancel_all_pendings_futures;
     pure $ pool
 );
 

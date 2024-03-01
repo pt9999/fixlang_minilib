@@ -17,7 +17,7 @@ A task pool that manages a collection of IOTasks.
 
 ```
 type TaskPool = unbox struct {
-    chan: Channel (IO ()),
+    chan: Channel FutureToken,
     tasks: Array (IOTask ())
 };
 ```
@@ -25,13 +25,20 @@ type TaskPool = unbox struct {
 
 `TaskPool::make(task_count)` creates a TaskPool.
 
-#### clear: TaskPool -> IO ();
+#### register_future: FutureToken -> TaskPool -> IOFail ();
 
-Clears the queue of futures.
+Register a future.
+It sends a future token to the channel.
+
+#### cancel_all_pendings_futures: TaskPool -> IO ();
+
+Cancel all pending futures and clears the queue.
+
+#### is_shutdown: TaskPool -> IO Bool;
+
+Checks whether the taskpool has been shutdown.
 
 #### shutdown: TaskPool -> IO TaskPool;
 
 Shutdowns a taskpool.
-
-#### `impl TaskPool: FutureRunner`
 

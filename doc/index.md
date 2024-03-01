@@ -194,10 +194,6 @@ URL and URI parsing
 
 Array utility functions for testing.
 
-### [module Minilib.Testing.Time (lib/testing/time.fix)](lib/testing/time.md)
-
-Timing module, such as sleep for a while, and measuring execution time.
-
 ### [module Minilib.Testing.UnitTest (lib/testing/unit_test.fix)](lib/testing/unit_test.md)
 
 Unit Test Framework
@@ -241,6 +237,10 @@ A computation that is performed in a TaskPool in parallel.
 ### [module Minilib.Thread.TaskPool (lib/thread/task_pool.fix)](lib/thread/task_pool.md)
 
 A task pool that can be used parallel computation.
+
+### [module Minilib.Thread.Time (lib/thread/time.fix)](lib/thread/time.md)
+
+Timing module, such as sleep for a while, and measuring execution time.
 
 ### [module Minilib.Trait.Comonad (lib/trait/comonad.fix)](lib/trait/comonad.md)
 

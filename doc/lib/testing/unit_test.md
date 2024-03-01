@@ -47,7 +47,7 @@ Verifies that two values are equal. If the values are different, the test will f
 
 Verifies that two values are not equal. If the values are equal, the test will fail with the specified message.
 
-#### `impl [a:Eq, e:Eq] Result e a: Eq`
+#### `impl [e:Eq, a:Eq] Result e a: Eq`
 
 Eq implementation for Result
 

@@ -16,9 +16,9 @@ usleep = |usec| (
     pure()
 );
 
-// Measures execution time of a function.
-// It executes the function many times, and measures total time.
-// Prints the result and measured time per loop.
+// Measures wall-clock time per a function call.
+// Specifically, It calls the function many times and measures the total time.
+// It then prints the function result and measured time per loop.
 timeit: [a: ToString] String -> (() -> a) -> IO a;
 timeit = |label, f| (
     let total_time_threshold = 0.1;  // 100 msec
@@ -27,16 +27,20 @@ timeit = |label, f| (
         if n <= 1 { result };
         repeat(n - 1)
     );
-    let (result, total_time) = consumed_time_while(repeat, 1);
-    let (result, total_time, total_count) = loop(
+    let repeat_io = |n| (
+        let _ = *pure();
+        pure(repeat(n))
+    );
+    let (result, total_time) = *consumed_realtime_while_io(repeat_io(1));
+    let (result, total_time, total_count) = *loop_m(
         (result, total_time, 1, 1), |(result, total_time, total_count, count)|
         if total_time >= total_time_threshold {
-            break $ (result, total_time, total_count)
+            break_m $ (result, total_time, total_count)
         };
-        let (result, time) = consumed_time_while(repeat, count);
+        let (result, time) = *consumed_realtime_while_io(repeat_io(count));
         let total_time = total_time + time;
         let total_count = total_count + count;
-        continue $ (result, total_time, total_count, count * 2)
+        continue_m $ (result, total_time, total_count, count * 2)
     );
     let time = total_time / total_count.to_F64;
     let (time, unit) = if time >= 1.0 { (time, "sec") }

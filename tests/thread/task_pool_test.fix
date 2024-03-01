@@ -4,10 +4,10 @@ import AsyncTask;
 import Debug;
 
 import Minilib.IO.Channel;
-import Minilib.IO.FileSystem;
 import Minilib.Monad.FunctorM;
 import Minilib.Thread.Future;
 import Minilib.Thread.TaskPool;
+import Minilib.Thread.Time;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -154,8 +154,42 @@ test_cancel_all_pending_futures = (
     pure()
 );
 
+// benchmarking
+test_perf: IO ();
+test_perf = (
+    let pool = *TaskPool::make(4);
+    let n = 1000;
+    let _ = *timeit_io("plain " + n.to_string,
+        pure(Iterator::range(0, n).fold(0, add))
+    );
+    let _ = *timeit_io("io " + n.to_string,
+        do {
+            let ios = Iterator::range(0, n).map(|i| pure(i));
+            let results = *ios.map_m(|io| io);
+            let sum = results.fold(0, add);
+            pure(sum)
+        }.try(|err|
+            let _ = *eprintln(err);
+            abort()
+        )
+    );
+    let _ = *timeit_io("futures " + n.to_string,
+        do {
+            let futures = *Iterator::range(0, n).map_m(|i| Future::make(pool, pure(i)));
+            let results = *futures.map_m(get);
+            let sum = results.fold(0, add);
+            pure(sum)
+        }.try(|err|
+            let _ = *eprintln(err);
+            abort()
+        )
+    );
+    pure()
+);
+
 main: IO ();
 main = (
+    // if true { test_perf };
     [
         test_task_count,
         test_simple,

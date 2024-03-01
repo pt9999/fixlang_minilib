@@ -1,5 +1,5 @@
 // Timing module, such as sleep for a while, and measuring execution time.
-module Minilib.Testing.Time;
+module Minilib.Thread.Time;
 
 import Debug;
 import Time;
@@ -16,33 +16,49 @@ usleep = |usec| (
     pure()
 );
 
-// Measures execution time of a function.
-// It executes the function many times, and measures total time.
-// Prints the result and measured time per loop.
+// Measures wall-clock time per a function call.
+// Specifically, It calls the function many times and measures the total time.
+// It then prints the function result and measured time per loop.
+// NOTE: The measured time per loop has a overhead about 0.1~1.0 usec.
 timeit: [a: ToString] String -> (() -> a) -> IO a;
 timeit = |label, f| (
+    let io_a = do {
+        let _ = *pure();
+        pure $ f()
+    };
+    timeit_io(label, io_a)
+);
+
+_repeat_io: IO a -> I64 -> IO a;
+_repeat_io = |io_a, n| (
+    let result = *io_a;
+    if n <= 1 { pure $ result };
+    _repeat_io(io_a, n - 1)
+);
+
+// Measures wall-clock time per an IO operation.
+// Specifically, It performs an IO operation many times and measures the total time.
+// It then prints the IO operation result and measured time per loop.
+// NOTE: The measured time per loop has a overhead about 0.1~1.0 usec.
+timeit_io: [a: ToString] String -> IO a -> IO a;
+timeit_io = |label, io_a| (
     let total_time_threshold = 0.1;  // 100 msec
-    let repeat = fix $ |repeat, n| (
-        let result = f();
-        if n <= 1 { result };
-        repeat(n - 1)
-    );
-    let (result, total_time) = consumed_time_while(repeat, 1);
-    let (result, total_time, total_count) = loop(
+    let (result, total_time) = *consumed_realtime_while_io(_repeat_io(io_a, 1));
+    let (result, total_time, total_count) = *loop_m(
         (result, total_time, 1, 1), |(result, total_time, total_count, count)|
         if total_time >= total_time_threshold {
-            break $ (result, total_time, total_count)
+            break_m $ (result, total_time, total_count)
         };
-        let (result, time) = consumed_time_while(repeat, count);
+        let (result, time) = *consumed_realtime_while_io(_repeat_io(io_a, count));
         let total_time = total_time + time;
         let total_count = total_count + count;
-        continue $ (result, total_time, total_count, count * 2)
+        continue_m $ (result, total_time, total_count, count * 2)
     );
     let time = total_time / total_count.to_F64;
     let (time, unit) = if time >= 1.0 { (time, "sec") }
     else if time >= 1.0e-3 { (time * 1.0e3, "msec") }
     else                   { (time * 1.0e6, "usec") };
-    let _ = *eprintln(label + "=" + result.to_string + 
+    let _ = *eprintln(label + "=" + result.to_string +
                       " time/loop=" + time.to_string_precision(3_U8) + " " + unit);
     pure $ result
 );
@@ -55,6 +71,7 @@ notimeit = |label, f| (
     pure $ result
 );
 
+// Get wall-clock time elapsed while executing an I/O action.
 consumed_realtime_while_io : IO a -> IO (a, F64);
 consumed_realtime_while_io = |io| (
     let _ = *pure();

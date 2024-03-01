@@ -31,6 +31,12 @@ type ChannelData a = unbox struct {
 
 `channel.clear` clears the queue of the channel.
 
+#### take_and_clear: Channel a -> IO (Iterator a);
+
+`channel.take_and_clear` takes all items away from the queue of the channel
+and clears the queue.
+This function can be used after the channel is closed.
+
 #### close: Channel a -> IO ();
 
 `channel.close` closes a channel.

@@ -1,0 +1,87 @@
+// A computation that is performed in a TaskPool in parallel.
+module Minilib.Thread.Future;
+
+import AsyncTask;
+
+import Minilib.Thread.TaskPool;
+
+// A computation that is performed in a TaskPool in parallel.
+type Future a = unbox struct {
+    var_state: Var FutureState,     // the state of a future
+    var_result: Var (Option a)      // the result of a future
+};
+
+// `Future::make(task_pool, io) creates a Future.
+// `io` is performed in the task pool.
+// If the task pool has been shutdown, an error is thrown.
+make: TaskPool -> IO a -> IOFail (Future a);
+make = |task_pool, io| (
+    // Init the state and result
+    let var_state = *Var::make(FutureState::pending()).lift;
+    let var_result = *Var::make(none()).lift;
+
+    // Prepare io_unit. The task pool does not have a type variable,
+    // so `IO ()` is required.
+    let io_unit: IO () = do {
+        let a = *io;
+        let _ = *var_result.Var::set(some $ a);
+        var_state.Var::set(FutureState::completed())
+    };
+
+    // Register a future token.
+    let token = FutureToken::make(var_state, io_unit);
+    let _ = *task_pool.register_future(token);
+
+    pure $ Future {
+        var_state: var_state,
+        var_result: var_result
+    }
+);
+
+// Gets the result of the Future.
+// It waits for future state to be either completed or canceled.
+get: Future a -> IOFail a;
+get = |future| (
+    let state = *future.@var_state.wait_and_lock(
+        |state| state.is_completed || state.is_canceled,
+        pure
+    ).lift;
+    if state.is_canceled { throw $ "canceled" };
+    let result = *future.@var_result.get.lift;
+    if result.is_none {
+        throw $ "result is not set !!!"     // should not happen
+    };
+    pure $ result.as_some
+);
+
+// A state of a future.
+type FutureState = unbox union {
+    pending: (),
+    running: (),
+    completed: (),
+    canceled: ()
+};
+
+// [nofixdoc]
+// A token of a future for the taskpool.
+// Since the taskpool has no type variable, it cannot perform `IO a`.
+// So the future token has `IO ()`.
+type FutureToken = unbox struct {
+    var_state: Var FutureState,
+    io_unit: IO ()
+};
+
+namespace FutureToken {
+    make: Var FutureState -> IO () -> FutureToken;
+    make = |var_state, io_unit| (
+        FutureToken {
+            var_state: var_state,
+            io_unit: io_unit
+        }
+    );
+
+    set_state: FutureState -> FutureToken -> IO ();
+    set_state = |state, token| (
+        token.@var_state.Var::set(state)
+    );
+}

@@ -1,0 +1,203 @@
+module Main;
+
+import AsyncTask;
+import Debug;
+
+import Minilib.IO.Channel;
+import Minilib.Monad.FunctorM;
+import Minilib.Thread.Future;
+import Minilib.Thread.TaskPool;
+import Minilib.Thread.Time;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_task_count: TestCase;
+test_task_count = (
+    make_test("test_task_count") $ |_|
+    let pool = *TaskPool::make(4).lift;
+    let _ = *assert_equal("task_count", 4, pool.@tasks.get_size);
+    let pool = *pool.shutdown.lift;
+    let _ = *assert_equal("after shutdown", 0, pool.@tasks.get_size);
+    pure()
+);
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let pool = *TaskPool::make(4).lift;
+    let futures = *Iterator::range(0, 10).map_m(|i|
+        Future::make(pool, do {
+            pure $ i * 2
+        })
+    );
+    let total = *futures.fold_m(
+        0, |sum, future| pure $ sum + *future.get
+    );
+    let _ = *assert_equal("total", 45 * 2, total);
+    pure()
+);
+
+test_lock: TestCase;
+test_lock = (
+    make_test("test_lock") $ |_|
+    let var_count1 = *Var::make(0).lift;
+    let var_count2 = *Var::make(0).lift;
+    let var_lock1 = *Var::make(false).lift;
+    let var_lock2 = *Var::make(false).lift;
+    let pool = *TaskPool::make(4).lift;
+    let futures = *Iterator::range(0, 12).map_m(|i|
+        Future::make(pool, do {
+            let _ = *var_count1.mod(|n| n + 1);
+            let _ = *var_lock1.wait(|b| b);
+            let _ = *var_count2.mod(|n| n + 1);
+            let _ = *var_lock2.wait(|b| b);
+            pure $ i
+        })
+    );
+    let receiver = do {
+        let _ = *var_count2.Var::set(0);
+        let _ = *var_count1.wait(|n| n == 4);
+        let _ = *var_lock2.Var::set(false);
+        let _ = *var_lock1.Var::set(true);
+        let _ = *var_count1.Var::set(0);
+        let _ = *var_count2.wait(|n| n == 4);
+        let _ = *var_lock1.Var::set(false);
+        let _ = *var_lock2.Var::set(true);
+        pure()
+    };
+    let _ = *receiver.lift;
+    let _ = *receiver.lift;
+    let _ = *receiver.lift;
+    let total = *futures.fold_m(
+        0, |sum, future| pure $ sum + *future.get
+    );
+    let _ = *assert_equal("total", 45 + 10 + 11, total);
+    pure()
+);
+
+test_is_shutdown: TestCase;
+test_is_shutdown = (
+    make_test("test_is_shutdown") $ |_|
+    let pool = *TaskPool::make(2).lift;
+    let _ = *assert_equal("before shutdown", false, *pool.is_shutdown.lift);
+    let pool = *pool.shutdown.lift;
+    let _ = *assert_equal("after shutdown", true, *pool.is_shutdown.lift);
+    pure()
+);
+
+// Tests that `Future::make` throws closed_error after shutdown
+test_shutdown_future_make: TestCase;
+test_shutdown_future_make = (
+    make_test("test_shutdown_future_make") $ |_|
+    let pool = *TaskPool::make(2).lift;
+    let pool = *pool.shutdown.lift;
+    let res = *Future::make(pool, pure(1)).to_result.lift;
+    // `Future` does not implment `Eq`, so I cannot use `assert_equal` here.
+    //let _ = *assert_equal("res", err $ Channel::closed_error, res);
+    let _ = *assert_true("res.is_err", res.is_err);
+    let _ = *assert_equal("res.as_err", Channel::closed_error, res.as_err);
+    pure()
+);
+
+// Tests that the pending futures are canceled on shutdown
+test_shutdown_future_cancel: TestCase;
+test_shutdown_future_cancel = (
+    make_test("test_shutdown_future_cancel") $ |_|
+    let var_int = *Var::make(0).lift;
+    let pool = *TaskPool::make(1).lift;
+    let future1 = *Future::make(pool, do {
+        let _ = *var_int.wait(|i| i == 1);
+        let _ = *var_int.Var::set(2);
+        let _ = *var_int.wait(|i| i == 3);
+        pure(true)
+    });
+    let future2 = *Future::make(pool, do {
+        let _ = *var_int.wait(|i| i == 3);
+        let _ = *var_int.Var::set(4);
+        pure(true)
+    });
+    let _ = *var_int.Var::set(1).lift;
+    let _ = *var_int.Var::wait(|i| i == 2).lift;     // future1 running
+    let _ = *pool.@chan.close.lift;                  // hack for testing !!!
+    let _ = *var_int.Var::set(3).lift;               // future1 end, future2 will not start
+    let pool = *pool.shutdown.lift;
+    let result1 = *future1.get.to_result.lift;
+    let result2 = *future2.get.to_result.lift;
+    let _ = *assert_equal("result1", ok(true), result1);
+    let _ = *assert_equal("result2", err("canceled"), result2);
+    pure()
+);
+
+test_cancel_all_pending_futures: TestCase;
+test_cancel_all_pending_futures = (
+    make_test("test_cancel_all_pending_futures") $ |_|
+    let var_int = *Var::make(0).lift;
+    let pool = *TaskPool::make(1).lift;
+    let io_a = do {
+        let _ = *var_int.Var::set(1);
+        let _ = *var_int.wait(|i| i == 2);
+        pure(true)
+    };
+    let future1 = *Future::make(pool, io_a);
+    let future2 = *Future::make(pool, io_a);
+    let future3 = *Future::make(pool, io_a);
+    let _ = *var_int.Var::wait(|i| i == 1).lift;     // future1 running
+    let _ = *pool.cancel_all_pendings_futures.lift;
+    let _ = *var_int.Var::set(2).lift;
+    let result1 = *future1.get.to_result.lift;
+    let result2 = *future2.get.to_result.lift;
+    let result3 = *future3.get.to_result.lift;
+    let _ = *assert_equal("result1", ok(true), result1);
+    let _ = *assert_equal("result2", err("canceled"), result2);
+    let _ = *assert_equal("result3", err("canceled"), result3);
+    let pool = *pool.shutdown.lift;
+    pure()
+);
+
+// benchmarking
+test_perf: IO ();
+test_perf = (
+    let pool = *TaskPool::make(4);
+    let n = 1000;
+    let _ = *timeit_io("plain " + n.to_string,
+        pure(Iterator::range(0, n).fold(0, add))
+    );
+    let _ = *timeit_io("io " + n.to_string,
+        do {
+            let ios = Iterator::range(0, n).map(|i| pure(i));
+            let results = *ios.map_m(|io| io);
+            let sum = results.fold(0, add);
+            pure(sum)
+        }.try(|err|
+            let _ = *eprintln(err);
+            abort()
+        )
+    );
+    let _ = *timeit_io("futures " + n.to_string,
+        do {
+            let futures = *Iterator::range(0, n).map_m(|i| Future::make(pool, pure(i)));
+            let results = *futures.map_m(get);
+            let sum = results.fold(0, add);
+            pure(sum)
+        }.try(|err|
+            let _ = *eprintln(err);
+            abort()
+        )
+    );
+    pure()
+);
+
+main: IO ();
+main = (
+    // if true { test_perf };
+    [
+        test_task_count,
+        test_simple,
+        test_lock,
+        test_is_shutdown,
+        test_shutdown_future_make,
+        test_shutdown_future_cancel,
+        test_cancel_all_pending_futures,
+        TestCase::empty
+    ].run_test_driver
+);

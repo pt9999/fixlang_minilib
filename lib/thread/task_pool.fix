@@ -1,0 +1,100 @@
+// A task pool that can be used parallel computation.
+//
+// A task pool creates IOTasks and starts them.
+// Each task waits for request until shutdown.
+// When the task receives the request, it performs the request as a computation.
+// When the task pool is shutdown, all tasks are stopped.
+// Computations are never performed after shutdown.
+//
+module Minilib.Thread.TaskPool;
+
+import AsyncTask;
+
+import Minilib.IO.Channel;
+import Minilib.Monad.FunctorM;
+import Minilib.Thread.Future;
+
+// A task pool that manages a collection of IOTasks.
+type TaskPool = unbox struct {
+    chan: Channel FutureToken,
+    tasks: Array (IOTask ())
+};
+
+// `TaskPool::make(task_count)` creates a TaskPool.
+make: I64 -> IO TaskPool;
+make = |task_count| (
+    let chan = *Channel::make;
+    let tasks = *Iterator::range(0, task_count).to_array.map_m(|i|
+        AsyncIOTask::make(_task_func(chan))
+    );
+    pure $ TaskPool {
+        chan: chan,
+        tasks: tasks
+    }
+);
+
+// Register a future.
+// It sends a future token to the channel.
+register_future: FutureToken -> TaskPool -> IOFail ();
+register_future = |token, pool| (
+    pool.@chan.send(token)
+);
+
+// Cancel all pending futures and clears the queue.
+cancel_all_pendings_futures: TaskPool -> IO ();
+cancel_all_pendings_futures = |pool| (
+    // Cancell all pending futures
+    let tokens = *pool.@chan.take_and_clear;
+    let _ = *tokens.fold_m(
+        (), |_, token|
+        token.set_state(FutureState::canceled())
+    );
+    pure()
+);
+
+// Checks whether the taskpool has been shutdown.
+is_shutdown: TaskPool -> IO Bool;
+is_shutdown = |pool| (
+    pool.@chan.is_closed
+);
+
+// Shutdowns a taskpool.
+shutdown: TaskPool -> IO TaskPool;
+shutdown = |pool| (
+    // Close the channel
+    let _ = *pool.@chan.close;
+
+    // Wait for all tasks to finish
+    let _ = *pool.@tasks.foreach_m(
+        |task| pure $ task.get
+    );
+    let pool = pool.set_tasks([]);
+
+    // Cancell all pending futures and clears the queue.
+    let _ = *pool.cancel_all_pendings_futures;
+    pure $ pool
+);
+
+// The task function of the taskpool.
+_task_func: Channel FutureToken -> IO ();
+_task_func = |chan| (
+    loop_m(
+        (), |_|
+        let token = *chan.recv;
+        if *chan.is_closed.lift {
+            // if channel was closed but the queue was not empty
+            let _ = *token.set_state(FutureState::canceled()).lift;
+            throw $ Channel::closed_error
+        };
+        let _ = *token.set_state(FutureState::running()).lift;
+        let _ = *token.@io_unit.lift;
+        let _ = *token.set_state(FutureState::completed()).lift;
+        continue_m $ ()
+    )
+    .try(|err|
+        if err == Channel::closed_error {
+            pure()    
+        };
+        eprintln(err)
+    )
+);

@@ -42,17 +42,17 @@ This library is still in alpha stage.
   - TCP/IP Socket (IPv4 only)
   - URL, URI
   - Simple HTTP Server
-- Task
-  - Task Pool
-  - Future
 - Testing
   - Unit test
-  - Time
 - Text
   - Simple parser
   - String extension
   - Regular expression
   - Unicode (UTF8/UTF16/UTF32) conversion
+- Thread
+  - Task Pool
+  - Future
+  - Time
 - Trait
   - Semigroup
   - Monoid

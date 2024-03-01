@@ -3,6 +3,7 @@ module Main;
 import AsyncTask;
 import Debug;
 
+import Minilib.IO.Channel;
 import Minilib.IO.FileSystem;
 import Minilib.Monad.FunctorM;
 import Minilib.Thread.Future;
@@ -74,6 +75,29 @@ test_lock = (
     pure()
 );
 
+test_is_shutdown: TestCase;
+test_is_shutdown = (
+    make_test("test_is_shutdown") $ |_|
+    let pool = *TaskPool::make(2).lift;
+    let _ = *assert_equal("before shutdown", false, *pool.is_shutdown.lift);
+    let pool = *pool.shutdown.lift;
+    let _ = *assert_equal("after shutdown", true, *pool.is_shutdown.lift);
+    pure()
+);
+
+test_shutdown_future_make: TestCase;
+test_shutdown_future_make = (
+    make_test("test_shutdown_future_make") $ |_|
+    let pool = *TaskPool::make(2).lift;
+    let pool = *pool.shutdown.lift;
+    let res = *Future::make(pool, pure(1)).to_result.lift;
+    //let _ = *assert_equal("res", err $ Channel::closed_error, res);
+    let _ = *assert_true("res.is_err", res.is_err);
+    let _ = *assert_equal("res", "Closed", res.as_err);
+    pure()
+);
+
+
 // TODO: shutdown test
 
 main: IO ();
@@ -82,6 +106,8 @@ main = (
         test_task_count,
         test_simple,
         test_lock,
+        test_is_shutdown,
+        test_shutdown_future_make,
         TestCase::empty
     ].run_test_driver
 );

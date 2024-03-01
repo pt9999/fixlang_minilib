@@ -44,7 +44,6 @@ This library is still in alpha stage.
   - Simple HTTP Server
 - Testing
   - Unit test
-  - Time
 - Text
   - Simple parser
   - String extension
@@ -53,6 +52,7 @@ This library is still in alpha stage.
 - Thread
   - Task Pool
   - Future
+  - Time
 - Trait
   - Semigroup
   - Monoid

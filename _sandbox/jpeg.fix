@@ -3,12 +3,12 @@ module Sandbox.Jpeg;
 import Debug;
 
 import Minilib.Encoding.Binary;
-import Minilib.IO.IOEx;
+import Minilib.IO.Platform;
 import Minilib.Media.Image;
 
 write_jpeg_file: String -> Image -> IOFail ();
 write_jpeg_file = |filepath, image| (
-    IO::with_file(filepath.parse.as_some, |fh|
+    IO::with_file(filepath.parse.as_some, "w", |fh|
         let cinfo = JpegCompress::make();
         let cinfo = cinfo.set_studio_dest(fh);
         let cinfo = cinfo.set_width(image.@width);
@@ -16,31 +16,54 @@ write_jpeg_file = |filepath, image| (
         let (channels, color_space) = JpegCompress::parse_format(image.@format);
         let cinfo = cinfo.set_format((channels, color_space));
         let cinfo = cinfo.set_defaults;
-        cinfo.compress(image.@data, image.@width, image.@height, channels)
+        let _ = *cinfo.compress(image.@data, image.@width, image.@height, channels);
+        pure()
     )
 );
 
 //----------------------------------------------------
 
 type JpegCompress = unbox struct {
-    data: ByteBuffer
+    data: ByteBuffer,
+    err_mgr: ByteBuffer
 };
 
 namespace JpegCompress {
 
+    _JPEG_LIB_VERSION: I64;
+    _JPEG_LIB_VERSION = 80;
+
     make: () -> JpegCompress;
     make = |_|(
-        let data = ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_compress_struct, 0_U8, Platform::byte_order);
-        let _ = cinfo.@data.borrow_ptr(|p_cinfo|
-            CALL_C[() jpeg_create_compress(Ptr), p_cinfo];
-        )
         let cinfo = JpegCompress {
-            data: data
+            data: ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_compress_struct, 0_U8, Platform::byte_order),
+            err_mgr: ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_error_mgr, 0_U8, Platform::byte_order)
         };
+        let cinfo = cinfo._set_std_error;
+        let cinfo = cinfo._create_compress;
         cinfo
     );
 
-    set_studio_dest: FileHandle -> JpegCompress -> JpegCompress;
+    _set_std_error: JpegCompress -> JpegCompress;
+    _set_std_error = |cinfo| (
+        let cinfo = cinfo.@err_mgr.borrow_ptr(|p_err_mgr|
+            let p_err_mgr = CALL_C[Ptr jpeg_std_error(Ptr), p_err_mgr];
+            cinfo.mod_data(set_ptr(_def_jpeg_compress.@offsetof_err, p_err_mgr))
+        );
+        cinfo
+    );
+
+    _create_compress: JpegCompress -> JpegCompress;
+    _create_compress = |cinfo| (
+        let _ = cinfo.@data.borrow_ptr(|p_cinfo|
+            // jpeg_create_compress() is actually a macro which calls jpeg_CreateCompress()
+            CALL_C[() jpeg_CreateCompress(Ptr, I32, I64),
+                p_cinfo, _JPEG_LIB_VERSION.to_I32, _def_jpeg_compress.@sizeof_jpeg_compress_struct]
+        );
+        cinfo
+    );
+
+    set_studio_dest: IOHandle -> JpegCompress -> JpegCompress;
     set_studio_dest = |fh, cinfo| (
         eval cinfo.@data.borrow_ptr(|p_cinfo|
             CALL_C[() jpeg_stdio_dest(Ptr, Ptr), p_cinfo, fh._file_ptr]
@@ -65,8 +88,8 @@ namespace JpegCompress {
     parse_format = |str| (
         if str == "GRAY" { (1, /*JCS_GRAYSCALE*/ 1) };
         if str == "RGB" { (3, /*JCS_RGB*/ 2) };
-        eval debug_eprintln ("invalid format: " + str);
-        0
+        eval assert (|_| "invalid format: " + str, false);
+        (0, 0)
     );
 
     set_defaults: JpegCompress -> JpegCompress;
@@ -107,7 +130,8 @@ namespace JpegCompress {
         offsetof_image_height: I64,
         offsetof_input_components: I64,
         offsetof_in_color_space: I64,
-        sizeof_struct_jpeg_compress_struct: I64
+        sizeof_jpeg_compress_struct: I64,
+        sizeof_jpeg_error_mgr: I64
     };
 
     _def_jpeg_compress: DefJpegCompress;
@@ -117,6 +141,7 @@ namespace JpegCompress {
         offsetof_image_height: 52,
         offsetof_input_components: 56,
         offsetof_in_color_space: 60,
-        sizeof_struct_jpeg_compress_struct: 584
+        sizeof_jpeg_compress_struct: 584,
+        sizeof_jpeg_error_mgr: 168
     };
 }

@@ -52,13 +52,33 @@ execute_command = |cmd, args| (
     pure()
 );
 
+type TestResult = unbox struct {
+    success: I64,
+    fail: I64
+};
+
+namespace TestResult {
+    empty: TestResult;
+    empty = TestResult {
+        success: 0,
+        fail: 0
+    };
+
+    show: TestResult -> IO ();
+    show = |test_result| (
+        println ((test_result.@success, test_result.@fail)
+            .format("AUTOTEST RESULT: SUCCESS: {} FAIL: {}"))
+    );
+}
 
 // Application
 type App = unbox struct {
     test_dirs: Array String,
     test_names: Array String,
     lib_dirs: Array String,
-    opt_level: Option String
+    opt_level: Option String,
+    keep_going: Option String,
+    var_test_result: Var TestResult
 };
 
 namespace App {
@@ -69,8 +89,8 @@ namespace App {
         pure $ dirname(cmd)
     );
 
-    process_test_file: String -> App -> IOFail ();
-    process_test_file = |test_file_path, app| (
+    build_test_args: String -> App -> IOFail (Array String);
+    build_test_args = |test_file_path, app| (
         let args = [
             *app.get_bin_dir + "/fixautolink",
             "run"
@@ -85,7 +105,28 @@ namespace App {
                 [], |level| [ "-O", level ]
             )
         );
-        execute_command(args.@(0), args)
+        pure $ args
+    );
+
+    mod_result: (TestResult -> TestResult) -> App -> IO ();
+    mod_result = |f, app| (
+        app.@var_test_result.mod(f)
+    );
+
+    process_test_file: String -> App -> IOFail ();
+    process_test_file = |test_file_path, app| (
+        let args = *app.build_test_args(test_file_path);
+        let res = *execute_command(args.@(0), args).to_result.lift;
+        if res.is_ok {
+            let _ = *app.mod_result(mod_success(add(1))).lift;
+            pure()
+        };
+        let _ = *app.mod_result(mod_fail(add(1))).lift;
+        if app.@keep_going.is_some {
+            let _ = *eprintln(res.as_err).lift;
+            pure()
+        };
+        throw $ res.as_err
     );
 
     process_test_dir: String -> App -> IOFail ();
@@ -112,6 +153,16 @@ namespace App {
             app.process_test_dir(test_dir)
         )
     );
+
+    show_result_and_exit: App -> IO ();
+    show_result_and_exit = |app| (
+        let test_result = *app.@var_test_result.get;
+        let _ = *test_result.show;
+        if test_result.@fail > 0 {
+            IO::exit(1)
+        };
+        IO::exit(0)
+    );
 }
 
 command: Command;
@@ -123,23 +174,38 @@ command = (
     .arg(Arg::new("TEST_DIR").short('T').long("test-dir").help("Test directory").required.takes_multiple_values)
     .arg(Arg::new("LIB_DIR").short('L').long("lib-dir").help("Library directory").takes_multiple_values)
     .arg(Arg::new("OPT_LEVEL").short('O').long("opt-level").help("Optimization level").takes_value)
+    .arg(Arg::new("KEEP_GOING").short('k').long("keep-going").help("Keep going when some tests fails"))
 );
 
+init_app: IOFail App;
+init_app = do {
+    let _ = *pure();
+    let test_result = TestResult {
+        success: 0,
+        fail: 0
+    };
+    let matches = *command.get_matches;
+    let app = App {
+        test_dirs: matches.get_many("TEST_DIR").as_some,
+        test_names: matches.get_many("TEST_NAME").as_some_or([]),
+        lib_dirs: matches.get_many("LIB_DIR").as_some_or([]),
+        opt_level: matches.get_one("OPT_LEVEL"),
+        keep_going: matches.get_one("KEEP_GOING"),
+        var_test_result: *Var::make(test_result).lift
+    };
+    pure $ app
+};
 
 main: IO ();
 main = (
     do {
         let _ = *IO::stdout.set_unbuffered_mode.lift;
         let _ = *IO::stderr.set_unbuffered_mode.lift;
-        let matches = *command.get_matches;
-        let app = App {
-            test_dirs: matches.get_many("TEST_DIR").as_some,
-            test_names: matches.get_many("TEST_NAME").as_some_or([]),
-            lib_dirs: matches.get_many("LIB_DIR").as_some_or([]),
-            opt_level: matches.get_one("OPT_LEVEL")
-        };
+
+        let app = *init_app;
         let _ = *app.process_test_dirs;
-        IO::exit(0).lift
+        let _ = *app.show_result_and_exit.lift;
+        pure()
     }.try(|err|
         let _ = *eprintln(err);
         IO::exit(1)

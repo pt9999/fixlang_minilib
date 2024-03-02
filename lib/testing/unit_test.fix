@@ -131,13 +131,35 @@ assert_not_equal = |msg, lhs, rhs| (
 // Testing Utilities
 //-------------------------
 
-// Eq implementation for Result
-impl [e:Eq, a:Eq] Result e a: Eq
-{
-    eq = |a, b| (
-        if a.is_ok && b.is_ok { a.as_ok == b.as_ok };
-        if a.is_err && b.is_err { a.as_err == b.as_err };
-        false
+// Wrapper for Std::Result
+type ResultEx e a = unbox union {
+    ok_ex: a,
+    err_ex: e
+};
+
+namespace Result {
+    to_ex: Result e a -> ResultEx e a;
+    to_ex = |res| (
+        if res.is_ok { ok_ex $ res.as_ok };
+        err_ex $ res.as_err
     );
 }
 
+// Converts `ResultEx e a` to a string, for example `"err(File not found)"`, `"ok(1)"` etc.
+impl [e: ToString, a: ToString] ResultEx e a: ToString {
+    to_string = |res| (
+        if res.is_err_ex {
+            "err(" + res.as_err_ex.to_string + ")"
+        };
+        "ok(" + res.as_ok_ex.to_string + ")"
+    );
+}
+
+impl [e:Eq, a:Eq] ResultEx e a: Eq
+{
+    eq = |a, b| (
+        if a.is_ok_ex && b.is_ok_ex { a.as_ok_ex == b.as_ok_ex };
+        if a.is_err_ex && b.is_err_ex { a.as_err_ex == b.as_err_ex };
+        false
+    );
+}

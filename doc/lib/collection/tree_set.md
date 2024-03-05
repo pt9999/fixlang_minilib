@@ -85,11 +85,11 @@ Converts an iterator into a TreeSet using specified ordering.
 
 Converts an iterator into a TreeSet using default `LessThan` ordering.
 
-#### intersect: [a : TreeSetElem] TreeSet k -> TreeSet k -> TreeSet k;
+#### intersect: [a : TreeSetElem] TreeSet a -> TreeSet a -> TreeSet a;
 
 Calculates intersection of two TreeSets.
 
-#### merge: [a : TreeSetElem] TreeSet k -> TreeSet k -> TreeSet k;
+#### merge: [a : TreeSetElem] TreeSet a -> TreeSet a -> TreeSet a;
 
 Calculates union of two TreeSets.
 

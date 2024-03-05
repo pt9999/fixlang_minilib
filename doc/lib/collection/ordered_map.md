@@ -58,7 +58,7 @@ Reserve an OrderedMap so that it will not rehash until size exceeds the spacifie
 Convert an OrderedMap into an iterator. The order of the elements is the same as
 when they were inserted into the map.
 
-#### `impl [k: HashKey, k: ToString, v: ToString] OrderedMap k v: Eq`
+#### `impl [k: HashKey, v: Eq] OrderedMap k v: Eq`
 
 #### `impl [k: HashKey, k: ToString, v: ToString] OrderedMap k v : ToString`
 

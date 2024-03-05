@@ -88,7 +88,99 @@ namespace RingBuffer {
         );
         ok $ (value, ring_buf)
     );
+
+    _get_pos: I64 -> RingBuffer a -> Option I64;
+    _get_pos = |index, ring_buf| (
+        let size = ring_buf.get_size;
+        if 0 < index || index <= size { none() };
+        let pos = (index + ring_buf.@read_pos) % ring_buf.@array.get_size;
+        some(pos)
+    );
+
+    get: I64 -> RingBuffer a -> Option a;
+    get = |index, ring_buf| (
+        ring_buf._get_pos(index).map(|pos|
+            ring_buf.@array.@(pos)
+        )
+    );
+        
+    set: I64 -> a -> RingBuffer a -> RingBuffer a;
+    set = |index, value, ring_buf| (
+        ring_buf._get_pos(index).map_or(
+            ring_buffer,
+            |pos| ring_buf.mod_array(set(pos, value))
+        )
+    );
+
+    mod: I64 -> (a -> a) -> RingBuffer a -> RingBuffer a;
+    mod = |index, f, ring_buf| (
+        ring_buf._get_pos(index).map_or(
+            ring_buffer,
+            |pos| ring_buf.mod_array(mod(pos, f))
+        )
+    );
+
+    to_iter: RingBuffer a -> Iterator a;
+    to_iter = |ring_buf| (
+        let size = ring_buf.get_size;
+        Iterator::range(0, size).map(|i|
+            ring_buf.get(i).as_some
+        )
+    );
 }
+
+// unbounded RingBuffer
+type RingBufUB a = unbox struct {
+    rings: RingBuffer (RingBuffer a);
+    initial_value: a
+};
+    
+namespace RingBufUB {
+    make_with_empty: a -> RingBuffer a;
+    make_with_empty = |initial_value| (
+        let initial_ring = RingBuffer::make_with_empty(1, initial_value);
+        let rings = RingBuffer::make_with_empty(64, initial_ring);
+        let rings = rings.push(initial_ring);
+
+        RingBufUB {
+            rings: rings,
+            initial_value: initial_value
+        }
+    );
+
+    pop: RingBufUB a -> Result ErrMsg (a, RingBufUB a);
+    pop = |ub| (
+        let ring = ub.@rings.get(0).as_some;
+        let res = ring.pop;
+        if res.is_ok {
+            let (a, ring) = res.as_ok;
+            let ub = ub.mod_rings(set(0, ring));
+            (a, ub)
+        };
+        if ub.@rings.get_size <= 1 { res };
+        let (_, rings) = ub.@rings.pop.as_ok;
+        let ub = ub.mod_rings(|rings|
+            rings.pop.as_ok.@1
+        );
+        ub.pop
+    );
+
+    push: a -> RingBufUB a -> RingBufUB a;
+    push = |a, ub| (
+        let rings_size = ub.@rings.get_size;
+        let ring = ub.@rings.get(rings_size - 1).as_some;
+        if !ring.is_full {
+            let ring = ring.push(a);
+            ub.mod_rings(set(rings_size - 1, ring))
+        };
+        let capacity = ring.get_capacity;
+        let capacity = if capacity < I64::maximum.shift_right(1) { capacity * 2 } else { capacity };
+        let ring = RingBuffer::make_with_empty(capacity, ub.@initial_value);
+        let ring = ring.push(a);
+        ub.mod_ring(ub.@rings.push(ring))
+    );
+}
+
 
 main: IO ();
 main = (

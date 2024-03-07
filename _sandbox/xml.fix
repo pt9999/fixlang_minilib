@@ -50,8 +50,31 @@ impl XmlDocument: ToString {
 // A type that represents an XML node.
 type XmlNode = box union {
     element_node: XmlElement,      // XML element
-    text_node: String              // text node
+    text_node: XmlText,            // text node
+    comment_node: XmlComment,      // comment node
+    cdata_section: XmlCDATASection, // cdata section
+    processing_instruction: XmlProcessingInstruction    // processing instruction
 };
+
+namespace XmlNode {
+    _output_string: Array String -> XmlNode -> Array String;
+    _output_string = |output, node| (
+        if node.is_element_node {
+            node.as_element_node._output_string(output)
+        } else if node.is_text_node {
+            node.as_text_node._output_string(output)
+        } else if node.is_comment_node {
+            node.as_comment_node._output_string(output)
+        } else if node.is_cdata_section {
+            node.as_cdata_section._output_string(output)
+        } else if node.is_processing_instruction {
+            node.as_processing_instruction._output_string(output)
+        } else {
+            eval assert(|_|"invalid node", false);
+            output
+        }
+    );
+}
 
 // A type that represents an XML element.
 type XmlElement = unbox struct {
@@ -100,10 +123,10 @@ namespace XmlElement {
         parent.mod_children(push_back(element_node(child)))
     );
 
-    // `el.text(txt)` adds a text node to `el`.
+    // `el.text(content)` adds a text node to `el`.
     text: String -> XmlElement -> XmlElement;
-    text = |txt, el| (
-        el.mod_children(push_back(text_node(txt)))
+    text = |content, el| (
+        el.mod_children(push_back(text_node $ XmlText::make(content)))
     );
         
     // `el._to_string` converts the element to XML string.
@@ -122,16 +145,8 @@ namespace XmlElement {
         let output = output.push_back(child_sep);
         let output = el.@children.to_iter.fold(
             output, |output, node|
-            if node.is_text_node {
-                output.push_back(escape_special(node.as_text_node))
-                      .push_back(child_sep)
-            } else if node.is_element_node {
-                node.as_element_node._output_string(output)
-                    .push_back(child_sep)
-            } else {
-                eval assert(|_|"invalid node", false);
-                output
-            }
+            node._output_string(output)
+                .push_back(child_sep)
         );
         let output = output.push_back("</" + el.@tag + ">");
         output
@@ -158,6 +173,69 @@ namespace XmlAttribute {
             .push_back(escape_special(value))
             .push_back("\"")
         )
+    );
+}
+
+type XmlText = unbox struct {
+    content: String
+};
+
+namespace XmlText {
+    make: String -> XmlText;
+    make = |content| XmlText { content: content };
+
+    _output_string: Array String -> XmlText -> Array String;
+    _output_string = |output, text| (
+        output.push_back(escape_special(text.@content))
+    );
+}
+
+type XmlCDATASection = unbox struct {
+    content: String
+};
+
+namespace XmlCDATASection {
+    make: String -> XmlCDATASection;
+    make = |content| XmlCDATASection { content: content };
+
+    _output_string: Array String -> XmlCDATASection -> Array String;
+    _output_string = |output, cdata_section| (
+        output
+        .push_back("<![CDATA[")
+        .push_back(cdata_section.@content)
+        .push_back("]]>")
+    );
+}
+
+type XmlComment = unbox struct {
+    content: String
+};
+
+namespace XmlComment {
+    make: String -> XmlComment;
+    make = |content| XmlComment { content: content };
+
+    _output_string: Array String -> XmlComment -> Array String;
+    _output_string = |output, comment| (
+        output.push_back("<!--")
+        .push_back(comment.@content)
+        .push_back("-->")
+    );
+}
+
+type XmlProcessingInstruction = unbox struct {
+    content: String
+};
+
+namespace XmlProcessingInstruction {
+    make: String -> XmlProcessingInstruction;
+    make = |content| XmlProcessingInstruction { content: content };
+
+    _output_string: Array String -> XmlProcessingInstruction -> Array String;
+    _output_string = |output, pi| (
+        output.push_back("<?")
+        .push_back(pi.@content)
+        .push_back("?>")
     );
 }
 

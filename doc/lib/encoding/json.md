@@ -18,6 +18,8 @@ type Json = box union {
     array:  Array Json
 };
 ```
+#### `impl Json: ToString`
+
 #### to_object: Array (String, Json) -> Json;
 
 Converts an array of keys and values to a JSON object.

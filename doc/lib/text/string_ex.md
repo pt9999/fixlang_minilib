@@ -9,34 +9,6 @@ String extensions, such as:
 - Hexadecimal String
 - File Path handling
 
-#### `impl (): ToString`
-
-Converts `()` to a string `"()"`.
-
-#### `impl [a : ToString, b : ToString, c : ToString] (a, b, c) : ToString`
-
-Converts `(a, b, c)` to a string, for example `"(123, 3.14, abc)"`.
-
-#### `impl [a : ToString, b : ToString, c : ToString, d : ToString] (a, b, c, d) : ToString`
-
-Converts `(a, b, c, d)` to a string, for example `"(123, 3.14, abc, ())"`.
-
-#### `impl [a: ToString] Option a: ToString`
-
-Converts `Option a` to a string, for example `"none()"`, `"some(1)"` etc.
-
-#### `impl [a: ToString, e: ToString] Result e a: ToString`
-
-Converts `Result e a` to a string, for example `"err(File not found)"`, `"ok(1)"` etc.
-
-#### `impl [k: ToString, v: ToString] HashMap k v : ToString`
-
-Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
-
-#### `impl [a: ToString] Array a: ToString`
-
-Converts `Array a` to a string, for example `"[1,2,3]"` etc.
-
 #### to_lower: String -> String;
 
 Converts the specified string to lowercase.
@@ -101,16 +73,6 @@ Checks if a string starts with the specified prefix.
 #### ends_with: String -> String -> Bool;
 
 Checks if a string ends with the specified suffix.
-
-#### string_less_than: (String, String) -> Bool;
-
-`string_less_than((str1,str2))` compares two strings.
-Returns True if and only if `str1` is less than `str2` in lexicographical order.
-
-#### `impl String: LessThan`
-
-`less_than(str1,str2) compares two strings.
-Returns True if and only if `str1` is less than `str2` in lexicographical order.
 
 #### formatv: String -> Array String -> String;
 

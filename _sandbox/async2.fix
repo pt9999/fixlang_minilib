@@ -3,18 +3,31 @@ module Main;
 import AsyncTask;
 import Random;
 
-impl Task: Functor {
-    map = |f, fa| AsyncTask::make(
+// Task a のラッパー
+type TaskM a = unbox struct {
+    data: Task a
+};
+
+namespace TaskM {
+    make: Lazy a -> TaskM a;
+    make = |f| TaskM { data: AsyncTask::make(f) };
+
+    get: TaskM a -> a;
+    get = |t| t.@data.get;
+}
+
+impl TaskM: Functor {
+    map = |f, fa| TaskM::make(
         |_|
         let a = fa.get;
         f(a)
     );
 }
 
-impl Task: Monad {
-    pure = |a| AsyncTask::make(
+impl TaskM: Monad {
+    pure = |a| TaskM::make(
         |_| a);
-    bind = |f, ma| AsyncTask::make(
+    bind = |f, ma| TaskM::make(
         |_|
         let a = ma.get;
         f(a).get
@@ -44,7 +57,7 @@ namespace IOTaskM {
 impl IOTaskM: Functor {
     map = |f, fa| IOTaskM::make(
         do {
-            let a = fa.get;
+            let a = *fa.get;
             pure $ f(a)
         }
     );
@@ -62,7 +75,7 @@ impl IOTaskM: Monad {
     );
 }
 
-myTask: () -> Task I64;
+myTask: () -> TaskM I64;
 myTask = |_| (
     let a = *pure(42);
     let b = *pure(a*2);

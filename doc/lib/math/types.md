@@ -54,3 +54,5 @@ forall a b, a = a * b / b
 
 #### `impl F64: One`
 
+#### `impl F32: One`
+

@@ -1,0 +1,182 @@
+module Main;
+
+import Sandbox.Xml;
+import Minilib.Monad.State;
+import Minilib.Text.StringEx;
+
+trait a: SvgNum {
+    to_attr_value: a -> String;
+}
+
+impl Bool: SvgNum {
+    to_attr_value = |x| if x { "1" } else { "0" };
+}
+
+impl I64: SvgNum {
+    to_attr_value = |x| x.to_string;
+}
+
+impl F64: SvgNum {
+    to_attr_value = |x| (
+        let str = x.to_string;
+        let str = str.strip_last(|c| c == '0').strip_last(|c| c == '.');
+        str
+    );
+}
+
+// Figure
+
+type FPath = unbox struct {
+    data: String
+};
+
+namespace FPath {
+    empty: FPath;
+    empty = FPath {
+        data: ""
+    };
+
+    _append: String -> FPath -> FPath;
+    _append = |str, path| (
+        path.mod_data(|data|
+            let data = if data.is_empty { data } else { data + " " };
+            data + str
+        )
+    );
+
+    moveto: [a: SvgNum] a -> a -> FPath -> FPath;
+    moveto = |x, y| _append([x, y].map(to_attr_value).format("M {} {}"));
+
+    lineto: [a: SvgNum] a -> a -> F64 -> FPath -> FPath;
+    lineto = |x, y| _append([x, y].map(to_attr_value).format("L {} {}"));
+
+    closepath: FPath -> FPath;
+    closepath = _append("Z");
+    
+    cubicto: [a: SvgNum] a -> a -> a -> a -> a -> a -> FPath -> FPath;
+    cubicto = |x1, y1, x2, y2, x, y| (
+        _append([x1, y1, x2, y2, x, y].map(to_attr_value).format("C {} {}, {} {}, {} {}")  )
+    );
+
+    cubicto_short: [a: SvgNum] a -> a -> a -> a -> FPath -> FPath;
+    cubicto_short = |x2, y2, x, y| (
+        _append([x2, y2, x, y].map(to_attr_value).format("S {} {}, {} {}"))
+    );
+
+    quadto: [a: SvgNum] a -> a -> a -> a -> FPath -> FPath;
+    quadto = |x1, y1, x, y| (
+        _append([x1, y1, x, y].map(to_attr_value).format("Q {} {}, {} {}"))
+    );
+
+    quadto_short: [a: SvgNum] a -> a -> FPath -> FPath;
+    quadto_short = |x, y| (
+        _append([x, y].map(to_attr_value).format("T {} {}"))
+    );
+
+    arcto: [a: SvgNum, b: SvgNum] a -> a -> a -> b -> b -> a -> a -> FPath -> FPath;
+    arcto = |rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y| (
+        _append([rx, ry, x_axis_rotation].map(to_attr_value).format("A {} {} {} ")
+                + [large_arc_flag, sweep_flag].map(to_attr_value).format("{} {} ")
+                + [x, y].map(to_attr_value).format("{} {}"))
+    );
+
+}
+
+namespace Svg {
+    svg: [a: SvgNum] a -> a -> XmlElement;
+    svg = |width, height| (
+        XmlElement::make("svg")
+            .attr_num("width", width)
+            .attr_num("height", height)
+            .attr("version", "1.1")
+            .attr("xmlns", "http://www.w3.org/2000/svg")
+    );
+
+    attr_num: [a: SvgNum] String -> a -> XmlElement -> XmlElement;
+    attr_num = |name, value| attr(name, value.to_attr_value);
+
+    stroke: String -> XmlElement -> XmlElement;
+    stroke = |color| attr("stroke", color);
+
+    stroke_width: [a: SvgNum] a -> XmlElement -> XmlElement;
+    stroke_width = |sw| attr_num("stroke-width", sw);
+
+    fill: String -> XmlElement -> XmlElement;
+    fill = |color| attr("fill", color);
+
+    fill_: String -> XmlElement -> XmlElement;
+    fill_ = fill;
+
+    rect: [a: SvgNum] a -> a -> a -> a -> XmlElement;
+    rect = |x, y, width, height| (
+        XmlElement::make("rect")
+            .attr_num("x", x)
+            .attr_num("y", y)
+            .attr_num("width", width)
+            .attr_num("height", height)
+    );
+
+    circle: [a: SvgNum] a -> a -> a -> XmlElement;
+    circle = |cx, cy, r| (
+        XmlElement::make("circle")
+            .attr_num("cx", cx)
+            .attr_num("cy", cy)
+            .attr_num("r", r)
+    );
+
+    write_file: String -> XmlElement -> IOFail ();
+    write_file = |filepath, svg| (
+        let doc = XmlDocument::make(svg);
+        let _ = *with_file(Path::parse(filepath).as_some, "w", |fh|
+            write_string(fh, doc.to_string)
+        );
+        eprintln("Wrote " + filepath).lift
+    );
+}
+
+figure1: XmlElement;
+figure1 = (
+    let fill = Svg::fill;
+    Svg::svg(300, 300)
+        .stroke("red").stroke_width(5)
+        .fill("transparent")
+        .add(rect(10, 10, 30, 30))
+        .add(circle(100, 100, 20))
+);
+
+main: IO ();
+main = (
+    do {
+        let svg = figure1;
+        svg.write_file("tmp.svg")
+    }
+    .try(eprintln)
+);
+
+/*
+type SvgState = State XmlElement;
+
+namespace SvgState {
+    mod_element: (XmlElement -> XmlElement) -> SvgState ();
+    mod_element = mod_state;
+
+
+    stroke: String -> SvgState ();
+    stroke = |color| mod_element(attr("stoke", color));
+
+    stroke_width: F64 -> SvgState ();
+    stroke_width = |sw| mod_element(attr("stoke-width", sw._to_string_short));
+
+    fill: String -> SvgState ();
+    fill = |color| mod_element(attr("fill", color));
+}
+
+
+test1: SvgState ();
+test1 = (
+    let _ = *add_child(rect(10, 10, 30, 30));
+    let _ = *add_child(rect(10, 10, 30, 30));
+    let _ = *add_child(circle(10, 10, 30, 30));
+    pure()
+);
+*/

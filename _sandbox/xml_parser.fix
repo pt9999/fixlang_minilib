@@ -1,0 +1,55 @@
+module Sandbox.XmlParser;
+
+import Sandbox.Xml;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+
+parse_document_from_string: String -> Result ErrMsg XmlDocument;
+parse_document_from_string = |str| (
+    let (doc, _) = *_parse_document.run_parser_str(str);
+    pure $ doc
+);
+
+_parse_document: Parser XmlDocument;
+_parse_document = do {
+
+};
+
+_parse_xml_declaration:
+
+_parse_misc: Parser XmlNode
+_parse_misc = do {
+    _parse_comment.or_else(
+        _parse_processing_instructions.or_else
+        _parse_whitespaces
+    )
+};
+
+_parse_comment: Parser XmlNode;
+_parse_comment = do {
+    let hyphen = match_any_char.filter(|c| c == '-');
+    let not_hyphen = match_any_char.filter(|c| c != '-');
+    let inner_comment = not_hyphen.or_else(do {
+        let _ = *hyphen;
+        not_hyphen
+    });
+    let _ = *match_string("<!--");
+    let start_stream = *get_stream;
+    let _ = *repeat(inner_comment);
+    let end_stream = *get_stream;
+    let _ = *match_string("-->").or_error("Missing end of comment");
+
+    let content = start_stream.read_string_between(end_stream);
+    pure $ comment_node $ XmlComment::make(content)
+};
+
+_parse_processing_instructions: Parser String;
+_parse_processing_instructions = do {
+    not_match   // TODO: currently not supported
+};
+
+_parse_whitespaces: Parser String;
+_parse_whitespaces = do {
+    one_or_more(match_any_char.filter(is_space)).map(_unsafe_to_string)
+};
+

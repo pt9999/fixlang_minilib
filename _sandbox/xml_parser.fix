@@ -1,4 +1,8 @@
+//
+// - [Extensible Markup Language (XML) 1.1 (Second Edition)](https://www.w3.org/TR/2006/REC-xml11-20060816/)
 module Sandbox.XmlParser;
+
+import Character;
 
 import Sandbox.Xml;
 import Minilib.Text.SimpleParser;
@@ -15,7 +19,81 @@ _parse_document = do {
     not_match // TODO
 };
 
-//_parse_xml_declaration:
+
+_parse_xml_declaration: Parser XmlNode;
+_parse_xml_declaration = do {
+    let question = match_any_char.filter(|c| c == '?');
+    let not_question = match_any_char.filter(|c| c != '?');
+    let not_right_angle = match_any_char.filter(|c| c != '>');
+    let inner_content = not_question.or_else(do {
+        let _ = *question;
+        not_right_angle
+    });
+    let _ = *match_str("<?");
+    let start_stream = *get_stream;
+    let _ = *match_str("xml");
+    // TODO: parse VersionInfo, EncodingDecl
+    let _ = *repeat(inner_content);
+    let end_stream = *get_stream;
+    let _ = *match_str("?>").or_else("Missing end of xml declaration");
+    let content = start_stream.read_string_between(end_stream);
+    pure $ processing_instruction_node $ XmlProcessingInstruction::make(content)
+};
+
+_parse_element: Parser XmlElement;
+_parse_element = do {
+    let _ = *match_char('<');
+    let name = *_parse_name;
+};
+
+_parse_name: Parser String;
+_parse_name = do {
+    let start_char = *_name_start_char;
+    let tail_chars = *repeat(_name_char);
+    pure $ [start_char].append(tail_chars)._unsafe_to_string
+};
+
+_name_start_char: Parser Char;
+_name_start_char = do {
+    match_any_char.filter(|c|
+        is_alpha(c) ||
+        c == ':' ||
+        c == '_' ||
+        c >= 0x80_U8        // not checked
+    )
+};
+
+_name_char: Parser Char;
+_name_char = do {
+    match_any_char.filter(|c|
+        is_alnum(c) ||
+        c == ':' ||
+        c == '_' ||
+        c == '-' ||
+        c == '.' ||
+        c >= 0x80_U8        // not checked
+    )
+};
+
+_parse_attribute: Parser XmlAttribute;
+_parse_attribute = do {
+    let name = *_parse_name;
+    let eq = *_parse_eq;
+    
+    
+};
+
+_parse_eq: Parser ();
+_parse_eq = {
+    let _ = *_skip_whitespaces;
+    let _ = *match_char('=');
+    let _ = *_skip_whitespaces;
+    pure()
+};
+
+_parse_attr_value: Parser String;
+_parse_attr_value = do {
+};
 
 _parse_misc: Parser XmlNode;
 _parse_misc = do {
@@ -53,4 +131,10 @@ _parse_whitespaces: Parser String;
 _parse_whitespaces = do {
     one_or_more(match_any_char.filter(is_space)).map(_unsafe_to_string)
 };
+
+_skip_whitespaces: Parser ();
+_skip_whitespaces = do {
+    repeat(match_any_char.filter(is_space)).map(|_| ())
+};
+
 

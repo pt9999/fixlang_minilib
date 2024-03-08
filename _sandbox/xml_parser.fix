@@ -22,9 +22,9 @@ _parse_document = do {
 
 _parse_xml_declaration: Parser XmlNode;
 _parse_xml_declaration = do {
-    let question = match_any_char.filter(|c| c == '?');
-    let not_question = match_any_char.filter(|c| c != '?');
-    let not_right_angle = match_any_char.filter(|c| c != '>');
+    let question = match_char_class(|c| c == '?');
+    let not_question = match_char_class(|c| c != '?');
+    let not_right_angle = match_char_class(|c| c != '>');
     let inner_content = not_question.or_else(do {
         let _ = *question;
         not_right_angle
@@ -44,6 +44,7 @@ _parse_element: Parser XmlElement;
 _parse_element = do {
     let _ = *match_char('<');
     let name = *_parse_name;
+    not_match // TODO impl
 };
 
 _parse_name: Parser String;
@@ -79,20 +80,66 @@ _parse_attribute: Parser XmlAttribute;
 _parse_attribute = do {
     let name = *_parse_name;
     let eq = *_parse_eq;
-    
-    
+    let value = *_parse_att_value;
+    let value = unescape_special(value);
+    pure $ XmlAttribute::make(name, value)
 };
 
 _parse_eq: Parser ();
-_parse_eq = {
+_parse_eq = do {
     let _ = *_skip_whitespaces;
     let _ = *match_char('=');
     let _ = *_skip_whitespaces;
     pure()
 };
 
-_parse_attr_value: Parser String;
-_parse_attr_value = do {
+_parse_att_value: Parser String;
+_parse_att_value = do {
+    let _DoubleQuote = 0x22_U8;        // '\"'
+    let _SingleQuote = 0x27_U8;        // '\''
+    let start_quote = *match_char_class(|c|
+            c == _DoubleQuote || c == _SingleQuote);
+
+    let start_stream = *get_stream;
+    let inner_quote = do {
+        match_char_class(|c| c != '<' && c != '&' && c != start_quote)
+        .map(|_|())
+        .or_else(
+            _parse_reference
+        )
+    };
+    let _ = *repeat(inner_quote);
+    let end_stream = *get_stream;
+    let end_quote = *match_char(start_quote).or_error("Missing end quote");
+    let content = start_stream.read_string_between(end_stream);
+    pure $ content
+};
+
+_parse_reference: Parser ();
+_parse_reference = do {
+    _parse_entity_ref.or_else(
+        _parse_char_ref
+    )
+};
+
+_parse_entity_ref: Parser ();
+_parse_entity_ref = do {
+    let _ = *match_char('&');
+    let _ = *_parse_name;
+    let _ = *match_char(';');
+    pure()
+};
+
+_parse_char_ref: Parser ();
+_parse_char_ref = do {
+    let _ = *match_char('&');
+    let _ = *match_char('#');
+    let x = *match_char('x').if_exists;
+    let _ = *one_or_more(match_char_class(
+        if x.is_some { is_xdigit } else { is_digit }
+    ));
+    let _ = *match_char(';');
+    pure()
 };
 
 _parse_misc: Parser XmlNode;

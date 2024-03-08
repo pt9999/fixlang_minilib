@@ -105,8 +105,8 @@ namespace XmlElement {
     attr: String -> String -> XmlElement -> XmlElement;
     attr = |name, value, el| (
         el.mod_attrs(|attrs|
-            attrs.filter(|(n,v)| n != name)
-                 .push_front((name,value))
+            attrs.filter(|attr| attr.@name != name)
+                 .push_front(XmlAttribute::make(name,value))
         )
     );
 
@@ -158,22 +158,34 @@ impl XmlElement: ToString {
 }
 
 // A type that represents name and value of an attribute.
-type XmlAttribute = (String, String);
+type XmlAttribute = unbox struct {
+    name: String,
+    value: String
+};
 
 namespace XmlAttribute {
+    make: String -> String -> XmlAttribute;
+    make = |name, value| (
+        XmlAttribute { name: name, value: value }
+    );
+
     // `attrs._output_string` output the attributes as XML string.
     _output_string: Array String -> Iterator XmlAttribute -> Array String;
     _output_string = |output, attrs| (
         attrs.fold(
-            output, |output, (name, value)|
+            output, |output, attr|
             output
             .push_back(" ")
-            .push_back(escape_special(name))
+            .push_back(escape_special(attr.@name))  // TODO needed?
             .push_back("=\"")
-            .push_back(escape_special(value))
+            .push_back(escape_special(attr.@value))
             .push_back("\"")
         )
     );
+}
+
+impl XmlAttribute: Eq {
+    eq = |a, b| a.@name == b.@name && a.@value == b.@value;
 }
 
 type XmlText = unbox struct {
@@ -297,6 +309,7 @@ namespace XmlHelpers {
         let i = i + 1;
         if !(i < n && input.@(i) == '#') { none() };
         let i = i + 1;
+        // TODO: support hex char code (`&#x[0-9A-Fa-f]+;`)
         let start = i;
         let i = loop(
             i, |i|

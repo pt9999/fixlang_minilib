@@ -1,0 +1,42 @@
+module Main;
+
+import Sandbox.Xml;
+import Sandbox.XmlParser;
+import Minilib.Testing.UnitTest;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+
+// trim err string like "Line 0, Column 13: XXXX"
+trim_err: Result ErrMsg a -> Result ErrMsg a;
+trim_err = |res| (
+    if res.is_ok { res };
+    let e = res.as_err;
+    let (loc, e) = e.split_first(": ");
+    err(e)
+);
+
+test_parse_comment: TestCase;
+test_parse_comment = (
+    make_table_test("test_parse_comment",
+        [
+            ("<!--abc-->", ok("abc")),
+            ("<!---a-a-aa-a-->", ok("-a-a-aa-a")),
+            ("<!---a-a-aa-a--->", err("Missing end of comment"))
+        ],
+        |(input, expect)|
+        let res = _parse_comment.run_parser_str(input);
+        let res = res.map(|(node,_)| 
+            if !node.is_comment_node { err $ "type" };
+            ok $ node.as_comment_node.@content
+        ).flatten.trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_parse_comment,
+        TestCase::empty
+    ].run_test_driver
+);

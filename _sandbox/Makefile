@@ -61,6 +61,9 @@ monoid_test1:
 xml_test1:
 	../bin/fixautolink run -L ../lib -L . -f xml_test1.fix -O minimum
 
+xml_parser_test:
+	../bin/fixautolink run -L ../lib -L . -f xml_parser_test.fix -O minimum
+	
 svg_test1:
 	../bin/fixautolink run -L ../lib -L . -f svg_test1.fix -O minimum
 

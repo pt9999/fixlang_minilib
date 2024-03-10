@@ -57,22 +57,34 @@ type XmlNode = box union {
     processing_instruction: XmlProcessingInstruction    // processing instruction
 };
 
-namespace XmlNode {
-    _output_string: Array String -> XmlNode -> Array String;
-    _output_string = |output, node| (
+impl XmlNode: Eq {
+    eq = |a, b| (
+        if a.is_element_node && b.is_element_node { a.as_element_node == b.as_element_node };
+        if a.is_text_node && b.is_text_node { a.as_text_node == b.as_text_node };
+        if a.is_comment_node && b.is_comment_node { a.as_comment_node == b.as_comment_node };
+        if a.is_cdata_section && b.is_cdata_section { a.as_cdata_section == b.as_cdata_section };
+        if a.is_processing_instruction && b.is_processing_instruction {
+            a.as_processing_instruction == b.as_processing_instruction
+        };
+        false
+    );
+}
+
+impl XmlNode: ToString {
+    to_string = |node| (
         if node.is_element_node {
-            node.as_element_node._output_string(output)
+            node.as_element_node.to_string
         } else if node.is_text_node {
-            node.as_text_node._output_string(output)
+            node.as_text_node.to_string
         } else if node.is_comment_node {
-            node.as_comment_node._output_string(output)
+            node.as_comment_node.to_string
         } else if node.is_cdata_section {
-            node.as_cdata_section._output_string(output)
+            node.as_cdata_section.to_string
         } else if node.is_processing_instruction {
-            node.as_processing_instruction._output_string(output)
+            node.as_processing_instruction.to_string
         } else {
             eval assert(|_|"invalid node", false);
-            output
+            ""
         }
     );
 }
@@ -80,7 +92,7 @@ namespace XmlNode {
 // A type that represents an XML element.
 type XmlElement = unbox struct {
     tag: String,                   // tag name
-    attrs: Iterator XmlAttribute,  // attributes (reversed iterator)
+    attrs: Array XmlAttribute,      // attributes
     children: Array XmlNode        // child nodes
 };
 
@@ -91,7 +103,7 @@ namespace XmlElement {
     make = |tag| (
         XmlElement {
             tag: tag,
-            attrs: Iterator::empty,
+            attrs: Array::empty(0),
             children: Array::empty(0)
         }
     );
@@ -101,14 +113,25 @@ namespace XmlElement {
     element = make;
 
     // `el.attr(name,value)` adds an attribute to `el`.
-    // If an attribute of same name exists, it will be removed first.
+    // If an attribute of same name exists, it will be replaced.
     // NOTE: validity of attribute names are not checked.
     attr: String -> String -> XmlElement -> XmlElement;
     attr = |name, value, el| (
+        let attr = XmlAttribute::make(name, value);
         el.mod_attrs(|attrs|
-            attrs.filter(|attr| attr.@name != name)
-                 .push_front(XmlAttribute::make(name,value))
+            let index = attrs.find_by(|attr2| attr2.@name == attr.@name);
+            if index.is_some {
+                attrs.set(index.as_some, attr)
+            } else {
+                attrs.push_back(attr)
+            }
         )
+    );
+
+    // `parent.add_node(child_node)` adds a child node to `parent`.
+    add_node: XmlNode -> XmlElement -> XmlElement;
+    add_node = |child_node, parent| (
+        parent.mod_children(push_back(child_node))
     );
 
     // `parent.add(child)` adds a child element to `parent`.
@@ -129,33 +152,30 @@ namespace XmlElement {
     text = |content, el| (
         el.mod_children(push_back(text_node $ XmlText::make(content)))
     );
-        
-    // `el._to_string` converts the element to XML string.
-    _to_string: XmlElement -> String;
-    _to_string = |el| (
-        el._output_string(Array::empty(100)).to_iter.concat_iter
-    );
+}
 
-    // `el._output_string` output the element as XML string.
-    _output_string: Array String -> XmlElement -> Array String;
-    _output_string = |output, el| (
-        let output = output.push_back("<" + el.@tag);
-        let output = el.@attrs.reverse._output_string(output);
-        let output = output.push_back(">");
-        let child_sep = if el.@children.get_size >= 1 { "\n" } else { "" };
-        let output = output.push_back(child_sep);
-        let output = el.@children.to_iter.fold(
-            output, |output, node|
-            node._output_string(output)
-                .push_back(child_sep)
-        );
-        let output = output.push_back("</" + el.@tag + ">");
-        output
+impl XmlElement: Eq {
+    eq = |a, b| (
+        a.@tag == b.@tag &&
+        a.@attrs._sort_by_name == b.@attrs._sort_by_name &&
+        a.@children == b.@children
     );
 }
 
 impl XmlElement: ToString {
-    to_string = _to_string;
+    to_string = |el| (
+        let output = "<" + el.@tag;
+        let output = output + el.@attrs.to_iter.map(|attr| " " + attr.to_string).concat_iter;
+        let output = output + ">";
+        let child_sep = if el.@children.get_size >= 1 { "\n" } else { "" };
+        let output = output + child_sep;
+        let output = el.@children.to_iter.fold(
+            output, |output, node|
+            output + node.to_string + child_sep
+        );
+        let output = output + "</" + el.@tag + ">";
+        output
+    );
 }
 
 // A type that represents name and value of an attribute.
@@ -167,27 +187,29 @@ type XmlAttribute = unbox struct {
 namespace XmlAttribute {
     make: String -> String -> XmlAttribute;
     make = |name, value| (
+        // TODO: check name safety
         XmlAttribute { name: name, value: value }
     );
 
-    // `attrs._output_string` output the attributes as XML string.
-    _output_string: Array String -> Iterator XmlAttribute -> Array String;
-    _output_string = |output, attrs| (
-        attrs.fold(
-            output, |output, attr|
-            output
-            .push_back(" ")
-            .push_back(escape_special(attr.@name))  // TODO needed?
-            .push_back("=\"")
-            .push_back(escape_special(attr.@value))
-            .push_back("\"")
-        )
+    _sort_by_name: Array XmlAttribute -> Array XmlAttribute;
+    _sort_by_name = |attrs| (
+        attrs.sort_by(|(a, b)| a.@name < b.@name)
     );
 }
 
 impl XmlAttribute: Eq {
     eq = |a, b| a.@name == b.@name && a.@value == b.@value;
 }
+
+impl XmlAttribute: ToString {
+    to_string = |attr| (
+        escape_special(attr.@name)      // for security
+        + "=\""
+        + escape_special(attr.@value)
+        + "\""
+    );
+}
+
 
 type XmlText = unbox struct {
     content: String
@@ -196,11 +218,14 @@ type XmlText = unbox struct {
 namespace XmlText {
     make: String -> XmlText;
     make = |content| XmlText { content: content };
+}
 
-    _output_string: Array String -> XmlText -> Array String;
-    _output_string = |output, text| (
-        output.push_back(escape_special(text.@content))
-    );
+impl XmlText: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlText: ToString {
+    to_string = |text| escape_special(text.@content);
 }
 
 type XmlCDATASection = unbox struct {
@@ -210,13 +235,15 @@ type XmlCDATASection = unbox struct {
 namespace XmlCDATASection {
     make: String -> XmlCDATASection;
     make = |content| XmlCDATASection { content: content };
+}
 
-    _output_string: Array String -> XmlCDATASection -> Array String;
-    _output_string = |output, cdata_section| (
-        output
-        .push_back("<![CDATA[")
-        .push_back(cdata_section.@content)
-        .push_back("]]>")
+impl XmlCDATASection: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlCDATASection: ToString {
+    to_string = |cdata_section| (
+        "<![CDATA[" + cdata_section.@content + "]]>"
     );
 }
 
@@ -236,6 +263,16 @@ namespace XmlComment {
     );
 }
 
+impl XmlComment: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlComment: ToString {
+    to_string = |comment| (
+        "<!--" + comment.@content + "-->"
+    );
+}
+
 type XmlProcessingInstruction = unbox struct {
     content: String
 };
@@ -243,12 +280,15 @@ type XmlProcessingInstruction = unbox struct {
 namespace XmlProcessingInstruction {
     make: String -> XmlProcessingInstruction;
     make = |content| XmlProcessingInstruction { content: content };
+}
 
-    _output_string: Array String -> XmlProcessingInstruction -> Array String;
-    _output_string = |output, pi| (
-        output.push_back("<?")
-        .push_back(pi.@content)
-        .push_back("?>")
+impl XmlProcessingInstruction: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlProcessingInstruction: ToString {
+    to_string = |pi| (
+        "<?" + pi.@content + "?>"
     );
 }
 

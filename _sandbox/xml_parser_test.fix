@@ -12,9 +12,10 @@ trim_err = |res| (
     if res.is_ok { res };
     let e = res.as_err;
     let (loc, e) = e.split_first(": ");
-    err(e)
+    if e == "" { res } else { err(e) }
 );
 
+// [15]   	Comment	   ::=   	'<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
 test_parse_comment: TestCase;
 test_parse_comment = (
     make_table_test("test_parse_comment",
@@ -33,12 +34,34 @@ test_parse_comment = (
     )
 );
 
+// [40]   	STag	   ::=   	'<' Name (S Attribute)* S? '>'
+test_parse_stag: TestCase;
+test_parse_stag = (
+    make_table_test("test_parse_stag",
+        [
+            ("<aaa  >", ok $ (false, XmlElement::make("aaa"))),
+            ("<aaa a='1' b=\"&amp;\" >", ok $ (false, XmlElement::make("aaa").attr("b", "&").attr("a", "1"))),
+            ("<aaa a b=\"&amp;\" >", err $ "Missing '='"),
+            ("<aaa &a='1' >", err $ "Missing '>'"),
+            ("<aaa <bbb>", err $ "Missing '>'"),
+            ("<aaa  ", err $ "Missing '>'")
+        ],
+        |(input, expect)|
+        let res = _parse_empty_elem_tag_or_stag.run_parser_str(input);
+        let res = res.map(|((empty, elem), _)| (empty, elem)).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+
+// [41]   	Attribute	   ::=   	Name Eq AttValue
 test_parse_attribute: TestCase;
 test_parse_attribute = (
     make_table_test("test_parse_attribute",
         [
             (":Aa0.='bbb'", ok $ (":Aa0.", "bbb")),
             ("_:Aa0.-  =  \"bbb &#12354;&#x6F22;&lt;&gt;&amp;&apos;&quot;\"", ok $ ("_:Aa0.-", "bbb あ漢<>&'\"")),
+            ("_:Aa0.-  =  bbb", err $ "Missing start quote"),
             ("_:Aa0.-  =  \"bbb", err $ "Missing end quote"),
             ("_:Aa0.-  =  \"bbb<\"", err $ "Missing end quote"),
             ("_:Aa0.-  =  \"bbb&\"", err $ "Missing end quote")
@@ -52,11 +75,31 @@ test_parse_attribute = (
     )
 );
 
+// [44]   	EmptyElemTag	   ::=   	'<' Name (S Attribute)* S? '/>'
+test_parse_empty_elem: TestCase;
+test_parse_empty_elem = (
+    make_table_test("test_parse_empty_elem",
+        [
+            ("<aaa a='1' b=\"&amp;\" />", ok $ (true, XmlElement::make("aaa").attr("b", "&").attr("a", "1"))),
+            ("<aaa a=1 b=\"&amp;\" />", err $ "Missing start quote"),
+            ("<aaa/>", ok $ (true, XmlElement::make("aaa"))),
+            ("<aaa/", err $ "Missing '>'")
+        ],
+        |(input, expect)|
+        let res = _parse_empty_elem_tag_or_stag.run_parser_str(input);
+        let res = res.map(|((empty, elem), _)| (empty, elem)).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+
 main: IO ();
 main = (
     [
         test_parse_comment,
+        test_parse_stag,
         test_parse_attribute,
+        test_parse_empty_elem,
         TestCase::empty
     ].run_test_driver
 );

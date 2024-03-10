@@ -14,12 +14,143 @@ parse_document_from_string = |str| (
     pure $ doc
 );
 
+// 2.1 Well-Formed XML Documents
 _parse_document: Parser XmlDocument;
 _parse_document = do {
     not_match // TODO
 };
 
+// 2.3 Common Syntactic Constructs
 
+// White Space
+// [3]   	S	   ::=   	(#x20 | #x9 | #xD | #xA)+
+_parse_s: Parser String;
+_parse_s = do {
+    one_or_more(_whitespace).map(_unsafe_to_string)
+};
+
+_whitespace: Parser Char;
+_whitespace = do {
+    match_any_char.filter(|c|
+        c == 0x20_U8 || c == 0x09_U8 || c == 0x0D_U8 || c == 0x0A_U8
+    )
+};
+
+// Names and Tokens
+
+// [4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] |
+//              [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] |
+//              [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] |
+//              [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+_parse_name_start_char: Parser Char;
+_parse_name_start_char = do {
+    match_any_char.filter(|c|
+        is_alpha(c) ||
+        c == ':' ||
+        c == '_' ||
+        c >= 0x80_U8        // not checked
+    )
+};
+
+// [4a]   	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] |
+//                                   #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
+_parse_name_char: Parser Char;
+_parse_name_char = do {
+    match_any_char.filter(|c|
+        is_alnum(c) ||
+        c == ':' ||
+        c == '_' ||
+        c == '-' ||
+        c == '.' ||
+        c >= 0x80_U8        // not checked
+    )
+};
+
+// [5]   	Name	   ::=   	NameStartChar (NameChar)*
+_parse_name: Parser String;
+_parse_name = do {
+    let start_char = *_parse_name_start_char;
+    let tail_chars = *repeat(_parse_name_char);
+    pure $ [start_char].append(tail_chars)._unsafe_to_string
+};
+
+// Literals
+
+// [10]   	AttValue	   ::=   	'"' ([^<&"] | Reference)* '"'
+//                               |  "'" ([^<&'] | Reference)* "'"
+_parse_att_value: Parser String;
+_parse_att_value = do {
+    let _DoubleQuote = 0x22_U8;        // '\"'
+    let _SingleQuote = 0x27_U8;        // '\''
+    let start_quote = *match_char_class(|c|
+        c == _DoubleQuote || c == _SingleQuote
+    ).or_error("Missing start quote");
+
+    let start_stream = *get_stream;
+    let inner_quote = do {
+        match_char_class(|c| c != '<' && c != '&' && c != start_quote)
+        .map(|_|())
+        .or_else(
+            _parse_reference
+        )
+    };
+    let _ = *repeat(inner_quote);
+    let end_stream = *get_stream;
+    let end_quote = *match_char(start_quote).or_error("Missing end quote");
+    let content = start_stream.read_string_between(end_stream);
+    pure $ content
+};
+
+// 2.4 Character Data and Markup
+
+// Character Data
+// [14]   	CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
+_parse_char_data: Parser String;
+_parse_char_data = do {
+    repeat(match_char_class(|c| c != '<' && c != '&'))
+    ._unsafe_to_string
+    // TODO: stop before ']]>'
+};
+
+// 2.5 Comments
+
+// [15]   	Comment	   ::=   	'<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
+_parse_comment: Parser XmlNode;
+_parse_comment = do {
+    let hyphen = match_any_char.filter(|c| c == '-');
+    let not_hyphen = match_any_char.filter(|c| c != '-');
+    let inner_comment = not_hyphen.or_else(do {
+        let _ = *hyphen;
+        not_hyphen
+    });
+    let _ = *match_str("<!--");
+    let start_stream = *get_stream;
+    let _ = *repeat(inner_comment);
+    let end_stream = *get_stream;
+    let _ = *match_str("-->").or_error("Missing end of comment");
+
+    let content = start_stream.read_string_between(end_stream);
+    pure $ comment_node $ XmlComment::make(content)
+};
+
+// 2.6 Processing Instructions
+
+// [16]   	PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
+_parse_pi: Parser String;
+_parse_pi = do {
+    not_match   // TODO: currently not supported
+};
+
+// 2.7 CDATA Sections
+
+// TODO
+
+// 2.8 Prolog and Document Type Declaration
+
+// [22]   	prolog	   ::=   	XMLDecl Misc* (doctypedecl Misc*)?
+// TODO
+
+// [23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
 _parse_xml_declaration: Parser XmlNode;
 _parse_xml_declaration = do {
     let question = match_char_class(|c| c == '?');
@@ -40,96 +171,116 @@ _parse_xml_declaration = do {
     pure $ processing_instruction_node $ XmlProcessingInstruction::make(content)
 };
 
+// [25]   	Eq	   ::=   	S? '=' S?
+_parse_eq: Parser ();
+_parse_eq = do {
+    let _ = *zero_or_more(_whitespace);
+    let _ = *match_char('=');
+    let _ = *zero_or_more(_whitespace);
+    pure()
+};
+
+// [27]   	Misc	   ::=   	Comment | PI | S
+_parse_misc: Parser XmlNode;
+_parse_misc = do {
+    _parse_comment.or_elseF $
+    _parse_pi.or_elseF $
+    one_or_more(_whitespace).map(|chars|
+        XmlText::make(chars._unsafe_to_string)
+    )
+};
+
+// Document Type Definition
+// TODO
+
+// ...TODO
+
+// 3 Logical Structures
+
+// Element
+// [39]   	element	   ::=   	EmptyElemTag
+//                              | STag content ETag
 _parse_element: Parser XmlElement;
 _parse_element = do {
+    let (empty_tag, elem) = *_parse_empty_elem_tag_or_stag;
+    if empty_tag { pure $ elem };
+    let elem = *_parse_content(elem);
+    let elem = *_parse_etag(elem).or_error("Missing end of tag");
+    pure $ elem
+};
+
+// [44]   	EmptyElemTag	   ::=   	'<' Name (S Attribute)* S? '/>'
+// [40]   	STag	   ::=   	'<' Name (S Attribute)* S? '>'
+_parse_empty_elem_tag_or_stag: Parser (Bool, XmlElement);
+_parse_empty_elem_tag_or_stag = do {
     let _ = *match_char('<');
     let name = *_parse_name;
-    not_match // TODO impl
+    let attrs = *repeat(
+        do {
+            let _ = *one_or_more(_whitespace);
+            _parse_attribute
+        }
+    );
+    let _ = *zero_or_more(_whitespace);
+    let slash = *match_char('/').if_exists;
+    let _ = *match_char('>').or_error("Missing '>'");
+    let elem = XmlElement::make(name).set_attrs(attrs);
+    pure $ (slash.is_some, elem)
 };
 
-_parse_name: Parser String;
-_parse_name = do {
-    let start_char = *_name_start_char;
-    let tail_chars = *repeat(_name_char);
-    pure $ [start_char].append(tail_chars)._unsafe_to_string
-};
-
-_name_start_char: Parser Char;
-_name_start_char = do {
-    match_any_char.filter(|c|
-        is_alpha(c) ||
-        c == ':' ||
-        c == '_' ||
-        c >= 0x80_U8        // not checked
-    )
-};
-
-_name_char: Parser Char;
-_name_char = do {
-    match_any_char.filter(|c|
-        is_alnum(c) ||
-        c == ':' ||
-        c == '_' ||
-        c == '-' ||
-        c == '.' ||
-        c >= 0x80_U8        // not checked
-    )
-};
-
+// [41]   	Attribute	   ::=   	Name Eq AttValue
 _parse_attribute: Parser XmlAttribute;
 _parse_attribute = do {
     let name = *_parse_name;
-    let eq = *_parse_eq;
+    let eq = *_parse_eq.or_error("Missing '='");
     let value = *_parse_att_value;
     let value = unescape_special(value);
     pure $ XmlAttribute::make(name, value)
 };
 
-_parse_eq: Parser ();
-_parse_eq = do {
-    let _ = *_skip_whitespaces;
-    let _ = *match_char('=');
-    let _ = *_skip_whitespaces;
-    pure()
+// [42]   	ETag	   ::=   	'</' Name S? '>'
+_parse_etag: XmlElement -> Parser XmlElement;
+_parse_etag = |elem| do {
+    let _ = *match_char('<');
+    let _ = *match_char('/');
+    let name = *_parse_name;
+    if name != elem.@name { error_parser $ "Tag name mismatch" };
+    let _ = *zero_or_more(_whitespace);
+    let _ = *match_char('>').or_error("Missing '>'");
+    pure $ elem
 };
 
-_parse_att_value: Parser String;
-_parse_att_value = do {
-    let _DoubleQuote = 0x22_U8;        // '\"'
-    let _SingleQuote = 0x27_U8;        // '\''
-    let start_quote = *match_char_class(|c|
-            c == _DoubleQuote || c == _SingleQuote);
-
-    let start_stream = *get_stream;
-    let inner_quote = do {
-        match_char_class(|c| c != '<' && c != '&' && c != start_quote)
-        .map(|_|())
-        .or_else(
-            _parse_reference
-        )
-    };
-    let _ = *repeat(inner_quote);
-    let end_stream = *get_stream;
-    let end_quote = *match_char(start_quote).or_error("Missing end quote");
-    let content = start_stream.read_string_between(end_stream);
-    pure $ content
+// Content of Elements
+// [43]   	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
+_parse_content: XmlElement -> Parser XmlElement;
+_parse_content = |elem| do {
+    let char_data = *_parse_char_data;
+    let elem = if char_data != "" { elem.text(char_data) } else { elem };
+    let elem = loop_m(
+        elem, |elem|
+        let node = *(
+            _parse_element.map(element_node).or_elseF $
+            _parse_reference_as_text_node.or_elseF $
+            // TODO: support for CDATA section
+            _parse_pi.or_elseF $
+            _parse_comment
+        ).if_exists;
+        if node.is_none { break_m $ elem };
+        let elem = elem.add_node(node.as_some);
+        let char_data = *_parse_char_data;
+        let elem = if char_data != "" { elem.text(char_data) } else { elem };
+        continue_m $ elem
+    );
+    pure $ elem
 };
 
-_parse_reference: Parser ();
-_parse_reference = do {
-    _parse_entity_ref.or_else(
-        _parse_char_ref
-    )
-};
 
-_parse_entity_ref: Parser ();
-_parse_entity_ref = do {
-    let _ = *match_char('&');
-    let _ = *_parse_name;
-    let _ = *match_char(';');
-    pure()
-};
+// 4 Physical Structures
+// 4.1 Character and Entity References
 
+// Character Reference
+// [66]   	CharRef	   ::=   	'&#' [0-9]+ ';'
+//                              | '&#x' [0-9a-fA-F]+ ';'
 _parse_char_ref: Parser ();
 _parse_char_ref = do {
     let _ = *match_char('&');
@@ -142,46 +293,30 @@ _parse_char_ref = do {
     pure()
 };
 
-_parse_misc: Parser XmlNode;
-_parse_misc = do {
-    _parse_comment.or_else(
-        _parse_processing_instructions.or_else(
-            _parse_whitespaces
-        )
+// Entity Reference
+// [67]   	Reference	   ::=   	EntityRef | CharRef
+_parse_reference: Parser ();
+_parse_reference = do {
+    _parse_entity_ref.or_else(
+        _parse_char_ref
     )
 };
 
-_parse_comment: Parser XmlNode;
-_parse_comment = do {
-    let hyphen = match_any_char.filter(|c| c == '-');
-    let not_hyphen = match_any_char.filter(|c| c != '-');
-    let inner_comment = not_hyphen.or_else(do {
-        let _ = *hyphen;
-        not_hyphen
-    });
-    let _ = *match_str("<!--");
+_parse_reference_as_text_node: Parser XmlNode;
+_parse_reference_as_text_node = do {
     let start_stream = *get_stream;
-    let _ = *repeat(inner_comment);
+    let _ = *_parse_reference;
     let end_stream = *get_stream;
-    let _ = *match_str("-->").or_error("Missing end of comment");
-
     let content = start_stream.read_string_between(end_stream);
-    pure $ comment_node $ XmlComment::make(content)
+    let content = unescape_special(content);
+    pure $ text_node $ XmlText::make(content)
 };
 
-_parse_processing_instructions: Parser String;
-_parse_processing_instructions = do {
-    not_match   // TODO: currently not supported
+// [68]   	EntityRef	   ::=   	'&' Name ';'
+_parse_entity_ref: Parser ();
+_parse_entity_ref = do {
+    let _ = *match_char('&');
+    let _ = *_parse_name;
+    let _ = *match_char(';');
+    pure()
 };
-
-_parse_whitespaces: Parser String;
-_parse_whitespaces = do {
-    one_or_more(match_any_char.filter(is_space)).map(_unsafe_to_string)
-};
-
-_skip_whitespaces: Parser ();
-_skip_whitespaces = do {
-    repeat(match_any_char.filter(is_space)).map(|_| ())
-};
-
-

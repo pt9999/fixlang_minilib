@@ -107,10 +107,31 @@ _parse_att_value = do {
 // [14]   	CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
 _parse_char_data: Parser String;
 _parse_char_data = do {
-    repeat(match_char_class(|c| c != '<' && c != '&'))
-    ._unsafe_to_string
-    // TODO: stop before ']]>'
+    let match_not_end_of_cdata = _negative_lookahead("]]>");
+    let inner = do {
+        let _ = *match_not_end_of_cdata;
+        let _ = *match_char_class(|c| c != '<' && c != '&');
+        pure()
+    };
+    let start_stream = *get_stream;
+    let _ = *repeat(inner);
+    let end_stream = *get_stream;
+    let content = start_stream.read_string_between(end_stream);
+    pure $ content
 };
+
+// Checks whether it does not match `str` at current position.
+// Raises `_NotMatch` if it matches.
+_negative_lookahead: String -> Parser ();
+_negative_lookahead = |str| (
+    let str_matcher = match_str(str);
+    parser $ |s| (
+        if str_matcher.run_parser(s).is_ok {
+            err $ _NotMatch
+        };
+        ok $ ((), s)
+    )
+);
 
 // 2.5 Comments
 
@@ -136,14 +157,56 @@ _parse_comment = do {
 // 2.6 Processing Instructions
 
 // [16]   	PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
-_parse_pi: Parser String;
+// [17]   	PITarget	   ::=   	Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
+_parse_pi: Parser XmlNode;
 _parse_pi = do {
-    not_match   // TODO: currently not supported
+    let match_not_end_mark = _negative_lookahead("?>");
+    let inner_content = do {
+        let _ = *match_not_end_mark;
+        let _ = *match_any_char;
+        pure()
+    };
+    let _ = *match_str("<?");
+    let start_stream = *get_stream;
+    let pitarget = *_parse_name;
+    if pitarget.to_lower == "xml" {
+        not_match
+    };
+    let _ = *do {
+        let _ = *one_or_more(_whitespace);
+        let _ = *repeat(inner_content);
+        pure()
+    }.if_exists;
+    let end_stream = *get_stream;
+    let _ = *match_str("?>").or_error("Missing '?>'");
+    let content = start_stream.read_string_between(end_stream);
+    pure $ processing_instruction $ XmlProcessingInstruction::make(content)
 };
 
 // 2.7 CDATA Sections
 
-// TODO
+// [18]   	CDSect	   ::=   	CDStart CData CDEnd
+// [19]   	CDStart	   ::=   	'<![CDATA['
+// [20]   	CData	   ::=   	(Char* - (Char* ']]>' Char*))
+// [21]   	CDEnd	   ::=   	']]>'
+_parse_cdsect: Parser XmlNode;
+_parse_cdsect = do {
+    let match_not_end_mark = _negative_lookahead("]]>");
+    let inner_content = do {
+        let _ = *match_not_end_mark;
+        let _ = *match_any_char;
+        pure()
+    };
+    let _ = *match_str("<![CDATA[");
+    let start_stream = *get_stream;
+    let _ = *repeat(inner_content);
+    let end_stream = *get_stream;
+    let _ = *match_str("]]>").or_error("Missing ']]>'");
+    let content = start_stream.read_string_between(end_stream);
+    pure $ cdata_section $ XmlCDATASection::make(content)
+};
+
+
 
 // 2.8 Prolog and Document Type Declaration
 

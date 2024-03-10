@@ -15,6 +15,57 @@ trim_err = |res| (
     if e == "" { res } else { err(e) }
 );
 
+
+// [4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] |
+//              [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] |
+//              [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] |
+//              [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+// [4a]   	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] |
+//                                   #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
+// [5]   	Name	   ::=   	NameStartChar (NameChar)*
+test_parse_name: TestCase;
+test_parse_name = (
+    make_table_test("test_parse_name",
+        [
+            // currently #x0080 or above are all matched to NameStartChar and NameChar
+            ("abc", ok $ "abc"),
+            ("ABC", ok $ "ABC"),
+            ("あ漢", ok $ "あ漢"),
+            (":AZ_az-.09あ漢", ok $ ":AZ_az-.09あ漢"),
+            (":abc", ok $ ":abc"),
+            ("_abc", ok $ "_abc"),
+            ("-abc", err $ "NotMatch"),
+            (".abc", err $ "NotMatch"),
+            ("0abc", err $ "NotMatch"),
+            ("$abc", err $ "NotMatch")
+        ],
+        |(input, expect)|
+        let res = _parse_name.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+// [14]   	CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
+test_parse_char_data: TestCase;
+test_parse_char_data = (
+    make_table_test("test_parse_char_data",
+        [
+            ("abc", ok $ "abc"),
+            ("a > b > c >'\"", ok $ "a > b > c >'\""),
+            ("abc]>>>", ok $ "abc]>>>"),
+            ("abc]]>>>", ok $ "abc"),
+            ("abc]]]>>>", ok $ "abc]"),
+            ("abc]]]]>>>", ok $ "abc]]"),
+            ("]]>", ok $ "")
+        ],
+        |(input, expect)|
+        let res = _parse_char_data.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 // [15]   	Comment	   ::=   	'<!--' ((Char - '-') | ('-' (Char - '-')))* '-->'
 test_parse_comment: TestCase;
 test_parse_comment = (
@@ -30,6 +81,52 @@ test_parse_comment = (
             if !node.is_comment_node { err $ "type" };
             ok $ node.as_comment_node.@content
         ).flatten.trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+// [16]   	PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
+test_parse_pi: TestCase;
+test_parse_pi = (
+    make_table_test("test_parse_pi",
+        [
+            ("<?target?>", ok("target")),
+            ("<?:AZaz09-.?>", ok(":AZaz09-.")),
+            ("<?_AZaz09-.?>", ok("_AZaz09-.")),
+            ("<?_AZaz09$.?>", err("Missing '?>'")),
+            ("<?_AZaz09 $.?>", ok("_AZaz09 $.")),
+            ("<?target abc ???>", ok("target abc ??")),
+            ("<?target abc ???", err("Missing '?>'")),
+            ("<?xml version='1.1'?>", err("NotMatch")),
+            ("<??>", err("NotMatch"))
+        ],
+        |(input, expect)|
+        let res = _parse_pi.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        let expect = expect.map(XmlProcessingInstruction::make >> processing_instruction);
+        assert_equal("res", expect, res)
+    )
+);
+
+// [18]   	CDSect	   ::=   	CDStart CData CDEnd
+// [19]   	CDStart	   ::=   	'<![CDATA['
+// [20]   	CData	   ::=   	(Char* - (Char* ']]>' Char*))
+// [21]   	CDEnd	   ::=   	']]>'
+test_parse_cdsect: TestCase;
+test_parse_cdsect = (
+    make_table_test("test_parse_cdsect",
+        [
+            ("<![CDATA[abc]]>", ok("abc")),
+            ("<![CDATA [abc]]>", err("NotMatch")),
+            ("<![CDATA[ <a<b>> &amp;& <c>>  ]]]]>", ok(" <a<b>> &amp;& <c>>  ]]")),
+            ("<![CDATA[<![CDATA[]>[][]]]]>", ok("<![CDATA[]>[][]]")),
+            ("<![CDATA[abc]]", err("Missing ']]>'")),
+            ("<![CDATA[]]>", ok(""))
+        ],
+        |(input, expect)|
+        let res = _parse_cdsect.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        let expect = expect.map(XmlCDATASection::make >> cdata_section);
         assert_equal("res", expect, res)
     )
 );
@@ -96,7 +193,11 @@ test_parse_empty_elem = (
 main: IO ();
 main = (
     [
+        test_parse_name,
+        test_parse_char_data,
         test_parse_comment,
+        test_parse_pi,
+        test_parse_cdsect,
         test_parse_stag,
         test_parse_attribute,
         test_parse_empty_elem,

@@ -268,7 +268,7 @@ _parse_element = do {
     let (empty_tag, elem) = *_parse_empty_elem_tag_or_stag;
     if empty_tag { pure $ elem };
     let elem = *_parse_content(elem);
-    let elem = *_parse_etag(elem).or_error("Missing end of tag");
+    let elem = *_parse_etag(elem).or_error("Missing end tag");
     pure $ elem
 };
 
@@ -307,7 +307,7 @@ _parse_etag = |elem| do {
     let _ = *match_char('<');
     let _ = *match_char('/');
     let name = *_parse_name;
-    if name != elem.@name { error_parser $ "Tag name mismatch" };
+    if name != elem.@tag { error_parser $ "Tag name mismatch" };
     let _ = *zero_or_more(_whitespace);
     let _ = *match_char('>').or_error("Missing '>'");
     pure $ elem
@@ -319,12 +319,12 @@ _parse_content: XmlElement -> Parser XmlElement;
 _parse_content = |elem| do {
     let char_data = *_parse_char_data;
     let elem = if char_data != "" { elem.text(char_data) } else { elem };
-    let elem = loop_m(
+    let elem = *loop_m(
         elem, |elem|
         let node = *(
             _parse_element.map(element_node).or_elseF $
             _parse_reference_as_text_node.or_elseF $
-            // TODO: support for CDATA section
+            _parse_cdsect.or_elseF $
             _parse_pi.or_elseF $
             _parse_comment
         ).if_exists;
@@ -334,6 +334,7 @@ _parse_content = |elem| do {
         let elem = if char_data != "" { elem.text(char_data) } else { elem };
         continue_m $ elem
     );
+    let elem = elem.concat_text_nodes;
     pure $ elem
 };
 

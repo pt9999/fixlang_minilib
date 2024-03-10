@@ -131,6 +131,29 @@ test_parse_cdsect = (
     )
 );
 
+// [39]   	element	   ::=   	EmptyElemTag
+//                              | STag content ETag
+test_parse_element: TestCase;
+test_parse_element = (
+    let element = XmlElement::make;
+    make_table_test("test_parse_element",
+        [
+            ("<a   x='1' >hello <b /> world</a>", ok $
+                    element("a")
+                    .attr("x", "1")
+                    .text("hello ")
+                    .add(element("b"))
+                    .text(" world")),
+            ("<a><b><c/></b></a>", ok $ element("a").add(element("b").add(element("c")))),
+            ("<a><b><c/></b>", err $ "Missing end tag")
+        ],
+        |(input, expect)|
+        let res = _parse_element.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 // [40]   	STag	   ::=   	'<' Name (S Attribute)* S? '>'
 test_parse_stag: TestCase;
 test_parse_stag = (
@@ -172,6 +195,29 @@ test_parse_attribute = (
     )
 );
 
+// [43]   	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
+test_parse_content: TestCase;
+test_parse_content = (
+    let elem = XmlElement::make("a");
+    make_table_test("test_parse_content",
+        [
+            ("abc<b/>", ok $ elem.text("abc").add(XmlElement::make("b"))),
+            ("ab&amp;c", ok $ elem.text("ab&c")),
+            ("ab<!--comment-->c", ok $ elem.text("ab")
+                    .add_node(comment_node(XmlComment::make("comment")))
+                    .text("c")),
+            ("<![CDATA[a]]> <?t?>", ok $ elem
+                    .add_node(cdata_section(XmlCDATASection::make("a")))
+                    .text(" ")
+                    .add_node(processing_instruction(XmlProcessingInstruction::make("t"))))
+        ],
+        |(input, expect)|
+        let res = _parse_content(elem).run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 // [44]   	EmptyElemTag	   ::=   	'<' Name (S Attribute)* S? '/>'
 test_parse_empty_elem: TestCase;
 test_parse_empty_elem = (
@@ -198,8 +244,10 @@ main = (
         test_parse_comment,
         test_parse_pi,
         test_parse_cdsect,
+        test_parse_element,
         test_parse_stag,
         test_parse_attribute,
+        test_parse_content,
         test_parse_empty_elem,
         TestCase::empty
     ].run_test_driver

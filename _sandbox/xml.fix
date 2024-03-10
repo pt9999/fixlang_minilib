@@ -152,6 +152,30 @@ namespace XmlElement {
     text = |content, el| (
         el.mod_children(push_back(text_node $ XmlText::make(content)))
     );
+
+    // `el.concat_text_nodes` concats adjuscent text nodes.
+    concat_text_nodes: XmlElement -> XmlElement;
+    concat_text_nodes = |el| (
+        let concat_or_push_back: Array XmlNode -> XmlNode -> Array XmlNode =
+            |children, child| (
+                if children.is_empty {
+                    children.push_back(child)
+                };
+                if !child.is_text_node {
+                    children.push_back(child)
+                };
+                let last = children.get_last.as_some;
+                if !last.is_text_node {
+                    children.push_back(child)
+                };
+                children.pop_back.push_back(text_node $ last.as_text_node + child.as_text_node)
+            );
+        el.mod_children(|children|
+            children.to_iter.fold(
+                [], concat_or_push_back
+            )
+        )
+    );
 }
 
 impl XmlElement: Eq {
@@ -166,8 +190,12 @@ impl XmlElement: ToString {
     to_string = |el| (
         let output = "<" + el.@tag;
         let output = output + el.@attrs.to_iter.map(|attr| " " + attr.to_string).concat_iter;
+        if el.@children.is_empty {
+            output + "/>"
+        };
         let output = output + ">";
-        let child_sep = if el.@children.get_size >= 1 { "\n" } else { "" };
+        //let child_sep = if el.@children.get_size >= 1 { "\n" } else { "" };
+        let child_sep = "";
         let output = output + child_sep;
         let output = el.@children.to_iter.fold(
             output, |output, node|
@@ -226,6 +254,10 @@ impl XmlText: Eq {
 
 impl XmlText: ToString {
     to_string = |text| escape_special(text.@content);
+}
+
+impl XmlText: Add {
+    add = |a, b| XmlText::make(a.@content + b.@content);
 }
 
 type XmlCDATASection = unbox struct {

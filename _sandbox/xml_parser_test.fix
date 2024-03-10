@@ -15,6 +15,33 @@ trim_err = |res| (
     if e == "" { res } else { err(e) }
 );
 
+// [1]   	document	   ::=   	( prolog element Misc* ) - ( Char* RestrictedChar Char* )
+test_parse_document: TestCase;
+test_parse_document = (
+    let xml_decl_str_inner = "xml version='1.1'";
+    let xml_decl_str = "<?" + xml_decl_str_inner + "?>";
+    let doc = XmlDocument::empty;
+    let xml_decl = XmlProcessingInstruction::make >> processing_instruction;
+    let element = XmlElement::make;
+    let text = XmlText::make >> text_node;
+    make_table_test("test_parse_document",
+        [
+            (xml_decl_str + "<a/>", ok $ doc
+                .set_xml_decl(xml_decl(xml_decl_str_inner))
+                .set_document_element(element("a"))),
+            (xml_decl_str + " <a/> ", ok $ doc
+                .set_xml_decl(xml_decl(xml_decl_str_inner))
+                .add_to_prolog(text(" "))
+                .set_document_element(element("a"))
+                .add_to_epilog(text(" "))),
+            (xml_decl_str, err $ "NotMatch")
+        ],
+        |(input, expect)|
+        let res = _parse_document.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
 
 // [4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] |
 //              [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] |
@@ -239,6 +266,7 @@ test_parse_empty_elem = (
 main: IO ();
 main = (
     [
+        test_parse_document,
         test_parse_name,
         test_parse_char_data,
         test_parse_comment,

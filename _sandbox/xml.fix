@@ -12,40 +12,59 @@ import Minilib.Net.HTML;
 
 // A type that represents an XML document.
 type XmlDocument = unbox struct {
-    document_element: XmlElement           // document element
+    xml_decl: XmlNode,
+    prolog: Array XmlNode,
+    document_element: XmlElement,
+    epilog: Array XmlNode
 };
 
 namespace XmlDocument {
     // An empty XML document.
     empty: XmlDocument;
     empty = (
+        let xml_decl = "xml version='1.1' encoding='utf-8'";
         XmlDocument {
-            document_element: XmlElement::make("root")      // dummy
+            xml_decl: processing_instruction $ XmlProcessingInstruction::make $ xml_decl,
+            prolog: [],
+            document_element: XmlElement::make("root"),
+            epilog: []
         }
     );
 
     make: XmlElement -> XmlDocument;
     make = |document_element| (
-        XmlDocument {
-            document_element: document_element
-        }
+        XmlDocument::empty.set_document_element(document_element)
     );
 
-    // Adds a child element to document element.
-    add: XmlElement -> XmlDocument -> XmlDocument;
-    add = |child, doc| (
-        doc.mod_document_element(add(child))
+    // Adds a child node to prolog.
+    add_to_prolog: XmlNode -> XmlDocument -> XmlDocument;
+    add_to_prolog = |child, doc| (
+        doc.mod_prolog(push_back(child))
     );
 
-    // Converts the XML document to XML string.
-    _to_string: XmlDocument -> String;
-    _to_string = |doc| (
-        doc.@document_element._to_string
-    );   
+    // Adds a child node to epilog.
+    add_to_epilog: XmlNode -> XmlDocument -> XmlDocument;
+    add_to_epilog = |child, doc| (
+        doc.mod_epilog(push_back(child))
+    );
+}
+
+impl XmlDocument: Eq {
+    eq = |a, b| (
+        a.@xml_decl == b.@xml_decl &&
+        a.@prolog == b.@prolog &&
+        a.@document_element == b.@document_element &&
+        a.@epilog == b.@epilog
+    );
 }
 
 impl XmlDocument: ToString {
-    to_string = _to_string;
+    to_string = |doc| (
+       doc.@xml_decl.to_string
+        + doc.@prolog.to_iter.map(to_string).concat_iter
+        + doc.@document_element.to_string
+        + doc.@epilog.to_iter.map(to_string).concat_iter
+    );
 }
 
 // A type that represents an XML node.

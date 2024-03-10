@@ -11,13 +11,21 @@ import Minilib.Text.StringEx;
 parse_document_from_string: String -> Result ErrMsg XmlDocument;
 parse_document_from_string = |str| (
     let (doc, _) = *_parse_document.run_parser_str(str);
+    let _ = *match_end_of_stream;
     pure $ doc
 );
 
 // 2.1 Well-Formed XML Documents
+
+// [1]   	document	   ::=   	( prolog element Misc* ) - ( Char* RestrictedChar Char* )
 _parse_document: Parser XmlDocument;
 _parse_document = do {
-    not_match // TODO
+    let doc = *_parse_prolog;
+    let element = *_parse_element;
+    let doc = doc.set_document_element(element);
+    let epilog = *repeat(_parse_misc);
+    let doc = epilog.to_iter.fold(doc, |doc, node| doc.add_to_epilog(node));
+    pure $ doc
 };
 
 // 2.3 Common Syntactic Constructs
@@ -35,6 +43,12 @@ _whitespace = do {
         c == 0x20_U8 || c == 0x09_U8 || c == 0x0D_U8 || c == 0x0A_U8
     )
 };
+
+_parse_s_as_text_node: Parser XmlNode;
+_parse_s_as_text_node = do {
+    _parse_s.map(XmlText::make >> text_node)
+};
+
 
 // Names and Tokens
 
@@ -211,7 +225,16 @@ _parse_cdsect = do {
 // 2.8 Prolog and Document Type Declaration
 
 // [22]   	prolog	   ::=   	XMLDecl Misc* (doctypedecl Misc*)?
-// TODO
+_parse_prolog: Parser XmlDocument;
+_parse_prolog = do {
+    let xml_decl = *_parse_xml_declaration;
+    let prolog = *repeat(_parse_misc);
+    let doc = XmlDocument::empty;
+    let doc = doc.set_xml_decl(xml_decl);
+    let doc = prolog.to_iter.fold(doc, |doc, node| doc.add_to_prolog(node));
+    // TODO: support doctypedecl
+    pure $ doc
+};
 
 // [23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
 _parse_xml_declaration: Parser XmlNode;
@@ -229,9 +252,9 @@ _parse_xml_declaration = do {
     // TODO: parse VersionInfo, EncodingDecl
     let _ = *repeat(inner_content);
     let end_stream = *get_stream;
-    let _ = *match_str("?>").or_else("Missing end of xml declaration");
+    let _ = *match_str("?>").or_error("Missing end of xml declaration");
     let content = start_stream.read_string_between(end_stream);
-    pure $ processing_instruction_node $ XmlProcessingInstruction::make(content)
+    pure $ processing_instruction $ XmlProcessingInstruction::make(content)
 };
 
 // [25]   	Eq	   ::=   	S? '=' S?
@@ -248,9 +271,7 @@ _parse_misc: Parser XmlNode;
 _parse_misc = do {
     _parse_comment.or_elseF $
     _parse_pi.or_elseF $
-    one_or_more(_whitespace).map(|chars|
-        XmlText::make(chars._unsafe_to_string)
-    )
+    _parse_s_as_text_node
 };
 
 // Document Type Definition

@@ -43,6 +43,9 @@ state_monad_test2:
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
 
+aes:
+	../bin/fixautolink run -L ../lib -f aes.fix
+
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix
 

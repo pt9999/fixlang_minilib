@@ -1,0 +1,107 @@
+// FIPS 197
+module Main;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+import Minilib.Text.StringEx;
+
+type AES = unbox struct {
+    s: Array U8        // state 4x4 bytes = 4 words, r+4c
+};
+
+namespace AES {
+    empty: AES;
+    empty = AES {
+        s: Array::fill(16, 0_U8)
+    };
+
+    // 3.4 The State 
+    _get_s: I64 -> I64 -> AES -> U8;
+    _get_s = |r, c, aes| (
+       aes.@s.@(r + 4*c)
+    );
+
+    _copy_input: Array U8 -> AES -> AES;
+    _copy_input = |input, aes| (
+        eval assert(|_| "invalid input size", input.get_size == 16);
+        aes.set_s(input)
+    );
+
+    _copy_output: AES -> Array U8;
+    _copy_output = |aes| (
+        aes.@s
+    );
+
+    // 3.5 Arrays of Words 
+    _get_v: I64 -> AES -> U32;
+    _get_v = |i, aes| (
+        eval assert(|_| "out of range", 0 <= i && i < 4);
+        get_u32_le(4 * i, aes.@s)
+    );
+
+    // 4.1 Addition in GF(2^8) 
+    _add_gf8: U8 -> U8 -> U8;
+    _add_gf8 = bit_xor;
+
+    // 4.2 Multiplication in GF(2^8) 
+    _mul_gf8: U8 -> U8 -> U8;
+    _mul_gf8 = |a, b| (
+        loop(
+            (b, 0_U8, 0_U8), |(b, c, i)|
+            if i >= 8_U8 { break $ c };
+            let c = if a.bit_and(1_U8.shift_left(i)) == 0_U8 { c }
+            else { c._add_gf8(b) };
+            let b = _xtimes(b);
+            continue $ (b, c, i + 1_U8) 
+        )
+    ); 
+
+    _xtimes: U8 -> U8;
+    _xtimes = |b| (
+        if b.bit_and(0x80_U8) == 0x00_U8 { b.shift_left(1_U8) }
+        else { b.shift_left(1_U8).bit_xor(0x1D_U8) }
+    );
+        
+    // 4.3 Multiplication of Words by a Fixed Matrix
+    // TODO
+
+    // 4.4 Multiplicative Inverses in GF(2^8) 
+    _inv_gf8: U8 -> U8;
+    _inv_gf8 = |b| (
+        b._pow_gf8(254_U8)
+    );
+
+    // `a._pow_gf8(n)` calculates `a ^ n`.
+    _pow_gf8: U8 -> U8 -> U8;
+    _pow_gf8 = |n, a| (
+        let op = _mul_gf8;
+        loop(
+            (1_U8, a, n), |(x, a, n)|
+            if n == 0_U8 {
+                break $ x
+            };
+            let x = if n.bit_and(1_U8) != 0_U8 {
+                op(x, a)
+            } else { x };
+            continue $ (x, op(a, a), n.shift_right(1_U8))
+        )
+    );
+}
+
+test_gf8: IO ();
+test_gf8 = (
+    Iterator::range(1, 256).fold_m(
+        (), |_, i|
+        let a = i.to_U8;
+        let b = _inv_gf8(a);
+        let c = _mul_gf8(a, b);
+        let _ = *println((a,b,c).format("a={} b={} c={}"));
+        eval assert(|_| "invalid c", c == 1_U8);
+        pure()
+    )
+);
+
+main: IO ();
+main = test_gf8;
+

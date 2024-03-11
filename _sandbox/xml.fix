@@ -11,7 +11,7 @@ import Minilib.Text.Unicode;
 import Minilib.Net.HTML;
 
 // A type that represents an XML document.
-type XmlDocument = unbox struct {
+type XmlDocument = box struct {
     xml_decl: XmlNode,
     prolog: Array XmlNode,
     document_element: XmlElement,
@@ -68,23 +68,30 @@ impl XmlDocument: ToString {
 }
 
 // A type that represents an XML node.
+// cf. [DOM: 4.4. Interface Node](https://dom.spec.whatwg.org/#node)
 type XmlNode = box union {
-    element_node: XmlElement,      // XML element
-    text_node: XmlText,            // text node
-    comment_node: XmlComment,      // comment node
-    cdata_section: XmlCDATASection, // cdata section
-    processing_instruction: XmlProcessingInstruction    // processing instruction
+    element_node: XmlElement,      // element node(1)
+    attribute_node: XmlAttribute, // attribute node(2)
+    text_node: XmlText,            // text node(3)
+    cdata_section: XmlCDATASection, // cdata section node(4)
+    processing_instruction: XmlProcessingInstruction,    // processing instruction node(7)
+    comment_node: XmlComment,      // comment node(8)
+    document_node: XmlDocument     // document node(9)
+    // TODO: document type node(10)
+    // TODO: document fragment node(11)
 };
 
 impl XmlNode: Eq {
     eq = |a, b| (
         if a.is_element_node && b.is_element_node { a.as_element_node == b.as_element_node };
+        if a.is_attribute_node && b.is_attribute_node { a.as_attribute_node == b.as_attribute_node };
         if a.is_text_node && b.is_text_node { a.as_text_node == b.as_text_node };
-        if a.is_comment_node && b.is_comment_node { a.as_comment_node == b.as_comment_node };
         if a.is_cdata_section && b.is_cdata_section { a.as_cdata_section == b.as_cdata_section };
         if a.is_processing_instruction && b.is_processing_instruction {
             a.as_processing_instruction == b.as_processing_instruction
         };
+        if a.is_comment_node && b.is_comment_node { a.as_comment_node == b.as_comment_node };
+        if a.is_document_node && b.is_document_node { a.as_document_node == b.as_document_node };
         false
     );
 }
@@ -93,14 +100,18 @@ impl XmlNode: ToString {
     to_string = |node| (
         if node.is_element_node {
             node.as_element_node.to_string
+        } else if node.is_attribute_node {
+            node.as_attribute_node.to_string
         } else if node.is_text_node {
             node.as_text_node.to_string
-        } else if node.is_comment_node {
-            node.as_comment_node.to_string
         } else if node.is_cdata_section {
             node.as_cdata_section.to_string
         } else if node.is_processing_instruction {
             node.as_processing_instruction.to_string
+        } else if node.is_comment_node {
+            node.as_comment_node.to_string
+        } else if node.is_document_node {
+            node.as_document_node.to_string
         } else {
             eval assert(|_|"invalid node", false);
             ""

@@ -7,15 +7,22 @@ import Minilib.Encoding.Binary;
 import Minilib.Text.StringEx;
 
 type AES = unbox struct {
+    key_length: I64,    // 128, 192, 256
     s: Array U8        // state 4x4 bytes = 4 words, r+4c
 };
 
 namespace AES {
-    empty: AES;
-    empty = AES {
-        s: Array::fill(16, 0_U8)
-    };
+    make: I64 -> AES;
+    make = |key_length| (
+        eval assert(|_| "unsupported key length", 
+            key_length == 128 || key_length == 192 || key_length == 256);
+        AES {
+            key_length: key_length,
+            s: Array::fill(16, 0_U8)
+        }
+    );
 
+    
     // 3.4 The State 
     _get_s: I64 -> I64 -> AES -> U8;
     _get_s = |r, c, aes| (
@@ -40,6 +47,44 @@ namespace AES {
         get_u32_le(4 * i, aes.@s)
     );
 
+    // 5. Algorithm Specifcations
+    _get_number_of_rounds: AES -> I64;
+    _get_number_of_rounds = |aes| (
+        if aes.@key_length == 128 { 10 };
+        if aes.@key_length == 192 { 12 };
+        if aes.@key_length == 256 { 14 };
+        eval assert(|_| "unsupported key length", false);
+        0
+    );
+
+    // 5.1.1 SUBBYTES() 
+    _sbox: U8 -> U8;
+    _sbox = |b| (
+        let b = if b == 0_U8 { 0_U8 } else { b._inv_gf8 };
+        b.bit_xor(b._rotr(4_U8))
+         .bit_xor(b._rotr(5_U8))
+         .bit_xor(b._rotr(6_U8))
+         .bit_xor(b._rotr(7_U8))
+         .bit_xor(0x63_U8)  // c
+    );    
+
+    // rotate left
+    _rotl: U8 -> U8 -> U8;
+    _rotl = |n, x| (
+        x.shift_left(n).bit_or(x.shift_right(8_U8 - n))
+    );
+
+    // rotate right
+    _rotr: U8 -> U8 -> U8;
+    _rotr = |n, x| (
+        x.shift_right(n).bit_or(x.shift_left(8_U8 - n))
+    );
+
+}
+
+// Arithmetic in GF(2^8)
+// NOTE: It might be better to rename GF8 to GF256 or GF2_8, but shorter is better.
+namespace GF8 {
     // 4.1 Addition in GF(2^8) 
     _add_gf8: U8 -> U8 -> U8;
     _add_gf8 = bit_xor;
@@ -60,7 +105,7 @@ namespace AES {
     _xtimes: U8 -> U8;
     _xtimes = |b| (
         if b.bit_and(0x80_U8) == 0x00_U8 { b.shift_left(1_U8) }
-        else { b.shift_left(1_U8).bit_xor(0x1D_U8) }
+        else { b.shift_left(1_U8).bit_xor(0x1B_U8) }
     );
         
     // 4.3 Multiplication of Words by a Fixed Matrix
@@ -87,21 +132,57 @@ namespace AES {
             continue $ (x, op(a, a), n.shift_right(1_U8))
         )
     );
+
 }
 
-test_gf8: IO ();
-test_gf8 = (
+to_string_hex2: U8 -> String;
+to_string_hex2 = |u8| (
+    let output = Array::empty(3);
+    output.push_back(u8.shift_right(4_U8).bit_and(15_U8).encode_hex_char)
+          .push_back(u8.shift_right(0_U8).bit_and(15_U8).encode_hex_char)
+          ._unsafe_to_string
+);
+
+test_mul_gf8: IO ();
+test_mul_gf8 = (
+    let xs = Iterator::range(0, 8).fold(
+        ([], 1_U8), |(xs, x), _|
+        (xs.push_back(x), x * 2_U8)).@0;
+    println $ xs.to_iter.map(|b|
+        let a = 0x57_U8;
+        let c = _mul_gf8(a, b);
+        [a,b,c].map(to_string_hex2).format("a={} b={} c={}")
+    ).join("\n")
+);
+
+test_inv_gf8: IO ();
+test_inv_gf8 = (
     Iterator::range(1, 256).fold_m(
         (), |_, i|
         let a = i.to_U8;
         let b = _inv_gf8(a);
         let c = _mul_gf8(a, b);
-        let _ = *println((a,b,c).format("a={} b={} c={}"));
+        let _ = *println([a,b,c].map(to_string_hex2).format("a={} b={} c={}"));
         eval assert(|_| "invalid c", c == 1_U8);
         pure()
     )
 );
 
+tabulate: (U8 -> String) -> String;
+tabulate = |f| (
+    Iterator::range(0, 16).map(|x|
+        Iterator::range(0, 16).map(|y|
+            let b = (x * 16 + y).to_U8;
+            f(b)
+        ).join(" ")
+    ).join("\n")
+);
+
+test_sbox: IO ();
+test_sbox = (
+    println $ tabulate(|b| _sbox(b).to_string_hex2)
+);
+
 main: IO ();
-main = test_gf8;
+main = test_sbox;
 

@@ -109,19 +109,3 @@ with `a`, `b`, `c`.
 `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
 with `a`, `b`, `c`, `d`.
 
-#### encode_hex_char: U8 -> U8;
-
-Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').
-
-#### decode_hex_char: U8 -> Result ErrMsg U8;
-
-Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
-
-#### to_string_hex: U64 -> String;
-
-Converts a 64bit number to a hex string.
-
-#### from_string_hex: String -> Result ErrMsg U64;
-
-Converts a hex string to a 64bit number.
-

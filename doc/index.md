@@ -198,6 +198,10 @@ Array utility functions for testing.
 
 Unit Test Framework
 
+### [module Minilib.Text.Hex (lib/text/hex.fix)](lib/text/hex.md)
+
+Hexadecimal string conversion
+
 ### [module Minilib.Text.RegExp.RegExpNFA (lib/text/regexp/regexp_nfa.fix)](lib/text/regexp/regexp_nfa.md)
 
 NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.

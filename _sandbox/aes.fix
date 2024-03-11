@@ -8,6 +8,7 @@ import Debug;
 import Minilib.Encoding.Binary;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
+import Minilib.Thread.Time;
 
 type AES = unbox struct {
     key_length: I64,    // 128, 192, 256
@@ -29,12 +30,6 @@ namespace AES {
     _get_s: I64 -> I64 -> AES -> U8;
     _get_s = |r, c, aes| (
        aes.@s.@(r + 4*c)
-    );
-
-    _copy_input: Array U8 -> AES -> AES;
-    _copy_input = |input, aes| (
-        eval assert(|_| "invalid input size", input.get_size == 16);
-        aes.set_s(input)
     );
 
     _copy_output: AES -> Array U8;
@@ -59,8 +54,29 @@ namespace AES {
         0
     );
 
-    // 5.1.1 SUBBYTES() 
+    // 5.1 CIPHER()
+    _cipher: Array U8 -> Array U32 -> AES -> Array U8;
+    _cipher = |input, w, aes| (
+        let nr = aes._get_number_of_rounds;
+        eval assert(|_| "invalid input size", input.get_size == 16);
+        let aes = aes.set_s(input);
+        let aes = aes._add_round_key(w, 0);
+        let aes = loop(
+            (aes, 1), |(aes, round)|
+            if round >= nr { break $ aes };
+            let aes = aes._sub_bytes;
+            let aes = aes._shift_rows;
+            let aes = aes._mix_columns;
+            let aes = aes._add_round_key(w, round);
+            continue $ (aes, round + 1)
+        );
+        let aes = aes._sub_bytes;
+        let aes = aes._shift_rows;
+        let aes = aes._add_round_key(w, nr);
+        aes.@s
+    );
 
+    // 5.1.1 SUBBYTES() 
     _sub_bytes: AES -> AES;
     _sub_bytes = |aes| (
         aes.mod_s(map(|b| _sbox_table.@(b.to_I64)))
@@ -80,14 +96,6 @@ namespace AES {
          .bit_xor(b._rotr(7_U8))
          .bit_xor(0x63_U8)  // c
     );    
-
-    // rotate left
-    /*
-    _rotl: U8 -> U8 -> U8;
-    _rotl = |n, x| (
-        x.shift_left(n).bit_or(x.shift_right(8_U8 - n))
-    );
-    */
 
     // rotate right
     _rotr: U8 -> U8 -> U8;
@@ -130,7 +138,19 @@ namespace AES {
     );
 
     // 5.1.4 ADDROUNDKEY()
-    // TODO
+    _add_round_key: Array U32 -> I64 -> AES -> AES;
+    _add_round_key = |w, round, aes| (
+        aes.mod_s(|s|
+            loop(
+                (s, 0), |(s, c)|
+                if c >= 4 { break $ s };
+                let s0123c = s.get_u32_be(4 * c);
+                let s0123c = s0123c.bit_xor(w.@(4 * round + c));
+                let s = s.set_u32_be(4 * c, s0123c);
+                continue $ (s, c + 1)
+            )
+        )
+    );
 
     // 5.2 KEYEXPANSION()
     _key_expansion: Array U8 -> AES -> Array U32;
@@ -294,11 +314,16 @@ test_sbox = (
     println $ tabulate(|b| _sbox(b).to_string_hex)
 );
 
+byte_array_from_string_hex: String -> Array U8;
+byte_array_from_string_hex = |str| (
+    str.split(" ").map(from_string_hex >> as_ok >> U64::to_U8).to_array
+);
+
 // Appendix A — Key Expansion Examples
 test_key_expansion: IO ();
 test_key_expansion = (
-    let key = [0x2b_U8, 0x7e_U8, 0x15_U8, 0x16_U8, 0x28_U8, 0xae_U8, 0xd2_U8, 0xa6_U8,
-               0xab_U8, 0xf7_U8, 0x15_U8, 0x88_U8, 0x09_U8, 0xcf_U8, 0x4f_U8, 0x3c_U8];
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
     let aes = AES::make(128);
     let w = aes._key_expansion(key);
     Iterator::range(0, 44).fold_m(
@@ -307,6 +332,19 @@ test_key_expansion = (
     )
 );
 
+// Appendix B — Cipher Example
+test_cipher: IO ();
+test_cipher = (
+    let input = "32 43 f6 a8 88 5a 30 8d 31 31 98 a2 e0 37 07 34";
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let input = input.byte_array_from_string_hex;
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(128);
+    let w = aes._key_expansion(key);
+    let out = *timeit("cipher", |_| aes._cipher(input, w));
+    println(out.to_string_hex)
+);
+
 main: IO ();
-main = test_key_expansion;
+main = test_cipher;
 

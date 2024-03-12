@@ -76,6 +76,28 @@ namespace AES {
         aes.@s
     );
 
+    // 5.3 INVCIPHER()
+    _inv_cipher: Array U8 -> Array U32 -> AES -> Array U8;
+    _inv_cipher = |input, w, aes| (
+        let nr = aes._get_number_of_rounds;
+        eval assert(|_| "invalid input size", input.get_size == 16);
+        let aes = aes.set_s(input);
+        let aes = aes._add_round_key(w, nr);
+        let aes = loop(
+            (aes, nr - 1), |(aes, round)|
+            if round < 1 { break $ aes };
+            let aes = aes._inv_shift_rows;
+            let aes = aes._inv_sub_bytes;
+            let aes = aes._add_round_key(w, round);
+            let aes = aes._inv_mix_columns;
+            continue $ (aes, round - 1)
+        );
+        let aes = aes._inv_shift_rows;
+        let aes = aes._inv_sub_bytes;
+        let aes = aes._add_round_key(w, 0);
+        aes.@s
+    );
+
     // 5.1.1 SUBBYTES() 
     _sub_bytes: AES -> AES;
     _sub_bytes = |aes| (
@@ -87,6 +109,23 @@ namespace AES {
         Array::from_map(256, I64::to_U8 >> _sbox)
     );
 
+    // 5.3.2 INVSUBBYTES()
+    _inv_sub_bytes: AES -> AES;
+    _inv_sub_bytes = |aes| (
+        aes.mod_s(map(|b| _inv_sbox_table.@(b.to_I64)))
+    );
+
+    _inv_sbox_table: Array U8;
+    _inv_sbox_table = (
+        Iterator::range(0, 256).fold(
+            Array::fill(256, 0_U8), |arr, i|
+            let x = i.to_U8;
+            let y = _sbox_table.@(i);
+            arr.set(y.to_I64, x)
+        )
+    );
+
+    // SBOX
     _sbox: U8 -> U8;
     _sbox = |b| (
         let b = if b == 0_U8 { 0_U8 } else { b._inv_gf8 };
@@ -117,6 +156,20 @@ namespace AES {
         )
     );
 
+    // 5.3.1 INVSHIFTROWS()
+    _inv_shift_rows: AES -> AES;
+    _inv_shift_rows = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c = (c - r).bit_and(3);
+                let i = c.shift_left(2).bit_or(r);
+                s.@(i)
+            )
+        )
+    );
+
     // 5.1.3 MIXCOLUMNS()
     _mix_columns: AES -> AES;
     _mix_columns = |aes| (
@@ -133,6 +186,26 @@ namespace AES {
                 ._add_gf8(s1c._mul_gf8(0x03_U8))
                 ._add_gf8(s2c)
                 ._add_gf8(s3c)
+            )
+        )
+    );
+
+    // 5.3.3 INVMIXCOLUMNS()
+    _inv_mix_columns: AES -> AES;
+    _inv_mix_columns = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c4 = c.shift_left(2);
+                let s0c = s.@((r + 0).bit_and(3) + c4);
+                let s1c = s.@((r + 1).bit_and(3) + c4);
+                let s2c = s.@((r + 2).bit_and(3) + c4);
+                let s3c = s.@((r + 3).bit_and(3) + c4);
+                s0c._mul_gf8(0x0e_U8)
+                ._add_gf8(s1c._mul_gf8(0x0b_U8))
+                ._add_gf8(s2c._mul_gf8(0x0d_U8))
+                ._add_gf8(s3c._mul_gf8(0x09_U8))
             )
         )
     );
@@ -341,8 +414,12 @@ test_cipher = (
     let key = key.byte_array_from_string_hex;
     let aes = AES::make(128);
     let w = aes._key_expansion(key);
-    let out = *timeit("cipher", |_| aes._cipher(input, w));
-    println(out.to_string_hex)
+    let output = *timeit("cipher", |_| aes._cipher(input, w));
+    let _ = *println(output.to_string_hex);
+    let input2 = *timeit("inv_cipher", |_| aes._inv_cipher(output, w));
+    let _ = *println(input2.to_string_hex);
+    eval assert_eq(|_| "inv_cipher failed", input, input2);
+    pure()
 );
 
 main: IO ();

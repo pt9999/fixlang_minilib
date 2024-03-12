@@ -4,6 +4,10 @@
 
 MD5 secure hash function.
 
+Implemented from specification of RFC 1321:
+https://www.rfc-editor.org/rfc/rfc1321.txt
+
+
 #### digest: Array U8 -> Array U8;
 
 `MD5::digest(bytes)` computes MD5 secure hash function of `bytes`.

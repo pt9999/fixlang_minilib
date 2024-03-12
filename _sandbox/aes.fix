@@ -12,7 +12,7 @@ import Minilib.Thread.Time;
 
 type AES = unbox struct {
     key_length: I64,    // 128, 192, 256
-    s: Array U8        // state 4x4 bytes = 4 words, r+4c
+    s: Array U8         // state 4x4 bytes = 4 words, r+4c
 };
 
 namespace AES {
@@ -26,24 +26,6 @@ namespace AES {
         }
     );
     
-    // 3.4 The State 
-    _get_s: I64 -> I64 -> AES -> U8;
-    _get_s = |r, c, aes| (
-       aes.@s.@(r + 4*c)
-    );
-
-    _copy_output: AES -> Array U8;
-    _copy_output = |aes| (
-        aes.@s
-    );
-
-    // 3.5 Arrays of Words 
-    _get_v: I64 -> AES -> U32;
-    _get_v = |i, aes| (
-        eval assert(|_| "out of range", 0 <= i && i < 4);
-        get_u32_le(4 * i, aes.@s)
-    );
-
     // 5. Algorithm Specifcations
     _get_number_of_rounds: AES -> I64;
     _get_number_of_rounds = |aes| (
@@ -296,6 +278,20 @@ namespace GF8 {
     // 4.2 Multiplication in GF(2^8) 
     _mul_gf8: U8 -> U8 -> U8;
     _mul_gf8 = |a, b| (
+        _mul_gf8_table.@(a.to_I64.shift_left(8).bit_or(b.to_I64))
+    );
+
+    _mul_gf8_table: Array U8;
+    _mul_gf8_table = (
+        Array::from_map(256 * 256, |i|
+            let a = i.shift_right(8).bit_and(255).to_U8;
+            let b = i.shift_right(0).bit_and(255).to_U8;
+            a._mul_gf8_slow(b)
+        )
+    );
+
+    _mul_gf8_slow: U8 -> U8 -> U8;
+    _mul_gf8_slow = |a, b| (
         loop(
             (b, 0_U8, 0_U8), |(b, c, i)|
             if i >= 8_U8 { break $ c };
@@ -312,9 +308,6 @@ namespace GF8 {
         else { b.shift_left(1_U8).bit_xor(0x1B_U8) }
     );
         
-    // 4.3 Multiplication of Words by a Fixed Matrix
-    // TODO
-
     // 4.4 Multiplicative Inverses in GF(2^8) 
     _inv_gf8: U8 -> U8;
     _inv_gf8 = |b| (

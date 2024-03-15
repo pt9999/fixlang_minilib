@@ -12,9 +12,28 @@ Converts a 4bit number (0..15) to a hex character ('0'..'9', 'a'..'f').
 
 Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
 
-#### from_string_hex: String -> Result ErrMsg U64;
+### trait FromStringHex
 
-Converts a hex string to a 64bit number.
+```
+trait a: FromStringHex {
+    from_string_hex: String -> Result ErrMsg a;
+}
+```
+#### `impl U8: FromStringHex`
+
+Converts a hex string of 1..2 characters to U8.
+
+#### `impl U16: FromStringHex`
+
+Converts a hex string of 1..4 characters to U16.
+
+#### `impl U32: FromStringHex`
+
+Converts a hex string of 1..8 characters to U32.
+
+#### `impl U64: FromStringHex`
+
+Converts a hex string of 1..16 characters to U64.
 
 ### trait ToStringHex
 

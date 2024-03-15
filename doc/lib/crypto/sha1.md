@@ -7,6 +7,11 @@ SHA-1 secure hash function.
 Implemented from specification of FIPS PUB 180-4:
 https://csrc.nist.gov/files/pubs/fips/180-4/final/docs/fips180-4.pdf
 
+NOTE: FIPS 180-4 (2012) is superseded by FIPS 180-4 (2015), with the only change being
+made in the Applicability Clause. There are no changes to the technical specifications.
+FIPS 180-4 (2015):
+http://dx.doi.org/10.6028/NIST.FIPS.180-4
+
 
 #### digest: Array U8 -> Array U8;
 

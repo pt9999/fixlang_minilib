@@ -20,6 +20,7 @@ This library is still in alpha stage.
   - Tree set
   - Red-Black tree
 - Cryptography
+  - Block cipher (AES)
   - Secure hash function (MD5/SHA-1/SHA-256)
 - Encoding
   - Binary

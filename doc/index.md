@@ -38,6 +38,10 @@ Common functions such as `id` and `flip`.
 
 Advanced Encryption Standard (AES)
 
+### [module Minilib.Crypto.HMAC (lib/crypto/hmac.fix)](lib/crypto/hmac.md)
+
+The Keyed-Hash Message Authentication Code (HMAC)
+
 ### [module Minilib.Crypto.MD5 (lib/crypto/md5.fix)](lib/crypto/md5.md)
 
 MD5 secure hash function.

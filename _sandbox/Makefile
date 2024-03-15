@@ -46,6 +46,9 @@ reader_writer_test:
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
+hmac_test1:
+	../bin/fixautolink run -L ../lib -L . -f hmac_test1.fix -O minimum
+
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix
 

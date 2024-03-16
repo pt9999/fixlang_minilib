@@ -22,6 +22,7 @@ This library is still in alpha stage.
 - Cryptography
   - Block cipher (AES)
   - Secure hash function (MD5/SHA-1/SHA-256)
+  - Message authentication code (HMAC)
 - Encoding
   - Binary
   - JSON

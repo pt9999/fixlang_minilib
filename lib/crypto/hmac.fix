@@ -1,0 +1,82 @@
+// The Keyed-Hash Message Authentication Code (HMAC)
+//
+// Implemented from specification of FIPS 198-1:
+// https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.198-1.pdf
+// https://doi.org/10.6028/NIST.FIPS.198-1
+module Minilib.Crypto.HMAC;
+
+import Debug;
+
+import Minilib.Crypto.MD5;
+import Minilib.Crypto.SHA1;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+
+// A type that generates a message authentication code.
+type HMAC = unbox struct {
+    h: Array U8 -> Array U8,    // hash function (H)
+    input_block_size: I64,      // input block size of hash function (B)
+    output_block_size: I64      // output block size of hash function (L)
+};
+
+namespace HMAC {
+    // An HMAC instance that uses MD5 as a hash function.
+    hmac_md5: HMAC;
+    hmac_md5 = HMAC::make(MD5::digest, 64, 16);
+
+    // An HMAC instance that uses SHA1 as a hash function.
+    hmac_sha1: HMAC;
+    hmac_sha1 = HMAC::make(SHA1::digest, 64, 20);
+
+    // `HMAC::make(h,b,l)` creates an HMAC instance.
+    // `h` is a secure hash function, such as MD5::digest or SHA1::digest.
+    // `b` is the input block size of `h`.
+    // `l` is the output block size of `h`.
+    // `l` must be less than or equal to `b`.
+    make: (Array U8 -> Array U8) -> I64 -> I64 -> HMAC;
+    make = |h, input_block_size, output_block_size| (
+        eval assert(|_| "invalid block size", input_block_size >= output_block_size);
+        HMAC {
+            h: h,
+            input_block_size: input_block_size,
+            output_block_size: output_block_size
+        }
+    );
+
+    // `hmac.digest(key, text)` creates a message authentication code from `key` and `text`.
+    digest: Array U8 -> Array U8 -> HMAC -> Array U8;
+    digest = |key, text, hmac| (
+        let ks = key.get_size;
+        let b = hmac.@input_block_size;
+        let k0 = if ks == b { // Step 1
+            key
+        } else if ks > b { // Step 2
+            let temp = hmac._hash(key);
+            temp.append(Array::fill(b - temp.get_size, 0_U8))
+        } else { // Step 3
+            key.append(Array::fill(b - ks, 0_U8))
+        };
+        // Step 4
+        let ipad = 0x36_U8;
+        let k0_ipad = k0.map(bit_xor(ipad));
+        // Step 5
+        let k0_ipad_text = k0_ipad.append(text);
+        // Step 6
+        let h_k0_ipad_text = hmac._hash(k0_ipad_text);
+        // Step 7
+        let opad = 0x5c_U8;
+        let k0_opad = k0.map(bit_xor(opad));
+        // Step 8
+        let result = k0_opad.append(h_k0_ipad_text);
+        // Step 9
+        let result = hmac._hash(result);
+        result
+    );
+
+    _hash: Array U8 -> HMAC -> Array U8;
+    _hash = |input, hmac| (
+        let output = (hmac.@h)(input);
+        eval assert(|_| "output block size mismatch", output.get_size == hmac.@output_block_size);
+        output
+    );
+}

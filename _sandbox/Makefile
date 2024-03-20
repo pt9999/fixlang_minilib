@@ -46,8 +46,8 @@ reader_writer_test:
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
-pkcs_test1:
-	../bin/fixautolink run -L ../lib -L . -f pkcs_test1.fix
+pkcs5_test1:
+	../bin/fixautolink run -L ../lib -L . -f pkcs5_test1.fix
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

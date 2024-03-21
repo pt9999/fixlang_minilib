@@ -33,10 +33,6 @@ namespace TestCase {
 // Exit with exitcode=1 if any test failed or any error occured, exitcode=0 otherwise.
 run_test_driver: Array TestCase -> IO ();
 run_test_driver = |tests| (
-    let exit = |exitcode| (
-        let _ = CALL_C[() exit(I64), exitcode];
-        pure()
-    );
     do {
         // make stdout & stderr unbuffered
         eval CALL_C[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
@@ -56,7 +52,11 @@ run_test_driver = |tests| (
         let _ = *eprintln("FATAL ERROR: " + err);
         pure $ 1
     )
-    .bind(|exitcode| exit(exitcode))
+    .bind(|exitcode|
+        // workaround for IO::exit()
+        eval if exitcode != 0 { abort() } else { () };
+        IO::exit(exitcode)
+    )
 );
 
 // Executes all test cases and treat the results as one test case.

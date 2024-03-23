@@ -43,6 +43,9 @@ state_monad_test2:
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
 
+cipher_test1:
+	../bin/fixautolink run -L ../lib -L . -f cipher_test1.fix -O minimum
+
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 

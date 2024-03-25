@@ -154,13 +154,15 @@ namespace CBC {
 impl [bc: BlockCipher] CBC bc: BlockCipher {
     get_block_size = |cbc| cbc.@block_cipher.get_block_size;
     encrypt_block = |plaintext, cbc| (
-        let ciphertext = cbc.@block_cipher.encrypt_block(cbc.@iv._xor_bytes(plaintext));
-        let cbc = CBC::make(cbc.@block_cipher, ciphertext);
+        let plaintext = cbc.@iv._xor_bytes(plaintext);
+        let (ciphertext, block_cipher) = cbc.@block_cipher.BlockCipher::encrypt_block(plaintext);
+        let cbc = cbc.set_block_cipher(block_cipher).set_iv(ciphertext);
         (ciphertext, cbc)
     );
     decrypt_block = |ciphertext, cbc| (
-        let plaintext = cbc.@block_cipher.decrypt_block(ciphertext)._xor_bytes(cbc.@iv);
-        let cbc = CBC::make(cbc.@block_cipher, ciphertext);
+        let (plaintext, block_cipher) = cbc.@block_cipher.BlockCipher::decrypt_block(ciphertext);
+        let plaintext = plaintext._xor_bytes(cbc.@iv);
+        let cbc = cbc.set_block_cipher(block_cipher).set_iv(ciphertext);
         (plaintext, cbc)
     );
 }
@@ -184,18 +186,32 @@ test_cipher = |padding_scheme, cipher| (
     )
 );
 
-test_aes_cipher: IO ();
-test_aes_cipher = (
+aes_cipher: AESCipher;
+aes_cipher = (
     let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
     let key = key.byte_array_from_string_hex;
     let aes = AES::make(key);
     let cipher = AESCipher::make(aes);
-    let padding_scheme = Pkcs7Padding::default;
-    test_cipher(padding_scheme, cipher)
+    cipher
 );
+
+test_aes_cipher: IO ();
+test_aes_cipher = (
+    let padding_scheme = Pkcs7Padding::default;
+    test_cipher(padding_scheme, aes_cipher)
+);
+
+test_aes_cbc: IO ();
+test_aes_cbc = (
+    let iv = "00 01 02 03 cc dd ee ff 44 55 66 77 bb aa 99 88";
+    let iv = iv.byte_array_from_string_hex;
+    test_cipher(Pkcs7Padding::default, CBC::make(aes_cipher, iv))
+);
+
 
 main: IO ();
 //main = test_pkcs7_padding;
-main = test_aes_cipher;
+//main = test_aes_cipher;
+main = test_aes_cbc;
 
 

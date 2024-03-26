@@ -46,6 +46,9 @@ reader_writer_test:
 cipher_test1:
 	../bin/fixautolink run -L ../lib -L . -f cipher_test1.fix -O minimum
 
+secure_random:
+	../bin/fixautolink run -L ../lib -L . -f secure_random.fix -O minimum
+
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
@@ -66,8 +69,7 @@ monoid_test1:
 
 clean:
 	rm -f *.out
-
-veryclean: clean
 	rm -f .depend
+	fix clean
 
 -include .depend

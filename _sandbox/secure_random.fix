@@ -1,0 +1,104 @@
+module Main;
+
+import Debug;
+
+import Sandbox.StateT;
+import Minilib.Crypto.SHA256;
+import Minilib.Text.Hex;
+
+type SecureRandom = unbox struct {
+    state: Array U8,
+    digest: Array U8
+};
+
+namespace SecureRandom {
+    _STATE_SIZE: I64;
+    _STATE_SIZE = 56;
+
+    init_with_state: Array U8 -> SecureRandom;
+    init_with_state = |state| (
+        eval assert(|_| "invalid state size", state.get_size == _STATE_SIZE);
+        SecureRandom {
+            state: state,
+            digest: []
+        }
+    );
+
+    init_with_urandom: IOFail SecureRandom;
+    init_with_urandom = (
+        eval *pure();
+        let state = *with_file(Path::parse("/dev/urandom").as_some, "r", |fh|
+            read_n_bytes(fh, _STATE_SIZE)
+        );
+        pure $ init_with_state(state)
+    );
+
+    generate_bytes: I64 -> SecureRandom -> (Array U8, SecureRandom);
+    generate_bytes = |size, sr| (
+        eval assert(|_| "invalid size", size >= 0);
+        if sr.@digest.get_size <= size {
+            sr._generate_digest.generate_bytes(size)
+        };
+        let bytes = sr.@digest.get_sub(0, size);
+        let sr = sr.mod_digest(get_sub(size, sr.@digest.get_size));
+        (bytes, sr)  
+    );
+    
+    _generate_digest: SecureRandom -> SecureRandom;
+    _generate_digest = |sr| (
+        let digest = SHA256::digest(sr.@state);
+        let sr = sr.mod_state(_increment_state(0));
+        let sr = sr.mod_digest(append(digest));
+        sr
+    );
+
+    _increment_state: I64 -> Array U8 -> Array U8;
+    _increment_state = |i, state| (
+        if i >= state.get_size { state };
+        if state.@(i) == 255_U8 {
+            state.mod(i, add(1_U8))._increment_state(i + 1)
+        } else {
+            state.mod(i, add(1_U8))
+        }
+    );
+}
+
+/*
+test_inc: IO ();
+test_inc = (
+    let state = [0_U8, 0_U8];
+    let state = *Iterator::range(0, 1000).fold_m(
+        state, |state, i|
+        let state = state._increment_state(1);
+        eval *print(state.to_string_hex + " ");
+        pure $ state
+    );
+    println("")
+);
+*/
+
+test1: IO ();
+test1 = do { 
+    let sr = *SecureRandom::init_with_urandom;
+    let (bytes, sr) = sr.generate_bytes(256);
+    println(bytes.to_string_hex).lift    
+}.try(eprintln);
+
+test2: IO ();
+test2 = do { 
+    let sr = *SecureRandom::init_with_urandom;
+    let print_line = do {
+        let bytes = *make_state_monad(generate_bytes(40) >> pure);
+        let _ = *println(bytes.to_string_hex).lift.to_state;
+        pure()
+    };
+    let print_lines = Iterator::range(0, 20).fold_m(
+        (), |_, i|
+        print_line
+    );
+    print_lines.run_state(sr).map(|_| ())
+}.try(eprintln);
+
+main: IO ();
+main = test2;
+

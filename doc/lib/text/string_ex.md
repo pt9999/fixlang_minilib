@@ -3,11 +3,10 @@
 ## module Minilib.Text.StringEx
 
 String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
+- Format
+- ToString extensions
 
 #### to_lower: String -> String;
 
@@ -108,4 +107,10 @@ with `a`, `b`, `c`.
 
 `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
 with `a`, `b`, `c`, `d`.
+
+### namespace HashMap
+
+#### to_string_ex: [k: ToString, v: ToString] HashMap k v -> String;
+
+Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
 

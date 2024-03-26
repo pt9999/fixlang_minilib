@@ -232,11 +232,10 @@ Simple text parser. Customizable by monadic operations.
 ### [module Minilib.Text.StringEx (lib/text/string_ex.fix)](lib/text/string_ex.md)
 
 String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
+- Format
+- ToString extensions
 
 ### [module Minilib.Text.Unicode (lib/text/unicode.fix)](lib/text/unicode.md)
 

@@ -59,7 +59,7 @@ algebra_test1:
 	../bin/fixautolink run -L ../lib -L . -f algebra_test1.fix
 
 monoid_test1:
-	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix
+	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix -O separated
 
 clean:
 	rm -f *.out

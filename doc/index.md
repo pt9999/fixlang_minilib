@@ -148,6 +148,10 @@ PNG image I/O.
 
 `map_m`, `foreach_m` for Array and Iterator.
 
+### [module Minilib.Monad.Identity (lib/monad/identity.fix)](lib/monad/identity.md)
+
+Identity monad
+
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
 Reader monad. (a.k.a Traced, CoWriter comonad)

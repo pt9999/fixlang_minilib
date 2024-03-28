@@ -6,6 +6,18 @@ Traced comonad. (a.k.a CoWriter comonad)
 
 For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 
+### type TracedT
+
+Traced comonad.
+`e` is a type of an environment.
+`w` is a type of an underlyind comonad.
+`a` is a type of a value.
+
+```
+type [w: * -> *] TracedT e w a = unbox struct {
+    data: w (e -> a)
+};
+```
 ### type Traced
 
 ```

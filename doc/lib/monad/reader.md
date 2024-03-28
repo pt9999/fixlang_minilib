@@ -6,6 +6,18 @@ Reader monad.
 
 For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 
+### type ReaderT
+
+Reader monad wraps a function from an environment to a value.
+`e` is a type of an environment.
+`m` is a type of an underlyind monad.
+`a` is a type of a value.
+
+```
+type [m: * -> *] ReaderT e m a = unbox struct {
+    data: e -> m a
+};
+```
 ### type Reader
 
 ```

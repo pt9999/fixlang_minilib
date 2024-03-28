@@ -34,6 +34,10 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
+
+Traced comonad. (a.k.a CoWriter comonad)
+
 ### [module Minilib.Crypto.AES (lib/crypto/aes.fix)](lib/crypto/aes.md)
 
 Advanced Encryption Standard (AES)
@@ -154,7 +158,7 @@ Identity monad
 
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
-Reader monad. (a.k.a Traced, CoWriter comonad)
+Reader monad.
 
 ### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
 

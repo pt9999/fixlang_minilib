@@ -25,3 +25,5 @@ Gets a value from an identity monad.
 
 #### `impl Identity: Monad`
 
+#### `impl Identity: Comonad`
+

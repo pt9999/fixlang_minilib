@@ -3,56 +3,102 @@
 // For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 module Minilib.Monad.Reader;
 
+import Minilib.Monad.Identity;
 import Minilib.Trait.Monoid;
 import Minilib.Trait.Semigroup;
 import Minilib.Trait.Comonad;
 
 // Reader monad wraps a function from an environment to a value.
 // `e` is a type of an environment.
+// `m` is a type of an underlyind monad.
 // `a` is a type of a value.
-type Reader e a = unbox struct {
-    data: e -> a
+type [m: * -> *] ReaderT e m a = unbox struct {
+    data: m (e -> a)
 };
 
+type Reader e a = ReaderT e Identity a;
+
 namespace Reader {
+    // Creates a generic reader monad from a function.
+    reader_t: [m: Monad] m (e -> a) -> ReaderT e m a;
+    reader_t = |f| ReaderT { data: f };
+
     // Creates a reader monad from a function.
     reader: (e -> a) -> Reader e a;
-    reader = |f| Reader { data: f };
+    reader = |f| reader_t $ Identity::make $ f;
+
+    // Runs a generic reader monad with the supplied environment.
+    run_reader_t: [m: Monad] ReaderT e m a -> m (e -> a);
+    run_reader_t = @data;
 
     // Runs a reader monad with the supplied environment.
     run_reader: e -> Reader e a -> a;
-    run_reader = |e, ma| (ma.@data)(e);
+    run_reader = |e, ma| (ma.@data.get)(e);
 
     // A reader monad that returns the environment as a value.
-    read: Reader e e;
-    read = reader(|e| e);
+    read: [m: Monad] ReaderT e m e;
+    read = reader_t $ pure $ |e| e;
 }
 
 // Traced comonad. This is same as a reader monad.
+// `e` is a type of an environment.
+// `w` is a type of an underlyind comonad.
+// `a` is a type of a value.
+type [w: * -> *] TracedT e w a = ReaderT e w a;
+
 type Traced e a = Reader e a;
 
 namespace Traced {
+    // Creates a generic traced comonad from a function.
+    traced_t: [w: Comonad] w (e -> a) -> TracedT e w a;
+    traced_t = |f| ReaderT { data: f };
+
     // Creates a traced comonad from a function.
     traced: (e -> a) -> Traced e a;
-    traced = Reader::reader;
+    traced = |f| traced_t $ Identity::make $ f;
+
+    // Runs a generic traced commonad with the supplied environment.
+    run_traced_t: [w: Comonad] TracedT e w a -> w (e -> a);
+    run_traced_t = @data;
 
     // Runs a traced commonad with the supplied environment.
     run_traced: e -> Traced e a -> a;
-    run_traced = Reader::run_reader;
+    run_traced = |e, wa| (wa.run_traced_t.extract)(e);
 }
 
-impl Reader e: Functor {
-    map = |f, ma| reader(ma.@data >> f);
+impl [m: Monad] ReaderT e m: Functor {
+    map = |f, ma| reader_t $ do {
+        let runner = *ma.run_reader_t;
+        pure $ runner >> f
+    };
 }
 
-impl Reader e: Monad {
-    pure = |a| reader(|_| a);
-    bind = |f, ma| reader(|e| f(ma.run_reader(e)).run_reader(e));
+impl [m: Monad] ReaderT e m: Monad {
+    pure = |a| reader_t $ pure $ |_| a;
+    bind = |f, ma| reader_t $ do {
+        let runner = *ma.run_reader_t;
+        pure $ |e| f(run(e))
+        (|e|
+        let a = *ma.run_reader_t(e);
+        f(a).run_reader_t(e)
+    );
 }
 
-impl [e: Monoid] Reader e: Comonad {
-    extract = |wa| wa.run_traced(mempty);
-    extend = |f, w| traced $ |c| (
-        f (traced $ |c2| w.run_traced(c.sappend(c2)))
+impl [e: Monoid, w: Comonad] ReaderT e w: Comonad {
+    extract = |wa| (wa.run_traced_t.extract)(mempty);
+    /*
+    extend = |f, wb| traced_t $ pure $ |c| (
+        f (traced_t $ pure $ |c2| (wb.run_traced_t.extract)(c.sappend(c2)))
+    );
+    */
+    extend = |f, wb| (      // wb: TracedT w e b, f: TracedT w e b -> a
+        let data = wb.run_traced_t;     // w (e -> b)
+        let inner2 = |c| wb.run_traced_t.extend(
+            |_, c2| (wb.run_traced_t.extract)(c.sappend(c2))
+        );  // e -> w (e -> a)
+        let inner1 = wb.run_traced_t.extend(
+            |_, c| f (traced_t $ inner2(c))
+        );  // w (e -> a)
+        traced_t $ inner1
     );
 }

@@ -6,8 +6,82 @@ module Main;
 
 import Debug;
 
+import Minilib.Encoding.Binary;
 import Minilib.Crypto.AES;
 import Minilib.Text.Hex;
 
 import Sandbox.Cipher;
 
+
+type Block = unbox struct {
+  hi: U64,
+  lo: U64
+};
+
+namespace Block {
+    get_block_be: I64 -> Array U8 -> Block;
+    get_block_be = |i, array| (
+        let hi = array.get_u64_be(i);
+        let lo = array.get_u64_be(i + 8);
+        Block { hi: hi, lo: lo }
+    );
+
+    set_block_be: I64 -> Block -> Array U8 -> Array U8;
+    set_block_be = |i, block, array| (
+        array.set_u64_be(i, block.@hi)
+             .set_u64_be(i + 8, block.@lo)
+    );
+
+    // 6.1 Basic operation and functions
+    _zero: Block;
+    _zero = Block { hi: 0_U64, lo: 0_U64 };
+    
+    _xor: Block -> Block -> Block;
+    _xor = |x, y| (
+        Block { 
+            hi: x.@hi.bit_xor(y.@hi), 
+            lo: x.@lo.bit_xor(y.@lo)
+        }
+    );
+
+    _shift_right_1: Block -> Block;
+    _shift_right_1 = |x| (
+        let hi = x.@hi.shift_right(1_U64);
+        let lo = x.@lo.shift_right(1_U64);
+        let lo = if x.@hi.bit_and(1_U64) == 0_U64 { lo } else { lo.bit_or(1_U64.shift_left(31_U64)) }; 
+        Block { hi: hi, lo: lo }
+    );
+   
+    _is_bit_set: I64 -> Block -> Bool;
+    _is_bit_set = |i, x| (
+        if i < 64 { x.@hi.bit_and(1_U64.shift_left(63 - i)) != 0_U64 };
+        if i < 128 { x.@lo.bit_and(1_U64.shift_left(127 - i)) != 0_U64 };
+        false
+    );
+
+    // 6.3 Multiplication operation of Blocks
+    _mul: Block -> Block -> Block;
+    _mul: |x, y| (
+        let z = _zero;
+        let v = y;
+        loop(
+            (z, v, 0), |(z, v, i)|
+            if i > 127 { break $ z };
+            let z = if x._is_bit_set(i) { z._xor(v) } else { z };
+            let v = if v._is_bit_set(127) { v._shift_right_1._xor(r) } else { v._shift_right_1 };
+            continue $ (z, v, i + 1)
+        )
+    ); 
+     
+    _R: Block;
+    _R = Block { hi: 0b11100001_U64.shift_left(56_U64), lo: 0_U64 };
+
+    // 6.4 GHASH function
+    _GHASH: Block -> Iterator Block -> Block;
+    _GHASH = |h, xs| (
+        xs.fold(_zero, |y, x| y._xor(x)._mul(h))
+    );
+
+    // 6.5 GCTR function
+    _GCTR: [bc: BlockCipher] bc -> 
+}

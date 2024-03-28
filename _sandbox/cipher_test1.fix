@@ -5,39 +5,7 @@ import Debug;
 import Minilib.Crypto.AES;
 import Minilib.Text.Hex;
 
-// ----------------------------------------
-// Padding
-// ----------------------------------------
-
-trait a: PaddingScheme {
-    add_padding: Array U8 -> I64 -> a -> Array U8;
-    remove_padding: Array U8 -> a -> Array U8;
-}
-
-// PKCS#7 Padding
-// https://tex2e.github.io/rfc-translater/html/rfc2315.html
-type Pkcs7Padding = unbox struct {
-    dummy: ()
-};
-
-namespace Pkcs7Padding {
-    default: Pkcs7Padding;
-    default = Pkcs7Padding { dummy: () };
-}
-
-impl Pkcs7Padding: PaddingScheme {
-    //add_padding: Array U8 -> I64 -> Pkcs7Padding -> Array U8;
-    add_padding = |data, block_size, _| (
-        let r = block_size - data.get_size % block_size;
-        data.append(Array::fill(r, r.to_U8))
-    );
-
-    //remove_padding: Array U8 -> Pkcs7Padding -> Array U8;
-    remove_padding = |data, _| (
-        let r = data.@(data.get_size - 1).to_I64;
-        data.get_sub(0, data.get_size - r)
-    );
-}
+import Sandbox.Cipher;
 
 test_pkcs7_padding: IO ();
 test_pkcs7_padding = (
@@ -57,115 +25,10 @@ test_pkcs7_padding = (
     )
 );
 
-// ----------------------------------------
-
-// Block cipher
-trait bc: BlockCipher {
-    get_block_size: bc -> I64;
-    encrypt_block: Array U8 -> bc -> (Array U8, bc);
-    decrypt_block: Array U8 -> bc -> (Array U8, bc);
-}
-
-_get_sub_ex: I64 -> I64 -> Array a -> Array a;
-_get_sub_ex = |b, e, arr| (
-    if b == 0 && e == arr.get_size { arr } else { arr.get_sub(b, e) }
-);
-
-encrypt: [bc: BlockCipher, ps: PaddingScheme] Array U8 -> ps -> bc -> (Array U8, bc);
-encrypt = |plaintext, padding_scheme, cipher| (
-    let block_size = cipher.get_block_size;
-    let plaintext = padding_scheme.add_padding(plaintext, block_size);
-    let block_count = plaintext.get_size / block_size;
-    let (ciphertext, cipher) = loop(
-        ([], cipher, 0), |(ciphertext, cipher, i)|
-        if i >= block_count { break $ (ciphertext, cipher) };
-        let plain_block = plaintext._get_sub_ex(i * block_size, (i + 1) * block_size);
-        let (cipher_block, cipher) = cipher.encrypt_block(plain_block);
-        let ciphertext = ciphertext.append(cipher_block);
-        continue $ (ciphertext, cipher, i + 1) 
-    );
-    (ciphertext, cipher)
-);
-
-decrypt: [bc: BlockCipher, ps: PaddingScheme] Array U8 -> ps -> bc -> (Array U8, bc);
-decrypt = |ciphertext, padding_scheme, cipher| (
-    let block_size = cipher.get_block_size;
-    let block_count = ciphertext.get_size / block_size;
-    let (plaintext, cipher) = loop(
-        ([], cipher, 0), |(plaintext, cipher, i)|
-        if i >= block_count { break $ (plaintext, cipher) };
-        let cipher_block = ciphertext._get_sub_ex(i * block_size, (i + 1) * block_size);
-        let (plain_block, cipher) = cipher.decrypt_block(cipher_block);
-        let plaintext = plaintext.append(plain_block);
-        continue $ (plaintext, cipher, i + 1) 
-    );
-    let plaintext = padding_scheme.remove_padding(plaintext);
-    (plaintext, cipher)
-);
-
-
-// ----------------------------------------
-type AESCipher = unbox struct {
-    aes: AES
-};
-
-namespace AESCipher {
-    make: AES -> AESCipher;
-    make = |aes| AESCipher { aes: aes };
-}
-
-impl AESCipher: BlockCipher {
-    get_block_size = |_| 16;
-    encrypt_block = |plaintext, ac| (ac.@aes.encrypt_block(plaintext), ac);
-    decrypt_block = |ciphertext, ac| (ac.@aes.decrypt_block(ciphertext), ac);
-}
-
 byte_array_from_string_hex: String -> Array U8;
 byte_array_from_string_hex = |str| (
     str.split(" ").map(from_string_hex >> as_ok).to_array
 );
-
-// ----------------------------------------
-// Cipher Block Chaining (CBC)
-type CBC bc = unbox struct {
-    block_cipher: bc,
-    iv: Array U8
-};
-
-namespace CBC {
-    make: [bc: BlockCipher] bc -> Array U8 -> CBC bc;
-    make = |block_cipher, iv| (
-        CBC { block_cipher: block_cipher, iv: iv }
-    );
-
-    _xor_bytes: Array U8 -> Array U8 -> Array U8;
-    _xor_bytes = |a, b| (
-        eval assert_eq(|_| "_xor_bytes: mismatch size", a.get_size, b.get_size);
-        let n = a.get_size;
-        loop(
-            (a, 0), |(a, i)|
-            if i >= n { break $ a };
-            let a = a.mod(i, bit_xor(b.@(i)));
-            continue $ (a, i + 1)
-        )
-    );
-}
-
-impl [bc: BlockCipher] CBC bc: BlockCipher {
-    get_block_size = |cbc| cbc.@block_cipher.get_block_size;
-    encrypt_block = |plaintext, cbc| (
-        let plaintext = cbc.@iv._xor_bytes(plaintext);
-        let (ciphertext, block_cipher) = cbc.@block_cipher.BlockCipher::encrypt_block(plaintext);
-        let cbc = cbc.set_block_cipher(block_cipher).set_iv(ciphertext);
-        (ciphertext, cbc)
-    );
-    decrypt_block = |ciphertext, cbc| (
-        let (plaintext, block_cipher) = cbc.@block_cipher.BlockCipher::decrypt_block(ciphertext);
-        let plaintext = plaintext._xor_bytes(cbc.@iv);
-        let cbc = cbc.set_block_cipher(block_cipher).set_iv(ciphertext);
-        (plaintext, cbc)
-    );
-}
 
 test_cipher: [bc: BlockCipher, ps: PaddingScheme] ps -> bc -> IO ();
 test_cipher = |padding_scheme, cipher| (

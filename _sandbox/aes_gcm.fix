@@ -16,7 +16,10 @@ import Sandbox.Cipher;
 //import Sandbox.StateT;
 
 
-// a 128bit block.
+// A block is a bit string of 128 bits.
+// We use two U64 as a representation.
+// When converted to a bit string, it is encoded in big-endian.
+// If a byte sequence is encoded to a bit string, MSB of the first byte becomes the leftmost bit.
 type Block = unbox struct {
   hi: U64,
   lo: U64
@@ -46,12 +49,23 @@ namespace Block {
              .set_u64_be(i + 8, block.@lo)
     );
 
+    from_bytes: Array U8 -> Block;
+    from_bytes = |bytes| (
+        eval assert(|_| "from_bytes: invalid size", bytes.get_size == 16);
+        bytes.get_block_be(0)
+    );
+
+    to_bytes: Block -> Array U8;
+    to_bytes = |block| (
+        Array::fill(16, 0_U8).set_block_be(0, block)
+    );
+
     // 6.1 Basic operation and functions
     _zero: Block;
     _zero = Block { hi: 0_U64, lo: 0_U64 };
 
-    _xor: Block -> Block -> Block;
-    _xor = |x, y| (
+    _bit_xor: Block -> Block -> Block;
+    _bit_xor = |x, y| (
         Block {
             hi: x.@hi.bit_xor(y.@hi),
             lo: x.@lo.bit_xor(y.@lo)
@@ -66,11 +80,20 @@ namespace Block {
         Block { hi: hi, lo: lo }
     );
 
-    _is_bit_set: I64 -> Block -> Bool;
-    _is_bit_set = |i, x| (
-        if i < 64 { x.@hi.bit_and(1_U64.shift_left((63 - i).to_U64)) != 0_U64 };
-        if i < 128 { x.@lo.bit_and(1_U64.shift_left((127 - i).to_U64)) != 0_U64 };
-        false
+    _u64_to_bitstring: U64 -> Array U8;
+    _u64_to_bitstring = |u64| (
+        Array::fill(8, 0_U8).set_u64_be(u64)
+    );
+
+    // 6.2 Incrementing function
+    _inc_32: Block -> Block;
+    _inc_32 = |x| (
+        Block {
+            hi: x.@hi,
+            lo: x.@lo.bit_and(0xffffffff00000000_U64).bit_or(
+                (x.@lo.to_U32 + 1_U32).to_U64
+            )
+        }
     );
 
     // 6.3 Multiplication operation of Blocks
@@ -81,10 +104,17 @@ namespace Block {
         loop(
             (z, v, 0), |(z, v, i)|
             if i > 127 { break $ z };
-            let z = if x._is_bit_set(i) { z._xor(v) } else { z };
-            let v = if v._is_bit_set(127) { v._shift_right_1._xor(_R) } else { v._shift_right_1 };
+            let z = if x._is_bit_set(i) { z._bit_xor(v) } else { z };
+            let v = if v._is_bit_set(127) { v._shift_right_1._bit_xor(_R) } else { v._shift_right_1 };
             continue $ (z, v, i + 1)
         )
+    );
+
+    _is_bit_set: I64 -> Block -> Bool;
+    _is_bit_set = |i, x| (
+        if i < 64 { x.@hi.bit_and(1_U64.shift_left((63 - i).to_U64)) != 0_U64 };
+        if i < 128 { x.@lo.bit_and(1_U64.shift_left((127 - i).to_U64)) != 0_U64 };
+        false
     );
 
     _R: Block;
@@ -93,11 +123,92 @@ namespace Block {
     // 6.4 GHASH function
     _GHASH: Block -> Iterator Block -> Block;
     _GHASH = |h, xs| (
-        xs.fold(_zero, |y, x| y._xor(x)._mul(h))
+        xs.fold(_zero, |y, x| y._bit_xor(x)._mul(h))
     );
 
+    _bytes_to_blocks: Array U8 -> Iterator Block;
+    _bytes_to_blocks = |bytes| (
+        eval assert(|_| "invalid byte size", bytes.get_size % 16 == 0);
+        let n = bytes.get_size / 16;
+        Iterator::range(0, n).map(|i|
+            bytes.get_block_be(i * 16)
+        )
+    );
+
+
     // 6.5 GCTR function
-    //_GCTR: [bc: BlockCipher] bc ->
+    _GCTR: (Block -> Block) -> Block -> Array U8 -> Array U8;
+    _GCTR = |cipher, initial_counter_block, x_bytes| (
+        if x_bytes.is_empty { x_bytes };
+        let n = (x_bytes.get_size + 15) / 16;   // ceil(len(x) / 128)
+        let padding = n * 16 - x_bytes.get_size;
+        let x_bytes_pad = if padding == 0 { x_bytes }
+        else { x_bytes.append(Array::fill(padding, 0_U8)) };
+        let y_bytes_pad = Array::fill(x_bytes_pad.get_size, 0_U8);
+        let cb = initial_counter_block;
+        let y_bytes_pad = loop(
+            (y_bytes_pad, cb, 0), |(y_bytes_pad, cb, i)|
+            if i >= n { break $ y_bytes_pad };
+            let x = x_bytes_pad.get_block_be(i * 16);
+            let y = x._bit_xor(cipher(cb));
+            let y_bytes_pad = y_bytes_pad.set_block_be(i * 16, y);
+            let cb = cb._inc_32;
+            continue $ (y_bytes_pad, cb, i + 1)
+        );
+        let y_bytes = if padding == 0 { y_bytes_pad }
+        else { y_bytes_pad.get_sub(0, y_bytes_pad.get_size - padding) };
+        y_bytes
+    );
+
+    _to_cipher: AES -> (Block -> Block);
+    _to_cipher = |aes, x| (
+        let plaintext = x.to_bytes;
+        let ciphertext = aes.encrypt_block(plaintext);
+        ciphertext.from_bytes
+    );
+
+    // 7.1 Algorithm for the Authenticated Encryption Function
+
+    // Input:
+    // - cipher: 128-bit block cipher
+    // - iv: initialization vector
+    // - len_t: tag length
+    // Output: (c, t)
+    // - c: ciphertext
+    // - t: authentication tag
+    gcm_ae: (Block -> Block) -> I64 -> Array U8 -> Array U8 -> Array U8 -> (Array U8, Array U8)
+    gcm_ae = |cipher, len_t, iv, plaintext, auth_data| (
+        // h: the hash subkey
+        let h: Block = cipher(_zero);
+        // j0: the pre-counter block
+        let j0: Block  = if iv.get_size == 96 / 8 {
+            iv.append([0_U8, 0_U8, 0_U8, 1_U8]).get_block_be(0)
+        } else {
+            let len_iv = iv.get_size * 8;
+            let s = 128 * ((len_iv + 127) / 128) - len_iv;
+            let zeros = Array::fill((s + 64) / 8, 0_U8);    // NOTE that `s % 8 == 0`.
+            let len_iv_str = _u64_to_bitstring(len_iv);
+            _GHASH(h, iv.append(zeros).append(len_iv_str)._bytes_to_blocks)
+        };
+
+        let c: Array U8 = _GCTR(cipher, j0._inc_32, plaintext);
+        let len_c = c.get_size * 8;
+        let u = 128 * ((len_c + 127) / 128) - len_c;
+        let len_a = auth_data.get_size * 8;
+        let v = 128 * ((len_a + 127) / 128) - len_a;
+        // NOTE that `u % 8 == 0` and `v % 8 == 0`.
+        let s: Block = _GHASH(h,
+            auth_data
+            .append(Array::fill(v / 8, 0_U8))
+            .append(c)
+            .append(Array::fill(u / 8, 0_U8))
+            .append(_u64_to_bitstring(len_a.to_U64))
+            .append(_u64_to_bitstring(len_c.to_U64))
+        );
+        let t: Array U8 = _GCTR(cipher, j0, s.to_bytes);
+        let t = if len_t < t.get_size * 8 { t.get_sub(0, len_t / 8) } else { t };
+        (c, t)
+    );
 }
 
 test_ghash: IO ();
@@ -109,6 +220,23 @@ test_ghash = (
     ].to_iter;
     let hash = _GHASH(h, xs);
     println(hash.to_string_hex)
+);
+
+byte_array_from_string_hex: String -> Array U8;
+byte_array_from_string_hex = |str| (
+    str.split(" ").map(from_string_hex >> as_ok).to_array
+);
+
+test_gctr: IO ();
+test_gctr = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let x_bytes = "Hello world foo bar baz 123 123".get_bytes.pop_back;
+    let cipher = _to_cipher(aes);
+    let initial_counter_block = cipher(_zero);
+    let y_bytes = _GCTR(cipher, initial_counter_block, x_bytes);
+    println(y_bytes.to_string_hex)
 );
 
 
@@ -214,6 +342,4 @@ test_clmul_u32_u32 = (
 
 main: IO ();
 //main = test_clmul_u32_u32;
-main = test_ghash;
-
-
+main = test_gctr;

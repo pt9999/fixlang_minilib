@@ -4,6 +4,18 @@
 
 Extension of `Random` module. For example, generating a random integer in range, or a random array.
 
+#### generate_U8: Random -> (U8, Random);
+
+`random.generate_U8` generates a random integer of U8.
+
+#### generate_U16: Random -> (U16, Random);
+
+`random.generate_U16` generates a random integer of U16.
+
+#### generate_U32: Random -> (U32, Random);
+
+`random.generate_U32` generates a random integer of U32.
+
 #### generate_I64_range: I64 -> I64 -> Random -> (I64, Random);
 
 `random.generate_I64_range(begin, end)` generates a random integer `r`

@@ -11,6 +11,7 @@ import Minilib.Encoding.Binary;
 import Minilib.Crypto.AES;
 import Minilib.Math.RandomEx;
 import Minilib.Text.Hex;
+import Minilib.Thread.Time;
 
 import Sandbox.Cipher;
 //import Sandbox.StateT;
@@ -66,10 +67,9 @@ namespace Block {
 
     _bit_xor: Block -> Block -> Block;
     _bit_xor = |x, y| (
-        Block {
-            hi: x.@hi.bit_xor(y.@hi),
-            lo: x.@lo.bit_xor(y.@lo)
-        }
+        let hi = x.@hi.bit_xor(y.@hi);
+        let lo = x.@lo.bit_xor(y.@lo);
+        x.set_hi(hi).set_lo(lo)
     );
 
     _shift_right_1: Block -> Block;
@@ -77,23 +77,20 @@ namespace Block {
         let hi = x.@hi.shift_right(1_U64);
         let lo = x.@lo.shift_right(1_U64);
         let lo = if x.@hi.bit_and(1_U64) == 0_U64 { lo } else { lo.bit_or(1_U64.shift_left(31_U64)) };
-        Block { hi: hi, lo: lo }
+        x.set_hi(hi).set_lo(lo)
     );
 
     _u64_to_bitstring: U64 -> Array U8;
     _u64_to_bitstring = |u64| (
-        Array::fill(8, 0_U8).set_u64_be(u64)
+        Array::fill(8, 0_U8).set_u64_be(0, u64)
     );
 
     // 6.2 Incrementing function
     _inc_32: Block -> Block;
     _inc_32 = |x| (
-        Block {
-            hi: x.@hi,
-            lo: x.@lo.bit_and(0xffffffff00000000_U64).bit_or(
-                (x.@lo.to_U32 + 1_U32).to_U64
-            )
-        }
+        let lo = x.@lo.bit_and(0xffffffff00000000_U64)
+                .bit_or((x.@lo.to_U32 + 1_U32).to_U64);
+        x.set_lo(lo)
     );
 
     // 6.3 Multiplication operation of Blocks
@@ -164,34 +161,51 @@ namespace Block {
     _to_cipher = |aes, x| (
         let plaintext = x.to_bytes;
         let ciphertext = aes.encrypt_block(plaintext);
+        // NOTE: aes.decrypt_block will not be used
         ciphertext.from_bytes
     );
 
     // 7.1 Algorithm for the Authenticated Encryption Function
 
+    // Performs authenticated encryption.
     // Input:
     // - cipher: 128-bit block cipher
-    // - iv: initialization vector
-    // - len_t: tag length
+    // - iv: initialization vector, typically 96 bits
+    // - plaintext: a byte sequence which will be encrypted
+    // - auth_data: a byte sequence which will not be encrypted
+    // - len_t: tag length in bits
     // Output: (c, t)
     // - c: ciphertext
     // - t: authentication tag
-    gcm_ae: (Block -> Block) -> I64 -> Array U8 -> Array U8 -> Array U8 -> (Array U8, Array U8)
-    gcm_ae = |cipher, len_t, iv, plaintext, auth_data| (
+    gcm_ae: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> I64 -> (Array U8, Array U8);
+    gcm_ae = |cipher, iv, plaintext, auth_data, len_t| (
         // h: the hash subkey
         let h: Block = cipher(_zero);
         // j0: the pre-counter block
-        let j0: Block  = if iv.get_size == 96 / 8 {
+        let j0: Block  = _get_j0(h, iv);
+
+        let c: Array U8 = _GCTR(cipher, j0._inc_32, plaintext);
+        let t = _get_tag(cipher, h, j0, c, auth_data, len_t);
+        (c, t)
+    );
+
+    // get the pre-counter block
+    _get_j0: Block -> Array U8 -> Block;
+    _get_j0 = |h, iv| (
+        if iv.get_size == 96 / 8 {
             iv.append([0_U8, 0_U8, 0_U8, 1_U8]).get_block_be(0)
         } else {
             let len_iv = iv.get_size * 8;
             let s = 128 * ((len_iv + 127) / 128) - len_iv;
             let zeros = Array::fill((s + 64) / 8, 0_U8);    // NOTE that `s % 8 == 0`.
-            let len_iv_str = _u64_to_bitstring(len_iv);
+            let len_iv_str = _u64_to_bitstring(len_iv.to_U64);
             _GHASH(h, iv.append(zeros).append(len_iv_str)._bytes_to_blocks)
-        };
+        }
+    );
 
-        let c: Array U8 = _GCTR(cipher, j0._inc_32, plaintext);
+    // get the authentication tag
+    _get_tag: (Block -> Block) -> Block -> Block -> Array U8 -> Array U8 -> I64 -> Array U8;
+    _get_tag = |cipher, h, j0, c, auth_data, len_t| (
         let len_c = c.get_size * 8;
         let u = 128 * ((len_c + 127) / 128) - len_c;
         let len_a = auth_data.get_size * 8;
@@ -204,10 +218,54 @@ namespace Block {
             .append(Array::fill(u / 8, 0_U8))
             .append(_u64_to_bitstring(len_a.to_U64))
             .append(_u64_to_bitstring(len_c.to_U64))
+            ._bytes_to_blocks
         );
         let t: Array U8 = _GCTR(cipher, j0, s.to_bytes);
         let t = if len_t < t.get_size * 8 { t.get_sub(0, len_t / 8) } else { t };
-        (c, t)
+        t
+    );
+
+    // 7.2 Algorithm for the Authenticated Decryption Function
+
+    // Performs authenticated decryption.
+    // Input:
+    // - cipher: 128-bit block cipher
+    // - iv: initialization vector, typically 96 bits
+    // - ciphertext: a byte sequence which will be decrypted
+    // - auth_data: a byte sequence which will not be encrypted
+    // - tag: authentication tag
+    // Output: ok(plaintext) or err(ErrMsg)
+    // - ok(plaintext): decrypted byte sequence
+    // - err(ErrMsg): inauthenticity
+    gcm_ad: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> Array U8 -> I64 -> Result ErrMsg (Array U8);
+    gcm_ad = |cipher, iv, ciphertext, auth_data, tag, len_t| (
+        // 5.2.1.1 Input Data
+        if ciphertext.get_size > (1.shift_left(39) - 256) / 8 {
+            err $ "ciphertext too long"
+        };
+        if auth_data.get_size > (U64::maximum / 8_U64).to_I64 {
+            err $ "auth_data too long"
+        };
+        if iv.get_size > (U64::maximum / 8_U64).to_I64 {
+            err $ "iv too long"
+        };
+        if iv.get_size < 1 {
+            err $ "iv too short"
+        };
+        if tag.get_size * 8 != len_t {
+            err $ "tag length mismatch"
+        };
+        // h: the hash subkey
+        let h: Block = cipher(_zero);
+        // j0: the pre-counter block
+        let j0: Block  = _get_j0(h, iv);
+        // p: plaintext
+        let p: Array U8 = _GCTR(cipher, j0._inc_32, ciphertext);
+        let t = _get_tag(cipher, h, j0, ciphertext, auth_data, len_t);
+        if tag != t {
+            err $ "authentication tag mismatch"
+        };
+        ok $ p
     );
 }
 
@@ -239,6 +297,24 @@ test_gctr = (
     println(y_bytes.to_string_hex)
 );
 
+test_gcm_ae_ad: IO ();
+test_gcm_ae_ad = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let cipher = _to_cipher(aes);
+    let len_t = 96;
+    let iv = "12 34 56 ab cd ef 65 43 21 fe dc ba";
+    let iv = iv.byte_array_from_string_hex;
+    let plaintext = "Hello world foo bar baz 123 123".get_bytes.pop_back;
+    let auth_data = "127.0.0.1".get_bytes.pop_back;
+    let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    //let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, len_t, iv, plaintext, auth_data));
+    let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
+    let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
+    let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
+    println("res="+res.to_string)
+);
 
 // Carryless Multiplication
 // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
@@ -342,4 +418,4 @@ test_clmul_u32_u32 = (
 
 main: IO ();
 //main = test_clmul_u32_u32;
-main = test_gctr;
+main = test_gcm_ae_ad;

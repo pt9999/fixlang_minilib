@@ -41,7 +41,7 @@ state_monad_test2:
 	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O minimum
 
 reader_writer_test:
-	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
+	../bin/fixautolink run -L ../lib -f reader_writer_test.fix -O separated
 
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix

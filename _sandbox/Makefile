@@ -53,7 +53,7 @@ aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
 aes_gcm:
-	../bin/fixautolink run -L ../lib -L . -f aes_gcm.fix -O separated
+	../bin/fixautolink run -L ../lib -L . -f aes_gcm.fix -O default
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

@@ -103,7 +103,8 @@ namespace Block {
 
     // 6.3 Multiplication operation of Blocks
     _mul: Block -> Block -> Block;
-    _mul = _mul_bitwise;
+    _mul = _clmul_u128_u128_reduce;     // fast
+    //_mul = _mul_bitwise;              // slow
 
     _mul_bitwise: Block -> Block -> Block;
     _mul_bitwise = |x, y| (
@@ -167,7 +168,9 @@ namespace Block {
         else { y_bytes_pad.get_sub(0, y_bytes_pad.get_size - padding) };
         y_bytes
     );
+}
 
+namespace GCM {
     _to_cipher: AES -> (Block -> Block);
     _to_cipher = |aes, x| (
         let plaintext = x.to_bytes;
@@ -282,6 +285,113 @@ namespace Block {
     );
 }
 
+// Carryless Multiplication
+// NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
+namespace CLMul {
+    _clmul_u8_u8_table: Array U16;
+    _clmul_u8_u8_table = Array::from_map(256 * 256, |pos|
+        let a = pos.shift_left(0).bit_and(0xff00).to_U16;
+        let b = pos.shift_left(8).bit_and(0xff00).to_U16;
+        let c = 0_U16;
+        loop(
+            (c, a, 0), |(c, a, i)|
+            if i >= 8 { break $ c };
+            let c = if b.shift_right((15 - i).to_U16).bit_and(1_U16) != 0_U16 {
+                c.bit_xor(a)
+            } else { c };
+            let a = a.shift_right(1_U16);
+            continue $ (c, a, i + 1)
+        )
+    );
+
+    _clmul_u8_u8: U8 -> U8 -> U16;
+    _clmul_u8_u8 = |a, b| (
+        let pos = a.to_I64.shift_left(8).bit_or(b.to_I64);
+        _clmul_u8_u8_table.@(pos)
+    );
+
+    _clmul_u16_u16: U16 -> U16 -> U32;
+    _clmul_u16_u16 = |x, y| (
+        // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
+        let x1 = x.to_U8;
+        let x0 = x.shift_right(8_U16).to_U8;
+        let y1 = y.to_U8;
+        let y0 = y.shift_right(8_U16).to_U8;
+        let z2 = _clmul_u8_u8(x1, y1);
+        let z0 = _clmul_u8_u8(x0, y0);
+        let z1 = z2.bit_xor(z0).bit_xor(_clmul_u8_u8(x1.bit_xor(x0), y1.bit_xor(y0)));
+        let z = z2.to_U32.bit_xor(z1.to_U32.shift_left(8_U32)).bit_xor(z0.to_U32.shift_left(16_U32));
+        z
+    );
+
+    _clmul_u32_u32: U32 -> U32 -> U64;
+    _clmul_u32_u32 = |x, y| (
+        // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
+        let x1 = x.to_U16;
+        let x0 = x.shift_right(16_U32).to_U16;
+        let y1 = y.to_U16;
+        let y0 = y.shift_right(16_U32).to_U16;
+        let z2 = _clmul_u16_u16(x1, y1);
+        let z0 = _clmul_u16_u16(x0, y0);
+        let z1 = z2.bit_xor(z0).bit_xor(_clmul_u16_u16(x1.bit_xor(x0), y1.bit_xor(y0)));
+        let z = z2.to_U64.bit_xor(z1.to_U64.shift_left(16_U64)).bit_xor(z0.to_U64.shift_left(32_U64));
+        z
+    );
+
+    _clmul_u64_u64: U64 -> U64 -> Block -> Block;
+    _clmul_u64_u64 = |x, y, z| (
+        // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
+        let x1 = x.to_U32;
+        let x0 = x.shift_right(32_U64).to_U32;
+        let y1 = y.to_U32;
+        let y0 = y.shift_right(32_U64).to_U32;
+        let z2 = _clmul_u32_u32(x1, y1);
+        let z0 = _clmul_u32_u32(x0, y0);
+        let z1 = z2.bit_xor(z0).bit_xor(_clmul_u32_u32(x1.bit_xor(x0), y1.bit_xor(y0)));
+        let z = z.set_hi(z0.bit_xor(z1.shift_right(32_U64)))
+                .set_lo(z2.bit_xor(z1.shift_left(32_U64)));
+        z
+    );
+
+    // Performs multiplication operation on blocks.
+    // ie. clmul(u128, u128) and reduce the result by R = 0b11100001 * 2^120.
+    _clmul_u128_u128_reduce: Block -> Block -> Block;
+    _clmul_u128_u128_reduce = |x, y| (
+        let x1 = x.@lo;
+        let x0 = x.@hi;
+        let y1 = y.@lo;
+        let y0 = y.@hi;
+        let z2 = x; // reuse as temporary buffer
+        let z1 = Block::_zero;
+        let z0 = y; // reuse as temporary buffer
+        let z2 = _clmul_u64_u64(x1, y1, z2);
+        let z0 = _clmul_u64_u64(x0, y0, z0);
+        let z1 = _clmul_u64_u64(x1.bit_xor(x0), y1.bit_xor(y0), z1)
+                ._bit_xor(z2)._bit_xor(z0);
+        let z2 = z2.mod_hi(bit_xor(z1.@lo));
+        let z0 = z0.mod_lo(bit_xor(z1.@hi));
+        // reduce the result by R = 0b11100001 * 2^120
+        let t  = z2.@lo;
+        let z0 = z0.mod_lo(bit_xor(t
+                                .bit_xor(t.shift_right(1_U64))
+                                .bit_xor(t.shift_right(2_U64))
+                                .bit_xor(t.shift_right(7_U64))));
+        let z2 = z2.mod_hi(bit_xor(t.shift_left(63_U64)
+                                .bit_xor(t.shift_left(62_U64))
+                                .bit_xor(t.shift_left(57_U64))));
+        let t = z2.@hi;
+        let z0 = z0.mod_hi(bit_xor(t
+                                .bit_xor(t.shift_right(1_U64))
+                                .bit_xor(t.shift_right(2_U64))
+                                .bit_xor(t.shift_right(7_U64))));
+        let z0 = z0.mod_lo(bit_xor(t.shift_left(63_U64)
+                                .bit_xor(t.shift_left(62_U64))
+                                .bit_xor(t.shift_left(57_U64))));
+
+        z0
+    );
+}
+
 test_mul_bitwise: IO ();
 test_mul_bitwise = (
     let zero = 0_U64;
@@ -300,15 +410,6 @@ test_mul_bitwise = (
         let z = _mul_bitwise(x, y);
         println([x, y, z].map(to_string_hex).to_string)
     )
-);
-
-// time/loop=1.748 usec
-test_mul_bitwise_perf: IO ();
-test_mul_bitwise_perf = (
-    let x = Block::make(0x012389ab4567cdef_U64, 0x12389ab4567cdef0_U64);
-    let y = Block::make(0x89ab32107654fedc_U64, 0x2345abcd6789ef01_U64);
-    let z = *timeit("_mul_bitwise", |_| _mul_bitwise(x, y));
-    pure()
 );
 
 test_ghash: IO ();
@@ -350,8 +451,8 @@ test_gcm_ae_ad = (
     let iv = iv.byte_array_from_string_hex;
     let plaintext = "Hello world foo bar baz 123 123".get_bytes.pop_back;
     let auth_data = "127.0.0.1".get_bytes.pop_back;
-    let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
-    //let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, len_t, iv, plaintext, auth_data));
+    //let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, iv, plaintext, auth_data, len_t));
     let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
     let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
     let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
@@ -369,117 +470,21 @@ test_gcm_ae_ad2 = (
     let len_t = 128;
     let aes = AES::make(key);
     let cipher = _to_cipher(aes);
-    let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    //let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, iv, plaintext, auth_data, len_t));
+    // using _clmul_u128_u128_reduce:
+    //   -O separated:  time/loop=537.554 usec
+    //   -O default:    time/loop=205.371 usec  slow??
+    // using _mul_bitwise:
+    //   -O separated:  time/loop=494.873 usec
+    //   -O default:    time/loop=202.305 usec
+
     let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
     let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
     let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
     println("res="+res.to_string)
 );
 
-// Carryless Multiplication
-// NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
-
-_clmul_u8_u8_table: Array U16;
-_clmul_u8_u8_table = Array::from_map(256 * 256, |pos|
-    let a = pos.shift_left(0).bit_and(0xff00).to_U16;
-    let b = pos.shift_left(8).bit_and(0xff00).to_U16;
-    let c = 0_U16;
-    loop(
-        (c, a, 0), |(c, a, i)|
-        if i >= 8 { break $ c };
-        let c = if b.shift_right((15 - i).to_U16).bit_and(1_U16) != 0_U16 {
-            c.bit_xor(a)
-        } else { c };
-        let a = a.shift_right(1_U16);
-        continue $ (c, a, i + 1)
-    )
-);
-
-_clmul_u8_u8: U8 -> U8 -> U16;
-_clmul_u8_u8 = |a, b| (
-    let pos = a.to_I64.shift_left(8).bit_or(b.to_I64);
-    _clmul_u8_u8_table.@(pos)
-);
-
-_clmul_u16_u16: U16 -> U16 -> U32;
-_clmul_u16_u16 = |x, y| (
-    // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
-    let x1 = x.to_U8;
-    let x0 = x.shift_right(8_U16).to_U8;
-    let y1 = y.to_U8;
-    let y0 = y.shift_right(8_U16).to_U8;
-    let z2 = _clmul_u8_u8(x1, y1);
-    let z0 = _clmul_u8_u8(x0, y0);
-    let z1 = z2.bit_xor(z0).bit_xor(_clmul_u8_u8(x1.bit_xor(x0), y1.bit_xor(y0)));
-    let z = z2.to_U32.bit_xor(z1.to_U32.shift_left(8_U32)).bit_xor(z0.to_U32.shift_left(16_U32));
-    z
-);
-
-_clmul_u32_u32: U32 -> U32 -> U64;
-_clmul_u32_u32 = |x, y| (
-    // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
-    let x1 = x.to_U16;
-    let x0 = x.shift_right(16_U32).to_U16;
-    let y1 = y.to_U16;
-    let y0 = y.shift_right(16_U32).to_U16;
-    let z2 = _clmul_u16_u16(x1, y1);
-    let z0 = _clmul_u16_u16(x0, y0);
-    let z1 = z2.bit_xor(z0).bit_xor(_clmul_u16_u16(x1.bit_xor(x0), y1.bit_xor(y0)));
-    let z = z2.to_U64.bit_xor(z1.to_U64.shift_left(16_U64)).bit_xor(z0.to_U64.shift_left(32_U64));
-    z
-);
-
-_clmul_u64_u64: U64 -> U64 -> Block -> Block;
-_clmul_u64_u64 = |x, y, z| (
-    // NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB
-    let x1 = x.to_U32;
-    let x0 = x.shift_right(32_U64).to_U32;
-    let y1 = y.to_U32;
-    let y0 = y.shift_right(32_U64).to_U32;
-    let z2 = _clmul_u32_u32(x1, y1);
-    let z0 = _clmul_u32_u32(x0, y0);
-    let z1 = z2.bit_xor(z0).bit_xor(_clmul_u32_u32(x1.bit_xor(x0), y1.bit_xor(y0)));
-    let z = z.set_hi(z0.bit_xor(z1.shift_right(32_U64)))
-             .set_lo(z2.bit_xor(z1.shift_left(32_U64)));
-    z
-);
-
-//  time/loop=0.468 usec
-_clmul_u128_u128_r: Block -> Block -> Block;
-_clmul_u128_u128_r = |x, y| (
-    let x1 = x.@lo;
-    let x0 = x.@hi;
-    let y1 = y.@lo;
-    let y0 = y.@hi;
-    let z2 = x; // reuse as temporary buffer
-    let z1 = Block::_zero;
-    let z0 = y; // reuse as temporary buffer
-    let z2 = _clmul_u64_u64(x1, y1, z2);
-    let z0 = _clmul_u64_u64(x0, y0, z0);
-    let z1 = _clmul_u64_u64(x1.bit_xor(x0), y1.bit_xor(y0), z1)
-             ._bit_xor(z2)._bit_xor(z0);
-    let z2 = z2.mod_hi(bit_xor(z1.@lo));
-    let z0 = z0.mod_lo(bit_xor(z1.@hi));
-    let t  = z2.@lo;
-    // shift_left t by 64 bit and clmul 0xe1
-    let z0 = z0.mod_lo(bit_xor(t
-                               .bit_xor(t.shift_right(1_U64))
-                               .bit_xor(t.shift_right(2_U64))
-                               .bit_xor(t.shift_right(7_U64))));
-    let z2 = z2.mod_hi(bit_xor(t.shift_left(63_U64)
-                               .bit_xor(t.shift_left(62_U64))
-                               .bit_xor(t.shift_left(57_U64))));
-    let t = z2.@hi;
-    let z0 = z0.mod_hi(bit_xor(t
-                               .bit_xor(t.shift_right(1_U64))
-                               .bit_xor(t.shift_right(2_U64))
-                               .bit_xor(t.shift_right(7_U64))));
-    let z0 = z0.mod_lo(bit_xor(t.shift_left(63_U64)
-                               .bit_xor(t.shift_left(62_U64))
-                               .bit_xor(t.shift_left(57_U64))));
-
-    z0
-);
 
 test_clmul_u8_u8: IO ();
 test_clmul_u8_u8 = (
@@ -527,38 +532,53 @@ test_clmul_u32_u32 = (
     pure()
 );
 
-test_clmul_u128_u128_r_1: Random -> IO Random;
-test_clmul_u128_u128_r_1 = |random| (
-    let (a0, random) = random.generate_U64;
-    let (b0, random) = random.generate_U64;
-    let (a1, random) = random.generate_U64;
-    let (b1, random) = random.generate_U64;
-    let a = Block::make(a0, a1);
-    let b = Block::make(b0, b1);
-    let expected = _mul_bitwise(a, b);
-    let actual = *timeit("_clmul_u128_u128_r", |_| _clmul_u128_u128_r(a, b));
-    let _ = *println("expected=" + expected.to_string_hex);
-    let _ = *println("actual  =" + actual.to_string_hex);
-    eval assert_eq(|_| "eq",
-        expected, actual);
-    pure $ random
-);
-
-test_clmul_u128_u128_r: IO ();
-test_clmul_u128_u128_r = (
-    let random = Random::init_by_seed(123_U64);
+test_clmul_u128_u128_reduce: IO ();
+test_clmul_u128_u128_reduce = (
+    let random = Random::init_by_seed(1234_U64);
     let random = *Iterator::range(0, 16).fold_m(
         random, |random, i|
-        test_clmul_u128_u128_r_1(random)
+        let (a0, random) = random.generate_U64;
+        let (b0, random) = random.generate_U64;
+        let (a1, random) = random.generate_U64;
+        let (b1, random) = random.generate_U64;
+        let a = Block::make(a0, a1);
+        let b = Block::make(b0, b1);
+        //let expected = _mul_bitwise(a, b);
+        let expected = *timeit("_mul_bitwise", |_| _mul_bitwise(a, b));
+        //let actual = _clmul_u128_u128_reduce(a, b);
+        let actual = *timeit("_clmul_u128_u128_reduce", |_| _clmul_u128_u128_reduce(a, b));
+        let _ = *println("expected=" + expected.to_string_hex);
+        let _ = *println("actual  =" + actual.to_string_hex);
+        eval assert_eq(|_| "eq", expected, actual);
+        pure $ random
     );
     pure()
 );
 
+test_mul_perf: IO ();
+test_mul_perf = (
+    let x = Block::make(0x012389ab4567cdef_U64, 0x12389ab4567cdef0_U64);
+    let y = Block::make(0x89ab32107654fedc_U64, 0x2345abcd6789ef01_U64);
+
+    // -O default:   time/loop=1.776 usec
+    // -O separated: time/loop=9.065 usec
+    let z = *timeit("_mul_bitwise", |_| _mul_bitwise(x, y));
+
+    //  -O default:   time/loop=0.482 usec
+    //  -O separated: time/loop=3.189 usec
+    let z2 = *timeit("_clmul_u128_u128_reduce", |_| _clmul_u128_u128_reduce(x, y));
+
+    eval assert_eq(|_| "eq", z, z2);
+    pure()
+);
+
+
 main: IO ();
 //main = test_clmul_u32_u32;
-main = test_clmul_u128_u128_r;
-//main = test_mul_bitwise_perf;
-//main = test_gcm_ae_ad2;
+//main = test_clmul_u128_u128_reduce;
+//main = test_mul_perf;
+main = test_gcm_ae_ad2;
 
 // TODO:
 // - write tests using NIST test vector
+// - optimize AES by minimizing allocation

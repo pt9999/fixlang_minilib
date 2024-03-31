@@ -76,7 +76,7 @@ namespace Block {
     _shift_right_1 = |x| (
         let hi = x.@hi.shift_right(1_U64);
         let lo = x.@lo.shift_right(1_U64);
-        let lo = if x.@hi.bit_and(1_U64) == 0_U64 { lo } else { lo.bit_or(1_U64.shift_left(31_U64)) };
+        let lo = if x.@hi.bit_and(1_U64) == 0_U64 { lo } else { lo.bit_or(1_U64.shift_left(63_U64)) };
         x.set_hi(hi).set_lo(lo)
     );
 
@@ -211,6 +211,8 @@ namespace Block {
         let len_a = auth_data.get_size * 8;
         let v = 128 * ((len_a + 127) / 128) - len_a;
         // NOTE that `u % 8 == 0` and `v % 8 == 0`.
+        //eval debug_eprintln("len_a + v =" + (len_a + v).to_string);
+        //eval debug_eprintln("len_c + u =" + (len_c + u).to_string);
         let s: Block = _GHASH(h,
             auth_data
             .append(Array::fill(v / 8, 0_U8))
@@ -269,6 +271,26 @@ namespace Block {
     );
 }
 
+test_mul: IO ();
+test_mul = (
+    let zero = 0_U64;
+    let one = 1_U64.shift_left(63_U64);
+    let two = 1_U64.shift_left(62_U64);
+    [
+        //(one, zero, one, zero),
+        //(two, zero, two, zero),
+        //(two, zero, zero, 1_U64),
+        (zero, 1_U64, two, zero)
+    ]
+    .to_iter.fold_m(
+        (), |_, (x0, x1, y0, y1)|
+        let x = Block::make(x0, x1);
+        let y = Block::make(y0, y1);
+        let z = _mul(x, y);
+        println([x, y, z].map(to_string_hex).to_string)
+    )
+);
+
 test_ghash: IO ();
 test_ghash = (
     let h = Block::make(0x112233_U64, 0x223344_U64);
@@ -310,6 +332,24 @@ test_gcm_ae_ad = (
     let auth_data = "127.0.0.1".get_bytes.pop_back;
     let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
     //let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, len_t, iv, plaintext, auth_data));
+    let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
+    let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
+    let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
+    println("res="+res.to_string)
+);
+
+test_gcm_ae_ad2: IO ();
+test_gcm_ae_ad2 = (
+    let plaintext = "hello world foo bar baz\nhello world foo bar baz\nhello world foo bar baz\n".get_bytes.pop_back;
+    let key = "1234567812345678123456781234abcd".get_bytes.pop_back;
+    let iv = "fedc56781234".get_bytes.pop_back;
+    let iv = "abcdefghijklmn".get_bytes.pop_back;
+    //let auth_data = "auth".get_bytes.pop_back;
+    let auth_data = "".get_bytes.pop_back;
+    let len_t = 128;
+    let aes = AES::make(key);
+    let cipher = _to_cipher(aes);
+    let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
     let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
     let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
     let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
@@ -418,4 +458,9 @@ test_clmul_u32_u32 = (
 
 main: IO ();
 //main = test_clmul_u32_u32;
-main = test_gcm_ae_ad;
+main = test_gcm_ae_ad2;
+//main = test_mul;
+
+// TODO:
+// - write tests using NIST test vector
+// - optimize Block::_mul()

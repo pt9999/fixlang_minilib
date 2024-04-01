@@ -1,0 +1,202 @@
+module Main;
+
+import Debug;
+import Random;
+
+import Minilib.Encoding.Binary;
+import Minilib.Crypto.AES;
+import Minilib.Math.RandomEx;
+import Minilib.Text.Hex;
+import Minilib.Thread.Time;
+import Sandbox.AES.GCM;
+
+test_mul_bitwise: IO ();
+test_mul_bitwise = (
+    let zero = 0_U64;
+    let one = 1_U64.shift_left(63_U64);
+    let two = 1_U64.shift_left(62_U64);
+    [
+        //(one, zero, one, zero),
+        //(two, zero, two, zero),
+        //(two, zero, zero, 1_U64),
+        (zero, 1_U64, two, zero)
+    ]
+    .to_iter.fold_m(
+        (), |_, (x0, x1, y0, y1)|
+        let x = Block::make(x0, x1);
+        let y = Block::make(y0, y1);
+        let z = _mul_bitwise(x, y);
+        println([x, y, z].map(to_string_hex).to_string)
+    )
+);
+
+test_ghash: IO ();
+test_ghash = (
+    let h = Block::make(0x112233_U64, 0x223344_U64);
+    let xs = [
+        Block::make(0x123123_U64, 0x234234_U64),
+        Block::make(0x123124_U64, 0x234235_U64)
+    ].to_iter;
+    let hash = _GHASH(h, xs);
+    println(hash.to_string_hex)
+);
+
+byte_array_from_string_hex: String -> Array U8;
+byte_array_from_string_hex = |str| (
+    str.split(" ").map(from_string_hex >> as_ok).to_array
+);
+
+test_gctr: IO ();
+test_gctr = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let x_bytes = "Hello world foo bar baz 123 123".get_bytes.pop_back;
+    let cipher = _to_cipher(aes);
+    let initial_counter_block = cipher(_zero);
+    let y_bytes = _GCTR(cipher, initial_counter_block, x_bytes);
+    println(y_bytes.to_string_hex)
+);
+
+test_gcm_ae_ad: IO ();
+test_gcm_ae_ad = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let cipher = _to_cipher(aes);
+    let len_t = 96;
+    let iv = "12 34 56 ab cd ef 65 43 21 fe dc ba";
+    let iv = iv.byte_array_from_string_hex;
+    let plaintext = "Hello world foo bar baz 123 123".get_bytes.pop_back;
+    let auth_data = "127.0.0.1".get_bytes.pop_back;
+    //let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, iv, plaintext, auth_data, len_t));
+    let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
+    let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
+    let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
+    println("res="+res.to_string)
+);
+
+test_gcm_ae_ad2: IO ();
+test_gcm_ae_ad2 = (
+    let plaintext = "hello world foo bar baz\nhello world foo bar baz\nhello world foo bar baz\n".get_bytes.pop_back;
+    let key = "1234567812345678123456781234abcd".get_bytes.pop_back;
+    let iv = "fedc56781234".get_bytes.pop_back;
+    let iv = "abcdefghijklmn".get_bytes.pop_back;
+    //let auth_data = "auth".get_bytes.pop_back;
+    let auth_data = "".get_bytes.pop_back;
+    let len_t = 128;
+    let aes = AES::make(key);
+    let cipher = _to_cipher(aes);
+    //let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+    let (c, t) = *timeit("gcm_ae", |_| gcm_ae(cipher, iv, plaintext, auth_data, len_t));
+    // using _clmul_u128_u128_reduce:
+    //   -O separated:  time/loop=537.554 usec
+    //   -O default:    time/loop=205.371 usec  slow??
+    // using _mul_bitwise:
+    //   -O separated:  time/loop=494.873 usec
+    //   -O default:    time/loop=202.305 usec
+
+    let _ = *println("c="+c.to_string_hex+"\nt="+t.to_string_hex);
+    let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
+    let res = res.map(push_back(0_U8) >> _unsafe_from_c_str);
+    println("res="+res.to_string)
+);
+
+
+test_clmul_u8_u8: IO ();
+test_clmul_u8_u8 = (
+    let print_row = |a:I64| println $ do {
+        let b = *Iterator::range(0, 16);
+        let c = _clmul_u8_u8(a.to_U8, b.to_U8);
+        pure $ c.to_string_hex
+    }.join(" ");
+    Iterator::range(0, 16).fold_m(
+        (), |_, a|
+        print_row(a)
+    )
+);
+
+test_clmul_u32_u32_1: Random -> IO Random;
+test_clmul_u32_u32_1 = |random| (
+    let trace_mul = |a, b| (
+        let c = _clmul_u32_u32(a, b);
+        eval *println(a.to_string_hex + " * " + b.to_string_hex + " = " + c.to_string_hex);
+        pure $ c
+    );
+    let (a1, random) = random.generate_U32;
+    let (b1, random) = random.generate_U32;
+    let (a2, random) = random.generate_U32;
+    let (b2, random) = random.generate_U32;
+    let c11 = *trace_mul(a1, b1);
+    let c12 = *trace_mul(a1, b2);
+    let c21 = *trace_mul(a2, b1);
+    let c22 = *trace_mul(a2, b2);
+    let expected = c11.bit_xor(c12).bit_xor(c21).bit_xor(c22);
+    let actual = *trace_mul(a1.bit_xor(a2), b1.bit_xor(b2));
+    eval assert_eq(|_|
+        "mismatch: " + [a1, b2, a2, b2].map(to_string_hex).to_string,
+        expected, actual);
+    pure $ random
+);
+
+test_clmul_u32_u32: IO ();
+test_clmul_u32_u32 = (
+    let random = Random::init_by_seed(123_U64);
+    let random = *Iterator::range(0, 16).fold_m(
+        random, |random, i|
+        test_clmul_u32_u32_1(random)
+    );
+    pure()
+);
+
+test_clmul_u128_u128_reduce: IO ();
+test_clmul_u128_u128_reduce = (
+    let random = Random::init_by_seed(1234_U64);
+    let random = *Iterator::range(0, 16).fold_m(
+        random, |random, i|
+        let (a0, random) = random.generate_U64;
+        let (b0, random) = random.generate_U64;
+        let (a1, random) = random.generate_U64;
+        let (b1, random) = random.generate_U64;
+        let a = Block::make(a0, a1);
+        let b = Block::make(b0, b1);
+        //let expected = _mul_bitwise(a, b);
+        let expected = *timeit("_mul_bitwise", |_| _mul_bitwise(a, b));
+        //let actual = _clmul_u128_u128_reduce(a, b);
+        let actual = *timeit("_clmul_u128_u128_reduce", |_| _clmul_u128_u128_reduce(a, b));
+        let _ = *println("expected=" + expected.to_string_hex);
+        let _ = *println("actual  =" + actual.to_string_hex);
+        eval assert_eq(|_| "eq", expected, actual);
+        pure $ random
+    );
+    pure()
+);
+
+test_mul_perf: IO ();
+test_mul_perf = (
+    let x = Block::make(0x012389ab4567cdef_U64, 0x12389ab4567cdef0_U64);
+    let y = Block::make(0x89ab32107654fedc_U64, 0x2345abcd6789ef01_U64);
+
+    // -O default:   time/loop=1.776 usec
+    // -O separated: time/loop=9.065 usec
+    let z = *timeit("_mul_bitwise", |_| _mul_bitwise(x, y));
+
+    //  -O default:   time/loop=0.482 usec
+    //  -O separated: time/loop=3.189 usec
+    let z2 = *timeit("_clmul_u128_u128_reduce", |_| _clmul_u128_u128_reduce(x, y));
+
+    eval assert_eq(|_| "eq", z, z2);
+    pure()
+);
+
+
+main: IO ();
+//main = test_clmul_u32_u32;
+//main = test_clmul_u128_u128_reduce;
+//main = test_mul_perf;
+main = test_gcm_ae_ad2;
+
+// TODO:
+// - write tests using NIST test vector
+// - optimize AES by minimizing allocation

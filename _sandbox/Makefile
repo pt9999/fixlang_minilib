@@ -52,8 +52,8 @@ secure_random:
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
-aes_gcm:
-	../bin/fixautolink run -L ../lib -L . -f aes_gcm.fix -O default
+aes_gcm_test1:
+	../bin/fixautolink run -L ../lib -L . -f aes_gcm_test1.fix -O default
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

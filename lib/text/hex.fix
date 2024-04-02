@@ -37,6 +37,22 @@ _from_string_hex = |n, input| (
     )
 );
 
+// `input._array_from_string_hex(n)` splits the input string
+// to `n` characters each, then converts each component to numbers.
+_array_from_string_hex: [a: FromStringHex] I64 -> String -> Result ErrMsg (Array a);
+_array_from_string_hex = |n, input| (
+    let count = (input.get_size + n - 1) / n;
+    loop_m(
+        (Array::empty(count), 0), |(array, i)|
+        if i >= count { break_m $ array };
+        let hex_str = input.substring(i * n, (i + 1) * n);
+        let value = *hex_str.from_string_hex;
+        let array = array.push_back(value);
+        continue_m $ (array, i + 1)
+    )
+);
+
+
 trait a: FromStringHex {
     from_string_hex: String -> Result ErrMsg a;
 }
@@ -59,6 +75,12 @@ impl U32: FromStringHex {
 // Converts a hex string of 1..16 characters to U64.
 impl U64: FromStringHex {
     from_string_hex = _from_string_hex(16);
+}
+
+// Converts a byte array from a hex string.
+// For example, `"a5b6".from_string_hex == ok $ [ 0xa5_U8, 0xb6_U8 ]`.
+impl Array U8: FromStringHex {
+    from_string_hex = _array_from_string_hex(2);
 }
 
 // `input._to_string_hex(n)` converts least significant `4 * n` bits of `input`

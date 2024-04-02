@@ -32,6 +32,14 @@ type TestVector = unbox struct {
     tag: Array U8
 };
 
+impl TestVector: ToString {
+    to_string = |tv| (
+        [tv.@count].format("count={}") +
+        [tv.@key, tv.@iv, tv.@pt, tv.@aad, tv.@ct, tv.@tag].map(to_string_hex)
+        .format(" key={} iv={} pt={} aad={} ct={} tag={}")
+    );
+}
+
 namespace TestVector {
     empty: TestVector;
     empty = TestVector {
@@ -49,56 +57,110 @@ namespace TestVector {
         tag: []
     };
 
-    process_line: String -> TestVector -> IOFail TestVector;
-    process_line = |line, tv| (
+    test: TestVector -> TestCase;
+    test = |tv| (
+        make_test("test_vector " + tv.to_string) $ |_|
+        let len_t = tv.@tag_len;
+        let key = tv.@key;
+        let iv = tv.@iv;
+        let plaintext = tv.@pt;
+        let auth_data = tv.@aad;
+        let ciphertext = tv.@ct;
+        let tag = tv.@tag;
+        let aes = AES::make(key);
+        let cipher = _to_cipher(aes);
+        let (c, t) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+        let _ = *assert_equal("ciphertext", ciphertext, c);
+        let _ = *assert_equal("tag", tag, t);
+        let res = gcm_ad(cipher, iv, c, auth_data, t, len_t);
+        let _ = *assert_equal("plaintext", ok $ plaintext, res);
+        pure()
+    );
+}
+
+type TestVectorParser = unbox struct {
+    tvs: Array TestVector,
+    tv: TestVector
+};
+
+namespace TestVectorParser {
+    empty: TestVectorParser;
+    empty = TestVectorParser {
+        tvs: [],
+        tv: TestVector::empty
+    };
+
+    process_line: String -> TestVectorParser -> IOFail TestVectorParser;
+    process_line = |line, tvp| (
+        if line.starts_with("#") { pure $ tvp };
         let line = if line.starts_with("[") && line.ends_with("]") {
             line.get_sub(1, line.get_size - 1)
         } else { line };
         let fields = line.split(" ").to_array;
         if fields.get_size < 2 || fields.@(1) != "=" {
-            pure $ tv
+            pure $ tvp
         };
         let name = fields.@(0);
         let value = if fields.get_size >= 3 { some(fields.@(2)) } else { none() };
         let parse_decimal = |_:()| value.map_or(pure $ 0, from_string >> from_result);
         let parse_bytes = |_:()| value.map_or(pure $ ([]: Array U8), from_string_hex  >> from_result);
 
-        if name == "Keylen" {
-            pure $ tv.set_key_len(*parse_decimal())
-        };
-        pure $ tv
-    );
-
-    parse_test_vector: Iterator String -> IOFail TestVector;
-    parse_test_vector = |lines| (
-        let tv = TestVector::empty;
-        lines.fold_m(
-            tv, |tv, line|
-            let tv = *tv.process_line(line);
+        let tv = tvp.@tv;
+        let tvp = tvp.set_tv(TestVector::empty);    // workaround for making tv unique
+        let tv = *do {
+            if name == "Keylen" { pure $ tv.set_key_len(*parse_decimal()) };
+            if name == "IVlen" { pure $ tv.set_iv_len(*parse_decimal()) };
+            if name == "PTlen" { pure $ tv.set_pt_len(*parse_decimal()) };
+            if name == "AADlen" { pure $ tv.set_aad_len(*parse_decimal()) };
+            if name == "Taglen" { pure $ tv.set_tag_len(*parse_decimal()) };
+            if name == "Count" { pure $ tv.set_count(*parse_decimal()) };
+            if name == "Key" { pure $ tv.set_key(*parse_bytes()) };
+            if name == "IV" { pure $ tv.set_iv(*parse_bytes()) };
+            if name == "PT" { pure $ tv.set_pt(*parse_bytes()) };
+            if name == "AAD" { pure $ tv.set_aad(*parse_bytes()) };
+            if name == "CT" { pure $ tv.set_ct(*parse_bytes()) };
+            if name == "Tag" { pure $ tv.set_tag(*parse_bytes()) };
+            let _ = *eprintln("unknown name: " + name).lift;
             pure $ tv
-        )
+        };
+        let tvp = tvp.set_tv(tv);
+        let tvp = if name == "Tag" {
+            tvp.mod_tvs(push_back(tv))
+        } else { tvp };
+        pure $ tvp
     );
 
-    parse_file: Path -> IOFail ();
-    parse_file = |filepath| (
+    parse_file: Path -> TestVectorParser -> IOFail TestVectorParser;
+    parse_file = |filepath, tvp| (
         let fh = *open_file(filepath, "r");
-        let tv = TestVector::empty;
-        let tv = *loop_m(
-            (tv, 1), |(tv, lineno)|
-            if lineno >= 1000 { break_m $ tv };
+        let tvp = *loop_m(
+            (tvp, 1), |(tvp, lineno)|
+            //if lineno >= 1000 { break_m $ tvp };
             let line = *read_line(fh);
-            if line == "" { break_m $ tv };
+            if line == "" { break_m $ tvp };
             let line = line.strip_spaces;
-            let _ = *println(line).lift;
-            let tv = *tv.process_line(line);
-            continue_m $ (tv, lineno + 1)
+            //let _ = *println(line).lift;
+            let tvp = *tvp.process_line(line);
+            continue_m $ (tvp, lineno + 1)
         );
         let _ = *close_file(fh).lift;
-        pure()
+        pure $ tvp
+    );
+
+    dump_vectors: TestVectorParser -> IOFail ();
+    dump_vectors = |tvp| (
+        tvp.@tvs.to_iter.fold_m(
+            (), |_, tv|
+            println(tv.to_string).lift
+        )
     );
 }
 
 main: IO ();
 main = do {
-    parse_file(Path::parse("../.local/gcmEncryptExtIV128.rsp").as_some)
+    let tvp = TestVectorParser::empty;
+    let tvp = *tvp.parse_file(Path::parse("../.local/gcmEncryptExtIV128.rsp").as_some);
+    //let _ = *tvp.dump_vectors;
+    let tests = tvp.@tvs.map(test);
+    tests.run_test_driver.lift
 }.try(eprintln);

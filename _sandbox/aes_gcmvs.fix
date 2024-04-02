@@ -1,0 +1,104 @@
+module Main;
+
+import Debug;
+import Random;
+
+import Minilib.Encoding.Binary;
+import Minilib.Crypto.AES;
+import Minilib.Crypto.AES.GCM;
+import Minilib.Math.RandomEx;
+import Minilib.Text.Hex;
+import Minilib.Thread.Time;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+// AES-GCM test vectors from NIST
+// https://csrc.nist.gov/groups/STM/cavp/documents/mac/gcmtestvectors.zip
+// The Galois/Counter Mode (GCM) and GMAC Validation System (GCMVS)
+// https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/gcmvs.pdf
+
+type TestVector = unbox struct {
+    key_len: I64,
+    iv_len: I64,
+    pt_len: I64,
+    aad_len: I64,
+    tag_len: I64,
+    count: I64,
+    key: Array U8,
+    iv: Array U8,
+    pt: Array U8,
+    aad: Array U8,
+    ct: Array U8,
+    tag: Array U8
+};
+
+namespace TestVector {
+    empty: TestVector;
+    empty = TestVector {
+        key_len: 0,
+        iv_len: 0,
+        pt_len: 0,
+        aad_len: 0,
+        tag_len: 0,
+        count: 0,
+        key: [],
+        iv: [],
+        pt: [],
+        aad: [],
+        ct: [],
+        tag: []
+    };
+
+    process_line: String -> TestVector -> IOFail TestVector;
+    process_line = |line, tv| (
+        let line = if line.starts_with("[") && line.ends_with("]") {
+            line.get_sub(1, line.get_size - 1)
+        } else { line };
+        let fields = line.split(" ").to_array;
+        if fields.get_size < 2 || fields.@(1) != "=" {
+            pure $ tv
+        };
+        let name = fields.@(0);
+        let value = if fields.get_size >= 3 { some(fields.@(2)) } else { none() };
+        let parse_decimal = |_:()| value.map_or(pure $ 0, from_string >> from_result);
+        let parse_bytes = |_:()| value.map_or(pure $ ([]: Array U8), from_string_hex  >> from_result);
+
+        if name == "Keylen" {
+            pure $ tv.set_key_len(*parse_decimal())
+        };
+        pure $ tv
+    );
+
+    parse_test_vector: Iterator String -> IOFail TestVector;
+    parse_test_vector = |lines| (
+        let tv = TestVector::empty;
+        lines.fold_m(
+            tv, |tv, line|
+            let tv = *tv.process_line(line);
+            pure $ tv
+        )
+    );
+
+    parse_file: Path -> IOFail ();
+    parse_file = |filepath| (
+        let fh = *open_file(filepath, "r");
+        let tv = TestVector::empty;
+        let tv = *loop_m(
+            (tv, 1), |(tv, lineno)|
+            if lineno >= 1000 { break_m $ tv };
+            let line = *read_line(fh);
+            if line == "" { break_m $ tv };
+            let line = line.strip_spaces;
+            let _ = *println(line).lift;
+            let tv = *tv.process_line(line);
+            continue_m $ (tv, lineno + 1)
+        );
+        let _ = *close_file(fh).lift;
+        pure()
+    );
+}
+
+main: IO ();
+main = do {
+    parse_file(Path::parse("../.local/gcmEncryptExtIV128.rsp").as_some)
+}.try(eprintln);

@@ -34,7 +34,15 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Crypto.AES.GCM (lib/crypto/aes/aes_gcm.fix)](lib/crypto/aes/aes_gcm.md)
+
+Galois/Counter Mode (GCM) for AES
+
 ### [module Minilib.Crypto.AES (lib/crypto/aes.fix)](lib/crypto/aes.md)
+
+Advanced Encryption Standard (AES)
+
+### [module Minilib.Crypto.AES0 (lib/crypto/aes0.fix)](lib/crypto/aes0.md)
 
 Advanced Encryption Standard (AES)
 

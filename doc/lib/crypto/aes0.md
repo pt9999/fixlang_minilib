@@ -1,6 +1,6 @@
-# aes.fix
+# aes0.fix
 
-## module Minilib.Crypto.AES
+## module Minilib.Crypto.AES0
 
 Advanced Encryption Standard (AES)
 
@@ -16,8 +16,7 @@ type AES = unbox struct {
     key_length: I64,    // 128, 192, 256
     key: Array U8,      // key (128 bits / 192 bits / 256 bits)
     w: Array U32,       // expanded key
-    c01: U64,           // state column 0,1  row 0123, 0123
-    c23: U64            // state column 2,3  row 0123, 0123
+    s: Array U8         // state 4x4 bytes
 };
 ```
 ### namespace AES

@@ -35,6 +35,12 @@ Converts a hex string of 1..8 characters to U32.
 
 Converts a hex string of 1..16 characters to U64.
 
+#### `impl Array U8: FromStringHex`
+
+Converts a byte array from a hex string.
+For example, `"a5b6".from_string_hex == ok $ [ 0xa5_U8, 0xb6_U8 ]`.
+Whitespaces are ignored.
+
 ### trait ToStringHex
 
 ```

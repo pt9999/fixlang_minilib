@@ -54,6 +54,10 @@ The Keyed-Hash Message Authentication Code (HMAC)
 
 MD5 secure hash function.
 
+### [module Minilib.Crypto.SecureRandom (lib/crypto/secure_random.fix)](lib/crypto/secure_random.md)
+
+Secure random number generator.
+
 ### [module Minilib.Crypto.SHA1 (lib/crypto/sha1.fix)](lib/crypto/sha1.md)
 
 SHA-1 secure hash function.

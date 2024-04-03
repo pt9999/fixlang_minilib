@@ -5,7 +5,9 @@
 module Main;
 
 import Character;
+import Debug;
 
+import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
@@ -45,52 +47,175 @@ namespace ECInt {
             bytes.set_u32_be(4 * i, a.@nat.@(i))
         )
     );
+
+    repeat_by_ECInt: (a -> a -> a) -> a -> a -> ECInt -> a;
+    repeat_by_ECInt = |op, x, a, n| (
+        eval assert(|_| "invalid sign", n.@sign >= 0);
+        // Russian peasant method
+        // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+        loop(
+            (x, a, n), |(x, a, n)|
+            if n.is_zero {
+                break $ x
+            };
+            let x = if n.is_odd {
+                op(x, a)
+            } else { x };
+            continue $ (x, op(a, a), n.shift_right(1_U64))
+        )
+    );
+
 }
 
+// a number in F(p) where p is an odd prime number
+type ECField = Modular ECInt;
+
+namespace ECField {
+    
+    // `ECField::make(a,p)` creates a number `a` in `F(p)`.
+    make: ECInt -> ECInt -> ECField;
+    make = Modular::make;
+
+    from_ECInt: ECInt -> ECField;
+    from_ECInt = |a| (
+        Modular::make(a, zero)
+    );
+
+    from_I64: I64 -> ECField;
+    from_I64 = |i64| (
+        Modular::make(BigInt::from_I64(i64), zero)
+    );
+}
+
+
 type ECPoint = unbox struct {
-    x: ECInt,
-    y: ECInt
+    ec: Option ECParam,    // should be some() if not infinity.
+    xy: Option (ECField, ECField)    // none() means `O` (the point at infinity)
 };
 
 namespace ECPoint {
+    make: Option ECParam -> Option (ECField, ECField) -> ECPoint;
+    make = |ec, xy| (
+        ECPoint { ec: ec, xy: xy }
+    );
+
+    is_zero: ECPoint -> Bool;
+    is_zero = |p| p.@xy.is_none;
 }
 
-// Elliptic Curve Domain Parameters
+impl ECPoint: ToString {
+    to_string = |p| p.@xy.to_string;
+}
+
+// `O` (the point at infinity)
+impl ECPoint: Zero {
+    zero = ECPoint::make(none(), none());
+}
+
+// Add two points.
+impl ECPoint: Add {
+    add = |p1, p2| (
+        // 1. O + O = O
+        // 2. (x, y) + O = O + (x, y) = (x, y)
+        if p1.is_zero { p2 };
+        if p2.is_zero { p1 };
+        let (x1, y1) = p1.@xy.as_some;
+        let (x2, y2) = p2.@xy.as_some;
+        eval assert(|_| "ec mismatch", p1.@ec == p2.@ec);
+        let ec = p1.@ec.as_some;
+        if x1 == x2 {
+            // 3. (x, y) + (x, -y) = O
+            if y1 == -y2 {
+                zero
+            };
+            // 5. Rule to add a point to itself (double a point)
+            eval assert(|_| "invalid y", y1 == y2);
+            let dividend = ECField::from_I64(3) * x1 * x1 + ECField::from_ECInt(ec.@a);
+            let divisor = ECField::from_I64(2) * y1;
+            let lambda = dividend / divisor;
+            let x3 = lambda * lambda - ECField::from_I64(2) * x1;
+            let y3 = lambda * (x1 - x3) - y1;
+            ECPoint::make(p1.@ec, some $ (x3, y3))
+        };
+        // 4. Rule to add two points with different x-coordinates 
+        let lambda = (y2 - y1) / (x2 - x1);
+        let x3 = lambda * lambda - x1 - x2;
+        let y3 = lambda * (x1 - x3) - y1; 
+        ECPoint::make(p1.@ec, some $ (x3, y3))
+    );
+}
+
+namespace ECPoint {
+    // `p.mul_by_ECInt(n)` calculates `n * p`.
+    mul_by_ECInt: ECInt -> ECPoint -> ECPoint;
+    mul_by_ECInt = |n, p| repeat_by_ECInt(add, zero, p, n);
+}
+
+
+// Elliptic Curve Domain Parameters over F(p), where p is an odd prime number
 // E(F(p)): y^2 = x^3 + a*x + b
 // cf. [2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf#page=7.31)
-type ECParam = unbox struct {
+type ECParam = box struct {
+    id: String,    // a unique id
     p: ECInt,      // a prime `p` for F(p)
     a: ECInt,      // coefficient of `x`
     b: ECInt,      // constant
-    g: ECPoint,     // a base point `G`
+    g: (ECInt, ECInt),     // a base point `G`
     n: ECInt,      // a prime `n` which is order of `G`
     h: ECInt       // the cofactor `h = #E(F(p)) / n`
 };
 
+impl ECParam: Eq {
+    // NOTE only `id` is compared
+    eq = |a, b| a.@id == b.@id;
+}
+
 impl ECParam: ToString {
     to_string = |ec| (
-        [ec.@p, ec.@a, ec.@b, ec.@g.@x, ec.@g.@y, ec.@n, ec.@h]
+        [ec.@p, ec.@a, ec.@b, ec.@g.@0, ec.@g.@1, ec.@n, ec.@h]
         .format("ECParam { p:{}, a:{}, b:{}, g:({},{}), n:{}, h:{} }")
     );
 }
 
 namespace ECParam {
+    make_point: (ECInt, ECInt) -> ECParam -> ECPoint;
+    make_point = |xy, ec| (
+        let x = ECField::make(xy.@0, ec.@p);
+        let y = ECField::make(xy.@1, ec.@p);
+        ECPoint::make(some(ec), some $ (x, y))
+    );
+
+    get_g: ECParam -> ECPoint;
+    get_g = |ec| (
+        ec.make_point(ec.@g)
+    );
+
     secp256r1: ECParam;
     secp256r1 = ECParam {
+        id: "secp256r1",
         p: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF").as_ok,
         a: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFC").as_ok,
         b: ECInt::from_string_hex("5AC635D8 AA3A93E7 B3EBBD55 769886BC 651D06B0 CC53B0F6 3BCE3C3E 27D2604B").as_ok,
-        g: ECPoint {
-            x: ECInt::from_string_hex("6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296").as_ok,
-            y: ECInt::from_string_hex("4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5").as_ok
-        },
+        g: (
+            ECInt::from_string_hex("6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296").as_ok,
+            ECInt::from_string_hex("4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5").as_ok
+        ),
         n: ECInt::from_string_hex("FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551").as_ok,
         h: ECInt::from_string_hex("01").as_ok
     };
 }
 
+test1: IO ();
+test1 = (
+    let ec = secp256r1;
+    let g = ec.get_g;
+    let p = g.mul_by_ECInt(BigInt::from_I64(100));
+    println(p.to_string)
+);
+
 main: IO ();
 main = (
-    println(secp256r1.to_string)
+    //println(secp256r1.to_string)
+    test1
 );
 

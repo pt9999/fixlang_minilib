@@ -4,34 +4,93 @@
 
 module Main;
 
+import Character;
+
 import Minilib.Math.BigInt;
 import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
 
-namespace BigInt {
-// 2.3.8 OctetString-to-Integer Conversion
-from_bytes: Array U8 -> Result ErrMsg BigInt;
-from_bytes = |bytes| (
-    let u8_len = bytes.get_size;
-    let u32_len = (u8_len + 3) / 4;
-    if u32_len == 0 { ok $ zero };
-    let bytes = if 4 * u32_len == u8_len { bytes }
-    else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
-    let nat = Array::from_map(u32_len, |i|
-        bytes.get_u32_be(4 * i)
+type ECInt = BigInt;
+
+namespace ECInt {
+    // 2.3.8 OctetString-to-Integer Conversion
+    from_bytes: Array U8 -> Result ErrMsg ECInt;
+    from_bytes = |bytes| (
+        let u8_len = bytes.get_size;
+        let u32_len = (u8_len + 3) / 4;
+        if u32_len == 0 { ok $ zero };
+        let bytes = if 4 * u32_len == u8_len { bytes }
+        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+        let nat = Array::from_map(u32_len, |i|
+            bytes.get_u32_be(4 * i)
+        );
+        ok $ BigInt::make(1, nat) 
     );
-    ok $ BigInt::make(1, nat) 
-);
 
+    from_string_hex: String -> Result ErrMsg ECInt;
+    from_string_hex = |str| (
+        let bytes: Array U8 = *FromStringHex::from_string_hex(str);
+        from_bytes(bytes)
+    );
+
+    to_bytes: ECInt -> Array U8;
+    to_bytes = |a| (
+        eval assert(|_| "invalid sign", a.@sign >= 0);
+        let u32_len = a.@nat.get_size;
+        let u8_len = u32_len * 4;
+        let bytes = Array::fill(u8_len, 0_U8);
+        Iterator::range(0, u32_len).fold(
+            bytes, |bytes, i|
+            bytes.set_u32_be(4 * i, a.@nat.@(i))
+        )
+    );
+}
+
+type ECPoint = unbox struct {
+    x: ECInt,
+    y: ECInt
+};
+
+namespace ECPoint {
+}
 
 // Elliptic Curve Domain Parameters
 // E(F(p)): y^2 = x^3 + a*x + b
 // cf. [2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf#page=7.31)
 type ECParam = unbox struct {
-    p: BigInt,      // a prime `p` for F(p)
-    a: BigInt,      // coefficient of `x`
-    b: BigInt,      // constant
-    g: (BigInt, BigInt),    // a base point `G`
-    n: BigInt,      // a prime `n` which is order of `G`
-    h: BigInt       // the cofactor `h = #E(F(p)) / n`
+    p: ECInt,      // a prime `p` for F(p)
+    a: ECInt,      // coefficient of `x`
+    b: ECInt,      // constant
+    g: ECPoint,     // a base point `G`
+    n: ECInt,      // a prime `n` which is order of `G`
+    h: ECInt       // the cofactor `h = #E(F(p)) / n`
 };
+
+impl ECParam: ToString {
+    to_string = |ec| (
+        [ec.@p, ec.@a, ec.@b, ec.@g.@x, ec.@g.@y, ec.@n, ec.@h]
+        .format("ECParam { p:{}, a:{}, b:{}, g:({},{}), n:{}, h:{} }")
+    );
+}
+
+namespace ECParam {
+    secp256r1: ECParam;
+    secp256r1 = ECParam {
+        p: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF").as_ok,
+        a: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFC").as_ok,
+        b: ECInt::from_string_hex("5AC635D8 AA3A93E7 B3EBBD55 769886BC 651D06B0 CC53B0F6 3BCE3C3E 27D2604B").as_ok,
+        g: ECPoint {
+            x: ECInt::from_string_hex("6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296").as_ok,
+            y: ECInt::from_string_hex("4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5").as_ok
+        },
+        n: ECInt::from_string_hex("FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551").as_ok,
+        h: ECInt::from_string_hex("01").as_ok
+    };
+}
+
+main: IO ();
+main = (
+    println(secp256r1.to_string)
+);
 

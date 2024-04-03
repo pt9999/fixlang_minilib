@@ -6,12 +6,12 @@ module Main;
 
 import Character;
 import Debug;
-import Random;
 
+import Minilib.Crypto.SecureRandom;
+import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
-import Minilib.Math.BigIntPrime;
-import Minilib.Encoding.Binary;
+import Minilib.Math.BigNat;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -46,9 +46,15 @@ namespace ECInt {
         let bytes = Array::fill(u8_len, 0_U8);
         Iterator::range(0, u32_len).fold(
             bytes, |bytes, i|
-            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))
+            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))    // big endian
         )
     );
+
+    to_string_hex: ECInt -> String;
+    to_string_hex = |a| (
+        a.to_bytes.to_string_hex
+    );
+
 
     repeat_by_ECInt: (a -> a -> a) -> a -> a -> ECInt -> a;
     repeat_by_ECInt = |op, x, a, n| (
@@ -67,6 +73,24 @@ namespace ECInt {
         )
     );
 
+    // Generates random ECInt `r` such that `begin <= r && r < end`.
+    generate_ecint_range: ECInt -> ECInt -> SecureRandom -> IOFail (ECInt, SecureRandom);
+    generate_ecint_range = |begin, end, secure_random| (
+        if begin > end {
+            secure_random.generate_ecint_range(end, begin)      // swap range and retry
+        };
+        let n = end - begin;
+        eval assert(|_| "invalid range", n > zero);
+        let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
+        let (bytes, secure_random) = *secure_random.generate_bytes(num_bits / 8);
+        let r = ECInt::from_bytes(bytes).as_ok;
+        if r >= (one.shift_left(num_bits.to_U64) / n) * n {
+            secure_random.generate_ecint_range(begin, end)      // try again
+        };
+        let r = r % n;
+        let r = begin + r;
+        pure $ (r, secure_random)
+    );
 }
 
 // a number in F(p) where p is an odd prime number
@@ -153,7 +177,6 @@ namespace ECPoint {
     mul_by_ECInt = |n, p| repeat_by_ECInt(add, zero, p, n);
 }
 
-
 // Elliptic Curve Domain Parameters over F(p), where p is an odd prime number
 // E(F(p)): y^2 = x^3 + a*x + b
 // cf. [2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf#page=7.31)
@@ -207,33 +230,53 @@ namespace ECParam {
     };
 }
 
+// Cryptographics key pair
+type ECKeyPair = unbox struct {
+    ec: ECParam,
+    d: ECInt,       // a private key
+    q: ECPoint      // a public key
+};
+
+impl ECKeyPair: ToString {
+    to_string = |kp| (
+        (kp.@ec.@id, kp.@d, kp.@q).format("ECKeyPair { ec:{}, d:{}, p:{} }")
+    );
+}
+
+namespace ECKeyPair {
+    generate_keypair: ECParam -> SecureRandom -> IOFail (ECKeyPair, SecureRandom);
+    generate_keypair = |ec, secure_random| (
+        let n = ec.@n;
+        let (d, secure_random) = *secure_random.generate_ecint_range(
+            one, n
+        );
+        eval assert(|_| "d is out of range", one <= d && d <= n - one);
+        let g = ec.get_g;
+        let q = g.mul_by_ECInt(d);
+        let key_pair = ECKeyPair {
+            ec: ec,
+            d: d,
+            q: q
+        };
+        pure $ (key_pair, secure_random)
+    );
+}
+
 test1: IO ();
 test1 = (
-    let ec = secp256r1;
-    let _ = *println("ec="+ec.to_string);
-    let g = ec.get_g;
-    let p = g.mul_by_ECInt(BigInt::from_I64(100));
-    println(p.to_string)
-);
-
-test2: IO ();
-test2 = (
-    let ec = secp256r1;
-    let random = Random::init_by_seed(123_U64);
-    let pg = *PrimeGen::make(random, true);
-    let res = *pg.miller_rabin(ec.@p);
-    println("res="+res.to_string)
-    /*
-    let tp: I64 -> BigInt = |n| one.shift_left(n.to_U64);
-    let p: BigInt = tp(224) * (tp(32) - one) + tp(192) + tp(96) - one;
-    let _ = *println(ec.@p.@nat.map(to_string_hex).to_string);
-    let _ = *println(p.@nat.map(to_string_hex).to_string);
-    pure()
-    */
+    do {
+        let ec = secp256r1;
+        let _ = *println("ec="+ec.to_string).lift;
+        //let g = ec.get_g;
+        //let p = g.mul_by_ECInt(BigInt::from_I64(100));
+        //println(p.to_string)
+        let secure_random = *SecureRandom::make;
+        let (key_pair, _) = *secure_random.generate_keypair(ec);
+        println(key_pair.to_string).lift
+    }.try(eprintln)
 );
 
 main: IO ();
 main = (
     test1
 );
-

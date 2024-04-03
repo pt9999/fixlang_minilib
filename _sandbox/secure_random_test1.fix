@@ -4,36 +4,28 @@ import Debug;
 
 import Sandbox.StateT;
 import Minilib.Crypto.SHA256;
+import Minilib.Crypto.SecureRandom;
 import Minilib.Text.Hex;
 
-type SecureRandom = unbox struct {
+type LessSecureRandom = unbox struct {
     state: Array U8,
     digest: Array U8
 };
 
-namespace SecureRandom {
+namespace LessSecureRandom {
     _STATE_SIZE: I64;
     _STATE_SIZE = 56;
 
-    init_with_state: Array U8 -> SecureRandom;
+    init_with_state: Array U8 -> LessSecureRandom;
     init_with_state = |state| (
         eval assert(|_| "invalid state size", state.get_size == _STATE_SIZE);
-        SecureRandom {
+        LessSecureRandom {
             state: state,
             digest: []
         }
     );
 
-    init_with_urandom: IOFail SecureRandom;
-    init_with_urandom = (
-        eval *pure();
-        let state = *with_file(Path::parse("/dev/urandom").as_some, "r", |fh|
-            read_n_bytes(fh, _STATE_SIZE)
-        );
-        pure $ init_with_state(state)
-    );
-
-    generate_bytes: I64 -> SecureRandom -> (Array U8, SecureRandom);
+    generate_bytes: I64 -> LessSecureRandom -> (Array U8, LessSecureRandom);
     generate_bytes = |size, sr| (
         eval assert(|_| "invalid size", size >= 0);
         if sr.@digest.get_size <= size {
@@ -44,7 +36,7 @@ namespace SecureRandom {
         (bytes, sr)  
     );
     
-    _generate_digest: SecureRandom -> SecureRandom;
+    _generate_digest: LessSecureRandom -> LessSecureRandom;
     _generate_digest = |sr| (
         let digest = SHA256::digest(sr.@state);
         let sr = sr.mod_state(_increment_state(0));
@@ -79,16 +71,16 @@ test_inc = (
 
 test1: IO ();
 test1 = do { 
-    let sr = *SecureRandom::init_with_urandom;
-    let (bytes, sr) = sr.generate_bytes(256);
+    let sr = *SecureRandom::make;
+    let (bytes, sr) = *sr.generate_bytes(256);
     println(bytes.to_string_hex).lift    
 }.try(eprintln);
 
 test2: IO ();
 test2 = do { 
-    let sr = *SecureRandom::init_with_urandom;
+    let sr = *SecureRandom::make;
     let print_line = do {
-        let bytes = *make_state_monad(generate_bytes(40) >> pure);
+        let bytes = *make_state_monad(generate_bytes(40));
         let _ = *println(bytes.to_string_hex).lift.to_state;
         pure()
     };

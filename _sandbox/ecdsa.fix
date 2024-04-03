@@ -6,9 +6,11 @@ module Main;
 
 import Character;
 import Debug;
+import Random;
 
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
+import Minilib.Math.BigIntPrime;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
@@ -25,7 +27,7 @@ namespace ECInt {
         let bytes = if 4 * u32_len == u8_len { bytes }
         else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
         let nat = Array::from_map(u32_len, |i|
-            bytes.get_u32_be(4 * i)
+            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
         );
         ok $ BigInt::make(1, nat) 
     );
@@ -44,7 +46,7 @@ namespace ECInt {
         let bytes = Array::fill(u8_len, 0_U8);
         Iterator::range(0, u32_len).fold(
             bytes, |bytes, i|
-            bytes.set_u32_be(4 * i, a.@nat.@(i))
+            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))
         )
     );
 
@@ -208,14 +210,30 @@ namespace ECParam {
 test1: IO ();
 test1 = (
     let ec = secp256r1;
+    let _ = *println("ec="+ec.to_string);
     let g = ec.get_g;
     let p = g.mul_by_ECInt(BigInt::from_I64(100));
     println(p.to_string)
 );
 
+test2: IO ();
+test2 = (
+    let ec = secp256r1;
+    let random = Random::init_by_seed(123_U64);
+    let pg = *PrimeGen::make(random, true);
+    let res = *pg.miller_rabin(ec.@p);
+    println("res="+res.to_string)
+    /*
+    let tp: I64 -> BigInt = |n| one.shift_left(n.to_U64);
+    let p: BigInt = tp(224) * (tp(32) - one) + tp(192) + tp(96) - one;
+    let _ = *println(ec.@p.@nat.map(to_string_hex).to_string);
+    let _ = *println(p.@nat.map(to_string_hex).to_string);
+    pure()
+    */
+);
+
 main: IO ();
 main = (
-    //println(secp256r1.to_string)
     test1
 );
 

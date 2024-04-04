@@ -1,4 +1,12 @@
-// 
+// Elliptic Curve Cryptography
+//
+// Implemented from specification of SEC 1
+// https://www.secg.org/SEC1-Ver-1.0.pdf
+// https://www.secg.org/sec1-v2.pdf
+//
+// Implemented secp256r1 from specification of SEC 2
+// https://www.secg.org/sec2-v2.pdf
+//
 // secp256r1（NIST P-256)
 // https://doi.org/10.6028/NIST.FIPS.186-5
 
@@ -16,10 +24,13 @@ import Minilib.Math.Types;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+// A type that represents an integer.
 type ECInt = BigInt;
 
 namespace ECInt {
-    // 2.3.8 OctetString-to-Integer Conversion
+
+    // Converts a byte array to an ECInt.
+    // SEC1: 2.3.8 Octet-String-to-Integer Conversion
     from_bytes: Array U8 -> Result ErrMsg ECInt;
     from_bytes = |bytes| (
         let u8_len = bytes.get_size;
@@ -33,13 +44,15 @@ namespace ECInt {
         ok $ BigInt::make(1, nat) 
     );
 
+    // Converts a hex string to an ECInt.
     from_string_hex: String -> Result ErrMsg ECInt;
     from_string_hex = |str| (
         let bytes: Array U8 = *FromStringHex::from_string_hex(str);
         from_bytes(bytes)
     );
 
-    // 2.3.7 Integer-to-OctetString Conversion
+    // Converts an ECInt to a byte array with specified length.
+    // SEC1: 2.3.7 Integer-to-Octet-String Conversion
     to_n_bytes: I64 -> ECInt -> Array U8;
     to_n_bytes = |mlen, a| (
         eval assert(|_| "invalid sign", a.@sign >= 0);
@@ -60,11 +73,13 @@ namespace ECInt {
         a.to_n_bytes(u8_len)
     );
 
+    // Converts an ECInt to a hex string.
     to_string_hex: ECInt -> String;
     to_string_hex = |a| (
         a.to_bytes.to_string_hex
     );
 
+    // Gets an octet string length.
     get_mlen: ECInt -> I64;
     get_mlen = |q| (
         let k = q.@nat._bit_length.to_I64;      // 2^(k-1) <= q < 2^k
@@ -72,6 +87,8 @@ namespace ECInt {
         mlen
     );
 
+    // `repeat_by_ECInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+    // `op` is an associative binary operation.
     repeat_by_ECInt: (a -> a -> a) -> a -> a -> ECInt -> a;
     repeat_by_ECInt = |op, x, a, n| (
         eval assert(|_| "invalid sign", n.@sign >= 0);
@@ -90,10 +107,10 @@ namespace ECInt {
     );
 
     // Generates random ECInt `r` such that `begin <= r && r < end`.
-    generate_ecint_range: ECInt -> ECInt -> SecureRandom -> IOFail (ECInt, SecureRandom);
-    generate_ecint_range = |begin, end, secure_random| (
+    generate_ECInt_range: ECInt -> ECInt -> SecureRandom -> IOFail (ECInt, SecureRandom);
+    generate_ECInt_range = |begin, end, secure_random| (
         if begin > end {
-            secure_random.generate_ecint_range(end, begin)      // swap range and retry
+            secure_random.generate_ECInt_range(end, begin)      // swap range and retry
         };
         let n = end - begin;
         eval assert(|_| "invalid range", n > zero);
@@ -101,7 +118,7 @@ namespace ECInt {
         let (bytes, secure_random) = *secure_random.generate_bytes(num_bits / 8);
         let r = ECInt::from_bytes(bytes).as_ok;
         if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
-            secure_random.generate_ecint_range(begin, end)      // try again
+            secure_random.generate_ECInt_range(begin, end)      // try again
         };
         let r = r % n;
         let r = begin + r;
@@ -340,6 +357,7 @@ impl ECParam: ToString {
 }
 
 namespace ECParam {
+    // Creates a point.
     make_point: (ECInt, ECInt) -> ECParam -> ECPoint;
     make_point = |xy, ec| (
         let x = ECField::make(xy.@0, ec.@p);
@@ -347,6 +365,7 @@ namespace ECParam {
         ECPoint::make(ec, x, y)
     );
 
+    // Gets the base point of a ECParam.
     get_g: ECParam -> ECPoint;
     get_g = |ec| (
         ec.make_point(ec.@g)
@@ -384,7 +403,7 @@ namespace ECKeyPair {
     generate_keypair: ECParam -> SecureRandom -> IOFail (ECKeyPair, SecureRandom);
     generate_keypair = |ec, secure_random| (
         let n = ec.@n;
-        let (d, secure_random) = *secure_random.generate_ecint_range(
+        let (d, secure_random) = *secure_random.generate_ECInt_range(
             one, n
         );
         eval assert(|_| "d is out of range", one <= d && d <= n - one);
@@ -405,12 +424,8 @@ test1 = (
     do {
         let ec = secp256r1;
         let _ = *println("ec="+ec.to_string).lift;
-        //let g = ec.get_g;
-        //let p = g.mul_by_ECInt(BigInt::from_I64(100));
-        //println(p.to_string)
         let secure_random = *SecureRandom::make;
         let (key_pair, _) = *secure_random.generate_keypair(ec);
-        //let _ = *println(key_pair.@d.to_bytes.to_string_hex).lift;
         let _ = *println("key_pair=" + key_pair.to_string).lift;
 
         let _ = *println("checking q").lift;

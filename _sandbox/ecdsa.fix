@@ -12,6 +12,7 @@ import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigNat;
+import Minilib.Math.Types;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -38,16 +39,25 @@ namespace ECInt {
         from_bytes(bytes)
     );
 
-    to_bytes: ECInt -> Array U8;
-    to_bytes = |a| (
+    // 2.3.7 Integer-to-OctetString Conversion
+    to_n_bytes: I64 -> ECInt -> Array U8;
+    to_n_bytes = |mlen, a| (
         eval assert(|_| "invalid sign", a.@sign >= 0);
-        let u32_len = a.@nat.get_size;
+        let u32_len = (mlen + 3) / 4;
         let u8_len = u32_len * 4;
         let bytes = Array::fill(u8_len, 0_U8);
-        Iterator::range(0, u32_len).fold(
+        let bytes = Iterator::range(0, u32_len).fold(
             bytes, |bytes, i|
             bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))    // big endian
-        )
+        );
+        if u8_len != mlen { bytes.get_sub(u8_len - mlen, u8_len) } else { bytes }
+    );
+
+    to_bytes: ECInt -> Array U8;
+    to_bytes = |a| (
+        let u32_len = a.@nat.get_size;
+        let u8_len = u32_len * 4;
+        a.to_n_bytes(u8_len)
     );
 
     to_string_hex: ECInt -> String;
@@ -55,6 +65,12 @@ namespace ECInt {
         a.to_bytes.to_string_hex
     );
 
+    get_mlen: ECInt -> I64;
+    get_mlen = |q| (
+        let k = q.@nat._bit_length.to_I64;      // 2^(k-1) <= q < 2^k
+        let mlen = (k + 7) / 8;
+        mlen
+    );
 
     repeat_by_ECInt: (a -> a -> a) -> a -> a -> ECInt -> a;
     repeat_by_ECInt = |op, x, a, n| (
@@ -84,7 +100,7 @@ namespace ECInt {
         let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
         let (bytes, secure_random) = *secure_random.generate_bytes(num_bits / 8);
         let r = ECInt::from_bytes(bytes).as_ok;
-        if r >= (one.shift_left(num_bits.to_U64) / n) * n {
+        if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
             secure_random.generate_ecint_range(begin, end)      // try again
         };
         let r = r % n;
@@ -111,6 +127,35 @@ namespace ECField {
     from_I64 = |i64| (
         Modular::make(BigInt::from_I64(i64), zero)
     );
+
+    // 2.3.5 FieldElement-to-OctetString Conversion
+    to_bytes: ECField -> Array U8;
+    to_bytes = |a| (
+        let a = a.nonneg;               // 1..(q-1)
+        let q = a.@modulus;
+        let mlen = q.get_mlen;
+        a.@value.to_n_bytes(mlen)
+    );
+
+    // Calculates the square root of `z`.
+    // Currently only supports `z.@modulus % 4 == 3`.
+    // cf. [Square Roots in Finite Prime Fields](https://www.staff.uni-mainz.de/pommeren/Cryptology/Asymmetric/5_NTh/SqRprim.pdf)
+    sqrt: ECField -> Result ErrMsg ECField;
+    sqrt = |z| (
+        let z = z.nonneg;
+        let p = z.@modulus;
+        let (k, r) = divmod(p, BigInt::from_I64(4));
+        if r != BigInt::from_I64(3) {
+            err $ "Currently only supports `z.@modulus % 4 == 3`"
+        };
+        // x = z^(k + 1) mod p
+        let x: ECField = repeat_by_ECInt(mul, (one: ECField), z, k + (one: ECInt));
+        let x = x.nonneg;
+        if x * x != z {
+            err $ "Square Root not found"
+        };
+        ok $ x
+    );
 }
 
 
@@ -120,13 +165,105 @@ type ECPoint = unbox struct {
 };
 
 namespace ECPoint {
-    make: Option ECParam -> Option (ECField, ECField) -> ECPoint;
-    make = |ec, xy| (
-        ECPoint { ec: ec, xy: xy }
+    make: ECParam -> ECField -> ECField -> ECPoint;
+    make = |ec, x, y| (
+        ECPoint { ec: some(ec), xy: some $ (x, y) }
     );
 
     is_zero: ECPoint -> Bool;
     is_zero = |p| p.@xy.is_none;
+
+    nonneg: ECPoint -> ECPoint;
+    nonneg = |p| (
+        p.mod_xy(map(|(x, y)| (x.nonneg, y.nonneg)))
+    );
+
+    _get_lhs: ECParam -> ECField -> ECField;
+    _get_lhs = |ec, y| (
+        let lhs = y * y;
+        lhs.nonneg
+    );
+
+    _get_rhs: ECParam -> ECField -> ECField;
+    _get_rhs = |ec, x| (
+        let a = ECField::make(ec.@a, ec.@p);
+        let b = ECField::make(ec.@b, ec.@p);
+        let rhs = x * (x * x + a) + b;
+        rhs.nonneg
+    );
+
+    check: ECPoint -> Result ErrMsg ();
+    check = |p| (
+        if p.is_zero { ok() };
+        let ec = p.@ec.as_some;
+        let (x, y) = p.@xy.as_some;
+        let lhs = _get_lhs(ec, y);
+        let rhs = _get_rhs(ec, x);
+        if lhs != rhs {
+            err $ [lhs, rhs].format("ECPoint check failed! lhs={} rhs={}")
+        };
+        ok()
+    );
+
+    // 2.3.3 EllipticCurvePoint-to-OctetString Conversion
+    to_bytes_compressed: ECPoint -> Array U8;
+    to_bytes_compressed = |p| (
+        if p.is_zero { [ 0_U8 ] };
+        let (x, y) = p.@xy.as_some;
+        let x_bytes = x.to_bytes;
+        let y = y.nonneg;
+        let y_bytes = if y.@value.is_even { [ 2_U8 ] } else { [ 3_U8 ]};
+        y_bytes.append(x_bytes)
+    );
+
+    to_bytes_uncompressed: ECPoint -> Array U8;
+    to_bytes_uncompressed = |p| (
+        if p.is_zero { [ 0_U8 ] };
+        let (x, y) = p.@xy.as_some;
+        let x_bytes = x.to_bytes;
+        let y_bytes = y.to_bytes;
+        [ 4_U8 ].append(x_bytes).append(y_bytes)
+    );
+
+    // 2.3.4 OctetString-to-EllipticCurvePoint Conversion
+    from_bytes_ec: ECParam -> Array U8 -> Result ErrMsg ECPoint;
+    from_bytes_ec = |ec, bytes| (
+        if bytes == [ 0_U8 ] { ok $ zero };
+        let mlen = ec.@p.get_mlen;
+        if bytes.get_size == mlen + 1 {     // compressed
+            let y_bytes = bytes.get_sub(0, 1);
+            let x_bytes = bytes.get_sub(1, mlen + 1);
+            let x = ECField::make(*ECInt::from_bytes(x_bytes), ec.@p);
+            let y_even = (y_bytes.@(0) == 2_U8);
+            let y_odd = (y_bytes.@(0) == 3_U8);
+            if !y_even && !y_odd {
+                err $ "from_bytes_ec: invalid y parity"
+            };
+            let alpha = _get_rhs(ec, x);
+            let beta = *alpha.sqrt;
+            let beta_even = beta.@value.is_even;
+            let y: ECField = if y_even == beta_even { beta } else {
+                (-beta).nonneg
+            };
+            let p = ECPoint::make(ec, x, y);
+            let _ = *p.check;
+            ok $ p
+        };
+        if bytes.get_size == 2 * mlen + 1 {     // uncompressed
+            let w = bytes.get_sub(0, 1);
+            let x_bytes = bytes.get_sub(1, mlen + 1);
+            let y_bytes = bytes.get_sub(mlen + 1, 2 * mlen + 1);
+            if w.@(0) != 4_U8 {
+                err $ "from_bytes_ec: invalid uncompressed marker"
+            };
+            let x = ECField::make(*ECInt::from_bytes(x_bytes), ec.@p);
+            let y = ECField::make(*ECInt::from_bytes(y_bytes), ec.@p);
+            let p = ECPoint::make(ec, x, y);
+            let _ = *p.check;
+            ok $ p
+        };
+        err $ "from_bytes_ec: invalid size"
+    );
 }
 
 impl ECPoint: ToString {
@@ -135,7 +272,7 @@ impl ECPoint: ToString {
 
 // `O` (the point at infinity)
 impl ECPoint: Zero {
-    zero = ECPoint::make(none(), none());
+    zero = ECPoint{ ec:none(), xy:none() };
 }
 
 // Add two points.
@@ -161,13 +298,13 @@ impl ECPoint: Add {
             let lambda = dividend / divisor;
             let x3 = lambda * lambda - ECField::from_I64(2) * x1;
             let y3 = lambda * (x1 - x3) - y1;
-            ECPoint::make(p1.@ec, some $ (x3, y3))
+            ECPoint::make(ec, x3, y3)
         };
         // 4. Rule to add two points with different x-coordinates 
         let lambda = (y2 - y1) / (x2 - x1);
         let x3 = lambda * lambda - x1 - x2;
         let y3 = lambda * (x1 - x3) - y1; 
-        ECPoint::make(p1.@ec, some $ (x3, y3))
+        ECPoint::make(ec, x3, y3)
     );
 }
 
@@ -207,7 +344,7 @@ namespace ECParam {
     make_point = |xy, ec| (
         let x = ECField::make(xy.@0, ec.@p);
         let y = ECField::make(xy.@1, ec.@p);
-        ECPoint::make(some(ec), some $ (x, y))
+        ECPoint::make(ec, x, y)
     );
 
     get_g: ECParam -> ECPoint;
@@ -253,6 +390,7 @@ namespace ECKeyPair {
         eval assert(|_| "d is out of range", one <= d && d <= n - one);
         let g = ec.get_g;
         let q = g.mul_by_ECInt(d);
+        let q = q.nonneg;
         let key_pair = ECKeyPair {
             ec: ec,
             d: d,
@@ -272,7 +410,28 @@ test1 = (
         //println(p.to_string)
         let secure_random = *SecureRandom::make;
         let (key_pair, _) = *secure_random.generate_keypair(ec);
-        println(key_pair.to_string).lift
+        //let _ = *println(key_pair.@d.to_bytes.to_string_hex).lift;
+        let _ = *println("key_pair=" + key_pair.to_string).lift;
+
+        let _ = *println("checking q").lift;
+        let _ = *key_pair.@q.check.from_result;
+
+        let _ = *println("convert q to bytes (uncompressed)").lift;
+        let q_bytes = key_pair.@q.to_bytes_uncompressed;
+        let _ = *println("q_bytes=" + q_bytes.to_string_hex).lift;
+
+        let _ = *println("convert bytes to q").lift;
+        let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+        let _ = *println("q=" + q.to_string).lift;
+
+        let _ = *println("convert q to byte (compressed)").lift;
+        let q_bytes = key_pair.@q.to_bytes_compressed;
+        let _ = *println("q_bytes=" + q_bytes.to_string_hex).lift;
+
+        let _ = *println("convert bytes to q").lift;
+        let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+        let _ = *println("q=" + q.to_string).lift;
+        pure()
     }.try(eprintln)
 );
 

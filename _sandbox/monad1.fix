@@ -1,5 +1,7 @@
 module Main;
 
+import Debug;
+
 // Function monad. same as Reader monad
 type Function a b = unbox struct {
     data: a -> b
@@ -37,6 +39,18 @@ namespace Cont {
     run: (a -> r) -> Cont r a -> r;
     run = |f, ma| (
         (ma.@data)(f)
+    );
+
+    call_cc: ((a -> Cont r b) -> Cont r a) -> Cont r a;
+    call_cc = |fambma| (
+        Cont::make $ |far|
+        let famb = |a| (
+            Cont::make $ |fbr|
+            far(a)
+        );
+        let ma = fambma(famb);
+        let r = ma.run(far);
+        r
     );
 }
 
@@ -84,5 +98,21 @@ test_monad_cont = (
     println (ans.to_string)
 );
 
+test_call_cc: IO ();
+test_call_cc = (
+    let cont: Cont String I64 = call_cc(|exit|
+        loop_m(
+            (0, 0), |(sum, i)|
+            if i >= 10 { break_m $ sum };
+            if i >= 5 { exit(sum) };
+            let sum = sum + i;
+            eval debug_eprintln("i="+i.to_string+" sum="+sum.to_string);
+            continue_m $ (sum, i + 1)
+        )
+    );
+    let ans = cont.run(|sum| sum.to_string);
+    println(ans)
+);
+
 main: IO ();
-main = test_monad_cont;
+main = test_call_cc;

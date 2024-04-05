@@ -1,0 +1,68 @@
+module Main;
+
+trait a: GetByteCount {
+  get_byte_count: a -> I64;
+}
+
+impl U8: GetByteCount {
+  get_byte_count = |_| 1;
+}
+
+impl U16: GetByteCount {
+  get_byte_count = |_| 2;
+}
+
+impl U32: GetByteCount {
+  get_byte_count = |_| 4;
+}
+
+impl [a: GetByteCount] Array a: GetByteCount {
+  get_byte_count = |arr| arr.get_size * arr.@0.get_byte_count;
+}
+
+trait a: TlsToBytes {
+    tls_to_bytes: a -> Array U8;
+}
+
+type HandshakeType = unbox union {
+    client_hello: (),
+    server_hello: (),
+    new_session_ticket: ()
+};
+
+type CipherSuite = U16;
+
+type ClientHello = unbox struct {
+    legacy_version: U16,                    // = 0x0303
+    random: Array U8,                       // [32]
+    legacy_session_id: Array U8,            // <0..32>
+    cipher_suites: Array CipherSuite,       // <2..2^16-2>
+    legacy_compression_method: Array U8,    // <1..2^8-1>
+    extensions: Array Extensions            // <8..2^16-1>
+};
+
+namespace ClientHello {
+    make: SecureRandom -> IOFail ClientHello;
+    make = |secure_random| (
+        pure $ ClientHello {
+            legacy_version: 0x0303_U16,
+            random: *secure_random.generate_bytes(32),
+            legacy_session_id: [],
+            cipher_suites: [],
+            legacy_compression_method: [],
+            extensions: [] 
+        }
+    );
+}
+
+impl ClientHello: TlsWrite {
+    tls_write = |msg| (
+        eval *write_single(msg.@legacy_version);
+        eval *write_fixed_array(msg.@random);
+        eval *write_variable_array(msg.@cipher_suites, 2);
+        eval *write_variable_array(msg.@legacy_compression_method, 1);
+        eval *write_variable_array(msg.@extensions, 2);
+        pure()
+    );
+}
+

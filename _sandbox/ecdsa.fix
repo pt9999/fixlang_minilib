@@ -209,15 +209,16 @@ namespace ECPoint {
         rhs.nonneg
     );
 
-    check: ECPoint -> Result ErrMsg ();
-    check = |p| (
+    // Checks whether the point is on the elliptic curve.
+    check_on_curve: ECPoint -> Result ErrMsg ();
+    check_on_curve = |p| (
         if p.is_zero { ok() };
         let ec = p.@ec.as_some;
         let (x, y) = p.@xy.as_some;
         let lhs = _get_lhs(ec, y);
         let rhs = _get_rhs(ec, x);
         if lhs != rhs {
-            err $ [lhs, rhs].format("ECPoint check failed! lhs={} rhs={}")
+            err $ [lhs, rhs].format("ECPoint check_on_curve failed! lhs={} rhs={}")
         };
         ok()
     );
@@ -263,7 +264,7 @@ namespace ECPoint {
                 (-beta).nonneg
             };
             let p = ECPoint::make(ec, x, y);
-            let _ = *p.check;
+            let _ = *p.check_on_curve;
             ok $ p
         };
         if bytes.get_size == 2 * mlen + 1 {     // uncompressed
@@ -276,7 +277,7 @@ namespace ECPoint {
             let x = ECField::make(*ECInt::from_bytes(x_bytes), ec.@p);
             let y = ECField::make(*ECInt::from_bytes(y_bytes), ec.@p);
             let p = ECPoint::make(ec, x, y);
-            let _ = *p.check;
+            let _ = *p.check_on_curve;
             ok $ p
         };
         err $ "from_bytes_ec: invalid size"
@@ -333,7 +334,6 @@ namespace ECPoint {
 
 // Elliptic Curve Domain Parameters over F(p), where p is an odd prime number
 // E(F(p)): y^2 = x^3 + a*x + b
-// cf. [2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf#page=7.31)
 type ECParam = box struct {
     id: String,    // a unique id
     p: ECInt,      // a prime `p` for F(p)
@@ -371,6 +371,8 @@ namespace ECParam {
         ec.make_point(ec.@g)
     );
 
+    // The Elliptic Curve secp256r1.
+    // cf. [SEC2: 2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf#page=7.31)
     secp256r1: ECParam;
     secp256r1 = ECParam {
         id: "secp256r1",
@@ -388,7 +390,7 @@ namespace ECParam {
 
 // Cryptographics key pair
 type ECKeyPair = unbox struct {
-    ec: ECParam,
+    ec: ECParam,    // an elliptic curve to use
     d: ECInt,       // a private key
     q: ECPoint      // a public key
 };
@@ -400,6 +402,7 @@ impl ECKeyPair: ToString {
 }
 
 namespace ECKeyPair {
+    // Generates a keypair from a SecureRandom and an ECParam.
     generate_keypair: ECParam -> SecureRandom -> IOFail (ECKeyPair, SecureRandom);
     generate_keypair = |ec, secure_random| (
         let n = ec.@n;
@@ -417,6 +420,30 @@ namespace ECKeyPair {
         };
         pure $ (key_pair, secure_random)
     );
+
+    // Validates the public key.
+    // cf. 3.2.2.1 Elliptic Curve Public Key Validation Primitive
+    validate_pubkey: ECPoint -> Result ErrMsg ();
+    validate_pubkey = |q| (
+        if q.is_zero {
+            err $ "validate_pubkey: q is zero"
+        };
+        let _ = *q.check_on_curve;
+        let _ = *do {
+            let ec = q.@ec.as_some;
+            if ec.@h == one {
+                // if h == 1, then n * q == O for all points q in E(F(p)).
+                ok()
+            };
+            let n = ec.@n;
+            let nq = q.mul_by_ECInt(n);
+            if !nq.is_zero {
+                err $ "validate_pubkey: nq != zero: nq=" + nq.to_string
+            };
+            ok()
+        };
+        ok()
+    );
 }
 
 test1: IO ();
@@ -428,8 +455,8 @@ test1 = (
         let (key_pair, _) = *secure_random.generate_keypair(ec);
         let _ = *println("key_pair=" + key_pair.to_string).lift;
 
-        let _ = *println("checking q").lift;
-        let _ = *key_pair.@q.check.from_result;
+        let _ = *println("validating public key q").lift;
+        let _ = *key_pair.@q.validate_pubkey.from_result;
 
         let _ = *println("convert q to bytes (uncompressed)").lift;
         let q_bytes = key_pair.@q.to_bytes_uncompressed;

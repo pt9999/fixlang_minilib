@@ -1,28 +1,94 @@
 module Main;
 
-trait a: GetByteCount {
-  get_byte_count: a -> I64;
+import Minilib.Crypto.SecureRandom;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+
+type U24 = unbox struct {
+    v: U32
+};
+
+namespace U24 {
+    to_U24: U32 -> U24;
+    to_U24 = |v| U24 { v: v.bit_and(0xFFFFFF_U32) };
+
+    to_U32: U24 -> U32;
+    to_U32 = |u24| u24.@v.bit_and(0xFFFFFF_U32);
 }
 
-impl U8: GetByteCount {
-  get_byte_count = |_| 1;
+impl U24: Marshal {
+    marshal = |val, buf| (
+        // big-endian only
+        let val = val.to_U32;
+        let buf = buf.marshal(val.shift_right(16_U32).to_U8);
+        let buf = buf.marshal(val.to_U16);
+        buf
+    );
 }
 
-impl U16: GetByteCount {
-  get_byte_count = |_| 2;
+impl U24: Unmarshal {
+    unmarshal = |buf| (
+        // big-endian only
+        let (hi:U8, buf) = buf.unmarshal;
+        let (lo:U16, buf) = buf.unmarshal;
+        let val:U32 = hi.to_U32.shift_left(16_U32).bit_or(lo.to_U32);
+        (val.to_U24, buf)
+    );
 }
 
-impl U32: GetByteCount {
-  get_byte_count = |_| 4;
+trait a: GetByteSize {
+    get_byte_size: a -> I64;
 }
 
-impl [a: GetByteCount] Array a: GetByteCount {
-  get_byte_count = |arr| arr.get_size * arr.@0.get_byte_count;
+impl U8: GetByteSize {
+    get_byte_size = |_| 1;
 }
 
-trait a: TlsToBytes {
-    tls_to_bytes: a -> Array U8;
+impl U16: GetByteSize {
+    get_byte_size = |_| 2;
 }
+
+impl U24: GetByteSize {
+    get_byte_size = |_| 3;
+}
+
+impl U32: GetByteSize {
+    get_byte_size = |_| 4;
+}
+
+impl [a: GetByteSize] Array a: GetByteSize {
+    get_byte_size = |arr| (
+        let n = arr.get_size;
+        if n == 0 { 0 } else { n * arr.@(0).get_byte_size }
+    );
+}
+
+namespace Vector {
+    marshal_fixed: [a: Marshal] Array a -> ByteBuffer -> ByteBuffer;
+    marshal_fixed = |vector, buf| (
+        let n = vector.get_size;
+        loop(
+            (buf, 0), |(buf, i)|
+            if i >= n { break $ buf };
+            let buf = buf.marshal(vector.@(i));
+            continue $ (buf, i + 1)
+        )
+    );
+
+    marshal_var_size: [a: Marshal, a: GetByteSize, sz: Marshal] Array a -> (I64 -> sz) -> ByteBuffer -> ByteBuffer;
+    marshal_var_size = |vector, to_size, buf| (
+        let size = vector.get_byte_size.to_size;
+        let buf = buf.marshal(size);
+        let n = vector.get_size;
+        loop(
+            (buf, 0), |(buf, i)|
+            if i >= n { break $ buf };
+            let buf = buf.marshal(vector.@(i));
+            continue $ (buf, i + 1)
+        )
+    );
+}
+
 
 type HandshakeType = unbox union {
     client_hello: (),
@@ -38,31 +104,65 @@ type ClientHello = unbox struct {
     legacy_session_id: Array U8,            // <0..32>
     cipher_suites: Array CipherSuite,       // <2..2^16-2>
     legacy_compression_method: Array U8,    // <1..2^8-1>
-    extensions: Array Extensions            // <8..2^16-1>
+    extensions: Array Extension            // <8..2^16-1>
 };
 
 namespace ClientHello {
     make: SecureRandom -> IOFail ClientHello;
     make = |secure_random| (
+        let (random, _) = *secure_random.generate_bytes(32);
+        //let random = Array::fill(32, 0x0a_U8);
         pure $ ClientHello {
             legacy_version: 0x0303_U16,
-            random: *secure_random.generate_bytes(32),
+            random: random,
             legacy_session_id: [],
             cipher_suites: [],
             legacy_compression_method: [],
-            extensions: [] 
+            extensions: []
         }
     );
 }
 
-impl ClientHello: TlsWrite {
-    tls_write = |msg| (
-        eval *write_single(msg.@legacy_version);
-        eval *write_fixed_array(msg.@random);
-        eval *write_variable_array(msg.@cipher_suites, 2);
-        eval *write_variable_array(msg.@legacy_compression_method, 1);
-        eval *write_variable_array(msg.@extensions, 2);
-        pure()
+impl ClientHello: Marshal {
+    marshal = |msg, buf| (
+        let buf = buf.marshal(msg.@legacy_version);
+        let buf = buf.marshal_fixed(msg.@random);
+        let buf = buf.marshal_var_size(msg.@cipher_suites, to_U16);
+        let buf = buf.marshal_var_size(msg.@legacy_compression_method, to_U8);
+        let buf = buf.marshal_var_size(msg.@extensions, to_U16);
+        buf
     );
 }
 
+type ExtensionType = U16;
+
+type Extension = unbox struct {
+    extension_type: ExtensionType,      // U16
+    extension_data: Array U8
+};
+
+impl Extension: GetByteSize {
+    get_byte_size = |ex| ex.@extension_type.get_byte_size + ex.@extension_data.get_byte_size;
+}
+
+impl Extension: Marshal {
+    marshal = |ex, buf| (
+        let buf = buf.marshal(ex.@extension_type);
+        let buf = buf.marshal_var_size(ex.@extension_data, to_U16);
+        buf
+    );
+}
+
+test1: IO ();
+test1 = (
+    do {
+        let secure_random = *SecureRandom::make;
+        let hello = *ClientHello::make(secure_random);
+        let buf = ByteBuffer::empty(0, big_endian());
+        let buf = buf.marshal(hello);
+        println(buf.@array.to_string_hex).lift
+    }.try(eprintln)
+);
+
+main: IO ();
+main = test1;

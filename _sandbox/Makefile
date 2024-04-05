@@ -59,6 +59,8 @@ gcmvs:
 	../bin/fixautolink run -L ../lib -L . -f aes_gcmvs.fix -O separated
 ecdsa:
 	../bin/fixautolink run -L ../lib -L . -f ecdsa.fix -O separated
+tls:
+	../bin/fixautolink run -L ../lib -L . -f tls.fix -O separated
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

@@ -19,7 +19,8 @@ type ByteOrder = unbox union {
 ```
 type ByteBuffer = unbox struct {
     array: Array U8,            // internal byte array
-    byte_order: ByteOrder       // byte order
+    byte_order: ByteOrder,      // byte order
+    position: I64               // read/write position
 };
 ```
 ### namespace ByteBuffer
@@ -46,9 +47,18 @@ type ByteBuffer = unbox struct {
 
 Calls a function with a pointer to the memory region where elements are stored.
 
+#### get_position: ByteBuffer -> I64;
+
+Gets the read/write position.
+
 #### get_size: ByteBuffer -> I64;
 
 Gets the size of internal byte array.
+
+#### ensure_size: I64 -> ByteBuffer -> ByteBuffer;
+
+`buf.ensure_size(req_size)` ensures that the size of the byte buffer is at least `req_size`.
+If not, appends zeros at the end of the byte buffer.
 
 #### get_bytes: ByteBuffer -> Array U8;
 
@@ -91,6 +101,36 @@ Sets U64 into the byte buffer at position `i`.
 #### to_u32_array: ByteBuffer -> Array U32;
 
 #### from_u32_array: Array U32 -> ByteOrder -> ByteBuffer;
+
+### trait Marshal
+
+```
+trait a: Marshal {
+    marshal: a -> ByteBuffer -> ByteBuffer;
+}
+```
+#### `impl U8: Marshal`
+
+#### `impl U16: Marshal`
+
+#### `impl U32: Marshal`
+
+#### `impl U64: Marshal`
+
+### trait Unmarshal
+
+```
+trait a: Unmarshal {
+    unmarshal: ByteBuffer -> (a, ByteBuffer);
+}
+```
+#### `impl U8: Unmarshal`
+
+#### `impl U16: Unmarshal`
+
+#### `impl U32: Unmarshal`
+
+#### `impl U64: Unmarshal`
 
 #### get_u8_le: I64 -> Array U8 -> U8;
 

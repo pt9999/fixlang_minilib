@@ -7,6 +7,9 @@ import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+map_0: (a -> b) -> (a, c) -> (b, c);
+map_0 = |f, (a, c)| (f(a), c);
+
 type U24 = unbox struct {
     v: U32
 };
@@ -17,26 +20,36 @@ namespace U24 {
 
     to_U32: U24 -> U32;
     to_U32 = |u24| u24.@v.bit_and(0xFFFFFF_U32);
+
+    // Gets U24 from the byte buffer at position `i`.
+    get_u24: I64 -> ByteBuffer -> U24;
+    get_u24 = |i, buf| (
+        eval assert(|_| "only big endian is supported", buf.@byte_order.is_big_endian);
+        let array = buf.@array;
+        array.get_u8_be(i).to_U32.shift_left(16_U32).bit_or(
+            array.get_u16_be(i + 1).to_U32
+        )
+        .to_U24
+    );
+
+    // Sets U24 into the byte buffer at position `i`.
+    set_u24: I64 -> U24 -> ByteBuffer -> ByteBuffer;
+    set_u24 = |i, val, buf| (
+        eval assert(|_| "only big endian is supported", buf.@byte_order.is_big_endian);
+        buf.mod_array(|array|
+            let val = val.to_U32;
+            array.set_u8_be(i, val.shift_right(16_U32).to_U8)
+                .set_u16_be(i + 1, val.to_U16)
+        )
+    );
 }
 
 impl U24: Marshal {
-    marshal = |val, buf| (
-        // big-endian only
-        let val = val.to_U32;
-        let buf = buf.marshal(val.shift_right(16_U32).to_U8);
-        let buf = buf.marshal(val.to_U16);
-        buf
-    );
+    marshal = |val, buf| buf._marshal(set_u24, 3, val);
 }
 
 impl U24: Unmarshal {
-    unmarshal = |buf| (
-        // big-endian only
-        let (hi:U8, buf) = buf.unmarshal;
-        let (lo:U16, buf) = buf.unmarshal;
-        let val:U32 = hi.to_U32.shift_left(16_U32).bit_or(lo.to_U32);
-        (val.to_U24, buf)
-    );
+    unmarshal = |buf| buf._unmarshal(get_u24, 3);
 }
 
 trait a: GetByteSize {
@@ -61,10 +74,7 @@ impl U32: GetByteSize {
 
 impl [a: GetByteSize] Array a: GetByteSize {
     get_byte_size = |arr| (
-        // TODO: each element may have diffrent sizes, for example `Extension`.
-        // so summing up sizes is required.
-        let n = arr.get_size;
-        if n == 0 { 0 } else { n * arr.@(0).get_byte_size }
+        arr.to_iter.map(get_byte_size).fold(0, add)
     );
 }
 
@@ -80,29 +90,33 @@ namespace Vector {
         )
     );
 
-    marshal_var_size: [a: Marshal, a: GetByteSize, sz: Marshal] Array a -> (I64 -> sz) -> ByteBuffer -> ByteBuffer;
+    marshal_var_size: [a: Marshal, sz: Marshal] Array a -> (I64 -> sz) -> ByteBuffer -> ByteBuffer;
     marshal_var_size = |vector, to_size, buf| (
-        let size = vector.get_byte_size.to_size;
-        let buf = buf.marshal(size);
-        buf.marshal_fixed(vector)
+        let size_pos = buf.get_position;
+        let buf = buf.marshal(0.to_size);
+        let begin_pos = buf.get_position;
+        let buf = buf.marshal_fixed(vector);
+        let end_pos = buf.get_position;
+        let buf = buf.set_position(size_pos);
+        let buf = buf.marshal((end_pos - begin_pos).to_size);
+        let buf = buf.set_position(end_pos);
+        buf
     );
 
-    unmarshal_fixed: [a: Unmarshal, a: GetByteSize] I64 -> ByteBuffer -> (Array a, ByteBuffer);
+    unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> (Array a, ByteBuffer);
     unmarshal_fixed = |byte_size, buf| (
-        if byte_size <= 0 { ([], buf) };
+        let begin_pos = buf.get_position;
         loop(
-            (buf, [], 0, 0), |(buf, vector, n, i)|
-            if n != 0 && i >= n { break $ (vector, buf) };
+            (buf, []), |(buf, vector)|
+            let pos = buf.get_position;
+            if pos - begin_pos >= byte_size { break $ (vector, buf) };
             let (val, buf) = buf.unmarshal;
-            let n = if n != 0 { n } else {
-                byte_size / val.get_byte_size
-            };
             let vector = vector.push_back(val);
-            continue $ (buf, vector, n, i + 1)
+            continue $ (buf, vector)
         )
     );
 
-    unmarshal_var_size: [a: Unmarshal, a: GetByteSize, sz: Unmarshal] (sz -> I64) -> ByteBuffer -> (Array a, ByteBuffer);
+    unmarshal_var_size: [a: Unmarshal, sz: Unmarshal] (sz -> I64) -> ByteBuffer -> (Array a, ByteBuffer);
     unmarshal_var_size = |from_size, buf| (
         let (size, buf) = buf.unmarshal;
         let byte_size = size.from_size;
@@ -166,10 +180,11 @@ impl Handshake: Marshal {
 }
 
 
+type ProtocolVersion = U16;
 type CipherSuite = U16;
 
 type ClientHello = unbox struct {
-    legacy_version: U16,                    // = 0x0303
+    legacy_version: ProtocolVersion,        // = 0x0303
     random: Array U8,                       // [32]
     legacy_session_id: Array U8,            // <0..32>
     cipher_suites: Array CipherSuite,       // <2..2^16-2>
@@ -187,7 +202,7 @@ namespace ClientHello {
             random: random,
             legacy_session_id: [],
             cipher_suites: [],
-            legacy_compression_method: [],
+            legacy_compression_method: [ 0_U8 ],
             extensions: []
         }
     );
@@ -206,7 +221,7 @@ impl ClientHello: Marshal {
 }
 
 type ServerHello = unbox struct {
-    legacy_version: U16,                    // = 0x0303
+    legacy_version: ProtocolVersion,        // = 0x0303
     random: Array U8,                       // [32]
     legacy_session_id_echo: Array U8,       // <0..32>
     cipher_suite: CipherSuite,              //
@@ -234,66 +249,37 @@ impl ServerHello: Unmarshal {
     );
 }
 
-
 type ExtensionType = U16;
-
-type Extension = unbox struct {
-    extension_type: ExtensionType,      // U16
-    extension_data: Array U8
-};
-
-impl Extension: GetByteSize {
-    get_byte_size = |ex| ex.@extension_type.get_byte_size + ex.@extension_data.get_byte_size;
-}
-
-impl Extension: Marshal {
-    marshal = |ex, buf| (
-        let buf = buf.marshal(ex.@extension_type);
-        let buf = buf.marshal_var_size(ex.@extension_data, to_U16);
-        buf
-    );
-}
-
-impl Extension: Unmarshal {
-    unmarshal = |buf| (
-        let (extension_type, buf) = buf.unmarshal;
-        let (extension_data, buf) = buf.unmarshal_var_size(U16::to_I64);
-        let ex = Extension {
-            extension_type: extension_type,
-            extension_data: extension_data
-        };
-        (ex, buf)
-    );
-}
-
-type Extension1 = unbox union {
-        server_name: (),
-        max_fragment_length: (),
-        status_request: (),
-        supported_groups: (),
-        signature_algorithms: (),
-        use_srtp: (),
-        heartbeat: (),
-        application_layer_protocol_negotiation: (),
-        signed_certificate_timestamp: (),
-        client_certificate_type: (),
-        server_certificate_type: (),
-        padding: (),
-        pre_shared_key: (),
-        early_data: (),
-        supported_versions: (),
-        cookie: (),
-        psk_key_exchange_modes: (),
-        certificate_authorities: (),
-        oid_filters: (),
-        post_handshake_auth: (),
-        signature_algorithms_cert: (),
-        key_share: ()
+type Extension = unbox union {
+    unknown_extension: ExtensionType,
+    server_name: (),
+    max_fragment_length: (),
+    status_request: (),
+    supported_groups: NamedGroupList,
+    signature_algorithms: (),
+    use_srtp: (),
+    heartbeat: (),
+    application_layer_protocol_negotiation: (),
+    signed_certificate_timestamp: (),
+    client_certificate_type: (),
+    server_certificate_type: (),
+    padding: (),
+    pre_shared_key: (),
+    early_data: (),
+    supported_versions: SupportedVersions,
+    cookie: (),
+    psk_key_exchange_modes: (),
+    certificate_authorities: (),
+    oid_filters: (),
+    post_handshake_auth: (),
+    signature_algorithms_cert: (),
+    key_share: ()
 };
 
 namespace Extension {
-    get_extension_type: Extension -> U16;
+    get_extension_type: Extension -> ExtensionType;
     get_extension_type = |ex| (
+        if ex.is_unknown_extension { ex.as_unknown_extension.to_I64 };
         if ex.is_server_name { 0 };
         if ex.is_max_fragment_length { 1 };
         if ex.is_status_request { 5 };
@@ -324,14 +310,149 @@ namespace Extension {
 impl Extension: Marshal {
     marshal = |ex, buf| (
         let buf = buf.marshal(ex.get_extension_type);
-        if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
+        let size_pos = buf.get_position;
+        let buf = buf.marshal(0_U16);       // size
+        let buf = (
+            if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
+            if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
+            buf
+        );
+        let last_pos = buf.get_position;
+        let buf = buf.set_u16(size_pos, (last_pos - (size_pos + 2)).to_U16);
         buf
     );
 }
 
+impl Extension: Unmarshal {
+    unmarshal = |buf| (
+        let (extension_type, buf) = buf.unmarshal;
+        let (extension_data_size: U16, buf) = buf.unmarshal;
+
+        if extension_type == 10_U16 { buf.unmarshal.map_0(supported_groups) };
+        if extension_type == 43_U16 { buf.unmarshal.map_0(supported_versions) };
+
+        // skip unknown extension data
+        let buf = buf.set_position(buf.get_position + extension_data_size.to_I64);
+        (unknown_extension(extension_type), buf)
+    );
+}
+
+// 4.2.1 Supported Versions
+type SupportedVersions = unbox struct {
+    versions: Array ProtocolVersion
+};
+
+impl SupportedVersions: Marshal {
+    marshal = |obj, buf| (
+        // for ClientHello
+        buf.marshal_var_size(obj.@versions, to_U8)
+    );
+}
+
+impl SupportedVersions: Unmarshal {
+    unmarshal = |buf| (
+        // for ServerHello, HelloRetryRequest
+        buf.unmarshal.map_0(|version|
+            SupportedVersions { versions: [ version ] }
+        )
+    );
+}
+
+// 4.2.3. Signature Algorithms
+type SignatureScheme = U16;
+
+namespace SignatureScheme {
+    table: Array (String, SignatureScheme);
+    table = [
+        /* RSASSA-PKCS1-v1_5 algorithms */
+        ("rsa_pkcs1_sha256", 0x0401_U16),
+        ("rsa_pkcs1_sha384", 0x0501_U16),
+        ("rsa_pkcs1_sha512", 0x0601_U16),
+
+        /* ECDSA algorithms */
+        ("ecdsa_secp256r1_sha256", 0x0403_U16),
+        ("ecdsa_secp384r1_sha384", 0x0503_U16),
+        ("ecdsa_secp521r1_sha512", 0x0603_U16),
+
+        /* RSASSA-PSS algorithms with public key OID rsaEncryption */
+        ("rsa_pss_rsae_sha256", 0x0804_U16),
+        ("rsa_pss_rsae_sha384", 0x0805_U16),
+        ("rsa_pss_rsae_sha512", 0x0806_U16),
+
+        /* EdDSA algorithms */
+        ("ed25519", 0x0807_U16),
+        ("ed448", 0x0808_U16),
+
+        /* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
+        ("rsa_pss_pss_sha256", 0x0809_U16),
+        ("rsa_pss_pss_sha384", 0x080a_U16),
+        ("rsa_pss_pss_sha512", 0x080b_U16),
+
+        /* Legacy algorithms */
+        ("rsa_pkcs1_sha1", 0x0201_U16),
+        ("ecdsa_sha1", 0x0203_U16)
+    ];
+
+    find_by_name: String -> Option SignatureScheme;
+    find_by_name = |name| (
+        table.find_by(@0 >> eq(name)).map(@1)
+    );
+
+    find_by_id: SignatureScheme -> Option String;
+    find_by_id = |id| (
+        table.find_by(@1 >> eq(id)).map(@0)
+    );
+}
+
+type SignatureSchemeList = unbox struct {
+    v: Array SignatureScheme
+};
+
+impl SignatureSchemeList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@v, to_U16)
+    );
+}
+
+impl SignatureSchemeList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U16::to_I64).map_0(|v|
+            SignatureSchemeList { v: v }
+        )
+    );
+}
+
 // 4.2.7 Supported Groups
-// supported_group(10)
 type NamedGroup = U16;
+
+namespace NamedGroup {
+    table: Array (String, NamedGroup);
+    table = [
+        /* Elliptic Curve Groups (ECDHE) */
+        ("secp256r1", 0x0017_U16),
+        ("secp384r1", 0x0018_U16),
+        ("secp521r1", 0x0019_U16),
+        ("x25519", 0x001D_U16),
+        ("x448", 0x001E_U16),
+
+        /* Finite Field Groups (DHE) */
+        ("ffdhe2048", 0x0100_U16),
+        ("ffdhe3072", 0x0101_U16),
+        ("ffdhe4096", 0x0102_U16),
+        ("ffdhe6144", 0x0103_U16),
+        ("ffdhe8192", 0x0104_U16)
+    ];
+
+    find_by_name: String -> Option NamedGroup;
+    find_by_name = |name| (
+        table.find_by(@0 >> eq(name)).map(@1)
+    );
+
+    find_by_id: NamedGroup -> Option String;
+    find_by_id = |id| (
+        table.find_by(@1 >> eq(id)).map(@0)
+    );
+}
 
 type NamedGroupList = unbox struct {
     v: Array NamedGroup
@@ -339,7 +460,15 @@ type NamedGroupList = unbox struct {
 
 impl NamedGroupList: Marshal {
     marshal = |obj, buf| (
-        buf.marshal_ver_size(obj.@v, to_U16)
+        buf.marshal_var_size(obj.@v, to_U16)
+    );
+}
+
+impl NamedGroupList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U16::to_I64).map_0(|v|
+            NamedGroupList { v: v }
+        )
     );
 }
 
@@ -369,4 +498,4 @@ test2 = (
 );
 
 main: IO ();
-main = test2;
+main = test1;

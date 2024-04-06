@@ -61,6 +61,8 @@ impl U32: GetByteSize {
 
 impl [a: GetByteSize] Array a: GetByteSize {
     get_byte_size = |arr| (
+        // TODO: each element may have diffrent sizes, for example `Extension`.
+        // so summing up sizes is required.
         let n = arr.get_size;
         if n == 0 { 0 } else { n * arr.@(0).get_byte_size }
     );
@@ -263,6 +265,84 @@ impl Extension: Unmarshal {
         (ex, buf)
     );
 }
+
+type Extension1 = unbox union {
+        server_name: (),
+        max_fragment_length: (),
+        status_request: (),
+        supported_groups: (),
+        signature_algorithms: (),
+        use_srtp: (),
+        heartbeat: (),
+        application_layer_protocol_negotiation: (),
+        signed_certificate_timestamp: (),
+        client_certificate_type: (),
+        server_certificate_type: (),
+        padding: (),
+        pre_shared_key: (),
+        early_data: (),
+        supported_versions: (),
+        cookie: (),
+        psk_key_exchange_modes: (),
+        certificate_authorities: (),
+        oid_filters: (),
+        post_handshake_auth: (),
+        signature_algorithms_cert: (),
+        key_share: ()
+};
+
+namespace Extension {
+    get_extension_type: Extension -> U16;
+    get_extension_type = |ex| (
+        if ex.is_server_name { 0 };
+        if ex.is_max_fragment_length { 1 };
+        if ex.is_status_request { 5 };
+        if ex.is_supported_groups { 10 };
+        if ex.is_signature_algorithms { 13 };
+        if ex.is_use_srtp { 14 };
+        if ex.is_heartbeat { 15 };
+        if ex.is_application_layer_protocol_negotiation { 16 };
+        if ex.is_signed_certificate_timestamp { 18 };
+        if ex.is_client_certificate_type { 19 };
+        if ex.is_server_certificate_type { 20 };
+        if ex.is_padding { 21 };
+        if ex.is_pre_shared_key { 41 };
+        if ex.is_early_data { 42 };
+        if ex.is_supported_versions { 43 };
+        if ex.is_cookie { 44 };
+        if ex.is_psk_key_exchange_modes { 45 };
+        if ex.is_certificate_authorities { 47 };
+        if ex.is_oid_filters { 48 };
+        if ex.is_post_handshake_auth { 49 };
+        if ex.is_signature_algorithms_cert { 50 };
+        if ex.is_key_share { 51 };
+        eval assert(|_| "invalid extension type", false);
+        65535
+    ).to_U16;
+}
+
+impl Extension: Marshal {
+    marshal = |ex, buf| (
+        let buf = buf.marshal(ex.get_extension_type);
+        if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
+        buf
+    );
+}
+
+// 4.2.7 Supported Groups
+// supported_group(10)
+type NamedGroup = U16;
+
+type NamedGroupList = unbox struct {
+    v: Array NamedGroup
+};
+
+impl NamedGroupList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_ver_size(obj.@v, to_U16)
+    );
+}
+
 
 test1: IO ();
 test1 = (

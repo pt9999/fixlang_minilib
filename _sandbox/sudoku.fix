@@ -1,10 +1,18 @@
 module Main;
 
+import Debug;
+
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
 type Number = U8;   // 1..9, 0=empty
 
 namespace Number {
     empty: Number;
     empty = 0_U8;
+
+    is_zero: Number -> Bool;
+    is_zero = |num| num == Number::empty;
 }
 
 type Grid = unbox struct {
@@ -23,16 +31,10 @@ namespace Grid {
     set_num: I64 -> I64 -> Number -> Grid -> Grid;
     set_num = |row, col, num, grid| grid.mod_data(set(row * 9 + col, num));
 
-    to_diag: I64 -> I64 -> Option I64;
-    to_diag = |row, col| (
-        if row == col { some(0) };
-        if row == 8 - col { some(1) };
-        none()
-    );
-
-    to_block: I64 -> I64 -> I64;
-    to_block = |row, col| (
-        (row / 3) * 3 + (col / 3)
+    get_nonzero_count: Grid -> I64;
+    get_nonzero_count = |grid| (
+        grid.@data.to_iter.map(|num| if !num.is_zero { 1 } else { 0 })
+        .fold(0, add)
     );
 }
 
@@ -46,7 +48,7 @@ impl Grid: FromString {
     from_string = |lines| (
         let grid = Grid::empty;
         let filter_chars = |f, str| (
-            str.get_bytes.pop_back.to_iter.filter(f).to_array.push_back(0_U8)._unsafe_from_c_str
+            str.get_bytes.pop_back.to_iter.filter(f).to_array._unsafe_to_string
         );
         let lines = lines.split("\n").map(
             filter_chars(|c| ('1' <= c && c <= '9') || c == '.')
@@ -71,70 +73,198 @@ impl Grid: ToString {
             Iterator::range(0, 9).map(|col|
                 let num = grid.get_num(row, col);
                 if num == Number::empty { '.' } else { num - 1_U8 + '1' }
-            ).to_array.push_back(0_U8)._unsafe_from_c_str
+            ).to_array._unsafe_to_string
         ).join("\n")
     );
 }
 
 type BitVec = U16;
 namespace BitVec {
+    full: BitVec;
+    full = 0b1111111110_U16;    //  bit 1..9
+
     empty: BitVec;
     empty = 0_U16;
 
-    get: I64 -> BitVec -> Bool;
-    get = |i, vec| vec.bit_and(1_U16.shift_left(i.to_U16)) != 0_U16;
+    get_bit: I64 -> BitVec -> Bool;
+    get_bit = |i, vec| vec.bit_and(1_U16.shift_left(i.to_U16)) != 0_U16;
 
-    set: I64 -> Bool -> BitVec -> BitVec;
-    set = |i, b, vec| (
+    set_bit: I64 -> Bool -> BitVec -> BitVec;
+    set_bit = |i, b, vec| (
         if b { vec.bit_or(1_U16.shift_left(i.to_U16)) }
         else { vec.bit_and(U16::maximum - 1_U16.shift_left(i.to_U16)) } 
     );
+
+    count_ones: BitVec -> I64;
+    count_ones = |vec| (
+        let vec = vec.bit_and(0xaaaa_U16).shift_right(1_U16) + vec.bit_and(0x5555_U16);
+        let vec = vec.bit_and(0xcccc_U16).shift_right(2_U16) + vec.bit_and(0x3333_U16);
+        let vec = vec.bit_and(0xf0f0_U16).shift_right(4_U16) + vec.bit_and(0x0f0f_U16);
+        let vec = vec.bit_and(0xff00_U16).shift_right(8_U16) + vec.bit_and(0x00ff_U16);
+        vec.to_I64
+    );
 }
 
-type Occupy = Array BitVec; // row(9), col(9), diag(2), block(9) = 29
-namespace Occupy {
-    empty: Occupy;
-    empty = Array::fill(29, BitVec::empty);
+type Candidates = unbox struct {
+    data: Array BitVec  // 9 x 9
+};
 
-    get_row: I64 -> Occupy -> BitVec;
-    get_row = |row, oc| oc.@(row);
+namespace Candidates {
+    full: Candidates;
+    full = Candidates {
+        data: Array::fill(9 * 9, BitVec::full)
+    };
 
-    mod_row: I64 -> (BitVec -> BitVec) -> Occupy -> Occupy;
-    mod_row = |row, f, oc| oc.mod(row, f);
+    get: I64 -> I64 -> Candidates -> BitVec;
+    get = |row, col, cand| cand.@data.@(row * 9 + col);
 
-    get_col: I64 -> Occupy -> BitVec;
-    get_col = |col, oc| oc.@(col + 9);
+    mod: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod = |row, col, f, cand| (
+        let cand = cand.mod_data(mod(row * 9 + col, f));
+        //eval debug_eprintln((row, col, cand.@data.@(row * 9 + col).to_string_hex).format("mod: ({}, {}) -> {}"));
+        cand
+    );
 
-    mod_col: I64 -> (BitVec -> BitVec) -> Occupy -> Occupy;
-    mod_col = |col, f, oc| oc.mod(col + 9, f);
+    mod_row: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod_row = |row, f, cand| Iterator::range(0, 9).fold(
+        cand, |cand, col| cand.mod(row, col, f)
+    );
 
-    get_diag: I64 -> Occupy -> BitVec;
-    get_diag = |diag, oc| oc.@(diag + 18);
+    mod_col: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod_col = |col, f, cand| Iterator::range(0, 9).fold(
+        cand, |cand, row| cand.mod(row, col, f)
+    );
 
-    mod_diag: I64 -> (BitVec -> BitVec) -> Occupy -> Occupy;
-    mod_diag = |diag, f, oc| oc.mod(diag + 18, f);
+    mod_block: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod_block = |row, col, f, cand| (
+        let top = row / 3 * 3;
+        let left = col / 3 * 3;
+        Iterator::range(0, 9).fold(
+            cand, |cand, i| cand.mod(top + i / 3, left + i % 3, f)
+        )
+    );
 
-    get_block: I64 -> Occupy -> BitVec;
-    get_block = |block, oc| oc.@(block + 20);
+    mod_all: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod_all = |row, col, f, cand| (
+        cand.mod_row(row, f)
+        .mod_col(col, f)
+        .mod_block(row, col, f)
+    );
 
-    mod_block: I64 -> (BitVec -> BitVec) -> Occupy -> Occupy;
-    mod_block = |block, f, oc| oc.mod(block + 20, f);
+    init_by_grid: Grid -> Candidates;
+    init_by_grid = |grid| (
+        let cand = Candidates::full;
+        Iterator::range(0, 9).fold(cand, |cand, row|
+            Iterator::range(0, 9).fold(cand, |cand, col|
+                let num = grid.get_num(row, col);
+                if num.is_zero { cand };
+                //eval debug_println((row, col, num).format("init_by_grid: ({},{}) = {}"));
+                cand.mod_all(row, col, set_bit(num.to_I64, false))
+            )
+        )
+    );
+
+    // returns (num_cand, row, col)
+    find_best_cell: Grid -> Candidates -> Option (I64, I64, I64);
+    find_best_cell = |grid, cand| (
+        let best: Option (I64, I64, I64) = none();
+        Iterator::range(0, 9).fold(best, |best, row|
+            Iterator::range(0, 9).fold(best, |best, col|
+                let num = grid.get_num(row, col);
+                if !num.is_zero { best };
+                let vec = cand.get(row, col);
+                let num_cand = vec.count_ones;
+                let best = if best.is_none || best.as_some.@0 > num_cand {
+                    some $ (num_cand, row, col)
+                } else { best };
+                best
+            )
+        )
+    );
 }
 
 
 type Board = unbox struct {
     grid: Grid,
-    occupy: Occupy,    
-    size: I64                 // occupied number count
+    candidates: Candidates,
+    nonzero_count: I64                 // occupied number count
 };
 
 namespace Board {
     empty: Board;
     empty = Board {
         grid: Grid::empty,
-        occupy: Occupy::empty,
-        size: 0
+        candidates: Candidates::full,
+        nonzero_count: 0
     };
+
+    init_by_grid: Grid -> Board;
+    init_by_grid = |grid| (
+        let candidates = Candidates::init_by_grid(grid);
+        let nonzero_count = grid.get_nonzero_count;
+        Board {
+            grid: grid,
+            candidates: candidates,
+            nonzero_count: nonzero_count
+        }
+    );
+
+    place_number: I64 -> I64 -> I64 -> Board -> Board;
+    place_number = |row, col, num, board| (
+        eval assert(|_| "number is already set", board.@grid.get_num(row, col).is_zero);
+        eval debug_println([board.@nonzero_count, num, row, col].format("{}: place {} at ({}, {})"));
+        let board = board.mod_grid(set_num(row, col, num.to_U8));
+        let board = board.mod_candidates(mod_all(row, col, set_bit(num, false)));
+        let board = board.mod_nonzero_count(add(1));
+        board
+    );
+
+    solve: Board -> Array Board;
+    solve = |board| (
+        let solutions = [];
+        let stack = [board];
+        _solve_inner(stack, solutions)
+    );
+
+    _solve_inner: Array Board -> Array Board -> Array Board;
+    _solve_inner = |stack, solutions| (
+        if stack.is_empty { solutions };
+        let board = stack.get_last.as_some;
+        let stack = stack.pop_back;
+        eval debug_println([board.@nonzero_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
+        if board.@nonzero_count >= 9 * 9 {
+            // success
+            eval debug_println("found a solution");
+            let solutions = solutions.push_back(board);
+            _solve_inner(stack, solutions)
+        };
+        let best = board.@candidates.find_best_cell(board.@grid);
+        if best.is_none {
+            // failed
+            eval debug_println([board.@nonzero_count].format("{}: no candidates"));
+            _solve_inner(stack, solutions)
+        };
+        let (num_cand, row, col) = best.as_some;
+        if num_cand == 0 {
+            // failed
+            eval debug_println([board.@nonzero_count, row, col].format("{}: no candidates at ({}, {})"));
+            _solve_inner(stack, solutions)
+        };
+
+        let vec = board.@candidates.get(row, col);
+        eval debug_println((board.@nonzero_count, num_cand, (row, col), vec).format("{}: find {} candidates at {} = {}"));
+        let stack = Iterator::range(0, 9).fold(stack, |stack, num|
+            let num = num + 1;
+            if vec.get_bit(num) == false { stack };
+            let stack = stack.push_back(board.place_number(row, col, num));
+            stack
+        );
+        _solve_inner(stack, solutions)
+    );
+}
+
+impl Board: ToString {
+    to_string = |board| board.@grid.to_string;
 }
 
 test_grid1: String;
@@ -153,7 +283,16 @@ test_grid1 = "
 test1: IO ();
 test1 = do {
     let grid: Grid = *from_string(test_grid1).from_result;
-    println(grid.to_string).lift
+    //println(grid.to_string).lift
+    let board = Board::init_by_grid(grid);
+    let solutions = board.solve;
+    if solutions.is_empty {
+        println("no solutions").lift
+    };
+    solutions.to_iter.fold_m(
+        (), |_, board|
+        println("---------\nSolution:\n" + board.to_string).lift
+    )
 }.try(eprintln);
 
 main: IO ();

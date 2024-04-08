@@ -11,35 +11,27 @@ debug_lazy = |lazy_str| (
     else { () }
 );
 
-type Digit = U8;   // 1..9, 0=empty
-
-namespace Digit {
-    empty: Digit;
-    empty = 0_U8;
-
-    is_empty: Digit -> Bool;
-    is_empty = |digit| digit == Digit::empty;
-}
+type Digit = U8;   // 1..9
 
 type Board = unbox struct {
-    data: Array Digit
+    data: Array (Option Digit)
 };
 
 namespace Board {
     empty: Board;
     empty = Board {
-        data: Array::fill(9 * 9, Digit::empty)
+        data: Array::fill(9 * 9, none())
     };
 
-    get_digit: I64 -> I64 -> Board -> Digit;
+    get_digit: I64 -> I64 -> Board -> Option Digit;
     get_digit = |row, col, board| board.@data.@(row * 9 + col);
 
-    set_digit: I64 -> I64 -> Digit -> Board -> Board;
+    set_digit: I64 -> I64 -> Option Digit -> Board -> Board;
     set_digit = |row, col, digit, board| board.mod_data(set(row * 9 + col, digit));
 
     get_digit_count: Board -> I64;
     get_digit_count = |board| (
-        board.@data.to_iter.map(|digit| if !digit.is_empty { 1 } else { 0 })
+        board.@data.to_iter.map(|digit| if digit.is_some { 1 } else { 0 })
         .fold(0, add)
     );
 }
@@ -65,7 +57,7 @@ impl Board: FromString {
             if line.get_size != 9 { err $ "invalid col size" };
             Iterator::range(0, 9).fold_m(board, |board, col|
                 let c = line.get_bytes.@(col);
-                let digit = if '1' <= c && c <= '9' { (c - '1' + 1_U8) } else { Digit::empty };
+                let digit = if '1' <= c && c <= '9' { some(c - '1' + 1_U8) } else { none() };
                 let board = board.set_digit(row, col, digit);
                 pure $ board
             )
@@ -78,7 +70,7 @@ impl Board: ToString {
         Iterator::range(0, 9).map(|row|
             Iterator::range(0, 9).map(|col|
                 let digit = board.get_digit(row, col);
-                if digit == Digit::empty { '.' } else { digit - 1_U8 + '1' }
+                if digit.is_none { '.' } else { digit.as_some - 1_U8 + '1' }
             ).to_array._unsafe_to_string
         ).join("\n")
     );
@@ -162,8 +154,8 @@ namespace Candidates {
         Iterator::range(0, 9).fold(cand, |cand, row|
             Iterator::range(0, 9).fold(cand, |cand, col|
                 let digit = board.get_digit(row, col);
-                if digit.is_empty { cand };
-                cand.mod_all(row, col, set_bit(digit.to_I64, false))
+                if digit.is_none { cand };
+                cand.mod_all(row, col, set_bit(digit.as_some.to_I64, false))
             )
         )
     );
@@ -175,7 +167,7 @@ namespace Candidates {
         Iterator::range(0, 9).fold(best, |best, row|
             Iterator::range(0, 9).fold(best, |best, col|
                 let digit = board.get_digit(row, col);
-                if !digit.is_empty { best };
+                if digit.is_some { best };
                 let vec = cand.get(row, col);
                 let num_cand = vec.count_ones;
                 let best = if best.is_none || best.as_some.@0 > num_cand {
@@ -215,9 +207,9 @@ namespace App {
 
     place_digit: I64 -> I64 -> I64 -> App -> App;
     place_digit = |row, col, digit, app| (
-        eval assert(|_| "digit is already set", app.@board.get_digit(row, col).is_empty);
+        eval assert(|_| "digit is already set", app.@board.get_digit(row, col).is_none);
         eval debug_lazy(|_| [app.@digit_count, digit, row, col].format("{}: place {} at ({}, {})"));
-        let app = app.mod_board(set_digit(row, col, digit.to_U8));
+        let app = app.mod_board(set_digit(row, col, some(digit.to_U8)));
         let app = app.mod_candidates(mod_all(row, col, set_bit(digit, false)));
         let app = app.mod_digit_count(add(1));
         app

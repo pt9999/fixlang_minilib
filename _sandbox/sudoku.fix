@@ -5,48 +5,54 @@ import Debug;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
-type Number = U8;   // 1..9, 0=empty
+debug_lazy: Lazy String -> ();
+debug_lazy = |lazy_str| (
+    if false { debug_println(lazy_str()) }
+    else { () }
+);
 
-namespace Number {
-    empty: Number;
+type Digit = U8;   // 1..9, 0=empty
+
+namespace Digit {
+    empty: Digit;
     empty = 0_U8;
 
-    is_zero: Number -> Bool;
-    is_zero = |num| num == Number::empty;
+    is_empty: Digit -> Bool;
+    is_empty = |digit| digit == Digit::empty;
 }
 
-type Grid = unbox struct {
-    data: Array Number
+type Board = unbox struct {
+    data: Array Digit
 };
 
-namespace Grid {
-    empty: Grid;
-    empty = Grid {
-        data: Array::fill(9 * 9, Number::empty)
+namespace Board {
+    empty: Board;
+    empty = Board {
+        data: Array::fill(9 * 9, Digit::empty)
     };
 
-    get_num: I64 -> I64 -> Grid -> Number;
-    get_num = |row, col, grid| grid.@data.@(row * 9 + col);
+    get_digit: I64 -> I64 -> Board -> Digit;
+    get_digit = |row, col, board| board.@data.@(row * 9 + col);
 
-    set_num: I64 -> I64 -> Number -> Grid -> Grid;
-    set_num = |row, col, num, grid| grid.mod_data(set(row * 9 + col, num));
+    set_digit: I64 -> I64 -> Digit -> Board -> Board;
+    set_digit = |row, col, digit, board| board.mod_data(set(row * 9 + col, digit));
 
-    get_nonzero_count: Grid -> I64;
-    get_nonzero_count = |grid| (
-        grid.@data.to_iter.map(|num| if !num.is_zero { 1 } else { 0 })
+    get_digit_count: Board -> I64;
+    get_digit_count = |board| (
+        board.@data.to_iter.map(|digit| if !digit.is_empty { 1 } else { 0 })
         .fold(0, add)
     );
 }
 
-// Read a grid from a string. The format is like this:
+// Read a board from a string. The format is like this:
 // ```
 // 1..2..3..
 // .4...5..6
 // ..7.8..9.
 // ```
-impl Grid: FromString {
+impl Board: FromString {
     from_string = |lines| (
-        let grid = Grid::empty;
+        let board = Board::empty;
         let filter_chars = |f, str| (
             str.get_bytes.pop_back.to_iter.filter(f).to_array._unsafe_to_string
         );
@@ -54,25 +60,25 @@ impl Grid: FromString {
             filter_chars(|c| ('1' <= c && c <= '9') || c == '.')
         ).filter(|s| s != "").to_array;
         if lines.get_size != 9 { err $ "invalid row size" };
-        Iterator::range(0, 9).fold_m(grid, |grid, row|
+        Iterator::range(0, 9).fold_m(board, |board, row|
             let line = lines.@(row);
             if line.get_size != 9 { err $ "invalid col size" };
-            Iterator::range(0, 9).fold_m(grid, |grid, col|
+            Iterator::range(0, 9).fold_m(board, |board, col|
                 let c = line.get_bytes.@(col);
-                let num = if '1' <= c && c <= '9' { (c - '1' + 1_U8) } else { Number::empty };
-                let grid = grid.set_num(row, col, num);
-                pure $ grid
+                let digit = if '1' <= c && c <= '9' { (c - '1' + 1_U8) } else { Digit::empty };
+                let board = board.set_digit(row, col, digit);
+                pure $ board
             )
         )
     );
 }
 
-impl Grid: ToString {
-    to_string = |grid| (
+impl Board: ToString {
+    to_string = |board| (
         Iterator::range(0, 9).map(|row|
             Iterator::range(0, 9).map(|col|
-                let num = grid.get_num(row, col);
-                if num == Number::empty { '.' } else { num - 1_U8 + '1' }
+                let digit = board.get_digit(row, col);
+                if digit == Digit::empty { '.' } else { digit - 1_U8 + '1' }
             ).to_array._unsafe_to_string
         ).join("\n")
     );
@@ -121,7 +127,6 @@ namespace Candidates {
     mod: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod = |row, col, f, cand| (
         let cand = cand.mod_data(mod(row * 9 + col, f));
-        //eval debug_eprintln((row, col, cand.@data.@(row * 9 + col).to_string_hex).format("mod: ({}, {}) -> {}"));
         cand
     );
 
@@ -151,27 +156,26 @@ namespace Candidates {
         .mod_block(row, col, f)
     );
 
-    init_by_grid: Grid -> Candidates;
-    init_by_grid = |grid| (
+    init_by_board: Board -> Candidates;
+    init_by_board = |board| (
         let cand = Candidates::full;
         Iterator::range(0, 9).fold(cand, |cand, row|
             Iterator::range(0, 9).fold(cand, |cand, col|
-                let num = grid.get_num(row, col);
-                if num.is_zero { cand };
-                //eval debug_println((row, col, num).format("init_by_grid: ({},{}) = {}"));
-                cand.mod_all(row, col, set_bit(num.to_I64, false))
+                let digit = board.get_digit(row, col);
+                if digit.is_empty { cand };
+                cand.mod_all(row, col, set_bit(digit.to_I64, false))
             )
         )
     );
 
     // returns (num_cand, row, col)
-    find_best_cell: Grid -> Candidates -> Option (I64, I64, I64);
-    find_best_cell = |grid, cand| (
+    find_best_cell: Board -> Candidates -> Option (I64, I64, I64);
+    find_best_cell = |board, cand| (
         let best: Option (I64, I64, I64) = none();
         Iterator::range(0, 9).fold(best, |best, row|
             Iterator::range(0, 9).fold(best, |best, col|
-                let num = grid.get_num(row, col);
-                if !num.is_zero { best };
+                let digit = board.get_digit(row, col);
+                if !digit.is_empty { best };
                 let vec = cand.get(row, col);
                 let num_cand = vec.count_ones;
                 let best = if best.is_none || best.as_some.@0 > num_cand {
@@ -184,91 +188,91 @@ namespace Candidates {
 }
 
 
-type Board = unbox struct {
-    grid: Grid,
+type App = unbox struct {
+    board: Board,
     candidates: Candidates,
-    nonzero_count: I64                 // occupied number count
+    digit_count: I64                 // placed digit count
 };
 
-namespace Board {
-    empty: Board;
-    empty = Board {
-        grid: Grid::empty,
+namespace App {
+    empty: App;
+    empty = App {
+        board: Board::empty,
         candidates: Candidates::full,
-        nonzero_count: 0
+        digit_count: 0
     };
 
-    init_by_grid: Grid -> Board;
-    init_by_grid = |grid| (
-        let candidates = Candidates::init_by_grid(grid);
-        let nonzero_count = grid.get_nonzero_count;
-        Board {
-            grid: grid,
+    init_by_board: Board -> App;
+    init_by_board = |board| (
+        let candidates = Candidates::init_by_board(board);
+        let digit_count = board.get_digit_count;
+        App {
+            board: board,
             candidates: candidates,
-            nonzero_count: nonzero_count
+            digit_count: digit_count
         }
     );
 
-    place_number: I64 -> I64 -> I64 -> Board -> Board;
-    place_number = |row, col, num, board| (
-        eval assert(|_| "number is already set", board.@grid.get_num(row, col).is_zero);
-        eval debug_println([board.@nonzero_count, num, row, col].format("{}: place {} at ({}, {})"));
-        let board = board.mod_grid(set_num(row, col, num.to_U8));
-        let board = board.mod_candidates(mod_all(row, col, set_bit(num, false)));
-        let board = board.mod_nonzero_count(add(1));
-        board
+    place_digit: I64 -> I64 -> I64 -> App -> App;
+    place_digit = |row, col, digit, app| (
+        eval assert(|_| "digit is already set", app.@board.get_digit(row, col).is_empty);
+        eval debug_lazy(|_| [app.@digit_count, digit, row, col].format("{}: place {} at ({}, {})"));
+        let app = app.mod_board(set_digit(row, col, digit.to_U8));
+        let app = app.mod_candidates(mod_all(row, col, set_bit(digit, false)));
+        let app = app.mod_digit_count(add(1));
+        app
     );
 
-    solve: Board -> Array Board;
-    solve = |board| (
+    solve: App -> Array App;
+    solve = |app| (
         let solutions = [];
-        let stack = [board];
+        let stack = [app];
         _solve_inner(stack, solutions)
     );
 
-    _solve_inner: Array Board -> Array Board -> Array Board;
+    _solve_inner: Array App -> Array App -> Array App;
     _solve_inner = |stack, solutions| (
         if stack.is_empty { solutions };
-        let board = stack.get_last.as_some;
+        let app = stack.get_last.as_some;
         let stack = stack.pop_back;
-        eval debug_println([board.@nonzero_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
-        if board.@nonzero_count >= 9 * 9 {
+        eval debug_lazy(|_| [app.@digit_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
+        if app.@digit_count >= 9 * 9 {
             // success
-            eval debug_println("found a solution");
-            let solutions = solutions.push_back(board);
+            eval debug_lazy(|_| "found a solution");
+            let solutions = solutions.push_back(app);
             _solve_inner(stack, solutions)
         };
-        let best = board.@candidates.find_best_cell(board.@grid);
+        let best = app.@candidates.find_best_cell(app.@board);
         if best.is_none {
             // failed
-            eval debug_println([board.@nonzero_count].format("{}: no candidates"));
+            eval debug_lazy(|_| [app.@digit_count].format("{}: no candidates"));
             _solve_inner(stack, solutions)
         };
         let (num_cand, row, col) = best.as_some;
         if num_cand == 0 {
             // failed
-            eval debug_println([board.@nonzero_count, row, col].format("{}: no candidates at ({}, {})"));
+            eval debug_lazy(|_| [app.@digit_count, row, col].format("{}: no candidates at ({}, {})"));
             _solve_inner(stack, solutions)
         };
 
-        let vec = board.@candidates.get(row, col);
-        eval debug_println((board.@nonzero_count, num_cand, (row, col), vec).format("{}: find {} candidates at {} = {}"));
-        let stack = Iterator::range(0, 9).fold(stack, |stack, num|
-            let num = num + 1;
-            if vec.get_bit(num) == false { stack };
-            let stack = stack.push_back(board.place_number(row, col, num));
+        let vec = app.@candidates.get(row, col);
+        eval debug_lazy(|_| (app.@digit_count, num_cand, (row, col), vec).format("{}: find {} candidates at {} = {}"));
+        let stack = Iterator::range(0, 9).fold(stack, |stack, digit|
+            let digit = digit + 1;
+            if vec.get_bit(digit) == false { stack };
+            let stack = stack.push_back(app.place_digit(row, col, digit));
             stack
         );
         _solve_inner(stack, solutions)
     );
 }
 
-impl Board: ToString {
-    to_string = |board| board.@grid.to_string;
+impl App: ToString {
+    to_string = |app| app.@board.to_string;
 }
 
-test_grid1: String;
-test_grid1 = "
+test_board1: String;
+test_board1 = "
     53..7....
     6..195...
     .98....6.
@@ -282,16 +286,14 @@ test_grid1 = "
 
 test1: IO ();
 test1 = do {
-    let grid: Grid = *from_string(test_grid1).from_result;
-    //println(grid.to_string).lift
-    let board = Board::init_by_grid(grid);
-    let solutions = board.solve;
-    if solutions.is_empty {
-        println("no solutions").lift
-    };
+    let board: Board = *from_string(test_board1).from_result;
+    //println(board.to_string).lift
+    let app = App::init_by_board(board);
+    let solutions = app.solve;
+    let _ = *println([solutions.get_size].format("Found {} solutions:")).lift;
     solutions.to_iter.fold_m(
-        (), |_, board|
-        println("---------\nSolution:\n" + board.to_string).lift
+        (), |_, app|
+        println("\n" + app.to_string).lift
     )
 }.try(eprintln);
 

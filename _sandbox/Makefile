@@ -65,7 +65,7 @@ sudoku:
 	../bin/fixautolink run -L ../lib -L . -f sudoku.fix -O separated
 
 build_sudoku:
-	../bin/fixautolink build -L ../lib -L . -f sudoku.fix -g -O minimum
+	../bin/fixautolink build -L ../lib -L . -f sudoku.fix -O minimum
 
 clean:
 	rm -f *.out

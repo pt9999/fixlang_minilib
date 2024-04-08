@@ -5,7 +5,8 @@ import Debug;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
-type Number = U8;   // 1..9, 0=empty
+// 数字 (1 から 9)  空の場合は 0
+type Number = U8;
 
 namespace Number {
     empty: Number;
@@ -15,6 +16,7 @@ namespace Number {
     is_zero = |num| num == Number::empty;
 }
 
+// グリッド (9 x 9 マス)
 type Grid = unbox struct {
     data: Array Number
 };
@@ -25,12 +27,15 @@ namespace Grid {
         data: Array::fill(9 * 9, Number::empty)
     };
 
+    // 指定したマスの数字を取得する
     get_num: I64 -> I64 -> Grid -> Number;
     get_num = |row, col, grid| grid.@data.@(row * 9 + col);
 
+    // 指定したマスの数字を設定する
     set_num: I64 -> I64 -> Number -> Grid -> Grid;
     set_num = |row, col, num, grid| grid.mod_data(set(row * 9 + col, num));
 
+    // ゼロでないマスの数を数える
     get_nonzero_count: Grid -> I64;
     get_nonzero_count = |grid| (
         grid.@data.to_iter.map(|num| if !num.is_zero { 1 } else { 0 })
@@ -78,6 +83,9 @@ impl Grid: ToString {
     );
 }
 
+// 特定のマスに数字を置けるかどうかを表わすビットベクトル。
+// bit i の意味は次のいずれか。(i = 1..9)
+// 1: 配置可能、0: 配置不可
 type BitVec = U16;
 namespace BitVec {
     full: BitVec;
@@ -95,6 +103,7 @@ namespace BitVec {
         else { vec.bit_and(U16::maximum - 1_U16.shift_left(i.to_U16)) } 
     );
 
+    // 1 (配置可能) の数を数える
     count_ones: BitVec -> I64;
     count_ones = |vec| (
         let vec = vec.bit_and(0xaaaa_U16).shift_right(1_U16) + vec.bit_and(0x5555_U16);
@@ -105,6 +114,7 @@ namespace BitVec {
     );
 }
 
+// 9 x 9 マスの配置可能候補を管理する
 type Candidates = unbox struct {
     data: Array BitVec  // 9 x 9
 };
@@ -125,16 +135,19 @@ namespace Candidates {
         cand
     );
 
+    // 指定した行全体の配置可能候補を更新する
     mod_row: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_row = |row, f, cand| Iterator::range(0, 9).fold(
         cand, |cand, col| cand.mod(row, col, f)
     );
 
+    // 指定した列全体の配置可能候補を更新する
     mod_col: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_col = |col, f, cand| Iterator::range(0, 9).fold(
         cand, |cand, row| cand.mod(row, col, f)
     );
 
+    // 指定したマスを含むブロックの配置可能候補を更新する
     mod_block: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_block = |row, col, f, cand| (
         let top = row / 3 * 3;
@@ -144,6 +157,7 @@ namespace Candidates {
         )
     );
 
+    // 指定したマスを含む行、列、ブロックの配置可能候補を更新する
     mod_all: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_all = |row, col, f, cand| (
         cand.mod_row(row, f)
@@ -151,6 +165,7 @@ namespace Candidates {
         .mod_block(row, col, f)
     );
 
+    // グリッドをもとに配置可能候補を初期化する
     init_by_grid: Grid -> Candidates;
     init_by_grid = |grid| (
         let cand = Candidates::full;
@@ -164,7 +179,10 @@ namespace Candidates {
         )
     );
 
-    // returns (num_cand, row, col)
+    // まだ配置されていないマスのうち、配置可能数が最も少ないマスを求める。
+    // 配置可能数は0の場合もある(失敗を意味する)
+    // (配置可能数, 行, 列) が返る。
+    // 全てのマスに配置済のときは none()が返る
     find_best_cell: Grid -> Candidates -> Option (I64, I64, I64);
     find_best_cell = |grid, cand| (
         let best: Option (I64, I64, I64) = none();

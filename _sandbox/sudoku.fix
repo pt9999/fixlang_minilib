@@ -16,17 +16,25 @@
 module Main;
 
 import Debug;
+import Random;
 
+import Minilib.Math.RandomEx;
 import Minilib.Text.StringEx;
 
 // ------------------------------------------------------------
-// ヘルパー関数
+// ヘルパー定義
 // ------------------------------------------------------------
 
 // デバッグメッセージを出力する
 debug_lazy: Lazy String -> ();
 debug_lazy = |lazy_str| (
     if false { debug_println(lazy_str()) }
+    else { () }
+);
+
+debug_lazy2: Lazy String -> ();
+debug_lazy2 = |lazy_str| (
+    if true { debug_println(lazy_str()) }
     else { () }
 );
 
@@ -147,6 +155,12 @@ namespace BitVec {
         let vec = vec.bit_and(0xff00_U16).shift_right(8_U16) + vec.bit_and(0x00ff_U16);
         vec.to_I64
     );
+
+    // 配置可能な数字のイテレータを返す。
+    to_iter: BitVec -> Iterator I64;
+    to_iter = |vec| (
+        Iterator::range(1, 9 + 1).filter(|digit| vec.get_bit(digit))
+    );
 }
 
 // 9 x 9 マスの配置可能候補を管理する
@@ -249,6 +263,14 @@ type BoardState = unbox struct {
 };
 
 namespace BoardState {
+    // 空の盤面状態
+    empty: BoardState;
+    empty = BoardState {
+        board: Board::empty,
+        candidates: Candidates::full,
+        digit_count: 0
+    };
+
     // 問題を読み込む。
     load_problem: String -> Result ErrMsg BoardState;
     load_problem = |problem| (
@@ -330,6 +352,73 @@ namespace Solver {
     );
 }
 
+type Generator = unbox struct {
+    cells_to_place: Iterator (I64, I64),
+    stack: Array BoardState,
+    problems: Array BoardState,
+    random: Random
+};
+
+namespace Generator {
+    generate_problem: I64 -> Random -> Result ErrMsg (BoardState, Random);
+    generate_problem = |num_digits_to_place, random| (
+        let (cells, random) = random._generate_cells_to_place(num_digits_to_place);
+        let gen = Generator {
+            cells_to_place: cells,
+            stack: [ BoardState::empty ],
+            problems: [],
+            random: random
+        };
+        let gen = gen._generate_inner;
+        if gen.@problems.is_empty {
+            err $ "Could not generate problem"
+        };
+        ok $ (gen.@problems.@(0), gen.@random)
+    );
+
+    _generate_cells_to_place: I64 -> Random -> (Iterator (I64, I64), Random);
+    _generate_cells_to_place = |num_digits, random| (
+        eval assert(|_| "num_digits out of range", 1 <= num_digits && num_digits <= 9 * 9);
+        let cells = do {
+            pure $ (*Iterator::range(0, 9), *Iterator::range(0, 9))
+        }.to_array;
+        let (cells, random) = random.shuffle(cells);
+        let cells = cells.to_iter.take(num_digits);
+        (cells, random)
+    );
+
+    _generate_inner: Generator -> Generator;
+    _generate_inner = |gen| (
+        if gen.@stack.is_empty { gen };
+        let state = gen.@stack.get_last.as_some;
+        let gen = gen.mod_stack(pop_back);
+        eval debug_lazy2(|_| [state.@digit_count, gen.@stack.get_size].format("{}: _generate_inner: stack size={}"));
+        if gen.@cells_to_place.is_empty {
+            let solutions = Solver::solve(state);
+            eval debug_lazy2(|_| [state.@digit_count, solutions.get_size].format("{}: solving: solution count={}"));
+            if solutions.get_size == 1 {
+                // found problem
+                let gen = gen.mod_problems(push_back(state));
+                gen
+            };
+            // not found problem
+            gen._generate_inner
+        };
+        let ((row, col), next) = gen.@cells_to_place.advance.as_some;
+        let gen = gen.set_cells_to_place(next);
+        let bitvec = state.@candidates.get(row, col);
+        let cands = bitvec.to_iter.to_array;
+        let (cands, random) = gen.@random.shuffle(cands);
+        let gen = gen.set_random(random);
+        eval debug_lazy2(|_| (state.@digit_count, cands.get_size, (row, col)).format("{}: find {} candidates at {}"));
+        let stack = cands.to_iter.fold(gen.@stack, |stack, digit|
+            stack.push_back(state.place_digit(row, col, digit))
+        );
+        let gen = gen.set_stack(stack);
+        gen._generate_inner
+    );
+}
+
 // ------------------------------------------------------------
 //  テストケース
 // ------------------------------------------------------------
@@ -358,5 +447,21 @@ test1 = do {
     )
 }.try(eprintln);
 
+test2: IO ();
+test2 = do {
+    let _ = *pure();
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(time.to_U64);
+    let num_digits_to_place = 60;
+    let (state, random) = *Generator::generate_problem(num_digits_to_place, random).from_result;
+    let _ = *println("Problem:\n" + state.to_string).lift;
+    let solutions = Solver::solve(state);
+    let _ = *println([solutions.get_size].format("Found {} solutions:")).lift;
+    solutions.to_iter.fold_m(
+        (), |_, state|
+        println("\n" + state.to_string).lift
+    )
+}.try(eprintln);
+
 main: IO ();
-main = test1;
+main = test2;

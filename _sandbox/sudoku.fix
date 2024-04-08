@@ -1,9 +1,27 @@
+// 数独の問題を解くプログラム。
+//
+// 数独の問題は以下のような9行9列の文字列として表現する。
+// 各マスは数字('1'から'9')または空き('.')とする。他の文字は無視される。
+// ```
+// 53..7....
+// 6..195...
+// .98....6.
+// 8...6....
+// 4..8.3..1
+// 7...2...6
+// .6....28.
+// ...419..5
+// ....8..79
+// ```
 module Main;
 
 import Debug;
 
 import Minilib.Text.StringEx;
-import Minilib.Text.Hex;
+
+// ------------------------------------------------------------
+// ヘルパー関数
+// ------------------------------------------------------------
 
 // デバッグメッセージを出力する
 debug_lazy: Lazy String -> ();
@@ -11,6 +29,20 @@ debug_lazy = |lazy_str| (
     if false { debug_println(lazy_str()) }
     else { () }
 );
+
+// バイト配列を文字列に変換する
+bytes_to_string: Array U8 -> String;
+bytes_to_string = |bytes| bytes.push_back(0_U8)._unsafe_from_c_str;
+
+// 文字列に含まれる文字のうち、指定した条件を満たす文字だけを残す
+filter_chars: (U8 -> Bool) -> String -> String;
+filter_chars = |f, str| (
+    str.get_bytes.pop_back.to_iter.filter(f).to_array.bytes_to_string
+);
+
+// ------------------------------------------------------------
+//  盤面の管理
+// ------------------------------------------------------------
 
 // 数字 (1 から 9)
 type Digit = U8;
@@ -41,69 +73,49 @@ namespace Board {
         board.@data.to_iter.map(|digit| if digit.is_some { 1 } else { 0 })
         .fold(0, add)
     );
-
-    rows: Iterator I64;
-    rows = Iterator::range(0, 9);
-
-    cols: Iterator I64;
-    cols = Iterator::range(0, 9);
-
-    rows_and_cols: Iterator (I64, I64);
-    rows_and_cols = do {
-        let row = *rows;
-        let col = *cols;
-        pure $ (row, col)
-    };
 }
 
-// 以下のような文字列から盤面を読み込む。
-// 文字列は9行9列で、数字('1'から'9')または空き('.')から構成される。他の文字は無視される。
-// ```
-// 53..7....
-// 6..195...
-// .98....6.
-// 8...6....
-// 4..8.3..1
-// 7...2...6
-// .6....28.
-// ...419..5
-// ....8..79
-// ```
+// 数独の問題を表す文字列から盤面を読み込む。
 impl Board: FromString {
-    from_string = |lines| (
+    from_string = |problem| (
         let board = Board::empty;
-        let filter_chars = |f, str| (
-            str.get_bytes.pop_back.to_iter.filter(f).to_array._unsafe_to_string
-        );
-        let lines = lines.split("\n").map(
+        // 問題を行に分割し、数字(1から9)と空き('.')以外の文字を除去する。空行も除去する。
+        let lines = problem.split("\n").map(
             filter_chars(|c| ('1' <= c && c <= '9') || c == '.')
         ).filter(|s| s != "").to_array;
+        // 9行9列であることを確認する。
         if lines.get_size != 9 { err $ "invalid row size" };
         let _ = *lines.to_iter.fold_m(
             (), |_, line|
             if line.get_size != 9 { err $ "invalid col size" };
             ok()
         );
-        rows_and_cols.fold_m(board, |board, (row, col)|
-            let line = lines.@(row);
-            let c = line.get_bytes.@(col);
-            let digit = if '1' <= c && c <= '9' { some(c - '1' + 1_U8) } else { none() };
-            let board = board.set_digit(row, col, digit);
-            pure $ board
+        Iterator::range(0, 9).fold_m(board, |board, row|
+            Iterator::range(0, 9).fold_m(board, |board, col|
+                let line = lines.@(row);
+                let c = line.get_bytes.@(col);
+                let digit = if '1' <= c && c <= '9' { some(c - '1' + 1_U8) } else { none() };
+                let board = board.set_digit(row, col, digit);
+                pure $ board
+            )
         )
     );
 }
 
 impl Board: ToString {
     to_string = |board| (
-        rows.map(|row|
-            cols.map(|col|
+        Iterator::range(0, 9).map(|row|
+            Iterator::range(0, 9).map(|col|
                 let digit = board.get_digit(row, col);
                 if digit.is_none { '.' } else { digit.as_some - 1_U8 + '1' }
-            ).to_array._unsafe_to_string
+            ).to_array.bytes_to_string
         ).join("\n")
     );
 }
+
+// ------------------------------------------------------------
+//  配置可能候補の管理
+// ------------------------------------------------------------
 
 // 特定のマスに数字を置けるかどうかを表わすビットベクトル。
 // bit i の意味は次のいずれか。(i = 1..9)
@@ -225,6 +237,10 @@ namespace Candidates {
     );
 }
 
+// ------------------------------------------------------------
+//  数独を解く
+// ------------------------------------------------------------
+
 // 盤面と配置可能候補の状態
 type BoardState = unbox struct {
     board: Board,
@@ -313,6 +329,10 @@ namespace Solver {
         _solve_inner(stack, solutions)
     );
 }
+
+// ------------------------------------------------------------
+//  テストケース
+// ------------------------------------------------------------
 
 problem1: String;
 problem1 = "

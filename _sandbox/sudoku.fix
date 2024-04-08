@@ -321,19 +321,21 @@ impl BoardState: ToString {
 
 namespace Solver {
     // 数独の問題を解く。
-    solve: BoardState -> Result ErrMsg (Array BoardState);
+    solve: BoardState -> Result ErrMsg (Array BoardState, I64);
     solve = |state| (
         let solutions = [];
         let stack = [state];
         _solve_inner(stack, 0, solutions)
     );
 
-    _solve_inner: Array BoardState -> I64 -> Array BoardState -> Result ErrMsg (Array BoardState);
+    _solve_inner: Array BoardState -> I64 -> Array BoardState -> Result ErrMsg (Array BoardState, I64);
     _solve_inner = |stack, step, solutions| (
         let step = step + 1;
         if step >= 100000 { err $ "too may steps" };
         if solutions.get_size >= 10 { err $ "too may solutions" };
-        if stack.is_empty { ok $ solutions };
+        if stack.is_empty {
+            ok $ (solutions, step)
+        };
         let state = stack.get_last.as_some;
         let stack = stack.pop_back;
         eval debug_lazy(|_| [state.@digit_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
@@ -401,10 +403,10 @@ namespace Generator {
             if gen.@step >= 100000 { break $ err $ "too many steps" };
             let state = gen.@state;
             let cells_to_place = gen.@num_digits_to_place - state.@digit_count;
-            eval debug_lazy2(|_| [state.@digit_count, cells_to_place].format(
-                "{}: _generate_loop: cells_to_place={}"));
+            //eval debug_lazy2(|_| [state.@digit_count, cells_to_place].format(
+            //    "{}: _generate_loop: cells_to_place={}"));
             if cells_to_place <= 0 {
-                eval debug_lazy2(|_| [state.@digit_count].format("{}: solving..."));
+                eval debug_lazy2(|_| [state.@digit_count, gen.@step].format("{}: trying problem solving: step={}"));
                 let res = Solver::solve(state);
                 if res.is_err {
                     eval debug_lazy2(|_| (state.@digit_count, res.as_err).format("{}: solving: err={}"));
@@ -412,7 +414,7 @@ namespace Generator {
                     let gen = gen.set_state(BoardState::empty); // restart
                     continue $ gen
                 };
-                let solutions = res.as_ok;
+                let (solutions, solve_step) = res.as_ok;
                 eval debug_lazy2(|_| [state.@digit_count, solutions.get_size].format("{}: solving: solution count={}"));
                 if solutions.get_size != 1 {
                     // not found solution or too many solutions
@@ -457,10 +459,10 @@ namespace Generator {
         let (bitvec, row, col) = empty_cells.@(i);
         let cands = bitvec.to_iter.to_array;
         eval assert (|_| "no cands", cands.get_size > 0);
-        eval debug_lazy2(|_| (state.@digit_count, (row, col), cands.get_size).format("{}: {} has {} cands"));
+        //eval debug_lazy2(|_| (state.@digit_count, (row, col), cands.get_size).format("{}: {} has {} cands"));
         let (i, random) = random.generate_I64_range(0, cands.get_size);
         let digit = cands.@(i);
-        eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
+        //eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
         let state = state.place_digit(row, col, digit);
         (ok $ state, random)
     );
@@ -470,7 +472,7 @@ namespace Generator {
 //  テストケース
 // ------------------------------------------------------------
 
-problem1: String;
+problem1: String;   // 54 steps
 problem1 = "
     53..7....
     6..195...
@@ -483,11 +485,37 @@ problem1 = "
     ....8..79
 ";
 
+problem2: String;   // 67 steps ... easy?
+problem2 = "
+..35...79
+..8...24.
+.15.....6
+26.....9.
+.5..8....
+..13.4...
+.........
+.4.16..5.
+..9....32
+";
+
+problem3: String;   // 799 steps ... hard?
+problem3 = "
+.5.7..1..
+....24...
+..2......
+3.......6
+.....8.1.
+19.3...7.
+.....5.21
+.7...18.3
+2.6.8.9..
+";
+
 test1: IO ();
 test1 = do {
     let state = *BoardState::load_problem(problem1).from_result;
-    let solutions = *Solver::solve(state).from_result;
-    let _ = *println([solutions.get_size].format("Found {} solutions:")).lift;
+    let (solutions, step) = *Solver::solve(state).from_result;
+    let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;
     solutions.to_iter.fold_m(
         (), |_, state|
         println("\n" + state.to_string).lift
@@ -497,14 +525,14 @@ test1 = do {
 test2: IO ();
 test2 = do {
     let _ = *pure();
-    //let time = CALL_C[I32 time(Ptr), nullptr];
-    let time = 123;
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    //let time = 12345;
     let random = Random::init_by_seed(time.to_U64);
-    let num_digits_to_place = 30;
+    let num_digits_to_place = 25;
     let (state, random) = *Generator::generate_problem(num_digits_to_place, random).from_result;
     let _ = *println("Problem:\n" + state.to_string).lift;
-    let solutions = *Solver::solve(state).from_result;
-    let _ = *println([solutions.get_size].format("Found {} solutions:")).lift;
+    let (solutions, step) = *Solver::solve(state).from_result;
+    let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;
     solutions.to_iter.fold_m(
         (), |_, state|
         println("\n" + state.to_string).lift

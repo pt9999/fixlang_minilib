@@ -395,10 +395,10 @@ namespace Generator {
 
     _generate_loop: Generator -> Result ErrMsg Generator;
     _generate_loop = |gen| (
-        loop_m(
+        loop(
             gen, |gen|
             let gen = gen.mod_step(add(1));
-            if gen.@step >= 100000 { err $ "too many steps" };
+            if gen.@step >= 100000 { break $ err $ "too many steps" };
             let state = gen.@state;
             let cells_to_place = gen.@num_digits_to_place - state.@digit_count;
             eval debug_lazy2(|_| [state.@digit_count, cells_to_place].format(
@@ -410,29 +410,29 @@ namespace Generator {
                     eval debug_lazy2(|_| (state.@digit_count, res.as_err).format("{}: solving: err={}"));
                     // not found solution
                     let gen = gen.set_state(BoardState::empty); // restart
-                    continue_m $ gen
+                    continue $ gen
                 };
                 let solutions = res.as_ok;
                 eval debug_lazy2(|_| [state.@digit_count, solutions.get_size].format("{}: solving: solution count={}"));
                 if solutions.get_size != 1 {
                     // not found solution or too many solutions
                     let gen = gen.set_state(BoardState::empty); // restart
-                    continue_m $ gen
+                    continue $ gen
                 };
                 // found problem with one solution
                 let gen = gen.set_problem(some(state));
-                break_m $ gen
+                break $ ok $ gen
             };
             let random = gen.@random;
             let (res, random) = random._place_random_digit(state);
             let gen = gen.set_random(random);
             if res.is_err {
                 let gen = gen.set_state(BoardState::empty); // restart
-                continue_m $ gen
+                continue $ gen
             };
             let state = res.as_ok;
             let gen = gen.set_state(state);
-            continue_m $ gen
+            continue $ gen
         )
     );
 
@@ -457,6 +457,7 @@ namespace Generator {
         let (bitvec, row, col) = empty_cells.@(i);
         let cands = bitvec.to_iter.to_array;
         eval assert (|_| "no cands", cands.get_size > 0);
+        eval debug_lazy2(|_| (state.@digit_count, (row, col), cands.get_size).format("{}: {} has {} cands"));
         let (i, random) = random.generate_I64_range(0, cands.get_size);
         let digit = cands.@(i);
         eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
@@ -499,7 +500,7 @@ test2 = do {
     //let time = CALL_C[I32 time(Ptr), nullptr];
     let time = 123;
     let random = Random::init_by_seed(time.to_U64);
-    let num_digits_to_place = 60;
+    let num_digits_to_place = 30;
     let (state, random) = *Generator::generate_problem(num_digits_to_place, random).from_result;
     let _ = *println("Problem:\n" + state.to_string).lift;
     let solutions = *Solver::solve(state).from_result;

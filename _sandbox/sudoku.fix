@@ -189,11 +189,11 @@ namespace Candidates {
         data: Array::fill(9 * 9, BitVec::full)
     };
 
-    // 指定したセルの配置可能候補を取得する
+    // 指定したマスの配置可能候補を取得する
     get_bitvec: I64 -> I64 -> Candidates -> BitVec;
     get_bitvec = |row, col, cand| cand.@data.@(row * 9 + col);
 
-    // 指定したセルの配置可能候補を更新する
+    // 指定したマスの配置可能候補を更新する
     mod_bitvec: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_bitvec = |row, col, f, cand| (
         let cand = cand.mod_data(mod(row * 9 + col, f));
@@ -243,24 +243,19 @@ namespace Candidates {
         )
     );
 
-    // まだ数値が配置されていないマスのうち、候補数が最も少ないマスを求める。
+    // 空のマスのうち、候補数が最も少ないマスを求める。
     // 成功時は `some(候補数, 行, 列)` が返る。
     // 候補数は0の場合もある。(そのマスにはどの数字も配置できないことを意味する)
-    // 全てのマスに数字が配置されているときは `none()` が返る。
+    // 空のマスがないときは `none()` が返る。
     find_best_cell: Board -> Candidates -> Option (I64, I64, I64);
     find_best_cell = |board, cand| (
         let best: Option (I64, I64, I64) = none();
-        Iterator::range(0, 9).fold(best, |best, row|
-            Iterator::range(0, 9).fold(best, |best, col|
-                let digit = board.get_digit(row, col);
-                if digit.is_some { best };
-                let bitvec = cand.get_bitvec(row, col);
-                let num_cand = bitvec.count_ones;
-                let best = if best.is_none || best.as_some.@0 > num_cand {
-                    some $ (num_cand, row, col)
-                } else { best };
-                best
-            )
+        board.get_empty_cells.fold(best, |best, (row, col)|
+            let bitvec = cand.get_bitvec(row, col);
+            let num_cand = bitvec.count_ones;
+            if best.is_none || best.as_some.@0 > num_cand {
+                some $ (num_cand, row, col)
+            } else { best }
         )
     );
 }
@@ -304,7 +299,7 @@ namespace BoardState {
         }
     );
 
-    // 指定したセルに数字を配置する。
+    // 指定したマスに数字を配置する。
     place_digit: I64 -> I64 -> I64 -> BoardState -> BoardState;
     place_digit = |row, col, digit, state| (
         eval assert(|_| "digit is already set", state.@board.get_digit(row, col).is_none);
@@ -329,6 +324,7 @@ namespace Solver {
         _solve_inner(stack, 0, solutions)
     );
 
+    // スタックから盤面状態を1つ取り出し、数字の配置を試みる。
     _solve_inner: Array BoardState -> I64 -> Array BoardState -> Result ErrMsg (Array BoardState, I64);
     _solve_inner = |stack, step, solutions| (
         let step = step + 1;
@@ -337,28 +333,35 @@ namespace Solver {
         if stack.is_empty {
             ok $ (solutions, step)
         };
+
+        //  スタックから盤面状態を1つ取り出す。
         let state = stack.get_last.as_some;
         let stack = stack.pop_back;
         eval debug_lazy(|_| [state.@digit_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
+
+        //  盤面に 9 x 9 個の数字をすべて配置したら解を記録する。
         if state.@digit_count >= 9 * 9 {
             // success
             eval debug_lazy(|_| "found a solution");
             let solutions = solutions.push_back(state);
             _solve_inner(stack, step, solutions)
         };
+
+        // 空のマスのうち、候補数が最も少ないマスを求める。
         let best = state.@candidates.find_best_cell(state.@board);
         if best.is_none {
-            // failed
+            // 空のマスがない
             eval debug_lazy(|_| [state.@digit_count].format("{}: no candidates"));
             _solve_inner(stack, step, solutions)
         };
         let (num_cand, row, col) = best.as_some;
         if num_cand == 0 {
-            // failed
+            // 候補数が0の場合、そのマスにはどの数字も配置できない。この場合は失敗と見なす。
             eval debug_lazy(|_| (state.@digit_count, row, col).format("{}: no candidates at ({}, {})"));
             _solve_inner(stack, step, solutions)
         };
 
+        //  候補の各々について、その数字を配置した盤面を生成し、スタックに積む。
         let bitvec = state.@candidates.get_bitvec(row, col);
         eval debug_lazy(|_| (state.@digit_count, num_cand, (row, col), bitvec).format("{}: find {} candidates at {} = {}"));
         let stack = Iterator::range(0, 9).fold(stack, |stack, digit|
@@ -371,7 +374,11 @@ namespace Solver {
     );
 }
 
-// 数独の問題を生成するための構造体。
+// ------------------------------------------------------------
+//  数独の問題を作成する
+// ------------------------------------------------------------
+
+// 問題作成器
 type Generator = unbox struct {
     max_retry: I64,                 //  問題作成の最大試行回数
     num_digits_to_place: I64,       //  数字を配置する数
@@ -380,11 +387,11 @@ type Generator = unbox struct {
 };
 
 namespace Generator {
-    //  Generator を構築する。
-    make: I64 -> Var Random -> Generator;
-    make = |num_digits_to_place, var_random| (
+    //  問題作成器を構築する。
+    make: I64 -> I64 -> Var Random -> Generator;
+    make = |max_retry, num_digits_to_place, var_random| (
         Generator {
-            max_retry: 1000,
+            max_retry: max_retry,
             num_digits_to_place: num_digits_to_place,
             var_random: var_random,
             retry: 0
@@ -400,13 +407,13 @@ namespace Generator {
             if gen.@retry > gen.@max_retry { throw $ "Max retry count reached" };
             let res = *gen._generate_problem.to_result.lift;
             if res.is_err {
-                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: Failed to generate a problem: err={}"));
+                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: 問題作成失敗: err={}"));
                 continue_m $ gen
             };
             let state = res.as_ok;
             let res = *gen._validate_solution(state).to_result.lift;
             if res.is_err {
-                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: Failed to validate a solution: err={}"));
+                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: 検証失敗: err={}"));
                 continue_m $ gen
             };
             break_m $ state
@@ -416,27 +423,26 @@ namespace Generator {
     // 数独の問題が唯一解を持つことを検証する。
     _validate_solution: BoardState -> Generator -> IOFail BoardState;
     _validate_solution = |state, gen| (
-        eval debug_lazy2(|_| [gen.@retry].format("{}: trying problem solving"));
+        eval debug_lazy2(|_| [gen.@retry].format("{}: 作成した問題を検証します"));
         let res = Solver::solve(state);
         if res.is_err {
-            eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: solving: err={}"));
             throw $ res.as_err
         };
         let (solutions, solve_step) = res.as_ok;
-        eval debug_lazy2(|_| [gen.@retry, solutions.get_size, solve_step].format("{}: solving: solution count={} step={}"));
+        eval debug_lazy2(|_| [gen.@retry, solutions.get_size, solve_step].format("{}: 検証結果: 解の数={} ステップ数={}"));
         if solutions.get_size == 0 {
-            throw $ "no solution"
+            throw $ "解なし"
         };
         if solutions.get_size > 1 {
-            throw $ "solution count is not 1"
+            throw $ "複数解あり"
         };
-        // found problem with one solution
         pure $ state
     );
 
     //  数独の問題を生成する。
     _generate_problem: Generator -> IOFail BoardState;
     _generate_problem = |gen| (
+        eval debug_lazy2(|_| [gen.@retry].format("{}: 問題を作成します"));
         loop_m(
             BoardState::empty, |state|
             //  数字の数が指定値を超えたらループを抜ける。
@@ -449,6 +455,8 @@ namespace Generator {
         )
     );
 
+    // var_random を用いて乱数を生成する。
+    // f は乱数を生成する関数。
     _with_random: (Random -> (a, Random)) -> Generator -> IOFail a;
     _with_random = |f, gen| (
         gen.@var_random.lock(|random|
@@ -458,28 +466,28 @@ namespace Generator {
         ).lift
     );
 
+    // 数字をランダムに配置する。
     _place_random_digit: BoardState -> Generator -> IOFail BoardState;
     _place_random_digit = |state, gen| (
-        eval assert(|_| "board is full", state.@digit_count < 9 * 9);
         let empty_cells = state.@board.get_empty_cells.to_array;
         if empty_cells.get_size == 0 {
-            throw $ "no empty cells"
+            throw $ "空のマスが存在しません"
         };
         if empty_cells.find_by(|(row, col)|
             state.@candidates.get_bitvec(row, col) == BitVec::empty
         ).is_some {
-            throw $ "cannot place any digit at some cell"
+            throw $ "数字を配置できないマスが存在します"
         };
 
         let i = *gen._with_random(generate_I64_range(0, empty_cells.get_size));
         let (row, col) = empty_cells.@(i);
         let bitvec = state.@candidates.get_bitvec(row, col);
         let digits = bitvec.to_iter.to_array;
-        eval assert (|_| "no candidate digits", digits.get_size > 0);
-        //eval debug_lazy2(|_| (state.@digit_count, (row, col), digits.get_size).format("{}: {} has {} candidate digits"));
+        eval assert (|_| "候補の数字がありません", digits.get_size > 0);
+        //eval debug_lazy2(|_| (gen.@retry, state.@digit_count, (row, col), digits.get_size).format("{}: {}: {} には {} 種類の数字を配置可能"));
         let i = *gen._with_random(generate_I64_range(0, digits.get_size));
         let digit = digits.@(i);
-        //eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
+        //eval debug_lazy2(|_| (gen.@retry, state.@digit_count, (row, col), digit).format("{}: {}: {} に {} を配置します"));
         let state = state.place_digit(row, col, digit);
         pure $ state
     );
@@ -546,12 +554,13 @@ test2 = do {
     //let time = 12345;
     let random = Random::init_by_seed(time.to_U64);
     let var_random = *Var::make(random).lift;
+    let max_retry = 1000;
     let num_digits_to_place = 25;
-    let gen = Generator::make(num_digits_to_place, var_random);
+    let gen = Generator::make(max_retry, num_digits_to_place, var_random);
     let state = *gen.generate_and_validate;
-    let _ = *println("Problem:\n" + state.to_string).lift;
+    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
     let (solutions, step) = *Solver::solve(state).from_result;
-    let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;
+    let _ = *println([solutions.get_size, step].format("{}個の解が見つかりました (ステップ数:{})")).lift;
     solutions.to_iter.fold_m(
         (), |_, state|
         println("\n" + state.to_string).lift

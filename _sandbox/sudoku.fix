@@ -449,27 +449,26 @@ namespace Generator {
     _place_random_digit: BoardState -> Generator -> IOFail (Option BoardState);
     _place_random_digit = |state, gen| (
         eval assert(|_| "board is full", state.@digit_count < 9 * 9);
-        let empty_cells = state.@board.get_empty_cells;
-        let empty_cells = empty_cells.map(|(row, col)|
-            let bitvec = state.@candidates.get_bitvec(row, col);
-            (bitvec, row, col)
-        );
-        let empty_cells = empty_cells.filter(|(bitvec, row, col)|
-            bitvec != BitVec::empty
-        );
-        let empty_cells = empty_cells.to_array;
+        let empty_cells = state.@board.get_empty_cells.to_array;
         if empty_cells.get_size == 0 {
-            eval debug_lazy2(|_| [state.@digit_count].format("{}: cannot place any digit"));
+            eval debug_lazy2(|_| [state.@digit_count].format("{}: no empty cells"));
+            pure $ none()
+        };
+        if empty_cells.find_by(|(row, col)|
+            state.@candidates.get_bitvec(row, col) == BitVec::empty
+        ).is_some {
+            eval debug_lazy2(|_| [state.@digit_count].format("{}: cannot place any digit at some cell"));
             pure $ none()
         };
 
         let i = *gen._with_random(generate_I64_range(0, empty_cells.get_size));
-        let (bitvec, row, col) = empty_cells.@(i);
-        let cands = bitvec.to_iter.to_array;
-        eval assert (|_| "no cands", cands.get_size > 0);
-        //eval debug_lazy2(|_| (state.@digit_count, (row, col), cands.get_size).format("{}: {} has {} cands"));
-        let i = *gen._with_random(generate_I64_range(0, cands.get_size));
-        let digit = cands.@(i);
+        let (row, col) = empty_cells.@(i);
+        let bitvec = state.@candidates.get_bitvec(row, col);
+        let digits = bitvec.to_iter.to_array;
+        eval assert (|_| "no candidate digits", digits.get_size > 0);
+        //eval debug_lazy2(|_| (state.@digit_count, (row, col), digits.get_size).format("{}: {} has {} candidate digits"));
+        let i = *gen._with_random(generate_I64_range(0, digits.get_size));
+        let digit = digits.@(i);
         //eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
         let state = state.place_digit(row, col, digit);
         pure $ some(state)

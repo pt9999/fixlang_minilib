@@ -17,6 +17,7 @@ module Main;
 
 import Debug;
 import Random;
+import AsyncTask;
 
 import Minilib.Math.RandomEx;
 import Minilib.Text.StringEx;
@@ -189,12 +190,12 @@ namespace Candidates {
     };
 
     // 指定したセルの配置可能候補を取得する
-    get: I64 -> I64 -> Candidates -> BitVec;
-    get = |row, col, cand| cand.@data.@(row * 9 + col);
+    get_bitvec: I64 -> I64 -> Candidates -> BitVec;
+    get_bitvec = |row, col, cand| cand.@data.@(row * 9 + col);
 
     // 指定したセルの配置可能候補を更新する
-    mod: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
-    mod = |row, col, f, cand| (
+    mod_bitvec: I64 -> I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
+    mod_bitvec = |row, col, f, cand| (
         let cand = cand.mod_data(mod(row * 9 + col, f));
         cand
     );
@@ -202,13 +203,13 @@ namespace Candidates {
     // 指定した行全体の配置可能候補を更新する
     mod_row: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_row = |row, f, cand| Iterator::range(0, 9).fold(
-        cand, |cand, col| cand.mod(row, col, f)
+        cand, |cand, col| cand.mod_bitvec(row, col, f)
     );
 
     // 指定した列全体の配置可能候補を更新する
     mod_col: I64 -> (BitVec -> BitVec) -> Candidates -> Candidates;
     mod_col = |col, f, cand| Iterator::range(0, 9).fold(
-        cand, |cand, row| cand.mod(row, col, f)
+        cand, |cand, row| cand.mod_bitvec(row, col, f)
     );
 
     // 指定したマスを含むブロックの配置可能候補を更新する
@@ -217,7 +218,7 @@ namespace Candidates {
         let top = row / 3 * 3;
         let left = col / 3 * 3;
         Iterator::range(0, 9).fold(
-            cand, |cand, i| cand.mod(top + i / 3, left + i % 3, f)
+            cand, |cand, i| cand.mod_bitvec(top + i / 3, left + i % 3, f)
         )
     );
 
@@ -253,7 +254,7 @@ namespace Candidates {
             Iterator::range(0, 9).fold(best, |best, col|
                 let digit = board.get_digit(row, col);
                 if digit.is_some { best };
-                let bitvec = cand.get(row, col);
+                let bitvec = cand.get_bitvec(row, col);
                 let num_cand = bitvec.count_ones;
                 let best = if best.is_none || best.as_some.@0 > num_cand {
                     some $ (num_cand, row, col)
@@ -358,7 +359,7 @@ namespace Solver {
             _solve_inner(stack, step, solutions)
         };
 
-        let bitvec = state.@candidates.get(row, col);
+        let bitvec = state.@candidates.get_bitvec(row, col);
         eval debug_lazy(|_| (state.@digit_count, num_cand, (row, col), bitvec).format("{}: find {} candidates at {} = {}"));
         let stack = Iterator::range(0, 9).fold(stack, |stack, digit|
             let digit = digit + 1;
@@ -374,33 +375,33 @@ type Generator = unbox struct {
     num_digits_to_place: I64,
     state: BoardState,
     problem: Option BoardState,
-    random: Random,
+    var_random: Var Random,
     step: I64
 };
 
 namespace Generator {
-    generate_problem: I64 -> Random -> Result ErrMsg (BoardState, Random);
-    generate_problem = |num_digits_to_place, random| (
+    generate_problem: I64 -> Var Random -> IOFail BoardState;
+    generate_problem = |num_digits_to_place, var_random| (
         let gen = Generator {
             num_digits_to_place: num_digits_to_place,
             state: BoardState::empty,
             problem: none(),
-            random: random,
+            var_random: var_random,
             step: 0
         };
         let gen = *gen._generate_loop;
         if gen.@problem.is_none {
-            err $ "Could not generate problem"
+            throw $ "Could not generate problem"
         };
-        ok $ (gen.@problem.as_some, gen.@random)
+        pure $ gen.@problem.as_some
     );
 
-    _generate_loop: Generator -> Result ErrMsg Generator;
+    _generate_loop: Generator -> IOFail Generator;
     _generate_loop = |gen| (
-        loop(
+        loop_m(
             gen, |gen|
             let gen = gen.mod_step(add(1));
-            if gen.@step >= 100000 { break $ err $ "too many steps" };
+            if gen.@step >= 100000 { throw $ "too many steps" };
             let state = gen.@state;
             let cells_to_place = gen.@num_digits_to_place - state.@digit_count;
             //eval debug_lazy2(|_| [state.@digit_count, cells_to_place].format(
@@ -412,38 +413,45 @@ namespace Generator {
                     eval debug_lazy2(|_| (state.@digit_count, res.as_err).format("{}: solving: err={}"));
                     // not found solution
                     let gen = gen.set_state(BoardState::empty); // restart
-                    continue $ gen
+                    continue_m $ gen
                 };
                 let (solutions, solve_step) = res.as_ok;
                 eval debug_lazy2(|_| [state.@digit_count, solutions.get_size].format("{}: solving: solution count={}"));
                 if solutions.get_size != 1 {
                     // not found solution or too many solutions
                     let gen = gen.set_state(BoardState::empty); // restart
-                    continue $ gen
+                    continue_m $ gen
                 };
                 // found problem with one solution
                 let gen = gen.set_problem(some(state));
-                break $ ok $ gen
+                break_m $ gen
             };
-            let random = gen.@random;
-            let (res, random) = random._place_random_digit(state);
-            let gen = gen.set_random(random);
-            if res.is_err {
+            let opt = *gen._place_random_digit(state);
+            if opt.is_none {
                 let gen = gen.set_state(BoardState::empty); // restart
-                continue $ gen
+                continue_m $ gen
             };
-            let state = res.as_ok;
+            let state = opt.as_some;
             let gen = gen.set_state(state);
-            continue $ gen
+            continue_m $ gen
         )
     );
 
-    _place_random_digit: BoardState -> Random -> (Result ErrMsg BoardState, Random);
-    _place_random_digit = |state, random| (
+    _with_random: (Random -> (a, Random)) -> Generator -> IOFail a;
+    _with_random = |f, gen| (
+        gen.@var_random.lock(|random|
+            let (a, random) = f(random);
+            let _ = *gen.@var_random.Var::set(random);
+            pure $ a
+        ).lift
+    );
+
+    _place_random_digit: BoardState -> Generator -> IOFail (Option BoardState);
+    _place_random_digit = |state, gen| (
         eval assert(|_| "board is full", state.@digit_count < 9 * 9);
         let empty_cells = state.@board.get_empty_cells;
         let empty_cells = empty_cells.map(|(row, col)|
-            let bitvec = state.@candidates.get(row, col);
+            let bitvec = state.@candidates.get_bitvec(row, col);
             (bitvec, row, col)
         );
         let empty_cells = empty_cells.filter(|(bitvec, row, col)|
@@ -452,19 +460,19 @@ namespace Generator {
         let empty_cells = empty_cells.to_array;
         if empty_cells.get_size == 0 {
             eval debug_lazy2(|_| [state.@digit_count].format("{}: cannot place any digit"));
-            (err $ "cannot place any digit", random)
+            pure $ none()
         };
 
-        let (i, random) = random.generate_I64_range(0, empty_cells.get_size);
+        let i = *gen._with_random(generate_I64_range(0, empty_cells.get_size));
         let (bitvec, row, col) = empty_cells.@(i);
         let cands = bitvec.to_iter.to_array;
         eval assert (|_| "no cands", cands.get_size > 0);
         //eval debug_lazy2(|_| (state.@digit_count, (row, col), cands.get_size).format("{}: {} has {} cands"));
-        let (i, random) = random.generate_I64_range(0, cands.get_size);
+        let i = *gen._with_random(generate_I64_range(0, cands.get_size));
         let digit = cands.@(i);
         //eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
         let state = state.place_digit(row, col, digit);
-        (ok $ state, random)
+        pure $ some(state)
     );
 }
 
@@ -528,8 +536,9 @@ test2 = do {
     let time = CALL_C[I32 time(Ptr), nullptr];
     //let time = 12345;
     let random = Random::init_by_seed(time.to_U64);
+    let var_random = *Var::make(random).lift;
     let num_digits_to_place = 25;
-    let (state, random) = *Generator::generate_problem(num_digits_to_place, random).from_result;
+    let state = *Generator::generate_problem(num_digits_to_place, var_random);
     let _ = *println("Problem:\n" + state.to_string).lift;
     let (solutions, step) = *Solver::solve(state).from_result;
     let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;

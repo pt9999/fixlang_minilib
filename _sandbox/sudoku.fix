@@ -371,69 +371,81 @@ namespace Solver {
     );
 }
 
+// 数独の問題を生成するための構造体。
 type Generator = unbox struct {
-    num_digits_to_place: I64,
-    state: BoardState,
-    problem: Option BoardState,
-    var_random: Var Random,
-    step: I64
+    max_retry: I64,                 //  問題作成の最大試行回数
+    num_digits_to_place: I64,       //  数字を配置する数
+    var_random: Var Random,         //  Random の変数
+    retry: I64                      //  現在の試行回数
 };
 
 namespace Generator {
-    generate_problem: I64 -> Var Random -> IOFail BoardState;
-    generate_problem = |num_digits_to_place, var_random| (
-        let gen = Generator {
+    //  Generator を構築する。
+    make: I64 -> Var Random -> Generator;
+    make = |num_digits_to_place, var_random| (
+        Generator {
+            max_retry: 1000,
             num_digits_to_place: num_digits_to_place,
-            state: BoardState::empty,
-            problem: none(),
             var_random: var_random,
-            step: 0
-        };
-        let gen = *gen._generate_loop;
-        if gen.@problem.is_none {
-            throw $ "Could not generate problem"
-        };
-        pure $ gen.@problem.as_some
+            retry: 0
+        }
     );
 
-    _generate_loop: Generator -> IOFail Generator;
-    _generate_loop = |gen| (
+    // 数独の問題を作成し、唯一解を持つことを検証する。
+    generate_and_validate: Generator -> IOFail BoardState;
+    generate_and_validate = |gen| (
         loop_m(
             gen, |gen|
-            let gen = gen.mod_step(add(1));
-            if gen.@step >= 100000 { throw $ "too many steps" };
-            let state = gen.@state;
-            let cells_to_place = gen.@num_digits_to_place - state.@digit_count;
-            //eval debug_lazy2(|_| [state.@digit_count, cells_to_place].format(
-            //    "{}: _generate_loop: cells_to_place={}"));
-            if cells_to_place <= 0 {
-                eval debug_lazy2(|_| [state.@digit_count, gen.@step].format("{}: trying problem solving: step={}"));
-                let res = Solver::solve(state);
-                if res.is_err {
-                    eval debug_lazy2(|_| (state.@digit_count, res.as_err).format("{}: solving: err={}"));
-                    // not found solution
-                    let gen = gen.set_state(BoardState::empty); // restart
-                    continue_m $ gen
-                };
-                let (solutions, solve_step) = res.as_ok;
-                eval debug_lazy2(|_| [state.@digit_count, solutions.get_size].format("{}: solving: solution count={}"));
-                if solutions.get_size != 1 {
-                    // not found solution or too many solutions
-                    let gen = gen.set_state(BoardState::empty); // restart
-                    continue_m $ gen
-                };
-                // found problem with one solution
-                let gen = gen.set_problem(some(state));
-                break_m $ gen
-            };
-            let opt = *gen._place_random_digit(state);
-            if opt.is_none {
-                let gen = gen.set_state(BoardState::empty); // restart
+            let gen = gen.mod_retry(add(1));
+            if gen.@retry > gen.@max_retry { throw $ "Max retry count reached" };
+            let res = *gen._generate_problem.to_result.lift;
+            if res.is_err {
+                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: Failed to generate a problem: err={}"));
                 continue_m $ gen
             };
-            let state = opt.as_some;
-            let gen = gen.set_state(state);
-            continue_m $ gen
+            let state = res.as_ok;
+            let res = *gen._validate_solution(state).to_result.lift;
+            if res.is_err {
+                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: Failed to validate a solution: err={}"));
+                continue_m $ gen
+            };
+            break_m $ state
+        )
+    );
+
+    // 数独の問題が唯一解を持つことを検証する。
+    _validate_solution: BoardState -> Generator -> IOFail BoardState;
+    _validate_solution = |state, gen| (
+        eval debug_lazy2(|_| [gen.@retry].format("{}: trying problem solving"));
+        let res = Solver::solve(state);
+        if res.is_err {
+            eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: solving: err={}"));
+            throw $ res.as_err
+        };
+        let (solutions, solve_step) = res.as_ok;
+        eval debug_lazy2(|_| [gen.@retry, solutions.get_size, solve_step].format("{}: solving: solution count={} step={}"));
+        if solutions.get_size == 0 {
+            throw $ "no solution"
+        };
+        if solutions.get_size > 1 {
+            throw $ "solution count is not 1"
+        };
+        // found problem with one solution
+        pure $ state
+    );
+
+    //  数独の問題を生成する。
+    _generate_problem: Generator -> IOFail BoardState;
+    _generate_problem = |gen| (
+        loop_m(
+            BoardState::empty, |state|
+            //  数字の数が指定値を超えたらループを抜ける。
+            if state.@digit_count >= gen.@num_digits_to_place {
+                break_m $ state
+            };
+            //  数字をランダムに配置する。
+            let state = *gen._place_random_digit(state);
+            continue_m $ state
         )
     );
 
@@ -446,19 +458,17 @@ namespace Generator {
         ).lift
     );
 
-    _place_random_digit: BoardState -> Generator -> IOFail (Option BoardState);
+    _place_random_digit: BoardState -> Generator -> IOFail BoardState;
     _place_random_digit = |state, gen| (
         eval assert(|_| "board is full", state.@digit_count < 9 * 9);
         let empty_cells = state.@board.get_empty_cells.to_array;
         if empty_cells.get_size == 0 {
-            eval debug_lazy2(|_| [state.@digit_count].format("{}: no empty cells"));
-            pure $ none()
+            throw $ "no empty cells"
         };
         if empty_cells.find_by(|(row, col)|
             state.@candidates.get_bitvec(row, col) == BitVec::empty
         ).is_some {
-            eval debug_lazy2(|_| [state.@digit_count].format("{}: cannot place any digit at some cell"));
-            pure $ none()
+            throw $ "cannot place any digit at some cell"
         };
 
         let i = *gen._with_random(generate_I64_range(0, empty_cells.get_size));
@@ -471,7 +481,7 @@ namespace Generator {
         let digit = digits.@(i);
         //eval debug_lazy2(|_| (state.@digit_count, digit, (row, col)).format("{}: place digit {} at {}"));
         let state = state.place_digit(row, col, digit);
-        pure $ some(state)
+        pure $ state
     );
 }
 
@@ -537,7 +547,8 @@ test2 = do {
     let random = Random::init_by_seed(time.to_U64);
     let var_random = *Var::make(random).lift;
     let num_digits_to_place = 25;
-    let state = *Generator::generate_problem(num_digits_to_place, var_random);
+    let gen = Generator::make(num_digits_to_place, var_random);
+    let state = *gen.generate_and_validate;
     let _ = *println("Problem:\n" + state.to_string).lift;
     let (solutions, step) = *Solver::solve(state).from_result;
     let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;

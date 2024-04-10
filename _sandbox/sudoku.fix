@@ -96,11 +96,16 @@ namespace Board {
 // 数独の問題を表す文字列から盤面を読み込む。
 impl Board: FromString {
     from_string = |problem| (
-        let board = Board::empty;
-        // 問題を行に分割し、数字(1から9)と空き('.')以外の文字を除去する。空行も除去する。
-        let lines = problem.split("\n").map(
+        // 問題を行に分割する。
+        let lines = problem.split("\n");
+        // 数字(1から9)と空き('.')以外の文字を除去する。
+        let lines = lines.map(
             filter_chars(|c| ('1' <= c && c <= '9') || c == '.')
-        ).filter(|s| s != "").to_array;
+        );
+        // 空行を除去する。
+        let lines = lines.filter(|s| s != "");
+        // イテレータから配列に変換する。
+        let lines = lines.to_array;
         // 9行9列であることを確認する。
         if lines.get_size != 9 { err $ "invalid row size" };
         let _ = *lines.to_iter.fold_m(
@@ -108,6 +113,8 @@ impl Board: FromString {
             if line.get_size != 9 { err $ "invalid col size" };
             ok()
         );
+        // 盤面の各マスを読み込む。
+        let board = Board::empty;
         Iterator::range(0, 9).fold_m(board, |board, row|
             Iterator::range(0, 9).fold_m(board, |board, col|
                 let line = lines.@(row);
@@ -136,8 +143,7 @@ impl Board: ToString {
 // ------------------------------------------------------------
 
 // 特定のマスに数字を置けるかどうかを表わすビットベクトル。
-// bit i の意味は次のいずれか。(i = 1..9)
-// 1: 配置可能、0: 配置不可
+// i 番目のビットは数字 i が配置可能(1)または配置不可(0)であることを表す。(i = 1..9)
 type BitVec = U16;
 
 namespace BitVec {
@@ -145,7 +151,7 @@ namespace BitVec {
     full: BitVec;
     full = 0b1111111110_U16;    //  bit 1..9
 
-    // すべての数字が配置できないビットベクトル。
+    // すべての数字が配置不可であるビットベクトル。
     empty: BitVec;
     empty = 0_U16;
 
@@ -266,9 +272,9 @@ namespace Candidates {
 
 // 盤面と配置可能候補の状態
 type BoardState = unbox struct {
-    board: Board,
-    candidates: Candidates,
-    digit_count: I64                       // 配置済みの数字の数
+    board: Board,                   //  盤面
+    candidates: Candidates,         //  配置可能候補
+    digit_count: I64                //  配置済みの数字の数
 };
 
 namespace BoardState {
@@ -303,11 +309,9 @@ namespace BoardState {
     place_digit: I64 -> I64 -> I64 -> BoardState -> BoardState;
     place_digit = |row, col, digit, state| (
         eval assert(|_| "digit is already set", state.@board.get_digit(row, col).is_none);
-        eval debug_lazy(|_| [state.@digit_count, digit, row, col].format("{}: place {} at ({}, {})"));
-        let state = state.mod_board(set_digit(row, col, some(digit.to_U8)));
-        let state = state.mod_candidates(mod_all(row, col, set_bit(digit, false)));
-        let state = state.mod_digit_count(add(1));
-        state
+        state.mod_board(set_digit(row, col, some(digit.to_U8)))
+             .mod_candidates(mod_all(row, col, set_bit(digit, false)))
+             .mod_digit_count(add(1))
     );
 }
 
@@ -330,6 +334,8 @@ namespace Solver {
         let step = step + 1;
         if step >= 100000 { err $ "too may steps" };
         if solutions.get_size >= 10 { err $ "too may solutions" };
+
+        //  スタックが空になった(探索する盤面が尽きた)場合、見つかった解を返す
         if stack.is_empty {
             ok $ (solutions, step)
         };
@@ -339,15 +345,14 @@ namespace Solver {
         let stack = stack.pop_back;
         eval debug_lazy(|_| [state.@digit_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
 
-        //  盤面に 9 x 9 個の数字をすべて配置したら解を記録する。
+        //  9 x 9 個のマスがすべて埋まったら解を記録する。
         if state.@digit_count >= 9 * 9 {
-            // success
             eval debug_lazy(|_| "found a solution");
             let solutions = solutions.push_back(state);
             _solve_inner(stack, step, solutions)
         };
 
-        // 空のマスのうち、候補数が最も少ないマスを求める。
+        // 空のマスのうち、候補数が最も少ないマスを検索する。
         let best = state.@candidates.find_best_cell(state.@board);
         if best.is_none {
             // 空のマスがない
@@ -356,19 +361,17 @@ namespace Solver {
         };
         let (num_cand, row, col) = best.as_some;
         if num_cand == 0 {
-            // 候補数が0の場合、そのマスにはどの数字も配置できない。この場合は失敗と見なす。
+            // 候補数が0のマスにはどの数字も配置できないため、その盤面は解にならない。
             eval debug_lazy(|_| (state.@digit_count, row, col).format("{}: no candidates at ({}, {})"));
             _solve_inner(stack, step, solutions)
         };
 
         //  候補の各々について、その数字を配置した盤面を生成し、スタックに積む。
+        eval debug_lazy(|_| (state.@digit_count, num_cand, (row, col)).format("{}: find {} candidates at {}"));
         let bitvec = state.@candidates.get_bitvec(row, col);
-        eval debug_lazy(|_| (state.@digit_count, num_cand, (row, col), bitvec).format("{}: find {} candidates at {} = {}"));
-        let stack = Iterator::range(0, 9).fold(stack, |stack, digit|
-            let digit = digit + 1;
-            if bitvec.get_bit(digit) == false { stack };
-            let stack = stack.push_back(state.place_digit(row, col, digit));
-            stack
+        let stack = bitvec.to_iter.fold(stack, |stack, digit|
+            eval debug_lazy(|_| [state.@digit_count, digit, row, col].format("{}: place {} at ({}, {})"));
+            stack.push_back(state.place_digit(row, col, digit))
         );
         _solve_inner(stack, step, solutions)
     );
@@ -534,6 +537,19 @@ problem3 = "
 .....5.21
 .7...18.3
 2.6.8.9..
+";
+
+problem4: String;  // 188 steps
+problem4 = "
+.145...2.
+..31..7..
+....79...
+..6...49.
+....645..
+........3
+6.8..2..9
+...4.....
+3.7.1..5.
 ";
 
 test1: IO ();

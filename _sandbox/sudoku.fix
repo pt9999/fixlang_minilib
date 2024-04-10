@@ -20,6 +20,7 @@ import Random;
 import AsyncTask;
 
 import Minilib.Math.RandomEx;
+import Minilib.IO.FileSystem;
 import Minilib.Text.StringEx;
 
 // ------------------------------------------------------------
@@ -30,12 +31,6 @@ import Minilib.Text.StringEx;
 debug_lazy: Lazy String -> ();
 debug_lazy = |lazy_str| (
     if false { debug_println(lazy_str()) }
-    else { () }
-);
-
-debug_lazy2: Lazy String -> ();
-debug_lazy2 = |lazy_str| (
-    if true { debug_println(lazy_str()) }
     else { () }
 );
 
@@ -320,6 +315,25 @@ impl BoardState: ToString {
 }
 
 namespace Solver {
+
+    // 指定された文字列から数独の問題を読み込み、問題を解いて出力する。
+    solve_problem_from_string: String -> IOFail ();
+    solve_problem_from_string = |problem| (
+        let state = *BoardState::load_problem(problem).from_result;
+        solve_problem_and_print_solutions(state)
+    );
+
+    // 数独の問題を解いて解を出力する。
+    solve_problem_and_print_solutions: BoardState -> IOFail ();
+    solve_problem_and_print_solutions = |state| (
+        let (solutions, step) = *Solver::solve(state).from_result;
+        let _ = *println((solutions.get_size, step).format("{} 個の解が見つかりました。(ステップ数: {})")).lift;
+        solutions.to_iter.fold_m(
+            (), |_, state|
+            println("\n" + state.to_string).lift
+        )
+    );
+
     // 数独の問題を解く。
     solve: BoardState -> Result ErrMsg (Array BoardState, I64);
     solve = |state| (
@@ -386,7 +400,8 @@ type Generator = unbox struct {
     max_retry: I64,                 //  問題作成の最大試行回数
     num_digits_to_place: I64,       //  数字を配置する数
     var_random: Var Random,         //  Random の変数
-    retry: I64                      //  現在の試行回数
+    retry: I64,                     //  現在の試行回数
+    progress: Bool                  //  進捗表示するならtrue
 };
 
 namespace Generator {
@@ -397,7 +412,8 @@ namespace Generator {
             max_retry: max_retry,
             num_digits_to_place: num_digits_to_place,
             var_random: var_random,
-            retry: 0
+            retry: 0,
+            progress: true
         }
     );
 
@@ -410,29 +426,37 @@ namespace Generator {
             if gen.@retry > gen.@max_retry { throw $ "Max retry count reached" };
             let res = *gen._generate_problem.to_result.lift;
             if res.is_err {
-                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: 問題作成失敗: err={}"));
+                let _ = *gen._progress(|_| (gen.@retry, res.as_err).format("{}: 問題作成失敗: err={}"));
                 continue_m $ gen
             };
             let state = res.as_ok;
             let res = *gen._validate_solution(state).to_result.lift;
             if res.is_err {
-                eval debug_lazy2(|_| (gen.@retry, res.as_err).format("{}: 検証失敗: err={}"));
+                let _ = *gen._progress(|_| (gen.@retry, res.as_err).format("{}: 検証失敗: err={}"));
                 continue_m $ gen
             };
             break_m $ state
         )
     );
 
+    // 進捗状況を表示する。
+    _progress: Lazy String -> Generator -> IOFail ();
+    _progress = |message, gen| (
+        if !gen.@progress { pure() };
+        let _ = *println(message()).lift;
+        fflush(IO::stdout)
+    );
+
     // 数独の問題が唯一解を持つことを検証する。
     _validate_solution: BoardState -> Generator -> IOFail BoardState;
     _validate_solution = |state, gen| (
-        eval debug_lazy2(|_| [gen.@retry].format("{}: 作成した問題を検証します"));
+        let _ = *gen._progress(|_| [gen.@retry].format("{}: 作成した問題を検証します"));
         let res = Solver::solve(state);
         if res.is_err {
             throw $ res.as_err
         };
         let (solutions, solve_step) = res.as_ok;
-        eval debug_lazy2(|_| [gen.@retry, solutions.get_size, solve_step].format("{}: 検証結果: 解の数={} ステップ数={}"));
+        let _ = *gen._progress(|_| [gen.@retry, solutions.get_size, solve_step].format("{}: 検証結果: 解の数={} ステップ数={}"));
         if solutions.get_size == 0 {
             throw $ "解なし"
         };
@@ -445,7 +469,7 @@ namespace Generator {
     //  数独の問題を生成する。
     _generate_problem: Generator -> IOFail BoardState;
     _generate_problem = |gen| (
-        eval debug_lazy2(|_| [gen.@retry].format("{}: 問題を作成します"));
+        let _ = *gen._progress(|_| [gen.@retry].format("{}: 問題を作成します"));
         loop_m(
             BoardState::empty, |state|
             //  数字の数が指定値を超えたらループを抜ける。
@@ -487,10 +511,10 @@ namespace Generator {
         let bitvec = state.@candidates.get_bitvec(row, col);
         let digits = bitvec.to_iter.to_array;
         eval assert (|_| "候補の数字がありません", digits.get_size > 0);
-        //eval debug_lazy2(|_| (gen.@retry, state.@digit_count, (row, col), digits.get_size).format("{}: {}: {} には {} 種類の数字を配置可能"));
+        //let _ = *gen._progress(|_| (gen.@retry, state.@digit_count, (row, col), digits.get_size).format("{}: {}: {} には {} 種類の数字を配置可能"));
         let i = *gen._with_random(generate_I64_range(0, digits.get_size));
         let digit = digits.@(i);
-        //eval debug_lazy2(|_| (gen.@retry, state.@digit_count, (row, col), digit).format("{}: {}: {} に {} を配置します"));
+        //let _ = *gen._progress(|_| (gen.@retry, state.@digit_count, (row, col), digit).format("{}: {}: {} に {} を配置します"));
         let state = state.place_digit(row, col, digit);
         pure $ state
     );
@@ -554,13 +578,7 @@ problem4 = "
 
 test1: IO ();
 test1 = do {
-    let state = *BoardState::load_problem(problem1).from_result;
-    let (solutions, step) = *Solver::solve(state).from_result;
-    let _ = *println([solutions.get_size, step].format("Found {} solutions in {} steps:")).lift;
-    solutions.to_iter.fold_m(
-        (), |_, state|
-        println("\n" + state.to_string).lift
-    )
+    solve_problem_from_string(problem1)
 }.try(eprintln);
 
 test2: IO ();
@@ -575,12 +593,7 @@ test2 = do {
     let gen = Generator::make(max_retry, num_digits_to_place, var_random);
     let state = *gen.generate_and_validate;
     let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
-    let (solutions, step) = *Solver::solve(state).from_result;
-    let _ = *println([solutions.get_size, step].format("{}個の解が見つかりました (ステップ数:{})")).lift;
-    solutions.to_iter.fold_m(
-        (), |_, state|
-        println("\n" + state.to_string).lift
-    )
+    solve_problem_and_print_solutions(state)
 }.try(eprintln);
 
 main: IO ();

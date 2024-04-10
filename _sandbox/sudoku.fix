@@ -19,6 +19,7 @@ import Debug;
 import Random;
 import AsyncTask;
 
+import Minilib.App.Clap;
 import Minilib.Math.RandomEx;
 import Minilib.IO.FileSystem;
 import Minilib.Text.StringEx;
@@ -460,7 +461,7 @@ namespace Generator {
         loop_m(
             gen, |gen|
             let gen = gen.mod_retry(add(1));
-            if gen.@retry > gen.@max_retry { throw $ "Max retry count reached" };
+            if gen.@retry > gen.@max_retry { throw $ "問題作成の最大試行回数を超えました" };
             let res = *gen._generate_problem.to_result.lift;
             if res.is_err {
                 let _ = *gen._progress(|_| (gen.@retry, res.as_err).format("{}: 問題作成失敗: err={}"));
@@ -635,5 +636,103 @@ test2 = do {
     gen.@solver.solve_problem_and_print_solutions(state)
 }.try(eprintln);
 
+command_solve: Command;
+command_solve = (
+    Command::new("solve")
+    .display_name("sudoku solve")
+    .about("数独の問題を解決します。")
+    .arg(Arg::new("input").short('i').long("input").help("数独問題ファイル。未指定時はサンプルの問題を解決する。").takes_value.default_value(""))
+    .arg(Arg::new("verbose").short('v').long("verbose").help("進捗状況を表示する").default_value("false"))
+);
+
+run_command_solve: ArgMatches -> IOFail ();
+run_command_solve = |submatches| (
+    let input = submatches.get_one("input").as_some;
+    let verbose = submatches.get_one("verbose").as_some;
+    let problem = *if input != "" {
+        read_file_string(Path::parse(input).as_some)
+    } else {
+        pure $ problem1
+    };
+    let solver = Solver::make();
+    let solver = solver.set_progress(verbose == "true");
+    solver.solve_problem_from_string(problem)
+);
+
+command_generate: Command;
+command_generate = (
+    Command::new("generate")
+    .display_name("sudoku generate")
+    .about("数独の問題を作成します。")
+    .arg(Arg::new("output").short('o').long("output").help("出力先の数独問題ファイル").takes_value)
+    .arg(Arg::new("max_retry").short('r').long("max-retry").help("問題作成の最大試行回数").takes_value.default_value("1000"))
+    .arg(Arg::new("num_digits").short('n').long("num-digits").help("配置する数字の数").takes_value.default_value("25"))
+    .arg(Arg::new("seed").short('s').long("seed").help("乱数生成器の種 (default: 現在時刻)").takes_value)
+    .arg(Arg::new("verbose").short('v').long("verbose").help("進捗状況を表示する").default_value("false"))
+);
+
+run_command_generate: ArgMatches -> IOFail ();
+run_command_generate = |submatches| (
+    let output_path = submatches.get_one("output").bind(Path::parse);
+    let seed = submatches.get_one("seed");
+    let max_retry: I64 = *submatches.get_one("max_retry").as_some.from_string.from_result;
+    let num_digits_to_place: I64 = *submatches.get_one("num_digits").as_some.from_string.from_result;
+    let verbose = submatches.get_one("verbose").as_some;
+    let seed: U64 = *if seed.is_none {
+        let time = CALL_C[I32 time(Ptr), nullptr];
+        pure $ time.to_U64
+    } else {
+        from_string(seed.as_some).from_result
+    };
+    let random = Random::init_by_seed(seed);
+    let var_random = *Var::make(random).lift;
+    let solver = Solver::make();
+    let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
+    let gen = gen.set_progress(verbose == "true");
+    let state = *gen.generate_and_validate;
+    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
+    let _ = *gen.@solver.solve_problem_and_print_solutions(state);
+    let _ = *if output_path.is_some {
+        write_file_string(output_path.as_some, state.to_string)
+    } else { pure() };
+    pure()
+);
+
+
+command_main: Command;
+command_main = (
+    Command::new("sudoku")
+    .version("0.1")
+    .about("数独の問題を作成または解決します。")
+    .subcommand(command_solve)
+    .subcommand(command_generate)
+);
+
+run_command_main: ArgMatches -> IOFail ();
+run_command_main = |matches| (
+    if matches.subcommand.is_none {
+        throw $ "no subcommand is specified"
+    };
+    let (name, submatches) = matches.subcommand.as_some;
+    if name == "solve" {
+        run_command_solve(submatches)
+    } else if name == "generate" {
+        run_command_generate(submatches)
+    } else {
+        throw $ "invalid subcommand: " + name
+    }
+);
+
 main: IO ();
-main = test2;
+main = (
+    do {
+        let args = *IO::get_args.lift;
+        let args = if args.get_size <= 1 {
+            ["sudoku", "solve"]
+            //["sudoku", "generate"]
+        } else { args };
+        let matches = *command_main.get_matches_from(args).from_result;
+        run_command_main(matches)
+    }.try(eprintln)
+);
+

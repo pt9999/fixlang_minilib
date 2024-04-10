@@ -314,19 +314,37 @@ impl BoardState: ToString {
     to_string = |state| state.@board.to_string;
 }
 
+// 数独の問題を解くための構造体
+type Solver = unbox struct {
+    stack: Array BoardState,        //  盤面状態のスタック
+    solutions: Array BoardState,    //  解のリスト
+    step: I64,                      //  ステップ数
+    progress: Bool                  //  進捗表示を行うならtrue
+};
+
 namespace Solver {
+    //  数独の問題を解くための構造体を作成する。
+    make: () -> Solver;
+    make = |_| (
+        Solver {
+            stack: [],
+            solutions: [],
+            step: 0,
+            progress: false
+        }
+    );
 
     // 指定された文字列から数独の問題を読み込み、問題を解いて出力する。
-    solve_problem_from_string: String -> IOFail ();
-    solve_problem_from_string = |problem| (
+    solve_problem_from_string: String -> Solver -> IOFail ();
+    solve_problem_from_string = |problem, solver| (
         let state = *BoardState::load_problem(problem).from_result;
-        solve_problem_and_print_solutions(state)
+        solver.solve_problem_and_print_solutions(state)
     );
 
     // 数独の問題を解いて解を出力する。
-    solve_problem_and_print_solutions: BoardState -> IOFail ();
-    solve_problem_and_print_solutions = |state| (
-        let (solutions, step) = *Solver::solve(state).from_result;
+    solve_problem_and_print_solutions: BoardState -> Solver -> IOFail ();
+    solve_problem_and_print_solutions = |state, solver| (
+        let (solutions, step) = *solver.solve(state).from_result;
         let _ = *println((solutions.get_size, step).format("{} 個の解が見つかりました。(ステップ数: {})")).lift;
         solutions.to_iter.fold_m(
             (), |_, state|
@@ -335,35 +353,35 @@ namespace Solver {
     );
 
     // 数独の問題を解く。
-    solve: BoardState -> Result ErrMsg (Array BoardState, I64);
-    solve = |state| (
-        let solutions = [];
-        let stack = [state];
-        _solve_inner(stack, 0, solutions)
+    solve: BoardState -> Solver -> Result ErrMsg (Array BoardState, I64);
+    solve = |state, solver| (
+        let solver = solver.set_solutions([])
+                           .set_stack([state])
+                           .set_step(0);
+        _solve_inner(solver)
     );
 
     // スタックから盤面状態を1つ取り出し、数字の配置を試みる。
-    _solve_inner: Array BoardState -> I64 -> Array BoardState -> Result ErrMsg (Array BoardState, I64);
-    _solve_inner = |stack, step, solutions| (
-        let step = step + 1;
-        if step >= 100000 { err $ "too may steps" };
-        if solutions.get_size >= 10 { err $ "too may solutions" };
-
-        //  スタックが空になった(探索する盤面が尽きた)場合、見つかった解を返す
-        if stack.is_empty {
-            ok $ (solutions, step)
-        };
+    _solve_inner: Solver -> Result ErrMsg (Array BoardState, I64);
+    _solve_inner = |solver| (
+        let solver = solver.mod_step(add(1));
+        if solver.@step >= 100000 { err $ "too may steps" };
+        if solver.@solutions.get_size >= 10 { err $ "too may solutions" };
 
         //  スタックから盤面状態を1つ取り出す。
-        let state = stack.get_last.as_some;
-        let stack = stack.pop_back;
-        eval debug_lazy(|_| [state.@digit_count, stack.get_size].format("{}: _solve_inner: stack size={}"));
+        let opt = solver._pop_stack;
+        if opt.is_none {
+            //  スタックが空の場合(探索する盤面が尽きた場合)、見つかった解を返す。
+            ok $ (solver.@solutions, solver.@step)
+        };
+        let (state, solver) = opt.as_some;
+        eval debug_lazy(|_| [state.@digit_count, solver.@stack.get_size].format("{}: _solve_inner: stack size={}"));
 
         //  9 x 9 個のマスがすべて埋まったら解を記録する。
         if state.@digit_count >= 9 * 9 {
             eval debug_lazy(|_| "found a solution");
-            let solutions = solutions.push_back(state);
-            _solve_inner(stack, step, solutions)
+            let solver = solver.mod_solutions(push_back(state));
+            solver._solve_inner
         };
 
         // 空のマスのうち、候補数が最も少ないマスを検索する。
@@ -371,23 +389,37 @@ namespace Solver {
         if best.is_none {
             // 空のマスがない
             eval debug_lazy(|_| [state.@digit_count].format("{}: no candidates"));
-            _solve_inner(stack, step, solutions)
+            solver._solve_inner
         };
         let (num_cand, row, col) = best.as_some;
         if num_cand == 0 {
             // 候補数が0のマスにはどの数字も配置できないため、その盤面は解にならない。
             eval debug_lazy(|_| (state.@digit_count, row, col).format("{}: no candidates at ({}, {})"));
-            _solve_inner(stack, step, solutions)
+            solver._solve_inner
         };
 
         //  候補の各々について、その数字を配置した盤面を生成し、スタックに積む。
         eval debug_lazy(|_| (state.@digit_count, num_cand, (row, col)).format("{}: find {} candidates at {}"));
         let bitvec = state.@candidates.get_bitvec(row, col);
-        let stack = bitvec.to_iter.fold(stack, |stack, digit|
+        let solver = bitvec.to_iter.fold(solver, |solver, digit|
             eval debug_lazy(|_| [state.@digit_count, digit, row, col].format("{}: place {} at ({}, {})"));
-            stack.push_back(state.place_digit(row, col, digit))
+            solver._push_stack(state.place_digit(row, col, digit))
         );
-        _solve_inner(stack, step, solutions)
+        solver._solve_inner
+    );
+
+    //  スタックに盤面状態を積む。
+    _push_stack: BoardState -> Solver -> Solver;
+    _push_stack = |state, solver| (
+        solver.mod_stack(push_back(state))
+    );
+
+    //  スタックから盤面状態を1つ取り出す。スタックが空の場合は none() を返す。
+    _pop_stack: Solver -> Option (BoardState, Solver);
+    _pop_stack = |solver| (
+        solver.@stack.get_last.map(|state|
+            (state, solver.mod_stack(pop_back))
+        )
     );
 }
 
@@ -400,18 +432,20 @@ type Generator = unbox struct {
     max_retry: I64,                 //  問題作成の最大試行回数
     num_digits_to_place: I64,       //  数字を配置する数
     var_random: Var Random,         //  Random の変数
+    solver: Solver,                 //  数独の問題を解くソルバー
     retry: I64,                     //  現在の試行回数
     progress: Bool                  //  進捗表示するならtrue
 };
 
 namespace Generator {
     //  問題作成器を構築する。
-    make: I64 -> I64 -> Var Random -> Generator;
-    make = |max_retry, num_digits_to_place, var_random| (
+    make: I64 -> I64 -> Var Random -> Solver -> Generator;
+    make = |max_retry, num_digits_to_place, var_random, solver| (
         Generator {
             max_retry: max_retry,
             num_digits_to_place: num_digits_to_place,
             var_random: var_random,
+            solver: solver,
             retry: 0,
             progress: true
         }
@@ -451,7 +485,7 @@ namespace Generator {
     _validate_solution: BoardState -> Generator -> IOFail BoardState;
     _validate_solution = |state, gen| (
         let _ = *gen._progress(|_| [gen.@retry].format("{}: 作成した問題を検証します"));
-        let res = Solver::solve(state);
+        let res = gen.@solver.solve(state);
         if res.is_err {
             throw $ res.as_err
         };
@@ -578,7 +612,8 @@ problem4 = "
 
 test1: IO ();
 test1 = do {
-    solve_problem_from_string(problem1)
+    let solver = Solver::make();
+    solver.solve_problem_from_string(problem1)
 }.try(eprintln);
 
 test2: IO ();
@@ -590,10 +625,11 @@ test2 = do {
     let var_random = *Var::make(random).lift;
     let max_retry = 1000;
     let num_digits_to_place = 25;
-    let gen = Generator::make(max_retry, num_digits_to_place, var_random);
+    let solver = Solver::make();
+    let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
     let state = *gen.generate_and_validate;
     let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
-    solve_problem_and_print_solutions(state)
+    gen.@solver.solve_problem_and_print_solutions(state)
 }.try(eprintln);
 
 main: IO ();

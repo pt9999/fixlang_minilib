@@ -21,7 +21,6 @@ import AsyncTask;
 
 import Minilib.App.Clap;
 import Minilib.Math.RandomEx;
-import Minilib.IO.FileSystem;
 import Minilib.Text.StringEx;
 
 // ------------------------------------------------------------
@@ -36,6 +35,17 @@ bytes_to_string = |bytes| bytes.push_back(0_U8)._unsafe_from_c_str;
 filter_chars: (U8 -> Bool) -> String -> String;
 filter_chars = |f, str| (
     str.get_bytes.pop_back.to_iter.filter(f).to_array.bytes_to_string
+);
+
+// ファイルストリームをフラッシュする。
+fflush : IOHandle -> IOFail ();
+fflush = |handle| (
+    let _ = *pure();    // make it lazy
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 {
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
 );
 
 // ------------------------------------------------------------
@@ -79,33 +89,6 @@ namespace Board {
         let col = *Iterator::range(0, 9);
         if board.get_digit(row, col).is_some { Iterator::empty };
         pure $ (row, col)
-    );
-
-    // 2つのマスを交換する。
-    swap_cells: (I64, I64) -> (I64, I64) -> Board -> Board;
-    swap_cells = |(row1, col1), (row2, col2), board| (
-        let digit1 = board.get_digit(row1, col1);
-        let digit2 = board.get_digit(row2, col2);
-        board.set_digit(row1, col1, digit2)
-             .set_digit(row2, col2, digit1)
-    );
-
-    // 2つの行を交換する。
-    swap_rows: I64 -> I64 -> Board -> Board;
-    swap_rows = |row1, row2, board| (
-        Iterator::range(0, 9).fold(
-            board, |board, col|
-            board.swap_cells((row1, col), (row2, col))
-        )
-    );
-
-    // 2つの列を交換する。
-    swap_cols: I64 -> I64 -> Board -> Board;
-    swap_cols = |col1, col2, board| (
-        Iterator::range(0, 9).fold(
-            board, |board, row|
-            board.swap_cells((row, col1), (row, col2))
-        )
     );
 }
 
@@ -261,7 +244,11 @@ namespace Candidates {
             Iterator::range(0, 9).fold(cand, |cand, col|
                 let digit = board.get_digit(row, col);
                 if digit.is_none { cand };
-                cand.mod_all(row, col, set_bit(digit.as_some.to_I64, false))
+                let digit = digit.as_some.to_I64;
+                eval assert(|_| (digit, (row, col)).format("could not place {} at {}"),
+                    cand.get_bitvec(row, col).get_bit(digit) == true
+                );
+                cand.mod_all(row, col, set_bit(digit, false))
             )
         )
     );
@@ -492,7 +479,7 @@ namespace Generator {
             gen, |gen|
             let gen = gen.mod_retry(add(1));
             if gen.@retry > gen.@max_retry { throw $ "問題作成の最大試行回数を超えました" };
-            let res = *gen._generate_problem.to_result.lift;
+            let res = *gen._generate_problem2.to_result.lift;
             if res.is_err {
                 let _ = *gen._progress(|_| (gen.@retry, res.as_err).format("{}: 問題作成失敗: err={}"));
                 continue_m $ gen
@@ -587,10 +574,127 @@ namespace Generator {
         pure $ state
     );
 
+}
+
+namespace Generator2 {
     // 別案: 最初に盤面をすべて埋める
-    _generate_full_board: Generator -> IOFail BoardState;
-    _generate_full_board = |gen| (
+
+    _generate_problem2: Generator -> IOFail BoardState;
+    _generate_problem2 = |gen| (
+        let _ = *gen._progress(|_| [gen.@retry].format("{}: 問題を作成します"));
+        let board = *gen._generate_random_full_board;
+        let state = *gen._make_holes(board);
+        //let state = BoardState::init_with_board(board);
+        pure $ state
     );
+
+    _make_holes: Board -> Generator -> IOFail BoardState;
+    _make_holes = |board, gen| (
+        let state = BoardState::init_with_board(board);
+        loop_m(
+            state, |state|
+            if state.@digit_count <= gen.@num_digits_to_place { break_m $ state };
+            let row = *gen._with_random(generate_I64_range(0, 9));
+            let col = *gen._with_random(generate_I64_range(0, 9));
+            if state.@board.get_digit(row, col).is_none { continue_m $ state };
+            // ランダムに1つ穴を開けた新しい盤面を作成する
+            let new_board = state.@board.set_digit(row, col, none());
+            let new_state = BoardState::init_with_board(new_board);
+            // 新しい盤面が唯一解を持つか確認する
+            let res = *gen.@solver.solve(new_state).to_result.lift;
+            let res = res.map(|(solutions, solve_step)| solutions.get_size == 1);
+            if res.is_err || res.as_ok == false {
+                // 穴を開けたら唯一解を持たなくなったため、以前の盤面を返す
+                break_m $ state
+            };
+            continue_m $ new_state
+        )
+    );
+
+    // すべての数字を配置した盤面をもとに、数独の制約条件を満たしたまま
+    // 数字・行・列をランダムに入れ替える。
+    _generate_random_full_board: Generator -> IOFail Board;
+    _generate_random_full_board = |gen| (
+        let board = BoardEx::full_board;
+        //  数字をランダムに置換する。
+        let subst = *gen._with_random(shuffle(Iterator::range(0, 9).to_array));
+        let board = board.subst_digit(subst);
+        Iterator::range(0, 100).fold_m(
+            board, |board, _|
+            // 同一ブロック内で2つの行をランダムに交換する。
+            let rowoff = *gen._with_random(generate_I64_range(1, 3));
+            let row1 = *gen._with_random(generate_I64_range(0, 9));
+            let row2 = row1 / 3 * 3 + (row1 + rowoff) % 3;
+            // 同一ブロック内で2つの列をランダムに交換する。
+            let coloff = *gen._with_random(generate_I64_range(1, 3));
+            let col1 = *gen._with_random(generate_I64_range(0, 9));
+            let col2 = col1 / 3 * 3 + (col1 + coloff) % 3;
+            let board = board.swap_rows(row1, row2).swap_cols(col1, col2);
+            pure $ board
+        )
+    );
+
+    namespace BoardEx {
+        // すべての数字を配置した盤面。
+        // 数独の制約条件を満たすが、シンプルすぎる。
+        full_board: Board;
+        full_board = (
+            let board = Board::empty;
+            let start = [0, 3, 6, 1, 4, 7, 2, 5, 8];
+            Iterator::range(0, 9).fold(
+                board, |board, row|
+                Iterator::range(0, 9).fold(
+                    board, |board, col|
+                    let digit = some $ ((start.@(row) + col) % 9 + 1).to_U8;
+                    board.set_digit(row, col, digit)
+                )
+            )
+        );
+
+        // 数字を置換する。
+        // subst は `Iterator::range(0, 9).to_array` をシャッフルした配列。
+        subst_digit: Array I64 -> Board -> Board;
+        subst_digit = |subst, board| (
+            Iterator::range(0, 9).fold(
+                board, |board, row|
+                Iterator::range(0, 9).fold(
+                    board, |board, col|
+                    let digit = board.get_digit(row, col);
+                    let digit = digit.map(|i| (subst.@(i.to_I64 - 1) + 1).to_U8);
+                    board.set_digit(row, col, digit)
+                )
+            )
+        );
+
+        // 2つのマスを交換する。
+        swap_cells: (I64, I64) -> (I64, I64) -> Board -> Board;
+        swap_cells = |(row1, col1), (row2, col2), board| (
+            let digit1 = board.get_digit(row1, col1);
+            let digit2 = board.get_digit(row2, col2);
+            board.set_digit(row1, col1, digit2)
+                .set_digit(row2, col2, digit1)
+        );
+
+        // 2つの行を交換する。
+        swap_rows: I64 -> I64 -> Board -> Board;
+        swap_rows = |row1, row2, board| (
+            if row1 == row2 { board };
+            Iterator::range(0, 9).fold(
+                board, |board, col|
+                board.swap_cells((row1, col), (row2, col))
+            )
+        );
+
+        // 2つの列を交換する。
+        swap_cols: I64 -> I64 -> Board -> Board;
+        swap_cols = |col1, col2, board| (
+            if col1 == col2 { board };
+            Iterator::range(0, 9).fold(
+                board, |board, row|
+                board.swap_cells((row, col1), (row, col2))
+            )
+        );
+    }
 }
 
 // ------------------------------------------------------------
@@ -667,6 +771,23 @@ test2 = do {
     let solver = Solver::make();
     let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
     let state = *gen.generate_and_validate;
+    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
+    gen.@solver.solve_problem_and_print_solutions(state)
+}.try(eprintln);
+
+test3: IO ();
+test3 = do {
+    let _ = *pure();
+    let time = CALL_C[I32 time(Ptr), nullptr];
+    //let time = 12345;
+    let random = Random::init_by_seed(time.to_U64);
+    let var_random = *Var::make(random).lift;
+    let max_retry = 1000;
+    let num_digits_to_place = 25;
+    let solver = Solver::make();
+    let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
+    let board = *gen._generate_random_full_board;
+    let state = BoardState::init_with_board(board);
     let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
     gen.@solver.solve_problem_and_print_solutions(state)
 }.try(eprintln);
@@ -760,11 +881,12 @@ run_command_main = |matches| (
 
 main: IO ();
 main = (
+//    if true { test3 };
     do {
         let args = *IO::get_args.lift;
         let args = if args.get_size <= 1 {
-            ["sudoku", "solve", "-v"]
-            //["sudoku", "generate", "-v"]
+            //["sudoku", "solve", "-v"]
+            ["sudoku", "generate", "-v"]
         } else { args };
         let matches = *command_main.get_matches_from(args).from_result;
         run_command_main(matches)

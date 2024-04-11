@@ -82,13 +82,24 @@ namespace Board {
         .fold(0, add)
     );
 
+    // マスのイテレータ
+    cells: Iterator (I64, I64);
+    cells = do {
+        let row = *Iterator::range(0, 9);
+        let col = *Iterator::range(0, 9);
+        pure $ (row, col)
+    };
+
+    // 数字が配置されているマスのイテレータを返す
+    get_nonempty_cells: Board -> Iterator (I64, I64);
+    get_nonempty_cells = |board| (
+        Board::cells.filter(|(row, col)| board.get_digit(row, col).is_some)
+    );
+
     // 数字が配置されていないマスのイテレータを返す
     get_empty_cells: Board -> Iterator (I64, I64);
     get_empty_cells = |board| (
-        let row = *Iterator::range(0, 9);
-        let col = *Iterator::range(0, 9);
-        if board.get_digit(row, col).is_some { Iterator::empty };
-        pure $ (row, col)
+        Board::cells.filter(|(row, col)| board.get_digit(row, col).is_none)
     );
 }
 
@@ -548,6 +559,14 @@ namespace Generator {
         ).lift
     );
 
+    // var_random を用いて配列の要素をランダムに選択する。
+    _select_random: Array a -> Generator -> IOFail a;
+    _select_random = |array, gen| (
+        eval assert(|_| "array is empty", array.get_size >= 1);
+        let i = *gen._with_random(generate_I64_range(0, array.get_size));
+        pure $ array.@(i)
+    );
+
     // 数字をランダムに配置する。
     _place_random_digit: BoardState -> Generator -> IOFail BoardState;
     _place_random_digit = |state, gen| (
@@ -588,15 +607,22 @@ namespace Generator2 {
         pure $ state
     );
 
+    // すべての数字を配置した盤面をもとに、穴を1つずつ空ける。
+    // 穴を空けた結果、唯一解を持たなくなったら、一つ前の盤面を問題として返す。
     _make_holes: Board -> Generator -> IOFail BoardState;
     _make_holes = |board, gen| (
         let state = BoardState::init_with_board(board);
         loop_m(
-            state, |state|
-            if state.@digit_count <= gen.@num_digits_to_place { break_m $ state };
-            let row = *gen._with_random(generate_I64_range(0, 9));
-            let col = *gen._with_random(generate_I64_range(0, 9));
-            if state.@board.get_digit(row, col).is_none { continue_m $ state };
+            (state, 0), |(state, retry)|
+            if state.@digit_count <= gen.@num_digits_to_place {
+                break_m $ state
+            };
+
+            // 数字があるマスを1つ選択する
+            let nonempty_cells = state.@board.get_nonempty_cells.to_array;
+            let (row, col) = *gen._select_random(nonempty_cells);
+            eval assert(|_| "should be nonempty", state.@board.get_digit(row, col).is_some);
+
             // ランダムに1つ穴を開けた新しい盤面を作成する
             let new_board = state.@board.set_digit(row, col, none());
             let new_state = BoardState::init_with_board(new_board);
@@ -604,10 +630,16 @@ namespace Generator2 {
             let res = *gen.@solver.solve(new_state).to_result.lift;
             let res = res.map(|(solutions, solve_step)| solutions.get_size == 1);
             if res.is_err || res.as_ok == false {
-                // 穴を開けたら唯一解を持たなくなったため、以前の盤面を返す
-                break_m $ state
+                // 穴を開けたら唯一解を持たなくなった
+                let retry = retry + 1;
+                if retry >= 100 {
+                    //let _ = *gen._progress(|_| (retry, state.@digit_count).format("{}: {}: 穴空けの最大試行回数を超えました"));
+                    break_m $ state
+                };
+                //let _ = *gen._progress(|_| (retry, state.@digit_count).format("{}: {}: 穴開けを再試行します"));
+                continue_m $ (state, retry)
             };
-            continue_m $ new_state
+            continue_m $ (new_state, 0)
         )
     );
 
@@ -753,45 +785,6 @@ problem4 = "
 3.7.1..5.
 ";
 
-test1: IO ();
-test1 = do {
-    let solver = Solver::make();
-    solver.solve_problem_from_string(problem1)
-}.try(eprintln);
-
-test2: IO ();
-test2 = do {
-    let _ = *pure();
-    let time = CALL_C[I32 time(Ptr), nullptr];
-    //let time = 12345;
-    let random = Random::init_by_seed(time.to_U64);
-    let var_random = *Var::make(random).lift;
-    let max_retry = 1000;
-    let num_digits_to_place = 25;
-    let solver = Solver::make();
-    let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
-    let state = *gen.generate_and_validate;
-    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
-    gen.@solver.solve_problem_and_print_solutions(state)
-}.try(eprintln);
-
-test3: IO ();
-test3 = do {
-    let _ = *pure();
-    let time = CALL_C[I32 time(Ptr), nullptr];
-    //let time = 12345;
-    let random = Random::init_by_seed(time.to_U64);
-    let var_random = *Var::make(random).lift;
-    let max_retry = 1000;
-    let num_digits_to_place = 25;
-    let solver = Solver::make();
-    let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
-    let board = *gen._generate_random_full_board;
-    let state = BoardState::init_with_board(board);
-    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
-    gen.@solver.solve_problem_and_print_solutions(state)
-}.try(eprintln);
-
 command_solve: Command;
 command_solve = (
     Command::new("solve")
@@ -822,7 +815,8 @@ command_generate = (
     .about("数独の問題を作成します。")
     .arg(Arg::new("output").short('o').long("output").help("出力先の数独問題ファイル").takes_value)
     .arg(Arg::new("max_retry").short('r').long("max-retry").help("問題作成の最大試行回数").takes_value.default_value("1000"))
-    .arg(Arg::new("num_digits").short('n').long("num-digits").help("配置する数字の数").takes_value.default_value("25"))
+    .arg(Arg::new("num_digits").short('n').long("num-digits").help("配置する数字の最小数").takes_value.default_value("25"))
+    .arg(Arg::new("max_step").short('d').long("max_step").help("問題解決の最大ステップ数").takes_value.default_value("100"))
     .arg(Arg::new("seed").short('s').long("seed").help("乱数生成器の種 (default: 現在時刻)").takes_value)
     .arg(Arg::new("verbose").short('v').long("verbose").help("進捗状況を表示する").default_value("false"))
 );
@@ -832,6 +826,7 @@ run_command_generate = |submatches| (
     let output_path = submatches.get_one("output").bind(Path::parse);
     let seed = submatches.get_one("seed");
     let max_retry: I64 = *submatches.get_one("max_retry").as_some.from_string.from_result;
+    let max_step: I64 = *submatches.get_one("max_step").as_some.from_string.from_result;
     let num_digits_to_place: I64 = *submatches.get_one("num_digits").as_some.from_string.from_result;
     let verbose = submatches.get_one("verbose").as_some;
     let seed: U64 = *if seed.is_none {
@@ -843,6 +838,7 @@ run_command_generate = |submatches| (
     let random = Random::init_by_seed(seed);
     let var_random = *Var::make(random).lift;
     let solver = Solver::make();
+    let solver = solver.set_max_step(max_step);
     let gen = Generator::make(max_retry, num_digits_to_place, var_random, solver);
     let gen = gen.set_progress(verbose == "true");
     let state = *gen.generate_and_validate;
@@ -881,7 +877,6 @@ run_command_main = |matches| (
 
 main: IO ();
 main = (
-//    if true { test3 };
     do {
         let args = *IO::get_args.lift;
         let args = if args.get_size <= 1 {

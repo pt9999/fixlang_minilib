@@ -312,7 +312,9 @@ impl BoardState: ToString {
 // 数独の問題を解くための構造体
 type Solver = unbox struct {
     stack: Array BoardState,        //  盤面状態のスタック
+    max_solutions: I64,             //  解の最大個数
     solutions: Array BoardState,    //  解のリスト
+    max_step: I64,                  //  最大ステップ数
     step: I64,                      //  ステップ数
     progress: Bool                  //  進捗表示を行うならtrue
 };
@@ -323,7 +325,9 @@ namespace Solver {
     make = |_| (
         Solver {
             stack: [],
+            max_solutions: 10,
             solutions: [],
+            max_step: 10000,
             step: 0,
             progress: false
         }
@@ -368,8 +372,8 @@ namespace Solver {
     _solve_inner: Solver -> IOFail (Array BoardState, I64);
     _solve_inner = |solver| (
         let solver = solver.mod_step(add(1));
-        if solver.@step >= 100000 { throw $ "too may steps" };
-        if solver.@solutions.get_size >= 10 { throw $ "too may solutions" };
+        if solver.@step > solver.@max_step { throw $ "最大ステップ数を超えました" };
+        if solver.@solutions.get_size > solver.@max_solutions { throw $ "解の最大個数を超えました" };
 
         //  スタックから盤面状態を1つ取り出す。
         let opt = solver._pop_stack;
@@ -382,7 +386,7 @@ namespace Solver {
 
         //  9 x 9 個のマスがすべて埋まったら解を記録する。
         if state.@digit_count >= 9 * 9 {
-            let _ = *solver._progress(|_| "found a solution");
+            let _ = *solver._progress(|_| [state.@digit_count].format("{}: 解が見つかりました"));
             let solver = solver.mod_solutions(push_back(state));
             solver._solve_inner
         };
@@ -391,21 +395,20 @@ namespace Solver {
         let min_cell = state.@candidates.find_min_candidates_cell(state.@board);
         if min_cell.is_none {
             // 空のマスがない
-            let _ = *solver._progress(|_| [state.@digit_count].format("{}: no candidates"));
+            let _ = *solver._progress(|_| [state.@digit_count].format("{}: 空のマスがありません"));
             solver._solve_inner
         };
         let (num_cand, row, col) = min_cell.as_some;
         if num_cand == 0 {
             // 候補数が0のマスにはどの数字も配置できないため、その盤面は解にならない。
-            let _ = *solver._progress(|_| (state.@digit_count, row, col).format("{}: no candidates at ({}, {})"));
+            let _ = *solver._progress(|_| (state.@digit_count, row, col).format("{}: ({}, {}) に配置できる数字がありません"));
             solver._solve_inner
         };
 
         //  候補の各々について、その数字を配置した盤面を生成し、スタックに積む。
-        let _ = *solver._progress(|_| (state.@digit_count, num_cand, (row, col)).format("{}: find {} candidates at {}"));
         let bitvec = state.@candidates.get_bitvec(row, col);
-        let _ = *solver._progress(|_| (state.@digit_count, bitvec.to_iter.map(to_string).join(","), row, col)
-                                .format("{}: place {} at ({}, {})"));
+        let _ = *solver._progress(|_| (state.@digit_count, (row, col), bitvec.to_iter.map(to_string).join(","))
+                                .format("{}: {} に配置可能な数字: {}"));
         let solver = bitvec.to_iter.fold(solver, |solver, digit|
             solver._push_stack(state.place_digit(row, col, digit))
         );
@@ -641,18 +644,18 @@ command_solve = (
     Command::new("solve")
     .display_name("sudoku solve")
     .about("数独の問題を解決します。")
-    .arg(Arg::new("input").short('i').long("input").help("数独問題ファイル。未指定時はサンプルの問題を解決する。").takes_value.default_value(""))
+    .arg(Arg::new("input").short('i').long("input").help("数独問題ファイル。未指定時はサンプルの問題を解決する。").takes_value)
     .arg(Arg::new("verbose").short('v').long("verbose").help("進捗状況を表示する").default_value("false"))
 );
 
 run_command_solve: ArgMatches -> IOFail ();
 run_command_solve = |submatches| (
-    let input = submatches.get_one("input").as_some;
+    let input_path = submatches.get_one("input").bind(Path::parse);
     let verbose = submatches.get_one("verbose").as_some;
-    let problem = *if input != "" {
-        read_file_string(Path::parse(input).as_some)
+    let problem = *if input_path.is_some {
+        read_file_string(input_path.as_some)
     } else {
-        pure $ problem1
+        pure $ problem4
     };
     let solver = Solver::make();
     let solver = solver.set_progress(verbose == "true");
@@ -728,8 +731,8 @@ main = (
     do {
         let args = *IO::get_args.lift;
         let args = if args.get_size <= 1 {
-            ["sudoku", "solve"]
-            //["sudoku", "generate"]
+            ["sudoku", "solve", "-v"]
+            //["sudoku", "generate", "-v"]
         } else { args };
         let matches = *command_main.get_matches_from(args).from_result;
         run_command_main(matches)

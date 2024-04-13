@@ -61,9 +61,6 @@ algebra_test1:
 monoid_test1:
 	../bin/fixautolink run -L ../lib -L . -f monoid_test1.fix -O separated
 
-sudoku:
-	../bin/fixautolink run -L ../lib -L . -f sudoku.fix -O separated
-
 clean:
 	rm -f *.out
 

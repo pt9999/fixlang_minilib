@@ -213,3 +213,56 @@ OPTIONS:
     -V, --version               Print version information
     -w, --word-list <VALUE>     Word list file (default: /usr/share/dict/american-english)
 ```
+
+## sudoku
+
+This program generates or solves a [Sudoku](https://en.wikipedia.org/wiki/Sudoku) problem.
+Currently it is localized for Japanese.
+
+```
+$ examples/sudoku.out --help
+sudoku.out 0.1
+数独の問題を作成または解決します。
+
+USAGE:
+    sudoku.out [OPTIONS] [SUBCOMMAND]
+
+OPTIONS:
+    -h, --help                  Print help information
+    -V, --version               Print version information
+
+SUBCOMMANDS:
+    solve      数独の問題を解決します。
+    generate   数独の問題を作成します。
+
+$ examples/sudoku.out solve --help
+sudoku.out solve
+数独の問題を解決します。
+
+USAGE:
+    sudoku.out solve [OPTIONS]
+
+OPTIONS:
+    -h, --help                  Print help information
+    -V, --version               Print version information
+    -i, --input <VALUE>         数独問題ファイル。未指定時はサンプルの問題を解決する。
+    -d, --max-step <VALUE>      問題解決の最大ステップ数 (default: 100)
+    -v, --verbose               進捗状況を表示する (default: false)
+
+$ examples/sudoku.out generate --help
+sudoku.out generate
+数独の問題を作成します。
+
+USAGE:
+    sudoku.out generate [OPTIONS]
+
+OPTIONS:
+    -h, --help                  Print help information
+    -V, --version               Print version information
+    -o, --output <VALUE>        出力先の数独問題ファイル
+    -r, --max-retry <VALUE>     穴開け処理の最大試行回数 (default: 100)
+    -n, --min-digits <VALUE>    数字の最小配置数 (default: 25)
+    -d, --max-step <VALUE>      問題解決の最大ステップ数 (default: 100)
+    -s, --seed <VALUE>          乱数生成器の種 (default: 現在時刻)
+    -v, --verbose               進捗状況を表示する (default: false)
+```

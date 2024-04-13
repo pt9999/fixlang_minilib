@@ -76,3 +76,5 @@ examples/probable_primes.out:
 examples/fractal_server.out:
 	-bin/fixautolink build -o $@ -L ./lib -d png -d z -f examples/fractal_server.fix $(OPT_EXAMPLES)
 
+examples/sudoku.out:
+	bin/fixautolink build -o $@ -L ./lib -f examples/sudoku.fix $(OPT_EXAMPLES)

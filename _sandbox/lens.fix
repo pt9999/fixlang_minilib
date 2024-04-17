@@ -64,9 +64,9 @@ namespace Lens {
         }
     );
 
-    // `lens.map_state(state)` transforms a state monad.
-    map_state: State t a -> Lens s t -> State s a;
-    map_state = |state, lens| (
+    // `lens.transform_state(state)` transforms a state monad.
+    transform_state: State t a -> Lens s t -> State s a;
+    transform_state = |state, lens| (
         make_state_monad $ |s|
         let t = lens.get(s);
         let (a, t) = state.run_state(t);
@@ -138,6 +138,16 @@ test2 = (
 //-------------------
 // Mock application
 //-------------------
+
+namespace StateEx {
+    // Lift a State monad.
+    liftS: [f: Functor] State s a -> State (f s) (f a);
+    liftS = |state| (
+        make_state_monad $ |fs|
+        let fas = fs.map(|s| state.run_state(s));
+        (fas.map(@0), fas.map(@1))
+    );
+}
 
 type User = unbox struct {
     name: String,
@@ -268,8 +278,8 @@ namespace App {
     add_favo_book4: String -> String -> App -> App;
     add_favo_book4 = |user_name, book_name, app| (
         do {
-            let _ = *user(user_name).map_state(state_add_favo(book_name).liftS);
-            let _ = *book(book_name).map_state(state_add_likes(1).liftS);
+            let _ = *user(user_name).transform_state(state_add_favo(book_name).liftS);
+            let _ = *book(book_name).transform_state(state_add_likes(1).liftS);
             pure()
         }.run_state(app).@1
     );

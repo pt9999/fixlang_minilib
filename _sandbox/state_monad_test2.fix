@@ -1,14 +1,14 @@
 // TODO: use UnitTest
 module Main;
 
-import Sandbox.StateT;
+import Minilib.Monad.State;
 
 type App = unbox struct {
     users: Array String,
     pages: Array String
 };
 
-type [m: * -> *] StateApp m = StateT m App;
+type StateApp = StateT App;
 
 namespace App {
     empty: App;
@@ -42,7 +42,7 @@ namespace App {
     print_users: StateApp IO ();
     print_users = do {
         let users = *get_users;
-        to_state $ do {
+        lift_state $ do {
             let _ = *println("---users---");
             users.to_iter.fold_m((), |_, u| println(u))
         }
@@ -51,7 +51,7 @@ namespace App {
     print_pages: StateApp IO ();
     print_pages = do {
         let pages = *get_pages;
-        to_state $ do {
+        lift_state $ do {
             let _ = *println("---pages---");
             pages.to_iter.fold_m((), |_, p| println(p))
         }
@@ -78,7 +78,7 @@ namespace App {
     save_file = |path| (
         let users = *get_users;
         let pages = *get_pages;
-        to_state $ do {
+        lift_state $ do {
             if path == "" { throw $ "Empty path" };
             let path = Path::parse(path);
             if path.is_none { throw $ "Path::parse failed" };
@@ -99,7 +99,7 @@ test_state = do {
         let _ = *register_users;
         get_users
     };
-    let (users,_) = *m.run_state(App::empty);  // App 以外を指定するとpanicする
+    let (users,_) = *m.run_state_t(App::empty);  // App 以外を指定するとpanicする
     let _ = *println(users.to_iter.join(","));
     pure()
 };
@@ -119,24 +119,22 @@ stateio_func = do {
 test_stateio: IO ();
 test_stateio = do {
     let _ = *println("=== test_stateio ===");
-    let (_,s) = *stateio_func.run_state(App::empty);
+    let (_,s) = *stateio_func.run_state_t(App::empty);
     pure()
 };
 
 stateiof_func: () -> StateApp IOFail ();
 stateiof_func = |_| do {
-    let lift_state = |lft, st| make_state_monad $ |s| st.run_state(s).lft;
-    //let lift_state = |lft, st| make_state_monad $ |s| st.run_state(s).lft; // コメントを外すとなぜかエラーになる
-    let _ = *stateio_func.lift_state(lift);
+    let _ = *stateio_func.map_state_t(lift);
     let _ = *save_file("");
-    let _ = *println("completed.").lift.to_state;
+    let _ = *println("completed.").lift.lift_state;
     pure()
 };
 
 test_stateiof: IO ();
 test_stateiof = do {
     let _ = *println("=== test_stateiof ===").lift;
-    let (_,s) = *stateiof_func().run_state(App::empty);
+    let (_,s) = *stateiof_func().run_state_t(App::empty);
     pure()
 }.try(|err| println("ERROR: " + err));
 

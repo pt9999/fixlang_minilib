@@ -67,6 +67,8 @@ To build example programs, type `make examples`.
 To run test codes, type `make test`. It has been mainly tested in the following environment.
 
 - Ubuntu-22.04 on WSL 2
+- gcc 11.4.0
+- GNU make 4.3
 - rustup 1.26.0
 - rustc 1.72.1
 - llvm 12.0.1

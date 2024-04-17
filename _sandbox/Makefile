@@ -34,11 +34,8 @@ mandelbrot:
 lens:
 	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
-state_monad_test:
-	../bin/fixautolink run -L ../lib -f state_monad_test.fix
-
 state_monad_test2:
-	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O minimum
+	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O separated
 
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix -O separated

@@ -38,6 +38,10 @@ Common functions such as `id` and `flip`.
 
 Env comonad. (a.k.a CoReader comonad)
 
+### [module Minilib.Comonad.IdentityC (lib/comonad/identity_c.fix)](lib/comonad/identity_c.md)
+
+Identity comonad
+
 ### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
 
 Traced comonad. (a.k.a CoWriter comonad)

@@ -21,7 +21,7 @@ type [w: * -> *] TracedT e w a = unbox struct {
 ### type Traced
 
 ```
-type Traced e a = TracedT e Identity a;
+type Traced e a = TracedT e IdentityC a;
 ```
 ### namespace Traced
 

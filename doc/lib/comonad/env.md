@@ -22,7 +22,7 @@ type [w: * -> *] EnvT e w a = unbox struct {
 ### type Env
 
 ```
-type Env e a = EnvT e Identity a;
+type Env e a = EnvT e IdentityC a;
 ```
 ### namespace Env
 

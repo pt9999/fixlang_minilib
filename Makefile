@@ -1,18 +1,15 @@
 all: tools examples
 
 clean:
-	rm -f examples/*.out
 	rm -f $(TOOLS)
 	rm -f .depend
 	fix clean
+	$(MAKE) -C examples clean
 
 -include .depend
 
 #OPT_TOOLS = -O default
 OPT_TOOLS = -O separated
-
-#OPT_EXAMPLES = -O default
-OPT_EXAMPLES = -O separated
 
 #OPT_TESTS = -O default
 OPT_TESTS = -O separated
@@ -38,41 +35,6 @@ test: bin/fixautotest
 document: bin/fixdoc
 	bin/fixdoc -i lib -o doc
 
-examples: bin/fixautolink \
-		examples/json_cat.out \
-		examples/sample_client.out \
-		examples/sample_server.out \
-		examples/sample_http_server.out \
-		examples/grep.out \
-		examples/spell_checker.out \
-		examples/calc_pi.out \
-		examples/probable_primes.out \
-		examples/fractal_server.out
-
-examples/json_cat.out: 
-	bin/fixautolink build -o $@ -L ./lib -f examples/json_cat.fix $(OPT_EXAMPLES)
-
-examples/sample_client.out:
-	bin/fixautolink build -o $@ -L ./lib -f examples/sample_client.fix $(OPT_EXAMPLES)
-
-examples/sample_server.out: 
-	bin/fixautolink build -o $@ -L ./lib -f examples/sample_server.fix $(OPT_EXAMPLES)
-
-examples/sample_http_server.out: 
-	bin/fixautolink build -o $@ -L ./lib -f examples/sample_http_server.fix $(OPT_EXAMPLES)
-
-examples/grep.out: 
-	bin/fixautolink build -o $@ -L ./lib -f examples/grep.fix $(OPT_EXAMPLES)
-
-examples/spell_checker.out:
-	bin/fixautolink build -o $@ -L ./lib -f examples/spell_checker.fix $(OPT_EXAMPLES)
-
-examples/calc_pi.out:
-	bin/fixautolink build -o $@ -L ./lib -f examples/calc_pi.fix $(OPT_EXAMPLES)
-
-examples/probable_primes.out:
-	bin/fixautolink build -o $@ -L ./lib -f examples/probable_primes.fix $(OPT_EXAMPLES)
-
-examples/fractal_server.out:
-	-bin/fixautolink build -o $@ -L ./lib -d png -d z -f examples/fractal_server.fix $(OPT_EXAMPLES)
-
+.PHONY: examples
+examples: bin/fixautolink
+	$(MAKE) -C examples all

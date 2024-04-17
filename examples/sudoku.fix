@@ -467,8 +467,7 @@ namespace Solver {
 // 問題作成器
 type Generator = unbox struct {
     max_retry: I64,                 //  穴開け処理の最大試行回数
-    min_digit_count: I64,       //  数字の最小配置数
-    swap_count: I64,                //  行・列の交換回数
+    min_digit_count: I64,           //  数字の最小配置数
     var_random: Var Random,         //  Random の変数
     solver: Solver,                 //  数独の問題を解くソルバー
     progress: Bool                  //  進捗表示するならtrue
@@ -481,7 +480,6 @@ namespace Generator {
         Generator {
             max_retry: max_retry,
             min_digit_count: min_digit_count,
-            swap_count: 100,
             var_random: var_random,
             solver: solver,
             progress: true
@@ -533,6 +531,7 @@ namespace Generator {
     // f は乱数を生成する関数。
     _with_random: (Random -> (a, Random)) -> Generator -> IOFail a;
     _with_random = |f, gen| (
+        eval *pure();
         gen.@var_random.lock(|random|
             let (a, random) = f(random);
             let _ = *gen.@var_random.Var::set(random);
@@ -592,25 +591,29 @@ namespace Generator {
         //  数字をランダムに置換する。
         let subst = *gen._with_random(shuffle(Iterator::range(0, 9).to_array));
         let board = board.subst_digit(subst);
-        Iterator::range(0, gen.@swap_count).fold_m(
-            board, |board, _|
-            // 同一ブロック内で2つの行をランダムに交換する。
-            let rowoff = *gen._with_random(generate_I64_range(1, 3));
-            let row1 = *gen._with_random(generate_I64_range(0, 9));
-            let row2 = row1 / 3 * 3 + (row1 + rowoff) % 3;
-            // 同一ブロック内で2つの列をランダムに交換する。
-            let coloff = *gen._with_random(generate_I64_range(1, 3));
-            let col1 = *gen._with_random(generate_I64_range(0, 9));
-            let col2 = col1 / 3 * 3 + (col1 + coloff) % 3;
-            let board = board.swap_rows(row1, row2).swap_cols(col1, col2);
-            pure $ board
-        )
+
+        // 0以上6未満の乱数生成器
+        let random6 = gen._with_random(generate_I64_range(0, 6));
+        // 行をランダムに置換する。
+        let board = board.permute3(add_offset(swap_rows, 0), *random6);
+        let board = board.permute3(add_offset(swap_rows, 3), *random6);
+        let board = board.permute3(add_offset(swap_rows, 6), *random6);
+        // 列をランダムに置換する。
+        let board = board.permute3(add_offset(swap_cols, 0), *random6);
+        let board = board.permute3(add_offset(swap_cols, 3), *random6);
+        let board = board.permute3(add_offset(swap_cols, 6), *random6);
+        // ブロックをランダムに置換する。
+        let board = board.permute3(swap_blocks(swap_rows), *random6);
+        let board = board.permute3(swap_blocks(swap_cols), *random6);
+
+        pure $ board
     );
 
     // 盤面生成用の処理
+    // 参考にしたサイト: https://nanpre.adg5.com/make_sys1.html
     namespace BoardEx {
-        // すべての数字を配置した盤面。
-        // 数独の制約条件を満たすが、シンプルすぎる。
+        // 数独の制約条件を満たすようにすべての数字を配置した盤面。
+        // 盤面生成処理では、これをランダムに置換する。
         full_board: Board;
         full_board = (
             let board = Board::empty;
@@ -649,8 +652,13 @@ namespace Generator {
                 .set_digit(row2, col2, digit1)
         );
 
+        //  行/列/ブロックを交換する `swap` 関数の型。
+        //  インターフェイス: `board.swap(index1, index2)`
+        //  `index1`, `index2` は行/列/ブロックのインデックス。(0以上3未満)
+        type Swapper = I64 -> I64 -> Board -> Board;
+
         // 2つの行を交換する。
-        swap_rows: I64 -> I64 -> Board -> Board;
+        swap_rows: Swapper;
         swap_rows = |row1, row2, board| (
             if row1 == row2 { board };
             Iterator::range(0, 9).fold(
@@ -660,13 +668,35 @@ namespace Generator {
         );
 
         // 2つの列を交換する。
-        swap_cols: I64 -> I64 -> Board -> Board;
+        swap_cols: Swapper;
         swap_cols = |col1, col2, board| (
             if col1 == col2 { board };
             Iterator::range(0, 9).fold(
                 board, |board, row|
                 board.swap_cells((row, col1), (row, col2))
             )
+        );
+
+        //  2つのブロックを交換する。
+        swap_blocks: Swapper -> Swapper;
+        swap_blocks = |swap, block1, block2| (
+            swap(block1 * 3 + 0, block2 * 3 + 0) >>
+            swap(block1 * 3 + 1, block2 * 3 + 1) >>
+            swap(block1 * 3 + 2, block2 * 3 + 2)
+        );
+
+        //  行/列の交換時のインデックスにオフセットを加算する。
+        add_offset: Swapper -> I64 -> Swapper;
+        add_offset = |swap, offset| (
+            |idx1, idx2| swap(idx1 + offset, idx2 + offset)
+        );
+
+        //  3つの行/列/ブロックをランダムな順列で入れ替える。permは0..6の乱数。
+        permute3: Swapper -> I64 -> Board -> Board;
+        permute3 = |swap, perm, board| (
+            let board = board.swap(perm % 3, (perm + 1) % 3);
+            let board = if perm / 3 == 0 { board } else { board.swap(1, 2) };
+            board
         );
     }
 }

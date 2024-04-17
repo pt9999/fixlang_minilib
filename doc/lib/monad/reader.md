@@ -45,6 +45,10 @@ Runs a reader monad with the supplied environment.
 
 A reader monad that returns the environment as a value.
 
+#### lift_reader: [m: Monad] m a -> ReaderT e m a;
+
+Lifts an underlyind monad to a reader monad.
+
 #### `impl [m: Monad] ReaderT e m: Functor`
 
 #### `impl [m: Monad] ReaderT e m: Monad`

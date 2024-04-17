@@ -34,6 +34,10 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Comonad.Env (lib/comonad/env.fix)](lib/comonad/env.md)
+
+Env comonad. (a.k.a CoReader comonad)
+
 ### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
 
 Traced comonad. (a.k.a CoWriter comonad)
@@ -166,7 +170,7 @@ State Monad which maintains a mutable state.
 
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
-Writer monad. (a.k.a Env, CoReader comonad)
+Writer monad.
 
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 

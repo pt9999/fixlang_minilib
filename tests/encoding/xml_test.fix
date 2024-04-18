@@ -4,6 +4,10 @@ import Minilib.Encoding.Xml;
 import Minilib.Testing.UnitTest;
 import Minilib.Text.StringEx;
 
+//=======================================================================
+// tests for XmlDocument
+//=======================================================================
+
 _default_xml_decl: String;
 _default_xml_decl = "<?xml version='1.1' encoding='utf-8'?>";
 
@@ -48,7 +52,10 @@ test_xmldocument_to_string = (
 
 // TODO: test XmlDeclaration
 // TODO: test XmlNode
-// TODO: test XmlElement
+
+//=======================================================================
+// tests for XmlElement
+//=======================================================================
 
 test_xmlelement_make: TestCase;
 test_xmlelement_make = (
@@ -106,6 +113,67 @@ test_xmlelement_addF = (
     assert_equal("child", [element_node $ child_and_grandchild], parent.@children)
 );
 
+test_xmlelement_text: TestCase;
+test_xmlelement_text = (
+    make_test("test_xmlelement_text") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.text("text1");
+    let element = element.text("text2");
+    assert_equal("children", [
+        text_node $ XmlText::make("text1"),
+        text_node $ XmlText::make("text2")
+    ], element.@children)
+);
+
+test_xmlelement_concat_text_nodes: TestCase;
+test_xmlelement_concat_text_nodes = (
+    make_test("test_xmlelement_concat_text_nodes") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.text("text1");
+    let element = element.text("text2");
+    let element = element.add_node(comment_node $ XmlComment::make("comment"));
+    let element = element.text("text3");
+    let element = element.concat_text_nodes;
+    assert_equal("children", [
+        text_node $ XmlText::make("text1text2"),
+        comment_node $ XmlComment::make("comment"),
+        text_node $ XmlText::make("text3")
+    ], element.@children)
+);
+
+test_xmlelement_eq: TestCase;
+test_xmlelement_eq = (
+    make_test("test_xmlelement_eq") $ |_|
+    let element1 = XmlElement::make("element");
+    let element2 = XmlElement::make("element");
+    eval *assert_equal("plain", element1, element2);
+    eval *assert_not_equal("attr1", element1, element2.attr("attr1", "value1"));
+    eval *assert_equal("attr2", element1.attr("attr1", "value1"), element2.attr("attr1", "value1"));
+    eval *assert_not_equal("attr3", element1.attr("attr1", "value1"), element2.attr("attr1", "value2"));
+    eval *assert_not_equal("children1", element1, element2.add(XmlElement::make("child1")));
+    eval *assert_equal("children2", element1.add(XmlElement::make("child1")), element2.add(XmlElement::make("child1")));
+    eval *assert_not_equal("children3", element1.add(XmlElement::make("child1")), element2.add(XmlElement::make("child2")));
+    pure()
+);
+
+test_xmlelement_to_string: TestCase;
+test_xmlelement_to_string = (
+    make_test("test_xmlelement_to_string") $ |_|
+    let element1 = XmlElement::make("element1");
+    let element1 = element1.attr("attr2", "value2");
+    let element1 = element1.attr("attr1", "value1");
+    let element1 = element1.text("text1");
+    let element1 = element1.add_node(comment_node $ XmlComment::make("comment"));
+    let element1 = element1.add(XmlElement::make("child1").text("text2"));
+    let expected = "<element1 attr2=\"value2\" attr1=\"value1\">"
+                    + "text1"
+                    + "<!--comment-->"
+                    + "<child1>text2</child1>"
+                    + "</element1>";
+    let actual = element1.to_string;
+    assert_equal("to_string", expected, actual)
+);
+
 // TODO: test XmlAttribute
 // TODO: test XmlText
 // TODO: test XmlCDATASection
@@ -126,6 +194,10 @@ main = (
         test_xmlelement_add_node,
         test_xmlelement_add,
         test_xmlelement_addF,
+        test_xmlelement_text,
+        test_xmlelement_concat_text_nodes,
+        test_xmlelement_eq,
+        test_xmlelement_to_string,
         TestCase::empty
     ].run_test_driver
 );

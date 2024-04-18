@@ -34,6 +34,26 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Comonad.Env (lib/comonad/env.fix)](lib/comonad/env.md)
+
+Env comonad. (a.k.a CoReader comonad)
+
+### [module Minilib.Comonad.IdentityC (lib/comonad/identity_c.fix)](lib/comonad/identity_c.md)
+
+Identity comonad
+
+### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
+
+Traced comonad. (a.k.a CoWriter comonad)
+
+### [module Minilib.Crypto.AES (lib/crypto/aes.fix)](lib/crypto/aes.md)
+
+Advanced Encryption Standard (AES)
+
+### [module Minilib.Crypto.HMAC (lib/crypto/hmac.fix)](lib/crypto/hmac.md)
+
+The Keyed-Hash Message Authentication Code (HMAC)
+
 ### [module Minilib.Crypto.MD5 (lib/crypto/md5.fix)](lib/crypto/md5.md)
 
 MD5 secure hash function.
@@ -140,9 +160,13 @@ PNG image I/O.
 
 `map_m`, `foreach_m` for Array and Iterator.
 
+### [module Minilib.Monad.Identity (lib/monad/identity.fix)](lib/monad/identity.md)
+
+Identity monad
+
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
-Reader monad. (a.k.a Traced, CoWriter comonad)
+Reader monad.
 
 ### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
 
@@ -150,7 +174,7 @@ State Monad which maintains a mutable state.
 
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
-Writer monad. (a.k.a Env, CoReader comonad)
+Writer monad.
 
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
@@ -198,6 +222,10 @@ Array utility functions for testing.
 
 Unit Test Framework
 
+### [module Minilib.Text.Hex (lib/text/hex.fix)](lib/text/hex.md)
+
+Hexadecimal string conversion
+
 ### [module Minilib.Text.RegExp.RegExpNFA (lib/text/regexp/regexp_nfa.fix)](lib/text/regexp/regexp_nfa.md)
 
 NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.
@@ -220,11 +248,10 @@ Simple text parser. Customizable by monadic operations.
 ### [module Minilib.Text.StringEx (lib/text/string_ex.fix)](lib/text/string_ex.md)
 
 String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
+- Format
+- ToString extensions
 
 ### [module Minilib.Text.Unicode (lib/text/unicode.fix)](lib/text/unicode.md)
 

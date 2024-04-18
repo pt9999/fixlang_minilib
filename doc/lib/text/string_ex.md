@@ -3,11 +3,10 @@
 ## module Minilib.Text.StringEx
 
 String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
+- Format
+- ToString extensions
 
 #### to_lower: String -> String;
 
@@ -109,19 +108,9 @@ with `a`, `b`, `c`.
 `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
 with `a`, `b`, `c`, `d`.
 
-#### encode_hex_char: U8 -> U8;
+### namespace HashMap
 
-Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').
+#### to_string_ex: [k: ToString, v: ToString] HashMap k v -> String;
 
-#### decode_hex_char: U8 -> Result ErrMsg U8;
-
-Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
-
-#### to_string_hex: U64 -> String;
-
-Converts a 64bit number to a hex string.
-
-#### from_string_hex: String -> Result ErrMsg U64;
-
-Converts a hex string to a 64bit number.
+Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
 

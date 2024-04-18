@@ -1,0 +1,66 @@
+module Main;
+
+import Debug;
+
+import Minilib.Monad.State;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_state_functor: TestCase;
+test_state_functor = (
+    make_test("test_state_functor") $ |_|
+    let sm = make_state_monad(|s| (2, s));
+    let sm = sm.map(add(1));
+    let sm = sm.map(to_string);
+    assert_equal("eq", ("3", "abc"), sm.run_state("abc"))
+);
+
+test_state_monad: TestCase;
+test_state_monad = (
+    make_test("test_state_monad") $ |_|
+    let get_elt = |i| (
+        let a = *get_state;
+        pure $ a.@(i)
+    );
+    let set_elt = |i, elt| (
+        let a = *get_state;
+        let a = a.set(i, elt);
+        put_state(a)
+    );
+    let sm = do {
+        eval *set_elt(1, 4);
+        let x = *get_elt(0);
+        let y = *get_elt(1);
+        pure $ x + y
+    };
+    assert_equal("eq", (6, [2, 4]), sm.run_state([2, 3]))
+);
+
+type StateIOF s a = StateT s IOFail a;
+
+test_stateiof: TestCase;
+test_stateiof = (
+    make_test("test_stateiof") $ |_|
+    let sm: StateIOF (Array I64) I64 = do {
+        let arr: Array I64 = *get_state;
+        let arr = arr.push_back(2);
+        if arr.get_size != 2 { lift_state << throw $ "err" };
+        eval *put_state(arr);
+        pure $ arr.to_iter.sum
+    };
+    let actual = *sm.run_state_t([1]);
+    assert_equal("eq", (3, [1, 2]), actual)
+);
+
+
+main: IO ();
+main = (
+    [
+        test_state_functor,
+        test_state_monad,
+        test_stateiof,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

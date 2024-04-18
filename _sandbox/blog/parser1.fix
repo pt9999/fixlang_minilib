@@ -1,0 +1,117 @@
+// ブログ記事用のチュートリアル
+module Main;
+
+// 文字を表す型。
+type Char = U8;
+
+// 文字のストリームを表す型。
+type Stream = Iterator Char;
+
+// 解析結果を表す型。成功時には解析結果(a)と次のストリーム位置を返す。失敗時にはエラーを返す。
+type ParseResult a = Result ErrMsg (a, Stream);
+
+// パーサを表す型。
+type Parser a = unbox struct { 
+    _parser: Stream -> ParseResult a   // ストリームを解析し、解析結果を返す関数
+};
+
+namespace Parser {
+    // パーサを作成する。
+    parser: (Stream -> ParseResult a) -> Parser a;
+    parser = |f| Parser { _parser: f };
+
+    // パーサを実行する。
+    run_parser: Stream -> Parser a -> ParseResult a;
+    run_parser = |s, p| p.@_parser $ s;
+}
+
+namespace Parser {
+    // 解析失敗時に返すエラーメッセージ。
+    _NotMatch: ErrMsg;
+    _NotMatch = "NotMatch";
+
+    // 任意の1文字にマッチする。文字がないときは _NotMatchエラーを返す。
+    match_any_char: Parser Char;
+    match_any_char = parser $ |s| (
+        s.advance.map_or(
+            err $ _NotMatch,
+            |(c, next)| pure $ (c, next)
+        )
+    );
+}
+
+// Functorトレイトを実装する。
+impl Parser: Functor {
+    // map: (a -> b) -> f a -> f b;
+    map = |f, p| parser $ |s| (
+        let (c, s) = *(p.run_parser(s));
+        pure $ (f(c), s)
+    );
+}
+
+// Monadトレイトを実装する。
+impl Parser: Monad {
+    pure = |a| parser $ |s| ok $ (a, s);
+    bind = |f, pa| (
+        parser $ |s|
+        let res = (pa.run_parser(s));
+        let (a, s) = *res;
+        let pb = f(a);
+        pb.run_parser(s)
+    );
+}
+
+namespace Parser {
+    // パーサの解析結果から指定した条件に合うものだけを取りだす。
+    filter: (a -> Bool) -> Parser a -> Parser a;
+    filter = |f, p| parser $ |s| (
+        let (c, next) = *(p.run_parser(s));
+        if !f(c) {
+            err $ _NotMatch
+        };
+        pure $ (c, next)
+    );
+    
+    // 指定したパーサがエラーを返すまで繰り返し実行する。
+    repeat: Parser a -> Parser (Array a);
+    repeat = |p| parser $ |s| (
+        loop(
+            ([], s), |(array, s)|
+            let res = p.run_parser(s);
+            if res.is_err {
+                break $ pure $ (array, s)
+            };
+            let (a, s) = res.as_ok;
+            continue $ (array.push_back(a), s)
+        )
+    );
+
+    match_integer: Parser I64;
+    match_integer = do {
+
+    };
+
+    skip_spaces: Parser ();
+    skip_spaces = do {
+        let _ = *repeat(match_any_char.filter(isspace));
+        pure()
+    };
+}
+
+// 文字の配列を文字列に変換する。
+chars_to_string: Array U8 -> String;
+chars_to_string = |chars| chars.push_back(0_U8)._unsafe_from_c_str;
+
+//--------------------------------------
+type User = unbox struct {
+    name: String,
+    age: I64
+};
+
+test1: IO ();
+test1 = (
+    let text = "User { name = taro, age = 10 }";
+
+);
+
+

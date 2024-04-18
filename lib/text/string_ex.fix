@@ -1,9 +1,8 @@
 // String extensions, such as:
-// - ToString for Tuple, Option, Result, Array, HashMap
 // - Array U8 -> String conversion
 // - Search, replace, split, comparison of String
-// - Hexadecimal String
-// - File Path handling
+// - Format
+// - ToString extensions
 module Minilib.Text.StringEx;
 
 import Debug;
@@ -245,53 +244,15 @@ namespace Tuple4 {
 }
 
 //---------------------------------
-// Hexadecimal
+// ToString extensions
 //---------------------------------
 
-// Converts a 4bit number (0..15) to a hex character ('0'..'9', 'A'..'F').
-encode_hex_char: U8 -> U8;
-encode_hex_char =
-    let hex_chars = "0123456789ABCDEF".get_bytes.pop_back
-    in |c| hex_chars.@(c.bit_and(15_U8).to_I64);
-
-// Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
-decode_hex_char: U8 -> Result ErrMsg U8;
-decode_hex_char = |c| (
-    if '0' <= c && c <= '9' { ok $ c - '0' };
-    if 'A' <= c && c <= 'F' { ok $ c - 'A' + 10_U8 };
-    if 'a' <= c && c <= 'f' { ok $ c - 'a' + 10_U8 };
-    err $ "Not a hexadecimal character: '" + byte_to_string(c) + "'"
-);
-
-// Converts a 64bit number to a hex string.
-to_string_hex: U64 -> String;
-to_string_hex = |input| (
-    let output: Iterator U8 = Iterator::empty;
-    let output = loop(
-        (output, 0, input), |(output, i, input)|
-        if i >= 16 || input == 0_U64 {
-            break $ output
-        };
-        let h = input.bit_and(15_U64).to_U8;
-        let input = input.shift_right(4_U64);
-        let output = output.push_front(encode_hex_char(h));
-        continue $ (output, i + 1, input)
+namespace HashMap {
+    // Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
+    to_string_ex: [k: ToString, v: ToString] HashMap k v -> String;
+    to_string_ex = |h| (
+        "{" +
+        h.to_iter.map(|(k,v)| k.to_string + ":" + v.to_string).join(",")
+        + "}"
     );
-    let output = if output.is_empty { output.push_front ('0') } else { output };
-    output.to_array._unsafe_to_string
-);
-
-// Converts a hex string to a 64bit number.
-from_string_hex: String -> Result ErrMsg U64;
-from_string_hex = |input| (
-    if input.get_size == 0 {
-        err $ "Empty string"
-    };
-    let input = input.get_bytes.pop_back;
-    input.to_iter.fold_m(
-        0_U64, |output, c|
-        let c = *decode_hex_char(c);
-        pure $ output.shift_left(4_U64).bit_or(c.to_U64)
-    )
-);
-
+}

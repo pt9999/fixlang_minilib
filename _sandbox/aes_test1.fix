@@ -1,0 +1,130 @@
+// Advanced Encryption Standard (AES)
+//
+// cf. [NIST FIPS 197](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf)
+module Main;
+
+import Debug;
+
+import Minilib.Crypto.AES;
+//import Minilib.Encoding.Binary;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Thread.Time;
+
+test_mul_gf8: IO ();
+test_mul_gf8 = (
+    let xs = Iterator::range(0, 8).fold(
+        ([], 1_U8), |(xs, x), _|
+        (xs.push_back(x), x * 2_U8)).@0;
+    println $ xs.to_iter.map(|b|
+        let a = 0x57_U8;
+        let c = _mul_gf8(a, b);
+        [a,b,c].map(to_string_hex).format("a={} b={} c={}")
+    ).join("\n")
+);
+
+test_inv_gf8: IO ();
+test_inv_gf8 = (
+    Iterator::range(1, 256).fold_m(
+        (), |_, i|
+        let a = i.to_U8;
+        let b = _inv_gf8(a);
+        let c = _mul_gf8(a, b);
+        let _ = *println([a,b,c].map(to_string_hex).format("a={} b={} c={}"));
+        eval assert(|_| "invalid c", c == 1_U8);
+        pure()
+    )
+);
+
+tabulate: (U8 -> String) -> String;
+tabulate = |f| (
+    Iterator::range(0, 16).map(|x|
+        Iterator::range(0, 16).map(|y|
+            let b = (x * 16 + y).to_U8;
+            f(b)
+        ).join(" ")
+    ).join("\n")
+);
+
+test_sbox: IO ();
+test_sbox = (
+    println $ tabulate(|b| _sbox(b).to_string_hex)
+);
+
+byte_array_from_string_hex: String -> Array U8;
+byte_array_from_string_hex = |str| (
+    str.split(" ").map(from_string_hex >> as_ok).to_array
+);
+
+// Appendix A — Key Expansion Examples
+test_key_expansion_128: IO ();
+test_key_expansion_128 = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::_empty(128);
+    let w = aes._key_expansion(key);
+    Iterator::range(0, 44).fold_m(
+        (), |_, i|
+        println((i, w.@(i).to_string_hex).format("w[{}] = {}"))
+    )
+);
+
+test_key_expansion_192: IO ();
+test_key_expansion_192 = (
+    let key = "8e 73 b0 f7 da 0e 64 52 c8 10 f3 2b 80 90 79 e5 62 f8 ea d2 52 2c 6b 7b";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::_empty(192);
+    let w = aes._key_expansion(key);
+    Iterator::range(0, 4 * (aes._get_number_of_rounds + 1)).fold_m(
+        (), |_, i|
+        println((i, w.@(i).to_string_hex).format("w[{}] = {}"))
+    )
+);
+
+test_key_expansion_256: IO ();
+test_key_expansion_256 = (
+    let key = "60 3d eb 10 15 ca 71 be 2b 73 ae f0 85 7d 77 81 1f 35 2c 07 3b 61 08 d7 2d 98 10 a3 09 14 df f4";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::_empty(256);
+    let w = aes._key_expansion(key);
+    Iterator::range(0, 4 * (aes._get_number_of_rounds + 1)).fold_m(
+        (), |_, i|
+        println((i, w.@(i).to_string_hex).format("w[{}] = {}"))
+    )
+);
+
+// Appendix B — Cipher Example
+test_cipher: IO ();
+test_cipher = (
+    let input = "32 43 f6 a8 88 5a 30 8d 31 31 98 a2 e0 37 07 34";
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let input = input.byte_array_from_string_hex;
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::_empty(128);
+    let w = aes._key_expansion(key);
+    let output = *timeit("cipher", |_| aes._cipher(input, w));
+    let _ = *println(output.to_string_hex);
+    let input2 = *timeit("inv_cipher", |_| aes._inv_cipher(output, w));
+    let _ = *println(input2.to_string_hex);
+    eval assert_eq(|_| "inv_cipher failed", input, input2);
+    pure()
+);
+
+test_encrypt_decrypt: IO ();
+test_encrypt_decrypt = (
+    let input = "32 43 f6 a8 88 5a 30 8d 31 31 98 a2 e0 37 07 34";
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let input = input.byte_array_from_string_hex;
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let output = *timeit("cipher", |_| aes.encrypt_block(input));
+    let _ = *println(output.to_string_hex);
+    let input2 = *timeit("inv_cipher", |_| aes.decrypt_block(output));
+    let _ = *println(input2.to_string_hex);
+    eval assert_eq(|_| "inv_cipher failed", input, input2);
+    pure()
+);
+
+main: IO ();
+main = test_encrypt_decrypt;
+

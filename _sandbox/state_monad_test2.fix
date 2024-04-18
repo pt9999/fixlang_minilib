@@ -1,14 +1,14 @@
 // TODO: use UnitTest
 module Main;
 
-import Sandbox.StateEx;
+import Minilib.Monad.State;
 
 type App = unbox struct {
     users: Array String,
     pages: Array String
 };
 
-type StateApp = State App;
+type StateApp = StateT App;
 
 namespace App {
     empty: App;
@@ -17,47 +17,47 @@ namespace App {
         pages: Array::empty(0)
     };
 
-    get_app: StateApp App;
+    get_app: [m: Monad] StateApp m App;
     get_app = get_state;
 
-    mod_app: StateApp ();
+    mod_app: [m: Monad] StateApp m ();
     mod_app = mod_state;
 
-    add_user: String -> StateApp ();
+    add_user: [m: Monad] String -> StateApp m ();
     add_user = |user| (
         mod_state(mod_users(push_back(user)))
     );
 
-    add_page: String -> StateApp ();
+    add_page: [m: Monad] String -> StateApp m ();
     add_page = |page| (
         mod_state(mod_pages(push_back(page)))
     );
 
-    get_users: StateApp (Array String);
+    get_users: [m: Monad] StateApp m (Array String);
     get_users = get_state.map(@users);
 
-    get_pages: StateApp (Array String);
+    get_pages: [m: Monad] StateApp m (Array String);
     get_pages = get_state.map(@pages);
 
-    print_users: StateApp (IO ());
+    print_users: StateApp IO ();
     print_users = do {
         let users = *get_users;
-        pure $ do {
+        lift_state $ do {
             let _ = *println("---users---");
             users.to_iter.fold_m((), |_, u| println(u))
         }
     };
 
-    print_pages: StateApp (IO ());
+    print_pages: StateApp IO ();
     print_pages = do {
         let pages = *get_pages;
-        pure $ do {
+        lift_state $ do {
             let _ = *println("---pages---");
             pages.to_iter.fold_m((), |_, p| println(p))
         }
     };
 
-    register_users: StateApp ();
+    register_users: [m: Monad] StateApp m ();
     register_users = do {
         let _ = *add_user("taro");
         let _ = *add_user("jiro");
@@ -65,7 +65,7 @@ namespace App {
         pure()
     };
 
-    create_user_pages: StateApp ();
+    create_user_pages: [m: Monad] StateApp m ();
     create_user_pages = do {
         let users = *get_users;
         users.to_iter.fold_m(
@@ -74,11 +74,11 @@ namespace App {
         )
     };
 
-    save_file: String -> StateApp (IOFail ());
+    save_file: String -> StateApp IOFail ();
     save_file = |path| (
         let users = *get_users;
         let pages = *get_pages;
-        pure $ do {
+        lift_state $ do {
             if path == "" { throw $ "Empty path" };
             let path = Path::parse(path);
             if path.is_none { throw $ "Path::parse failed" };
@@ -99,55 +99,43 @@ test_state = do {
         let _ = *register_users;
         get_users
     };
-    let (users,_) = m.run_state(App::empty);  // App 以外を指定するとpanicする
+    let (users,_) = *m.run_state_t(App::empty);  // App 以外を指定するとpanicする
     let _ = *println(users.to_iter.join(","));
     pure()
 };
 
-stateio_func: StateApp (IO ());
+stateio_func: StateApp IO ();
 stateio_func = do {
-    let ioa0 = *print_users;
-    let iob0 = *print_pages;
+    let _ = *print_users;
+    let _ = *print_pages;
     let _ = *register_users;
     let _ = *create_user_pages;
-    let ioa = *print_users;
-    let iob = *print_pages;
-    pure $ do {
-        let _ = *ioa0;
-        let _ = *iob0;
-        let _ = *ioa;
-        let _ = *iob;
-        pure()
-    }
+    let _ = *print_users;
+    let _ = *print_pages;
+    pure ()
 };
 
 
 test_stateio: IO ();
 test_stateio = do {
     let _ = *println("=== test_stateio ===");
-    let (io,s) = stateio_func.run_state(App::empty);
-    io
+    let (_,s) = *stateio_func.run_state_t(App::empty);
+    pure()
 };
 
-//stateiof_func: StateIOF App ();
-// 返り値がTrait Monadの場合、Lazyにするとうまくいった。
-stateiof_func: () -> StateApp (IOFail ());
+stateiof_func: () -> StateApp IOFail ();
 stateiof_func = |_| do {
-    let io = *stateio_func;
-    let iof = *save_file("");
-    pure $ do {
-        let _ = *io.lift;
-        let _ = *iof;
-        let _ = *println("completed.").lift;
-        pure()
-    }
+    let _ = *stateio_func.map_state_t(lift);
+    let _ = *save_file("");
+    let _ = *println("completed.").lift.lift_state;
+    pure()
 };
 
 test_stateiof: IO ();
 test_stateiof = do {
     let _ = *println("=== test_stateiof ===").lift;
-    let (iof,s) = stateiof_func().run_state(App::empty);
-    iof
+    let (_,s) = *stateiof_func().run_state_t(App::empty);
+    pure()
 }.try(|err| println("ERROR: " + err));
 
 main: IO ();

@@ -2,63 +2,70 @@
 
 ## module Minilib.Monad.Writer
 
-Writer monad. (a.k.a Env, CoReader comonad)
+Writer monad.
 
 For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 
-### type Writer
+### type WriterT
 
 Writer monad wraps a pair of an environment and a value.
 `e` is a type of an environment.
+`m` is a type of an underlyind monad.
 `a` is a type of a value.
 
 ```
-type Writer e a = unbox struct {
-    data: (e, a)
+type [m: * -> *] WriterT e m a = unbox struct {
+    data: m (e, a)
 };
 ```
+### type Writer
+
+```
+type Writer e a = WriterT e Identity a;
+```
 ### namespace Writer
+
+#### writer_t: [m: Monad] m (e, a) -> WriterT e m a;
+
+Creates a generic writer monad from an enviroment and a value.
 
 #### writer: e -> a -> Writer e a;
 
 Creates a writer monad from an enviroment and a value.
 
+#### run_writer_t: [m: Monad] WriterT e m a -> m (e, a);
+
+Runs a generic writer monad to get an enviroment and a value.
+
 #### run_writer: Writer e a -> (e, a);
 
 Runs a writer monad to get an enviroment and a value.
 
-#### write: [e: Monoid] e -> Writer e ();
+#### write: [e: Monoid, m: Monad] e -> WriterT e m ();
 
 Creates a writer monad that appends to the environment.
+
+#### get_env_t: [m: Monad] WriterT e m a -> m e;
+
+Gets the envirionment from a generic writer monad.
 
 #### get_env: Writer e a -> e;
 
 Gets the envirionment from a writer monad.
 
+#### get_value_t: [m: Monad] WriterT e m a -> m a;
+
+Gets the value from a generic writer monad.
+
 #### get_value: Writer e a -> a;
 
 Gets the value from a writer monad.
 
-### type Env
+#### lift_writer: [e: Monoid, m: Monad] m a -> WriterT e m a;
 
-Env comonad. this is same as a writer monad.
+Lifts an underlyind monad to a writer monad.
 
-```
-type Env e a = Writer e a;
-```
-### namespace Env
+#### `impl [m: Monad] WriterT e m: Functor`
 
-#### env: e -> a -> Env e a;
-
-Creates a env comonad from an enviroment and a value.
-
-#### to_tuple: Env e a -> (e, a);
-
-Converts a env comonad to a pair of an enviroment and a value.
-
-#### `impl Writer e: Functor`
-
-#### `impl [e: Monoid] Writer e: Monad`
-
-#### `impl Writer e: Comonad`
+#### `impl [e: Monoid, m: Monad] WriterT e m: Monad`
 

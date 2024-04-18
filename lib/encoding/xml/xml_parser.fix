@@ -1,4 +1,4 @@
-//
+// XML Parser.
 // - [Extensible Markup Language (XML) 1.1 (Second Edition)](https://www.w3.org/TR/2006/REC-xml11-20060816/)
 module Minilib.Encoding.Xml.XmlParser;
 
@@ -7,6 +7,13 @@ import Character;
 import Minilib.Encoding.Xml;
 import Minilib.Text.SimpleParser;
 import Minilib.Text.StringEx;
+
+_DoubleQuote: U8;
+_DoubleQuote = 0x22_U8;        // '\"'
+
+_SingleQuote: U8;
+_SingleQuote = 0x27_U8;        // '\''
+
 
 parse_document_from_string: String -> Result ErrMsg XmlDocument;
 parse_document_from_string = |str| (
@@ -94,8 +101,6 @@ _parse_name = do {
 //                               |  "'" ([^<&'] | Reference)* "'"
 _parse_att_value: Parser String;
 _parse_att_value = do {
-    let _DoubleQuote = 0x22_U8;        // '\"'
-    let _SingleQuote = 0x27_U8;        // '\''
     let start_quote = *match_char_class(|c|
         c == _DoubleQuote || c == _SingleQuote
     ).or_error("Missing start quote");
@@ -237,7 +242,7 @@ _parse_prolog = do {
 };
 
 // [23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
-_parse_xml_declaration: Parser XmlNode;
+_parse_xml_declaration: Parser XmlDeclaration;
 _parse_xml_declaration = do {
     let question = match_char_class(|c| c == '?');
     let not_question = match_char_class(|c| c != '?');
@@ -247,14 +252,28 @@ _parse_xml_declaration = do {
         not_right_angle
     });
     let _ = *match_str("<?");
-    let start_stream = *get_stream;
     let _ = *match_str("xml");
-    // TODO: parse VersionInfo, EncodingDecl
-    let _ = *repeat(inner_content);
-    let end_stream = *get_stream;
+    let version = *_parse_version_info;
+    let encoding = *_parse_encoding_decl.if_exists;
+    let standalone = *_parse_sd_decl.if_exists;
     let _ = *match_str("?>").or_error("Missing end of xml declaration");
-    let content = start_stream.read_string_between(end_stream);
-    pure $ processing_instruction $ XmlProcessingInstruction::make(content)
+    pure $ XmlDeclaration {
+        version: version,
+        encoding: encoding,
+        standalone: standalone
+    }
+};
+
+// [24]   	VersionInfo	   ::=   	S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"')
+_parse_version_info: Parser String;
+_parse_version_info = do {
+    let _ = *one_or_more(_whitespace);
+    let _ = *match_str("version");
+    let _ = *_parse_eq;
+    let quote = *match_char_class(|c| c == _SingleQuote || c == _DoubleQuote);
+    let version_num = *match_str_class(|c| is_digit(c) || c == '.');
+    let _ = *match_char(quote);
+    pure $ version_num
 };
 
 // [25]   	Eq	   ::=   	S? '=' S?
@@ -277,7 +296,20 @@ _parse_misc = do {
 // Document Type Definition
 // TODO
 
-// ...TODO
+// 2.9 Standalone Document Declaration
+
+// [32]   	SDDecl	   ::=   	S 'standalone' Eq (("'" ('yes' | 'no') "'") | ('"' ('yes' | 'no') '"'))
+_parse_sd_decl: Parser String;
+_parse_sd_decl = do {
+    let _ = *one_or_more(_whitespace);
+    let _ = *match_str("standalone");
+    let _ = *_parse_eq;
+    let quote = *match_char_class(|c| c == _SingleQuote || c == _DoubleQuote);
+    let match_str_unforget = |str| match_str(str).map(|_| str);
+    let yesno = *match_str_unforget("yes").or_else(match_str_unforget("no"));
+    let _ = *match_char(quote);
+    pure $ yesno
+};
 
 // 3 Logical Structures
 
@@ -404,4 +436,28 @@ _parse_entity_ref = do {
     let _ = *_parse_name;
     let _ = *match_char(';');
     pure()
+};
+
+// 4.3.3 Character Encoding in Entities
+
+// [80]   	EncodingDecl	   ::=   	S 'encoding' Eq ('"' EncName '"' | "'" EncName "'" )
+_parse_encoding_decl: Parser String;
+_parse_encoding_decl = do {
+    let _ = *one_or_more(_whitespace);
+    let _ = *match_str("encoding");
+    let _ = *_parse_eq;
+    let quote = *match_char_class(|c| c == _SingleQuote || c == _DoubleQuote);
+    let enc_name = *_parse_enc_name;
+    let _ = *match_char(quote);
+    pure $ enc_name
+};
+
+// [81]   	EncName	   ::=   	[A-Za-z] ([A-Za-z0-9._] | '-')*
+_parse_enc_name: Parser String;
+_parse_enc_name = do {
+    let head_char = *match_char_class(is_alpha);
+    let tail_chars = *repeat(match_char_class(|c|
+        is_alnum(c) || c == '.' || c == '_' || c == '-'
+    ));
+    pure $ [head_char].append(tail_chars)._unsafe_to_string
 };

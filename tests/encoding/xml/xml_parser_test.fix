@@ -157,6 +157,79 @@ test_parse_cdsect = (
     )
 );
 
+// [23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
+test_parse_xml_declaration: TestCase;
+test_parse_xml_declaration = (
+    make_table_test("test_parse_xml_declaration",
+        let xmldecl = XmlDeclaration {
+            version: "1.1",
+            encoding: none(),
+            standalone: none()
+        };
+        [
+            ("<?xml?>", err("NotMatch")),
+            ("<?xml version='1.1'?>", ok $ xmldecl),
+            ("<?xml version='1.1'>", err("Missing end of xml declaration")),
+            ("<?xmlversion='1.1'?>", err("NotMatch")),
+            ("<? xml version='1.1'?>", err("NotMatch")),
+            ("<?xml version='1.1' encoding='utf-8' ?>",
+                ok $ xmldecl.set_encoding(some("utf-8"))),
+            ("<?xml version='1.1' standalone='no' ?>", ok $ xmldecl.set_standalone(some("no"))),
+            ("<?xml version='1.1' encoding='utf-8' standalone='yes' ?>",
+                ok $ xmldecl.set_encoding(some("utf-8")).set_standalone(some("yes"))),
+            ("<?xml version='1.1' standalone='yes' encoding='utf-8' ?>", err("Missing end of xml declaration")),
+            ("<?xml encoding='utf-8' standalone='yes' ?>", err("NotMatch"))
+        ],
+        |(input, expect)|
+        let res = _parse_xml_declaration.run_parser_str(input).map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+// [24]   	VersionInfo	   ::=   	S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"')
+test_parse_version_info: TestCase;
+test_parse_version_info = (
+    make_table_test("test_parse_version_info",
+        [
+            (" version", err("NotMatch")),
+            (" version=1.1", err("NotMatch")),
+            (" version='1.1'", ok $ "1.1"),
+            (" version=\"1.0\"", ok $ "1.0"),
+            (" version='x.x'", err("NotMatch")),
+            ("   version  =  '1.1'", ok $ "1.1"),
+            ("   version  =  \"1.1\"", ok $ "1.1"),
+            ("   version  =  \"1.1'", err("NotMatch"))
+        ],
+        |(input, expect)|
+        let res = _parse_version_info.run_parser_str(input).map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+// 2.9 Standalone Document Declaration
+
+// [32]   	SDDecl	   ::=   	S 'standalone' Eq (("'" ('yes' | 'no') "'") | ('"' ('yes' | 'no') '"'))
+test_parse_sd_decl: TestCase;
+test_parse_sd_decl = (
+    make_table_test("test_parse_sd_decl",
+        [
+            (" standalone", err("NotMatch")),
+            (" standalone=yes", err("NotMatch")),
+            (" standalone='yes'", ok $ "yes"),
+            (" standalone=\"no\"", ok $ "no"),
+            (" standalone='xxx'", err("NotMatch")),
+            ("   standalone  =  'yes'", ok $ "yes"),
+            ("   standalone  =  \"no\"", ok $ "no"),
+            ("   standalone  =  \"no'", err("NotMatch"))
+        ],
+        |(input, expect)|
+        let res = _parse_sd_decl.run_parser_str(input).map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+
+// 3 Logical Structures
+
 // [39]   	element	   ::=   	EmptyElemTag
 //                              | STag content ETag
 test_parse_element: TestCase;
@@ -261,6 +334,53 @@ test_parse_empty_elem = (
     )
 );
 
+// 4 Physical Structures
+// 4.1 Character and Entity References
+// TODO
+// [66]   	CharRef	   ::=   	'&#' [0-9]+ ';'
+//                              | '&#x' [0-9a-fA-F]+ ';'
+// [67]   	Reference	   ::=   	EntityRef | CharRef
+// [68]   	EntityRef	   ::=   	'&' Name ';'
+
+// 4.3.3 Character Encoding in Entities
+
+// [80]   	EncodingDecl	   ::=   	S 'encoding' Eq ('"' EncName '"' | "'" EncName "'" )
+test_parse_encoding_decl: TestCase;
+test_parse_encoding_decl = (
+    make_table_test("test_parse_encoding_decl",
+        [
+            ("encoding='utf-8'", err("NotMatch")),
+            (" encoding='utf-8'", ok $ "utf-8"),
+            (" encoding=' utf-8 '", err("NotMatch")),
+            ("  encoding  =  \"UTF8\"", ok $ "UTF8"),
+            ("  encoding  =  \"UTF8'", err("NotMatch"))
+        ],
+        |(input, expect)|
+        let res = _parse_encoding_decl.run_parser_str(input).map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+// [81]   	EncName	   ::=   	[A-Za-z] ([A-Za-z0-9._] | '-')*
+test_parse_enc_name: TestCase;
+test_parse_enc_name = (
+    make_table_test("test_parse_enc_name",
+        [
+            ("", err("NotMatch")),
+            ("a", ok $ "a"),
+            ("A", ok $ "A"),
+            ("Abc", ok $ "Abc"),
+            (" Abc ", err("NotMatch")),
+            ("0bc", err("NotMatch")),
+            (".bc", err("NotMatch")),
+            ("aBC09..__--", ok $ "aBC09..__--")
+        ],
+        |(input, expect)|
+        let res = _parse_enc_name.run_parser_str(input).map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 
 main: IO ();
 main = (
@@ -271,11 +391,16 @@ main = (
         test_parse_comment,
         test_parse_pi,
         test_parse_cdsect,
+        test_parse_xml_declaration,
+        test_parse_version_info,
+        test_parse_sd_decl,
         test_parse_element,
         test_parse_stag,
         test_parse_attribute,
         test_parse_content,
         test_parse_empty_elem,
+        test_parse_encoding_decl,
+        test_parse_enc_name,
         TestCase::empty
     ].run_test_driver
 );

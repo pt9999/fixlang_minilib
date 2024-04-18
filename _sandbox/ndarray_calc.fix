@@ -16,7 +16,7 @@ import HashMap;
 import Minilib.Text.StringEx;
 import Minilib.Text.SimpleParser;
 import Sandbox.NdArray;
-import Sandbox.StateEx;
+import Minilib.Monad.State;
 
 _EOF: String;
 _EOF = "EOF";
@@ -646,7 +646,7 @@ type AppState = struct {
 };
 
 // Type of State monad with IOFail for application state
-type AppStateIOF = StateIOF AppState;
+type AppStateIOF = StateT AppState IOFail;
 
 
 namespace AppState {
@@ -658,14 +658,14 @@ namespace AppState {
 
     // Throws an error
     error: String -> AppStateIOF a;
-    error = to_stateiof << throw;
+    error = lift_state << throw;
 
     process_line: String -> AppState -> IO AppState;
     process_line = |line, app_state| (
         do {
             //let _ = *println("process_line: " + line).lift;
             let expr = *parse_expr(line).from_result;
-            let (expr, app_state) = *evaluate(expr).run_stateiof(app_state);
+            let (expr, app_state) = *evaluate(expr).run_state_t(app_state);
             let _ = *println("--> " + expr.to_string).lift;
             pure $ app_state
         }

@@ -34,6 +34,18 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Comonad.Env (lib/comonad/env.fix)](lib/comonad/env.md)
+
+Env comonad. (a.k.a CoReader comonad)
+
+### [module Minilib.Comonad.IdentityC (lib/comonad/identity_c.fix)](lib/comonad/identity_c.md)
+
+Identity comonad
+
+### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
+
+Traced comonad. (a.k.a CoWriter comonad)
+
 ### [module Minilib.Crypto.AES (lib/crypto/aes.fix)](lib/crypto/aes.md)
 
 Advanced Encryption Standard (AES)
@@ -148,9 +160,13 @@ PNG image I/O.
 
 `map_m`, `foreach_m` for Array and Iterator.
 
+### [module Minilib.Monad.Identity (lib/monad/identity.fix)](lib/monad/identity.md)
+
+Identity monad
+
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
-Reader monad. (a.k.a Traced, CoWriter comonad)
+Reader monad.
 
 ### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
 
@@ -158,7 +174,7 @@ State Monad which maintains a mutable state.
 
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
-Writer monad. (a.k.a Env, CoReader comonad)
+Writer monad.
 
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 

@@ -14,10 +14,10 @@ ndarray:
 	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
-	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
+	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
 
 ndarray_calc.out:
-	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix state_monad.fix -d readline
+	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
 
 png: 
 	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z
@@ -34,14 +34,11 @@ mandelbrot:
 lens:
 	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
-state_monad_test:
-	../bin/fixautolink run -L ../lib -f state_monad_test.fix
-
 state_monad_test2:
-	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O minimum
+	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O separated
 
 reader_writer_test:
-	../bin/fixautolink run -L ../lib -f reader_writer_test.fix
+	../bin/fixautolink run -L ../lib -f reader_writer_test.fix -O separated
 
 aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix

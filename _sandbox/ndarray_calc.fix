@@ -1,22 +1,27 @@
-
+// Simple NdArray Calculator
 //
-//  以下のように実行する。
-//  $ fix run -d readline -f ndarray_calc.fix ndarray.fix ../lib/simple_parser.fix ../lib/string_ex.fix ../lib/monad/state_monad.fix
+// Prerequisite: readline library is required.
+// For Ubuntu 22.04, you can install libreadline-dev with command below.
+// ```
+// $ sudo apt install libreadline-dev
+// ```
 //
-//  あらかじめ libreadline-dev をインストールしておく必要がある。
-//  $ sudo apt install libreadline-dev
-//
+// How to run:
+// ```
+// $ ../bin/fixautolink run -L ../lib -L . -f ndarray_calc.fix -d readline
+// ```
 
 module Main;
 
 import Character;
 import Debug;
 import HashMap;
+import AsyncTask;
 
 import Minilib.Text.StringEx;
 import Minilib.Text.SimpleParser;
-import Sandbox.NdArray;
 import Minilib.Monad.State;
+import Sandbox.NdArray;
 
 _EOF: String;
 _EOF = "EOF";
@@ -49,9 +54,9 @@ is_all = |f, array| (
 
 type Expr = box union {
     ex_none: (),
-    ex_ident: String,
+    ex_var: String,
     ex_float: F64,
-    ex_funcall: (String, Array Expr),
+    ex_apply: (String, Array Expr),
     ex_array: Array Expr,
     ex_subsc: (Expr, Array Expr),
     ex_range: (Option Expr, Option Expr),
@@ -62,10 +67,10 @@ type Expr = box union {
 
 impl Expr: ToString {
     to_string = |ex| (
-        if ex.is_ex_ident { ex.as_ex_ident };
+        if ex.is_ex_var { ex.as_ex_var };
         if ex.is_ex_float { ex.as_ex_float.to_string };
-        if ex.is_ex_funcall {
-            let (name, args) = ex.as_ex_funcall;
+        if ex.is_ex_apply {
+            let (name, args) = ex.as_ex_apply;
             name + "(" + args.to_iter.map(to_string).join(",") + ")"
         };
         if ex.is_ex_array {
@@ -96,7 +101,7 @@ impl Expr: ToString {
 }
 
 // num_lit
-// ident
+// var
 // "(" expr ")"
 // expr "(" (expr ("," expr)*)? ")"
 // "[" (expr ("," expr)*)? "]"
@@ -204,7 +209,7 @@ namespace Expr {
 
     _parse_term: Parser Expr;
     _parse_term = do {
-        _parse_funcall
+        _parse_apply
         .or_else(_parse_array)
         .or_else(_parse_subsc)
         .or_else(_parse_paren)
@@ -226,17 +231,17 @@ namespace Expr {
         pure $ [a].append(rest)
     };
 
-    _parse_funcall: Parser Expr;
-    _parse_funcall = do {
+    _parse_apply: Parser Expr;
+    _parse_apply = do {
         let _ = *_skip_whitespaces;
-        let name = *_parse_ident;
-        let name = name.as_ex_ident;
+        let name = *_parse_var;
+        let name = name.as_ex_var;
         let _ = *_skip_whitespaces;
         let _ = *match_char('(');
         let args = *_parse_expr_list;
         let _ = *_skip_whitespaces;
         let _ = *match_char(')').or_error("')' is missing");
-        pure $ ex_funcall $ (name, args)
+        pure $ ex_apply $ (name, args)
     };
 
     _parse_array: Parser Expr;
@@ -251,9 +256,9 @@ namespace Expr {
 
     _parse_subsc: Parser Expr;
     _parse_subsc = do {
-        let ident = *_parse_ident;
+        let var = *_parse_var;
         loop_m(
-            ident, |expr|
+            var, |expr|
             let _ = *_skip_whitespaces;
             let lbracket = *match_char('[').if_exists;
             if lbracket.is_none {
@@ -274,12 +279,12 @@ namespace Expr {
         pure $ expr
     };
 
-    _parse_ident: Parser Expr;
-    _parse_ident = do {
+    _parse_var: Parser Expr;
+    _parse_var = do {
         let c = *match_char_class(|c| is_alpha(c) || c == '_');
         let rest = *repeat(match_char_class(is_alnum));
         let str = [c].append(rest)._unsafe_to_string;
-        pure $ ex_ident(str)
+        pure $ ex_var(str)
     };
  
     _parse_number_lit: Parser Expr;
@@ -343,7 +348,7 @@ type Value = box union {
     v_err: String,
     v_float: F64,
     v_range: (Option I64, Option I64),
-    v_func: (String, Value -> AppStateIOF Value),
+    v_func: (String, Value -> IOFail Value),
     v_array: Array Value,
     v_ndarray: NdArray F64
 };
@@ -355,7 +360,10 @@ impl Value: ToString {
     to_string = |v| (
         if v.is_v_none { "" };
         if v.is_v_err { "ERR:" + v.as_v_err };
-        if v.is_v_float { v.as_v_float.to_string };
+        if v.is_v_float {
+            let str = v.as_v_float.to_string;
+            str.strip_last_bytes(|c| c == '0').strip_last_bytes(|c| c == '.')
+        };
         if v.is_v_range { 
             let (lhs, rhs) = v.as_v_range;
             lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
@@ -374,34 +382,89 @@ impl Value: ToString {
     );
 }
 
+// Type of environment
+type Environ = box struct {
+    map: HashMap String Value,
+    parent: Option Environ
+};
+
+namespace Environ {
+    empty: Environ;
+    empty = Environ {
+        map: HashMap::empty(0),
+        parent: none()
+    };
+
+    make_child: Environ -> Environ;
+    make_child = |parent| (
+        Environ::empty.set_parent(parent)
+    );
+
+    find: String -> Environ -> Option Value;
+    find = |key, env| (
+        let opt = env.@map.find(key);
+        if opt.is_some { opt };
+        env.@parent.map_or(
+            none(),
+            |parent| parent.find(key)
+        )
+    );
+
+    insert: String -> Value -> Environ -> Environ;
+    insert = |key, value, env| (
+        env.mod_map(insert(key, value))
+    );
+}
+
+type Evaluator = unbox struct {
+    env: Var Environ
+};
+
 // Expr evaluator
 namespace Evaluator
 {
-    evaluate: Expr -> AppStateIOF Value;
-    evaluate = |expr| (
-        if expr.is_ex_ident {
-            _eval_ident $ expr.as_ex_ident
+    make: Var Environ -> Evaluator;
+    make = |env| (
+        Evaluator {
+            env: env
+        }
+    );
+
+    get_environ: Evaluator -> IOFail Environ;
+    get_environ = |ev| (
+        ev.@env.get.lift
+    );
+
+    mod_environ: (Environ -> Environ) -> Evaluator -> IOFail ();
+    mod_environ = |f, ev| (
+        ev.@env.mod(f).lift
+    );
+
+    evaluate: Expr -> Evaluator -> IOFail Value;
+    evaluate = |expr, ev| (
+        if expr.is_ex_var {
+            ev._eval_var(expr.as_ex_var)
         };
         if expr.is_ex_assign {
-            _eval_assign $ expr.as_ex_assign
+            ev._eval_assign(expr.as_ex_assign)
         };
         if expr.is_ex_range {
-            _eval_range $ expr.as_ex_range
+            ev._eval_range(expr.as_ex_range)
         };
-        if expr.is_ex_funcall {
-            _eval_funcall $ expr.as_ex_funcall
+        if expr.is_ex_apply {
+            ev._eval_apply(expr.as_ex_apply)
         };
         if expr.is_ex_array {
-            _eval_array $ expr.as_ex_array
+            ev._eval_array(expr.as_ex_array)
         };
         if expr.is_ex_subsc {
-            _eval_subsc $ expr.as_ex_subsc
+            ev._eval_subsc(expr.as_ex_subsc)
         };
         if expr.is_ex_infix {
-            _eval_infix $ expr.as_ex_infix
+            ev._eval_infix(expr.as_ex_infix)
         };
         if expr.is_ex_unary {
-            _eval_unary $ expr.as_ex_unary
+            ev._eval_unary(expr.as_ex_unary)
         };
         if expr.is_ex_none {
             pure $ v_none $ expr.as_ex_none
@@ -413,57 +476,55 @@ namespace Evaluator
         pure $ v_none()
     );
 
-    _evaluate_array: Array Expr -> AppStateIOF (Array Value);
-    _evaluate_array = |array_expr| (
+    _evaluate_array: Array Expr -> Evaluator -> IOFail (Array Value);
+    _evaluate_array = |array_expr, ev| (
         array_expr.to_iter.fold_m(
             [], |array_value, expr|
-            let value = *evaluate(expr);
+            let value = *ev.evaluate(expr);
             pure $ array_value.push_back(value)
         )
     );
 
-    _eval_ident: String -> AppStateIOF Value;
-    _eval_ident = |name| (
-        let app_state: AppState = *get_state;
-        let opt = app_state.@env.find(name);
+    _eval_var: String -> Evaluator -> IOFail Value;
+    _eval_var = |name, ev| (
+        let env: Environ = *ev.get_environ;
+        let opt = env.find(name);
         if opt.is_none {
-            error $ "not found: " + name
+            throw $ "not found: " + name
         };
         pure $ opt.as_some
     );
     
-    _eval_assign: (Expr, Expr) -> AppStateIOF Value;
-    _eval_assign = |(lhs, rhs)| (
-        if lhs.is_ex_ident {
-            let lhs = lhs.as_ex_ident;
-            let rhs = *evaluate(rhs);
-            let app_state = *get_state;
-            let app_state = app_state.mod_env(insert(lhs, rhs));
-            let _ = *put_state(app_state);
+    _eval_assign: (Expr, Expr) -> Evaluator -> IOFail Value;
+    _eval_assign = |(lhs, rhs), ev| (
+        if lhs.is_ex_var {
+            let lhs = lhs.as_ex_var;
+            let rhs = *ev.evaluate(rhs);
+            let _ = *ev.mod_environ(insert(lhs, rhs));
             pure $ v_none()
         };
-        error $ "assign type mismatch"
+        throw $ "assign type mismatch"
     );
 
-    _eval_funcall: (String, Array Expr) -> AppStateIOF Value;
-    _eval_funcall = |(name, args)| (
-        let f = *_eval_ident(name);
+    _eval_apply: (String, Array Expr) -> Evaluator -> IOFail Value;
+    _eval_apply = |(name, args), ev| (
+        let f = *ev._eval_var(name);
         args.to_iter.fold_m(
             f, |f, arg|
             if !f.is_v_func {
-                error $ "invalid func type: " + f.to_string
+                throw $ "invalid func type: " + f.to_string
             }; 
             let (f_name, f) = f.as_v_func;
-            let arg = *evaluate(arg);
+            let arg = *ev.evaluate(arg);
             let value = *f(arg);
             pure $ value
         )
     );
     
-    _eval_infix: (Expr, String, Expr) -> AppStateIOF Value;
-    _eval_infix = |(lhs, op, rhs)| (
-        let lhs = *evaluate(lhs);
-        let rhs = *evaluate(rhs);
+    _eval_infix: (Expr, String, Expr) -> Evaluator -> IOFail Value;
+    _eval_infix = |(lhs, op, rhs), ev| (
+        let lhs = *ev.evaluate(lhs);
+        let rhs = *ev.evaluate(rhs);
         if lhs.is_v_float && rhs.is_v_float {
             _eval_infix_op((lhs.as_v_float, op, rhs.as_v_float), v_float)
         };
@@ -476,21 +537,21 @@ namespace Evaluator
         if lhs.is_v_float && rhs.is_v_ndarray {
             _eval_infix_op((scalar(lhs.as_v_float), op, rhs.as_v_ndarray), v_ndarray)
         };
-        error $ "_eval_infix: type mismatch"
+        throw $ "_eval_infix: type mismatch"
     );
 
-    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> IOFail Value;
     _eval_infix_op = |(lhs, op, rhs), to_value| (
         if op == "+" { pure $ to_value $ lhs + rhs };
         if op == "-" { pure $ to_value $ lhs - rhs };
         if op == "*" { pure $ to_value $ lhs * rhs };
         if op == "/" { pure $ to_value $ lhs / rhs };
-        error $ "invalid op: " + op
+        throw $ "invalid op: " + op
     );
 
-    _eval_unary: (String, Expr) -> AppStateIOF Value;
-    _eval_unary = |(op, expr)| (
-        let value = *evaluate(expr);
+    _eval_unary: (String, Expr) -> Evaluator -> IOFail Value;
+    _eval_unary = |(op, expr), ev| (
+        let value = *ev.evaluate(expr);
         
         if value.is_v_float {
             _eval_unary_op((op, value.as_v_float), v_float)
@@ -498,44 +559,44 @@ namespace Evaluator
         if value.is_v_ndarray {
             _eval_unary_op((op, value.as_v_ndarray), v_ndarray)
         };
-        error $ "_eval_unary: type mismatch"
+        throw $ "_eval_unary: type mismatch"
     );
 
-    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> IOFail Value;
     _eval_unary_op = |(op, val), to_value| (
         if op == "-" { pure $ to_value $ -val };
-        error $ "invalid op: " + op
+        throw $ "invalid op: " + op
     );
 
-    _eval_array: Array Expr -> AppStateIOF Value;
-    _eval_array = |array_expr| (
-        let array_value = *_evaluate_array(array_expr);
+    _eval_array: Array Expr -> Evaluator -> IOFail Value;
+    _eval_array = |array_expr, ev| (
+        let array_value = *ev._evaluate_array(array_expr);
         if array_value.is_all(is_v_float) {
-            //eval debug_eprintln("all v_float");
+            //ev debug_eprintln("all v_float");
             let ndarray = NdArray::from_array(array_value.map(as_v_float));
             pure $ v_ndarray(ndarray)
         };
-        //eval debug_eprintln("not all v_float");
+        //ev debug_eprintln("not all v_float");
         pure $ v_array (array_value)
     );
 
-    _eval_subsc: (Expr, Array Expr) -> AppStateIOF Value;
-    _eval_subsc = |(lhs, rhs)| (
-        let lhs = *evaluate(lhs);
-        let rhs = *_evaluate_array(rhs);
+    _eval_subsc: (Expr, Array Expr) -> Evaluator -> IOFail Value;
+    _eval_subsc = |(lhs, rhs), ev| (
+        let lhs = *ev.evaluate(lhs);
+        let rhs = *ev._evaluate_array(rhs);
         if lhs.is_v_array {
             let array = lhs.as_v_array;
             let idx = rhs;
             if idx.get_size != 1 {
-                error $ "invalid subsc (idx size)"
+                throw $ "invalid subsc (idx size)"
             };
             let idx = idx.@(0);
             if !idx.is_v_float {
-                error $ "invalid subsc (idx type)"
+                throw $ "invalid subsc (idx type)"
             };
             let i = idx.as_v_float.to_I64;
             if !(0 <= i && i <= array.get_size) {
-                error $ "invalid subsc (idx out of range)"
+                throw $ "invalid subsc (idx out of range)"
             };
             pure $ array.@(i)
         };
@@ -543,7 +604,7 @@ namespace Evaluator
             let ndarray = lhs.as_v_ndarray;
             let idx = rhs;
             if idx.get_size != ndarray.get_dim {
-                error $ "invalid subsc (idx size)"
+                throw $ "invalid subsc (idx size)"
             };
             let tuple2_array = *idx.to_iter.fold_m(
                 [], |tuple2_array, i|
@@ -557,23 +618,23 @@ namespace Evaluator
                     let end = end.as_some_or(I64::maximum);
                     pure $ tuple2_array.push_back((begin, end))
                 };
-                error $ "invalid subsc (idx type): " + i.to_string
+                throw $ "invalid subsc (idx type): " + i.to_string
             );
             let val = ndarray.get_sub(tuple2_array);
             pure $ v_ndarray $ val
         };
-        error $ "invalid subsc: lhs="+lhs.to_string + " rhs="+rhs.to_string
+        throw $ "invalid subsc: lhs="+lhs.to_string + " rhs="+rhs.to_string
     );
 
-    _eval_range: (Option Expr, Option Expr) -> AppStateIOF Value;
-    _eval_range = |(lhs, rhs)| (
-        let inner: Option Expr -> AppStateIOF (Option I64) = |expr| (
+    _eval_range: (Option Expr, Option Expr) -> Evaluator -> IOFail Value;
+    _eval_range = |(lhs, rhs), ev| (
+        let inner: Option Expr -> IOFail (Option I64) = |expr| (
             if expr.is_none {
                 pure $ none ()
             };
-            let v = *evaluate(expr.as_some);
+            let v = *ev.evaluate(expr.as_some);
             if !v.is_v_float {
-                error $ "invalid range type: " + v.to_string
+                throw $ "invalid range type: " + v.to_string
             };
             pure $ some(v.as_v_float.to_I64)
         );
@@ -584,25 +645,25 @@ namespace Evaluator
 }
 
 
-type Func = Value -> AppStateIOF Value;
+type Func = Value -> IOFail Value;
 
 namespace Builtin {
 
     // initialize builtin functions
-    init_builtin_funcs: AppState -> AppState;
-    init_builtin_funcs = |app_state| (
-        app_state
+    init_builtin_funcs: Environ -> Environ;
+    init_builtin_funcs = |env| (
+        env
         .add_builtin_func("ndarray", Builtin::ndarray)
         .add_builtin_func("stack", Builtin::stack)
     );
 
-    add_builtin_func: String -> Func -> AppState -> AppState;
-    add_builtin_func = |name, f, app_state| (
+    add_builtin_func: String -> Func -> Environ -> Environ;
+    add_builtin_func = |name, f, env| (
         let func = v_func $ (name, f);
-        app_state.mod_env(insert(name, func))
+        env.insert(name, func)
     ); 
 
-    ndarray: Value -> AppStateIOF Value;
+    ndarray: Value -> IOFail Value;
     ndarray = |arg| (
         if arg.is_v_ndarray {
             pure $ arg
@@ -610,80 +671,74 @@ namespace Builtin {
         if arg.is_v_array {
             let array = arg.as_v_array;
             if !array.is_all(is_v_float) {
-                error $ "not all v_float"
+                throw $ "not all v_float"
             };
             let ndarray = NdArray::from_array(array.map(as_v_float));
             pure $ v_ndarray(ndarray)
         };
-        error $ "invalid arg: arg=" + arg.to_string
+        throw $ "invalid arg: arg=" + arg.to_string
     );
 
-    stack: Value -> AppStateIOF Value;
+    stack: Value -> IOFail Value;
     stack = |arg| (
         if !arg.is_v_array {
-            error $ "invalid arg type"
+            throw $ "invalid arg type"
         }; 
         let array = arg.as_v_array;
         if array.get_size == 0 {
-            error $ "invalid arg count"
+            throw $ "invalid arg count"
         };
         if !array.is_all(is_v_ndarray) {
-            error $ "type mismatch"
+            throw $ "type mismatch"
         };
         let children = array.map(as_v_ndarray);
         let first_child = children.@(0);
         if !children.is_all(|child| child.@shape == first_child.@shape) {
-            error $ "shape mismatch"
+            throw $ "shape mismatch"
         };
         let parent = NdArray::stack(0, children);
         pure $ v_ndarray $ parent
     );
 }
 
-// Type of application state
-type AppState = struct {
-    env: HashMap String Value
+type App = unbox struct {
+    global: Var Environ
 };
 
-// Type of State monad with IOFail for application state
-type AppStateIOF = StateT AppState IOFail;
+namespace App {
+    make: () -> IOFail App;
+    make = |_| (
+        let global = Environ::empty;
+        let global = global.init_builtin_funcs;
+        pure $ App {
+            global: *Var::make(global).lift
+        }
+    );
 
-
-namespace AppState {
-    // An empty application state
-    empty: AppState;
-    empty = AppState {
-        env: HashMap::empty(100)
-    };
-
-    // Throws an error
-    error: String -> AppStateIOF a;
-    error = lift_state << throw;
-
-    process_line: String -> AppState -> IO AppState;
-    process_line = |line, app_state| (
+    process_line: String -> App -> IO App;
+    process_line = |line, app| (
         do {
             //let _ = *println("process_line: " + line).lift;
             let expr = *parse_expr(line).from_result;
-            let (expr, app_state) = *evaluate(expr).run_state_t(app_state);
-            let _ = *println("--> " + expr.to_string).lift;
-            pure $ app_state
+            let ev = Evaluator::make(app.@global);
+            let value = *ev.evaluate(expr);
+            let _ = *println("--> " + value.to_string).lift;
+            pure $ app
         }
         .try(|err| 
             let _ = *eprintln("ERROR: " + err);
-            pure $ app_state
+            pure $ app
         )
     );
 
     main_loop: () -> IOFail ();
     main_loop = |_| (
-        let app_state = AppState::empty;
-        let app_state = app_state.init_builtin_funcs;
+        let app = *App::make();
         loop_m(
-            app_state, |app_state|
+            app, |app|
             let line = *readline("$ ");
-            let app_state = *app_state.process_line(line).lift;
-            continue_m $ app_state
+            let app = *app.process_line(line).lift;
+            continue_m $ app
         )
     );
 }

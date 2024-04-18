@@ -14,10 +14,10 @@ ndarray:
 	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
-	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
+	../bin/fixautolink run -L ../lib -L . -f ndarray_calc.fix -d readline -O separated
 
 ndarray_calc.out:
-	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
+	../bin/fixautolink build -o $@ -L ../lib -L . -f ndarray_calc.fix -d readline -O separated
 
 png: 
 	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z

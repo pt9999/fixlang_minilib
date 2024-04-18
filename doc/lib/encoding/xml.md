@@ -32,7 +32,7 @@ An empty XML document.
 
 #### make: XmlElement -> XmlDocument;
 
-Creates a XML document with specified document element.
+Creates a XML document with the specified document element.
 
 #### add_to_prolog: XmlNode -> XmlDocument -> XmlDocument;
 
@@ -48,6 +48,8 @@ Adds a child node to the epilog of the document.
 
 ### type XmlDeclaration
 
+A type that represents an XML declaration.
+
 ```
 type XmlDeclaration = unbox struct {
     version: String,
@@ -58,6 +60,8 @@ type XmlDeclaration = unbox struct {
 ### namespace XmlDeclaration
 
 #### default: XmlDeclaration;
+
+A default XML declaration with version="1.1", encoding="utf-8".
 
 #### `impl XmlDeclaration: Eq`
 
@@ -100,7 +104,7 @@ type XmlElement = unbox struct {
 
 #### make: String -> XmlElement;
 
-`XmlElement::make(tag)` creates an empty element with specified tag name.
+`XmlElement::make(tag)` creates an empty element with the specified tag name.
 
 #### element: String -> XmlElement;
 
@@ -151,11 +155,15 @@ type XmlAttribute = unbox struct {
 
 #### make: String -> String -> XmlAttribute;
 
+`XmlAttribute::make(name, value)` creates an attribute with the specified name and value.
+
 #### `impl XmlAttribute: Eq`
 
 #### `impl XmlAttribute: ToString`
 
 ### type XmlText
+
+A type that represents a text node.
 
 ```
 type XmlText = unbox struct {
@@ -166,6 +174,8 @@ type XmlText = unbox struct {
 
 #### make: String -> XmlText;
 
+`XmlText::make(content)` creates a text node with the specified content.
+
 #### `impl XmlText: Eq`
 
 #### `impl XmlText: ToString`
@@ -173,6 +183,8 @@ type XmlText = unbox struct {
 #### `impl XmlText: Add`
 
 ### type XmlCDATASection
+
+A type that represents a CDATA section.
 
 ```
 type XmlCDATASection = unbox struct {
@@ -183,11 +195,15 @@ type XmlCDATASection = unbox struct {
 
 #### make: String -> XmlCDATASection;
 
+`XmlCDATASection::make(content)` creates a CDATA section with the specified content.
+
 #### `impl XmlCDATASection: Eq`
 
 #### `impl XmlCDATASection: ToString`
 
 ### type XmlComment
+
+A type that represents a comment node.
 
 ```
 type XmlComment = unbox struct {
@@ -198,11 +214,15 @@ type XmlComment = unbox struct {
 
 #### make: String -> XmlComment;
 
+`XmlComment::make(content)` creates a comment node with the specified content.
+
 #### `impl XmlComment: Eq`
 
 #### `impl XmlComment: ToString`
 
 ### type XmlProcessingInstruction
+
+A type that represents a processing instruction.
 
 ```
 type XmlProcessingInstruction = unbox struct {
@@ -212,6 +232,8 @@ type XmlProcessingInstruction = unbox struct {
 ### namespace XmlProcessingInstruction
 
 #### make: String -> XmlProcessingInstruction;
+
+`XmlProcessingInstruction::make(content)` creates a processing instruction with the specified content.
 
 #### `impl XmlProcessingInstruction: Eq`
 

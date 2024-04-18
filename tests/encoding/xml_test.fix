@@ -21,11 +21,11 @@ test_xmldocument_empty = (
 test_xmldocument_make: TestCase;
 test_xmldocument_make = (
     make_test("test_xmldocument_empty") $ |_|
-    let element = XmlElement::make("abc");
+    let element = XmlElement::make("element1");
     let doc = XmlDocument::make(element);
     eval *assert_equal("xml_decl", _default_xml_decl, doc.@xml_decl.to_string);
     eval *assert_equal("prolog", [], doc.@prolog);
-    eval *assert_equal("document_element", "abc", doc.@document_element.@tag);
+    eval *assert_equal("document_element", "element1", doc.@document_element.@tag);
     eval *assert_equal("epilog", [], doc.@epilog);
     pure()
 );
@@ -37,11 +37,11 @@ test_xmldocument_make = (
 test_xmldocument_to_string: TestCase;
 test_xmldocument_to_string = (
     make_test("test_xmldocument_to_string") $ |_|
-    let element = XmlElement::make("abc").text("this is content");
+    let element = XmlElement::make("element1").text("this is content");
     let doc = XmlDocument::make(element);
     let doc = doc.add_to_prolog(text_node $ XmlText::make("this is prolog"));
     let doc = doc.add_to_epilog(text_node $ XmlText::make("this is epilog"));
-    let expected = "<?xml version='1.1' encoding='utf-8'?>this is prolog<abc>this is content</abc>this is epilog";
+    let expected = "<?xml version='1.1' encoding='utf-8'?>this is prolog<element1>this is content</element1>this is epilog";
     let actual = doc.to_string;
     assert_equal("eq", expected, actual)
 );
@@ -49,6 +49,63 @@ test_xmldocument_to_string = (
 // TODO: test XmlDeclaration
 // TODO: test XmlNode
 // TODO: test XmlElement
+
+test_xmlelement_make: TestCase;
+test_xmlelement_make = (
+    make_test("test_xmlelement_make") $ |_|
+    let element = XmlElement::make("element1");
+    eval *assert_equal("tag", "element1", element.@tag);
+    eval *assert_equal("attrs", [], element.@attrs);
+    eval *assert_equal("children", [], element.@children);
+    pure()
+);
+
+test_xmlelement_attr: TestCase;
+test_xmlelement_attr = (
+    make_test("test_xmlelement_attr") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.attr("attr1", "value1");
+    let element = element.attr("attr2", "value2");
+    let element = element.attr("attr1", "value1-1");
+    assert_equal("attrs", [
+        XmlAttribute::make("attr1", "value1-1"),
+        XmlAttribute::make("attr2", "value2")
+    ], element.@attrs)
+);
+
+test_xmlelement_add_node: TestCase;
+test_xmlelement_add_node = (
+    make_test("test_xmlelement_add_node") $ |_|
+    let element = XmlElement::make("element1");
+    let comment = XmlComment::make("comment");
+    let element = element.add_node(comment_node $ comment);
+    assert_equal("children", [comment_node $ comment], element.@children)
+);
+
+test_xmlelement_add: TestCase;
+test_xmlelement_add = (
+    make_test("test_xmlelement_add") $ |_|
+    let element = XmlElement::make("element1");
+    let child1 = XmlElement::make("child1");
+    let child2 = XmlElement::make("child2");
+    let element = element.add(child1).add(child2);
+    assert_equal("children", [
+        element_node $ child1,
+        element_node $ child2
+    ], element.@children)
+);
+
+test_xmlelement_addF: TestCase;
+test_xmlelement_addF = (
+    make_test("test_xmlelement_addF") $ |_|
+    let parent = XmlElement::make("parent");
+    let child = XmlElement::make("child");
+    let grandchild = XmlElement::make("grandchild");
+    let parent = parent.addF $ child.addF $ grandchild;
+    let child_and_grandchild = child.add(grandchild);
+    assert_equal("child", [element_node $ child_and_grandchild], parent.@children)
+);
+
 // TODO: test XmlAttribute
 // TODO: test XmlText
 // TODO: test XmlCDATASection
@@ -63,6 +120,12 @@ main = (
         test_xmldocument_empty,
         test_xmldocument_make,
         test_xmldocument_to_string,
+
+        test_xmlelement_make,
+        test_xmlelement_attr,
+        test_xmlelement_add_node,
+        test_xmlelement_add,
+        test_xmlelement_addF,
         TestCase::empty
     ].run_test_driver
 );

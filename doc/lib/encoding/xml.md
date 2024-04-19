@@ -2,15 +2,15 @@
 
 ## module Minilib.Encoding.Xml
 
-XML Document Object Model (DOM).
+Simple XML Model.
 
 This module is intended to support
 [Extensible Markup Language (XML) 1.1 (Second Edition)](https://www.w3.org/TR/2006/REC-xml11-20060816/),
 but it is not fully supported at this time.
 
-The DOM API is based on
-[MDN: XMLDocument](https://developer.mozilla.org/ja/docs/Web/API/XMLDocument).
+This module is not intended to support DOM API.
 
+This module does not support XML namespace (xmlns).
 
 ### type XmlDocument
 
@@ -95,30 +95,49 @@ A type that represents an XML element.
 
 ```
 type XmlElement = unbox struct {
-    tag: String,                   // tag name
-    attrs: Array XmlAttribute,      // attributes
-    children: Array XmlNode        // child nodes
+    tag_name: String,                   // tag name
+    attributes: Array XmlAttribute,     // attributes
+    children: Array XmlNode             // child nodes
 };
 ```
 ### namespace XmlElement
 
 #### make: String -> XmlElement;
 
-`XmlElement::make(tag)` creates an empty element with the specified tag name.
+`XmlElement::make(tag_name)` creates an empty element with the specified tag name.
 
 #### element: String -> XmlElement;
 
 Synonym for `XmlElement::make`.
 
-#### attr: String -> String -> XmlElement -> XmlElement;
+#### get_attribute: String -> XmlElement -> Option String;
 
-`el.attr(name,value)` adds an attribute to `el`.
+`element.get_attribute(name)` gets the value of a specified attribute
+on the element.
+
+#### set_attribute: String -> String -> XmlElement -> XmlElement;
+
+`element.set_attribute(name,value)` sets the value of an attribute
+on the element.
 If an attribute of same name exists, it will be replaced.
 NOTE: validity of attribute names are not checked.
 
+#### remove_attribute: String -> XmlElement -> XmlElement;
+
+`element.remove_attribute(name)` removes the attribute with the specified name
+from the element. If the specified attribute does not exist, this function does nothing.
+
+#### attr: String -> String -> XmlElement -> XmlElement;
+
+`attr` is synonym for `set_attribute`.
+
+#### append_child: XmlNode -> XmlElement -> XmlElement;
+
+`parent.append_child(child_node)` adds a child node to `parent`.
+
 #### add_node: XmlNode -> XmlElement -> XmlElement;
 
-`parent.add_node(child_node)` adds a child node to `parent`.
+`add_node` is synonym for `append_child`.
 
 #### add: XmlElement -> XmlElement -> XmlElement;
 
@@ -131,11 +150,11 @@ This is a flipped version of `add`.
 
 #### text: String -> XmlElement -> XmlElement;
 
-`el.text(content)` adds a text node to `el`.
+`element.text(content)` adds a text node to `element`.
 
 #### concat_text_nodes: XmlElement -> XmlElement;
 
-`el.concat_text_nodes` concats adjuscent text nodes.
+`element.concat_text_nodes` concats adjuscent text nodes.
 
 #### `impl XmlElement: Eq`
 
@@ -196,6 +215,7 @@ type XmlCDATASection = unbox struct {
 #### make: String -> XmlCDATASection;
 
 `XmlCDATASection::make(content)` creates a CDATA section with the specified content.
+If `content` contains the end marker of CDATA section(`"]]>"`), this function panics.
 
 #### `impl XmlCDATASection: Eq`
 
@@ -215,6 +235,7 @@ type XmlComment = unbox struct {
 #### make: String -> XmlComment;
 
 `XmlComment::make(content)` creates a comment node with the specified content.
+If `content` contains the end marker of comment(`"-->"`), this function panics.
 
 #### `impl XmlComment: Eq`
 

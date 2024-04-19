@@ -96,7 +96,7 @@ XML Parser.
 
 ### [module Minilib.Encoding.Xml (lib/encoding/xml.fix)](lib/encoding/xml.md)
 
-XML Document Object Model (DOM).
+Simple XML Model.
 
 ### [module Minilib.IO.Channel (lib/io/channel.fix)](lib/io/channel.md)
 

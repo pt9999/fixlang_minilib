@@ -177,18 +177,18 @@ impl XmlNode: ToString {
 
 // A type that represents an XML element.
 type XmlElement = unbox struct {
-    tag: String,                   // tag name
-    attrs: Array XmlAttribute,      // attributes
-    children: Array XmlNode        // child nodes
+    tag_name: String,                   // tag name
+    attributes: Array XmlAttribute,     // attributes
+    children: Array XmlNode             // child nodes
 };
 
 namespace XmlElement {
-    // `XmlElement::make(tag)` creates an empty element with the specified tag name.
+    // `XmlElement::make(tag_name)` creates an empty element with the specified tag name.
     make: String -> XmlElement;
-    make = |tag| (
+    make = |tag_name| (
         XmlElement {
-            tag: tag,
-            attrs: Array::empty(0),
+            tag_name: tag_name,
+            attributes: Array::empty(0),
             children: Array::empty(0)
         }
     );
@@ -197,27 +197,50 @@ namespace XmlElement {
     element: String -> XmlElement;
     element = make;
 
-    // `el.attr(name,value)` adds an attribute to `el`.
+    // `element.get_attribute(name)` gets the value of a specified attribute
+    // on the element.
+    get_attribute: String -> XmlElement -> Option String;
+    get_attribute = |name, element| (
+        element.@attributes.to_iter.filter(|attr| attr.@name == name).get_first.map(@value)
+    );
+
+    // `element.set_attribute(name,value)` sets the value of an attribute
+    // on the element.
     // If an attribute of same name exists, it will be replaced.
     // NOTE: validity of attribute names are not checked.
-    attr: String -> String -> XmlElement -> XmlElement;
-    attr = |name, value, el| (
+    set_attribute: String -> String -> XmlElement -> XmlElement;
+    set_attribute = |name, value, element| (
         let attr = XmlAttribute::make(name, value);
-        el.mod_attrs(|attrs|
-            let index = attrs.find_by(|attr2| attr2.@name == attr.@name);
+        element.mod_attributes(|attributes|
+            let index = attributes.find_by(|attr2| attr2.@name == attr.@name);
             if index.is_some {
-                attrs.set(index.as_some, attr)
+                attributes.set(index.as_some, attr)
             } else {
-                attrs.push_back(attr)
+                attributes.push_back(attr)
             }
         )
     );
 
-    // `parent.add_node(child_node)` adds a child node to `parent`.
-    add_node: XmlNode -> XmlElement -> XmlElement;
-    add_node = |child_node, parent| (
+    // `element.remove_attribute(name)` removes the attribute with the specified name
+    // from the element. If the specified attribute does not exist, this function does nothing.
+    remove_attribute: String -> XmlElement -> XmlElement;
+    remove_attribute = |name, element| (
+        element.mod_attributes(to_iter >> filter(|attr| attr.@name != name) >> to_array)
+    );
+
+    // `attr` is synonym for `set_attribute`.
+    attr: String -> String -> XmlElement -> XmlElement;
+    attr = set_attribute;
+
+    // `parent.append_child(child_node)` adds a child node to `parent`.
+    append_child: XmlNode -> XmlElement -> XmlElement;
+    append_child = |child_node, parent| (
         parent.mod_children(push_back(child_node))
     );
+
+    // `add_node` is synonym for `append_child`.
+    add_node: XmlNode -> XmlElement -> XmlElement;
+    add_node = append_child;
 
     // `parent.add(child)` adds a child element to `parent`.
     add: XmlElement -> XmlElement -> XmlElement;
@@ -232,15 +255,15 @@ namespace XmlElement {
         parent.mod_children(push_back(element_node(child)))
     );
 
-    // `el.text(content)` adds a text node to `el`.
+    // `element.text(content)` adds a text node to `element`.
     text: String -> XmlElement -> XmlElement;
-    text = |content, el| (
-        el.mod_children(push_back(text_node $ XmlText::make(content)))
+    text = |content, element| (
+        element.mod_children(push_back(text_node $ XmlText::make(content)))
     );
 
-    // `el.concat_text_nodes` concats adjuscent text nodes.
+    // `element.concat_text_nodes` concats adjuscent text nodes.
     concat_text_nodes: XmlElement -> XmlElement;
-    concat_text_nodes = |el| (
+    concat_text_nodes = |element| (
         let concat_or_push_back: Array XmlNode -> XmlNode -> Array XmlNode =
             |children, child| (
                 if children.is_empty {
@@ -255,7 +278,7 @@ namespace XmlElement {
                 };
                 children.pop_back.push_back(text_node $ last.as_text_node + child.as_text_node)
             );
-        el.mod_children(|children|
+        element.mod_children(|children|
             children.to_iter.fold(
                 [], concat_or_push_back
             )
@@ -265,16 +288,16 @@ namespace XmlElement {
 
 impl XmlElement: Eq {
     eq = |a, b| (
-        a.@tag == b.@tag &&
-        a.@attrs._sort_by_name == b.@attrs._sort_by_name &&
+        a.@tag_name == b.@tag_name &&
+        a.@attributes._sort_by_name == b.@attributes._sort_by_name &&
         a.@children == b.@children
     );
 }
 
 impl XmlElement: ToString {
     to_string = |el| (
-        let output = "<" + el.@tag;
-        let output = output + el.@attrs.to_iter.map(|attr| " " + attr.to_string).concat_iter;
+        let output = "<" + el.@tag_name;
+        let output = output + el.@attributes.to_iter.map(|attr| " " + attr.to_string).concat_iter;
         if el.@children.is_empty {
             output + "/>"
         };
@@ -286,7 +309,7 @@ impl XmlElement: ToString {
             output, |output, node|
             output + node.to_string + child_sep
         );
-        let output = output + "</" + el.@tag + ">";
+        let output = output + "</" + el.@tag_name + ">";
         output
     );
 }
@@ -309,10 +332,10 @@ namespace XmlAttribute {
         XmlAttribute { name: name, value: value }
     );
 
-    // `attrs._sort_by_name` sorts an array of attributes by the name.
+    // `attributes._sort_by_name` sorts an array of attributes by the name.
     _sort_by_name: Array XmlAttribute -> Array XmlAttribute;
-    _sort_by_name = |attrs| (
-        attrs.sort_by(|(a, b)| a.@name < b.@name)
+    _sort_by_name = |attributes| (
+        attributes.sort_by(|(a, b)| a.@name < b.@name)
     );
 }
 

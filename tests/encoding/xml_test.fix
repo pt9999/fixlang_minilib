@@ -9,7 +9,7 @@ import Minilib.Text.StringEx;
 //=======================================================================
 
 _default_xml_decl: String;
-_default_xml_decl = "<?xml version='1.1' encoding='utf-8'?>";
+_default_xml_decl = "<?xml version=\"1.1\" encoding=\"utf-8\"?>";
 
 test_xmldocument_empty: TestCase;
 test_xmldocument_empty = (
@@ -45,13 +45,97 @@ test_xmldocument_to_string = (
     let doc = XmlDocument::make(element);
     let doc = doc.add_to_prolog(text_node $ XmlText::make("this is prolog"));
     let doc = doc.add_to_epilog(text_node $ XmlText::make("this is epilog"));
-    let expected = "<?xml version='1.1' encoding='utf-8'?>this is prolog<element1>this is content</element1>this is epilog";
+    let expected = _default_xml_decl + "this is prolog<element1>this is content</element1>this is epilog";
     let actual = doc.to_string;
     assert_equal("eq", expected, actual)
 );
 
-// TODO: test XmlDeclaration
-// TODO: test XmlNode
+//=======================================================================
+// tests for XmlDeclaration
+//=======================================================================
+
+test_xmldeclaration_default: TestCase;
+test_xmldeclaration_default = (
+    make_test("test_xmldeclaration_default") $ |_|
+    let decl = XmlDeclaration::default;
+    eval *assert_equal("version", "1.1", decl.@version);
+    eval *assert_equal("encoding", some("utf-8"), decl.@encoding);
+    eval *assert_equal("standalone", none(), decl.@standalone);
+    pure()
+);
+
+test_xmldeclaration_eq: TestCase;
+test_xmldeclaration_eq = (
+    make_test("test_xmldeclaration_eq") $ |_|
+    let decl1 = XmlDeclaration::default;
+    let decl2 = XmlDeclaration::default;
+    eval *assert_equal("default", decl1, decl2);
+    eval *assert_not_equal("version", decl1, decl2.set_version("1.0"));
+    eval *assert_not_equal("encoding", decl1, decl2.set_encoding(none()));
+    eval *assert_not_equal("standalone", decl1, decl2.set_standalone(some("yes")));
+    pure()
+);
+
+test_xmldeclaration_to_string: TestCase;
+test_xmldeclaration_to_string = (
+    make_test("test_xmldeclaration_to_string") $ |_|
+    let decl = XmlDeclaration::default;
+    eval *assert_equal("default", "<?xml version=\"1.1\" encoding=\"utf-8\"?>", decl.to_string);
+    eval *assert_equal("version", "<?xml version=\"1.0\" encoding=\"utf-8\"?>", decl.set_version("1.0").to_string);
+    eval *assert_equal("encoding", "<?xml version=\"1.1\"?>", decl.set_encoding(none()).to_string);
+    eval *assert_equal("standalone", "<?xml version=\"1.1\" encoding=\"utf-8\" standalone=\"yes\"?>", decl.set_standalone(some("yes")).to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlNode
+//=======================================================================
+
+test_xmlnode_eq: TestCase;
+test_xmlnode_eq = (
+    make_test("test_xmlnode_eq") $ |_|
+    let table = [
+        element_node $ XmlElement::make("element1"),
+        element_node $ XmlElement::make("element2"),
+        attribute_node $ XmlAttribute::make("attr", "value1"),
+        attribute_node $ XmlAttribute::make("attr", "value2"),
+        text_node $ XmlText::make("text1"),
+        text_node $ XmlText::make("text2"),
+        cdata_section $ XmlCDATASection::make("cdata1"),
+        cdata_section $ XmlCDATASection::make("cdata2"),
+        processing_instruction $ XmlProcessingInstruction::make("pi1"),
+        processing_instruction $ XmlProcessingInstruction::make("pi2"),
+        comment_node $ XmlComment::make("comment1"),
+        comment_node $ XmlComment::make("comment2"),
+        document_node $ XmlDocument::make(XmlElement::make("doc1")),
+        document_node $ XmlDocument::make(XmlElement::make("doc2"))
+    ];
+    let n = table.get_size;
+    Iterator::range(0, n).fold_m(
+        (), |_, i|
+        eval *assert_equal("eq" + i.to_string, table.@(i), table.@(i));
+        eval *assert_not_equal("neq" + i.to_string, table.@(i), table.@((i+1) % n));
+        pure()
+    )
+);
+
+_assert_node_to_string: [a: ToString] String -> (a -> XmlNode) -> a -> IOFail ();
+_assert_node_to_string = |label, to_node, data| (
+    assert_equal(label, data.to_string, (to_node $ data).to_string)
+);
+
+test_xmlnode_to_string: TestCase;
+test_xmlnode_to_string = (
+    make_test("test_xmlnode_to_string") $ |_|
+    eval *_assert_node_to_string("element", element_node, XmlElement::make("element1"));
+    eval *_assert_node_to_string("attr", attribute_node, XmlAttribute::make("attr", "value1"));
+    eval *_assert_node_to_string("text", text_node, XmlText::make("text1"));
+    eval *_assert_node_to_string("cdata", cdata_section, XmlCDATASection::make("cdata1"));
+    eval *_assert_node_to_string("pi", processing_instruction, XmlProcessingInstruction::make("pi1"));
+    eval *_assert_node_to_string("comment", comment_node, XmlComment::make("comment1"));
+    eval *_assert_node_to_string("doc", document_node, XmlDocument::make(XmlElement::make("doc1")));
+    pure()
+);
 
 //=======================================================================
 // tests for XmlElement
@@ -224,6 +308,13 @@ main = (
         test_xmldocument_empty,
         test_xmldocument_make,
         test_xmldocument_to_string,
+
+        test_xmldeclaration_default,
+        test_xmldeclaration_eq,
+        test_xmldeclaration_to_string,
+
+        test_xmlnode_eq,
+        test_xmlnode_to_string,
 
         test_xmlelement_make,
         test_xmlelement_attr,

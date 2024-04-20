@@ -1,0 +1,131 @@
+module Main;
+
+import Minilib.Encoding.Xml;
+import Minilib.Media.Svg;
+import Minilib.Testing.UnitTest;
+import Minilib.Text.StringEx;
+
+//=======================================================================
+// tests for SvgNum
+//=======================================================================
+
+test_svgnum: TestCase;
+test_svgnum = (
+    make_test("test_svgnum") $ |_|
+    eval *assert_equal("bool", "1", true.to_attr_value);
+    eval *assert_equal("bool", "0", false.to_attr_value);
+    eval *assert_equal("I64", "100", 100.to_attr_value);
+    eval *assert_equal("F64", "123.45", 123.45.to_attr_value);
+    eval *assert_equal("F64", "100", 100.00.to_attr_value);
+    eval *assert_equal("(I64, I64)", "123 100", (123, 100).to_attr_value);
+    eval *assert_equal("(F64, F64)", "123.45 100", (123.45, 100.00).to_attr_value);
+    eval *assert_equal("Array (I64, I64)", "123, 234, 345", [123, 234, 345].to_attr_value);
+    eval *assert_equal("Array (I64, I64)", "123 100, 234 200", [(123, 100), (234,200)].to_attr_value);
+    eval *assert_equal("Array (F64, F64)", "123.45 100, 234.56 200.22", [(123.45, 100.00), (234.56,200.22)].to_attr_value);
+    pure()
+);
+
+//=======================================================================
+// tests for PathData
+//=======================================================================
+
+test_pathdata_empty_newpath: TestCase;
+test_pathdata_empty_newpath = (
+    make_test("test_pathdata_empty_newpath") $ |_|
+    eval *assert_equal("empty", "", PathData::empty.@data);
+    eval *assert_equal("newpath", "", PathData::newpath.@data);
+    pure()
+);
+
+test_pathdata_moveto_rmoveto_lineto_rlineto: TestCase;
+test_pathdata_moveto_rmoveto_lineto_rlineto = (
+    make_test("test_pathdata_moveto_rmoveto_lineto_rlineto") $ |_|
+    let path = PathData::newpath;
+    let path = path.moveto(10, 11).rmoveto(20, 21).lineto(30, 31).rlineto(40, 41);
+    assert_equal("data", "M 10 11 m 20 21 L 30 31 l 40 41", path.@data)
+);
+
+test_pathdata_curveto_scurveto_closepath: TestCase;
+test_pathdata_curveto_scurveto_closepath = (
+    make_test("test_pathdata_curveto_scurveto_closepath") $ |_|
+    let path = PathData::newpath;
+    let path = path.curveto(10, 11, 20, 21, 30, 31);
+    let path = path.scurveto(40, 41, 50, 51);
+    let path = path.closepath;
+    assert_equal("data", "C 10 11, 20 21, 30 31 S 40 41, 50 51 Z", path.@data)
+);
+
+test_pathdata_quadto_squadto_arcto: TestCase;
+test_pathdata_quadto_squadto_arcto = (
+    make_test("test_pathdata_quadto_squadto_arcto") $ |_|
+    let path = PathData::newpath;
+    let path = path.quadto(10, 11, 20, 21);
+    let path = path.squadto(30, 31);
+    let path = path.arcto(40, 41, 23.4, true, true, 50, 51);
+    assert_equal("data", "Q 10 11, 20 21 T 30 31 A 40 41 23.4 1 1 50 51", path.@data)
+);
+
+test_svg_svg: TestCase;
+test_svg_svg = (
+    make_test("test_svg_svg") $ |_|
+    let svg = Svg::svg(100, 200);
+    eval *assert_equal("version", some("1.1"), svg.get_attribute("version"));
+    eval *assert_equal("xmlns", some("http://www.w3.org/2000/svg"), svg.get_attribute("xmlns"));
+    eval *assert_equal("width", some("100"), svg.get_attribute("width"));
+    eval *assert_equal("height", some("200"), svg.get_attribute("height"));
+    pure()
+);
+
+test_svg_attr_num: TestCase;
+test_svg_attr_num = (
+    make_test("test_svg_attr_num") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.attr_num("attr1", 123);
+    let element = element.attr_num("attr2", 456.78);
+    eval *assert_equal("attr1", some("123"), element.get_attribute("attr1"));
+    eval *assert_equal("attr2", some("456.78"), element.get_attribute("attr2"));
+    pure()
+);
+
+test_svg_view_box: TestCase;
+test_svg_view_box = (
+    make_test("test_svg_view_box") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.view_box(10, 11, 20, 21);
+    eval *assert_equal("viewBox", some("10 11 20 21"), element.get_attribute("viewBox"));
+    pure()
+);
+
+test_svg_stroke_stroke_width_fill: TestCase;
+test_svg_stroke_stroke_width_fill = (
+    make_test("test_svg_stroke_stroke_width_fill") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.stroke("black");
+    let element = element.stroke_width(5.5);
+    let element = element.fill_("red");
+    eval *assert_equal("stroke", some("black"), element.get_attribute("stroke"));
+    eval *assert_equal("stroke-width", some("5.5"), element.get_attribute("stroke-width"));
+    eval *assert_equal("fill", some("red"), element.get_attribute("fill"));
+    pure()
+);
+
+// TODO: add tests
+
+main: IO ();
+main = (
+    [
+        test_svgnum,
+
+        test_pathdata_empty_newpath,
+        test_pathdata_moveto_rmoveto_lineto_rlineto,
+        test_pathdata_curveto_scurveto_closepath,
+        test_pathdata_quadto_squadto_arcto,
+
+        test_svg_svg,
+        test_svg_attr_num,
+        test_svg_view_box,
+        test_svg_stroke_stroke_width_fill,
+
+        TestCase::empty
+    ].run_test_driver
+);

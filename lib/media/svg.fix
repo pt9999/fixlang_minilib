@@ -1,3 +1,4 @@
+// SVG 1.1
 module Minilib.Media.Svg;
 
 import Minilib.Encoding.Xml;
@@ -43,10 +44,10 @@ impl [a: SvgNum] (a, a): SvgNum {
     to_attr_value = |(x, y)| x.to_attr_value + " " + y.to_attr_value;
 }
 
-// An array is converted to a string by joining elements with `","`.
+// An array is converted to a string by joining elements with `", "`.
 // For example, `[(123.45, 100.00), (234.60, 345.70)]` -> `"123.45 100, 234.6 345.7"`.
 impl [a: SvgNum] Array a: SvgNum {
-    to_attr_value = |arr| arr.to_iter.map(to_attr_value).join(",");
+    to_attr_value = |arr| arr.to_iter.map(to_attr_value).join(", ");
 }
 
 //---------------------------------------------------------------------------
@@ -107,7 +108,7 @@ namespace PathData {
     // Coordinates are absolute.
     curveto: [a: SvgNum] a -> a -> a -> a -> a -> a -> PathData -> PathData;
     curveto = |x1, y1, x2, y2, x, y| (
-        _append([x1, y1, x2, y2, x, y].map(to_attr_value).format("C {} {}, {} {}, {} {}")  )
+        _append([x1, y1, x2, y2, x, y].map(to_attr_value).format("C {} {}, {} {}, {} {}"))
     );
 
     // Shorthand/smooth version of `curveto`.
@@ -130,9 +131,13 @@ namespace PathData {
         _append([x, y].map(to_attr_value).format("T {} {}"))
     );
 
-    arc_to: [a: SvgNum, b: SvgNum] a -> a -> a -> b -> b -> a -> a -> PathData -> PathData;
-    arc_to = |rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y| (
-        _append([rx, ry, x_axis_rotation].map(to_attr_value).format("A {} {} {} ")
+    // `pathdata.arcto(rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y)` draws a elliptical arc.
+    // Coordinates are absolute.
+    // For details, see [W3C SVG 1.1: 8.3.8 The elliptical arc curve commands](https://www.w3.org/TR/SVG11/paths.html#PathDataEllipticalArcCommands).
+    arcto: [a: SvgNum, b: SvgNum, r: SvgNum] a -> a -> r -> b -> b -> a -> a -> PathData -> PathData;
+    arcto = |rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y| (
+        _append([rx, ry].map(to_attr_value).format("A {} {} ")
+                + [x_axis_rotation].map(to_attr_value).format("{} ")
                 + [large_arc_flag, sweep_flag].map(to_attr_value).format("{} {} ")
                 + [x, y].map(to_attr_value).format("{} {}"))
     );
@@ -148,10 +153,10 @@ namespace Svg {
     svg: [a: SvgNum] a -> a -> XmlElement;
     svg = |width, height| (
         XmlElement::make("svg")
-            .attr_num("width", width)
-            .attr_num("height", height)
             .attr("version", "1.1")
             .attr("xmlns", "http://www.w3.org/2000/svg")
+            .attr_num("width", width)
+            .attr_num("height", height)
     );
 
     // `element.attr_num(name, value)` sets an attribute of specified name to the element.
@@ -176,7 +181,7 @@ namespace Svg {
     // `element.fill(paint)` sets a `fill` attribute to the element.
     // NOTE: this function may conflict with `Array::fill`.
     fill: String -> XmlElement -> XmlElement;
-    fill = |color| attr("fill", color);
+    fill = |paint| attr("fill", paint);
 
     // Synonym for `Svg::fill` to avoid conflicts.
     fill_: String -> XmlElement -> XmlElement;

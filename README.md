@@ -26,6 +26,7 @@ This library is still in alpha stage.
 - Encoding
   - Binary
   - JSON
+  - XML
 - IO
   - File system
   - Platform information

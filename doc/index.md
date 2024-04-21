@@ -172,6 +172,7 @@ PNG image I/O.
 
 ### [module Minilib.Media.Svg (lib/media/svg.fix)](lib/media/svg.md)
 
+Scalable Vector Graphics (SVG) 1.1
 
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 

@@ -2,6 +2,10 @@
 
 ## module Minilib.Media.Svg
 
+Scalable Vector Graphics (SVG) 1.1
+
+This module uses `Minilib.Encoding.Xml` to handle XML.
+
 ### trait SvgNum
 
 A trait that can be converted to an attribute value of a SVG element.
@@ -35,7 +39,7 @@ For example, `(123.45, 100.00)` -> `"123.45 100"`.
 
 #### `impl [a: SvgNum] Array a: SvgNum`
 
-An array is converted to a string by joining elements with `","`.
+An array is converted to a string by joining elements with `", "`.
 For example, `[(123.45, 100.00), (234.60, 345.70)]` -> `"123.45 100, 234.6 345.7"`.
 
 ### type PathData
@@ -101,7 +105,11 @@ Coordinates are absolute.
 
 Shorthand/smooth version of `quadto`.
 
-#### arc_to: [a: SvgNum, b: SvgNum] a -> a -> a -> b -> b -> a -> a -> PathData -> PathData;
+#### arcto: [a: SvgNum, b: SvgNum, r: SvgNum] a -> a -> r -> b -> b -> a -> a -> PathData -> PathData;
+
+`pathdata.arcto(rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y)` draws a elliptical arc.
+Coordinates are absolute.
+For details, see [W3C SVG 1.1: 8.3.8 The elliptical arc curve commands](https://www.w3.org/TR/SVG11/paths.html#PathDataEllipticalArcCommands).
 
 ### namespace Svg
 

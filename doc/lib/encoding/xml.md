@@ -235,7 +235,7 @@ type XmlComment = unbox struct {
 #### make: String -> XmlComment;
 
 `XmlComment::make(content)` creates a comment node with the specified content.
-If `content` contains the end marker of comment(`"-->"`), this function panics.
+If `content` contains a double-hyphen(`"--"`), this function panics.
 
 #### `impl XmlComment: Eq`
 

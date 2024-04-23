@@ -91,8 +91,7 @@ XML helpers, such as:
 
 ### [module Minilib.Encoding.Xml.XmlParser (lib/encoding/xml/xml_parser.fix)](lib/encoding/xml/xml_parser.md)
 
-XML Parser.
-- [Extensible Markup Language (XML) 1.1 (Second Edition)](https://www.w3.org/TR/2006/REC-xml11-20060816/)
+Simple XML 1.1 Parser.
 
 ### [module Minilib.Encoding.Xml (lib/encoding/xml.fix)](lib/encoding/xml.md)
 

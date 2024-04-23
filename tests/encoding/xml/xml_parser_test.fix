@@ -15,6 +15,45 @@ trim_err = |res| (
     if e == "" { res } else { err(e) }
 );
 
+make_table_test_with_parser: [a: ToString, a: Eq] String -> Array (String, Result ErrMsg a) -> Parser a -> TestCase;
+make_table_test_with_parser = |test_name, params, parser| (
+    make_table_test(test_name,
+    params,
+    |(input, expect)|
+        let res = do {
+            let x = *parser;
+            eval *match_end_of_stream;
+            pure $ x
+        }.run_parser_str(input);
+        let res = res.map(@0).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
+
+// 2.1 Well-Formed XML Documents
+
+test_parse_document_from_string: TestCase;
+test_parse_document_from_string = (
+    let xml_decl_str = "<?xml version='1.1'?>";
+    let doc = XmlDocument::empty;
+    let xml_decl = XmlDeclaration { version: "1.1", encoding: none(), standalone: none() };
+    let element = XmlElement::make;
+    make_table_test("test_parse_document_from_string",
+        [
+            (xml_decl_str + "<a/>", ok $ doc
+                .set_xml_decl(xml_decl)
+                .set_document_element(element("a"))),
+            (xml_decl_str, err $ "NotMatch"),
+            ("<a/>", err $ "Missing XML declaration"),
+            ("abc", err $ "Missing XML declaration")
+        ],
+        |(input, expect)|
+        let res = parse_document_from_string(input).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 // [1]   	document	   ::=   	( prolog element Misc* ) - ( Char* RestrictedChar Char* )
 test_parse_document: TestCase;
 test_parse_document = (
@@ -23,7 +62,7 @@ test_parse_document = (
     let xml_decl = XmlDeclaration { version: "1.1", encoding: none(), standalone: none() };
     let element = XmlElement::make;
     let text = XmlText::make >> text_node;
-    make_table_test("test_parse_document",
+    make_table_test_with_parser("test_parse_document",
         [
             (xml_decl_str + "<a/>", ok $ doc
                 .set_xml_decl(xml_decl)
@@ -35,12 +74,43 @@ test_parse_document = (
                 .add_to_epilog(text(" "))),
             (xml_decl_str, err $ "NotMatch")
         ],
-        |(input, expect)|
-        let res = _parse_document.run_parser_str(input);
-        let res = res.map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_document
     )
 );
+
+// 2.3 Common Syntactic Constructs
+
+// White Space
+// [3]   	S	   ::=   	(#x20 | #x9 | #xD | #xA)+
+test_parse_s: TestCase;
+test_parse_s = (
+    make_table_test_with_parser("test_parse_s",
+        [
+            (" ", ok $ " "),
+            ("  \t\r\n \t\r\n", ok $ "  \t\r\n \t\r\n"),
+            ("\u000b", err $ "NotMatch"),
+            ("a", err $ "NotMatch"),
+            ("", err $ "NotMatch")
+        ],
+        _parse_s
+    )
+);
+
+test_parse_s_as_text_node: TestCase;
+test_parse_s_as_text_node = (
+    make_table_test_with_parser("test_parse_s_as_text_node",
+        let text = text_node << XmlText::make in
+        [
+            (" ", ok $ text(" ")),
+            ("  \t\r\n \t\r\n", ok $ text("  \t\r\n \t\r\n")),
+            ("\u000b", err $ "NotMatch"),
+            ("a", err $ "NotMatch"),
+            ("", err $ "NotMatch")
+        ],
+        _parse_s_as_text_node
+    )
+);
+
 
 // [4]   	NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] |
 //              [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] |
@@ -51,7 +121,7 @@ test_parse_document = (
 // [5]   	Name	   ::=   	NameStartChar (NameChar)*
 test_parse_name: TestCase;
 test_parse_name = (
-    make_table_test("test_parse_name",
+    make_table_test_with_parser("test_parse_name",
         [
             // currently #x0080 or above are all matched to NameStartChar and NameChar
             ("abc", ok $ "abc"),
@@ -65,12 +135,28 @@ test_parse_name = (
             ("0abc", err $ "NotMatch"),
             ("$abc", err $ "NotMatch")
         ],
-        |(input, expect)|
-        let res = _parse_name.run_parser_str(input);
-        let res = res.map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_name
     )
 );
+
+// [10]   	AttValue	   ::=   	'"' ([^<&"] | Reference)* '"'
+//                               |  "'" ([^<&'] | Reference)* "'"
+test_parse_att_value: TestCase;
+test_parse_att_value = (
+    make_table_test_with_parser("test_parse_att_value",
+        [
+            ("\"abc\"", ok $ "abc"),
+            ("'abc'", ok $ "abc"),
+            ("\"AZaz09あ漢 &lt;&gt;&amp;'\"", ok $ "AZaz09あ漢 &lt;&gt;&amp;'"),
+            ("'AZaz09あ漢 &lt;&gt;&amp;\"'", ok $ "AZaz09あ漢 &lt;&gt;&amp;\""),
+            ("abc", err("Missing start quote")),
+            ("'abc\"", err("Missing end quote")),
+            ("", err("Missing start quote"))
+        ],
+        _parse_att_value
+    )
+);
+
 
 // [14]   	CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
 test_parse_char_data: TestCase;
@@ -87,6 +173,7 @@ test_parse_char_data = (
         ],
         |(input, expect)|
         let res = _parse_char_data.run_parser_str(input);
+        // possibly not at end of stream
         let res = res.map(@0).trim_err;
         assert_equal("res", expect, res)
     )
@@ -157,10 +244,33 @@ test_parse_cdsect = (
     )
 );
 
+// [22]   	prolog	   ::=   	XMLDecl Misc* (doctypedecl Misc*)?
+test_parse_prolog: TestCase;
+test_parse_prolog = (
+    let xml_decl_str = "<?xml version='1.1'?>";
+    let xml_decl = XmlDeclaration { version: "1.1", encoding: none(), standalone: none() };
+    let doc = XmlDocument::empty.set_xml_decl(xml_decl);
+    let text = text_node << XmlText::make;
+    let comment = comment_node << XmlComment::make;
+    make_table_test_with_parser("test_parse_prolog",
+        [
+            (xml_decl_str, ok $ doc),
+            (xml_decl_str + "\n", ok $
+                doc.add_to_prolog(text $ "\n")
+            ),
+            (xml_decl_str + "\n<!--comment-->", ok $
+                doc.add_to_prolog(text $ "\n")
+                   .add_to_prolog(comment $ "comment")
+            ),
+            ("", err("Missing XML declaration"))
+        ],
+        _parse_prolog
+    )
+);
 // [23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
 test_parse_xml_declaration: TestCase;
 test_parse_xml_declaration = (
-    make_table_test("test_parse_xml_declaration",
+    make_table_test_with_parser("test_parse_xml_declaration",
         let xmldecl = XmlDeclaration {
             version: "1.1",
             encoding: none(),
@@ -180,16 +290,14 @@ test_parse_xml_declaration = (
             ("<?xml version='1.1' standalone='yes' encoding='utf-8' ?>", err("Missing end of xml declaration")),
             ("<?xml encoding='utf-8' standalone='yes' ?>", err("NotMatch"))
         ],
-        |(input, expect)|
-        let res = _parse_xml_declaration.run_parser_str(input).map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_xml_declaration
     )
 );
 
 // [24]   	VersionInfo	   ::=   	S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"')
 test_parse_version_info: TestCase;
 test_parse_version_info = (
-    make_table_test("test_parse_version_info",
+    make_table_test_with_parser("test_parse_version_info",
         [
             (" version", err("NotMatch")),
             (" version=1.1", err("NotMatch")),
@@ -200,17 +308,46 @@ test_parse_version_info = (
             ("   version  =  \"1.1\"", ok $ "1.1"),
             ("   version  =  \"1.1'", err("NotMatch"))
         ],
-        |(input, expect)|
-        let res = _parse_version_info.run_parser_str(input).map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_version_info
     )
 );
+
+// [25]   	Eq	   ::=   	S? '=' S?
+test_parse_eq: TestCase;
+test_parse_eq = (
+    make_table_test_with_parser("test_parse_eq",
+        [
+            ("=", ok $ ()),
+            ("  =  \r\n", ok $ ()),
+            ("", err("NotMatch"))
+        ],
+        _parse_eq
+    )
+);
+
+// [27]   	Misc	   ::=   	Comment | PI | S
+test_parse_misc: TestCase;
+test_parse_misc = (
+    make_table_test_with_parser("test_parse_misc",
+        [
+            ("<!--comment-->", ok $ comment_node $ XmlComment::make("comment")),
+            ("<?instruction?>", ok $ processing_instruction $
+                XmlProcessingInstruction::make("instruction")),
+            (" \r\n", ok $ text_node $ XmlText::make(" \r\n")),
+            ("&#020;", err("NotMatch")),
+            ("a", err("NotMatch")),
+            ("", err("NotMatch"))
+        ],
+        _parse_misc
+    )
+);
+
 // 2.9 Standalone Document Declaration
 
 // [32]   	SDDecl	   ::=   	S 'standalone' Eq (("'" ('yes' | 'no') "'") | ('"' ('yes' | 'no') '"'))
 test_parse_sd_decl: TestCase;
 test_parse_sd_decl = (
-    make_table_test("test_parse_sd_decl",
+    make_table_test_with_parser("test_parse_sd_decl",
         [
             (" standalone", err("NotMatch")),
             (" standalone=yes", err("NotMatch")),
@@ -221,21 +358,35 @@ test_parse_sd_decl = (
             ("   standalone  =  \"no\"", ok $ "no"),
             ("   standalone  =  \"no'", err("NotMatch"))
         ],
-        |(input, expect)|
-        let res = _parse_sd_decl.run_parser_str(input).map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_sd_decl
     )
 );
 
 
 // 3 Logical Structures
 
+// Element
+
+test_parse_element_from_string: TestCase;
+test_parse_element_from_string = (
+    let element = XmlElement::make;
+    make_table_test("parse_elment_from_string",
+        [
+            ("<a/>", ok $ XmlElement::make("a")),
+            ("<?xml version='1.1'?><a/>", err $ "NotMatch")
+        ],
+        |(input, expect)|
+        let res = parse_element_from_string(input).trim_err;
+        assert_equal("res", expect, res)
+    )
+);
+
 // [39]   	element	   ::=   	EmptyElemTag
 //                              | STag content ETag
 test_parse_element: TestCase;
 test_parse_element = (
-    let element = XmlElement::make;
-    make_table_test("test_parse_element",
+    make_table_test_with_parser("test_parse_element",
+        let element = XmlElement::make in
         [
             ("<a   x='1' >hello <b /> world</a>", ok $
                     element("a")
@@ -246,17 +397,14 @@ test_parse_element = (
             ("<a><b><c/></b></a>", ok $ element("a").add(element("b").add(element("c")))),
             ("<a><b><c/></b>", err $ "Missing end tag")
         ],
-        |(input, expect)|
-        let res = _parse_element.run_parser_str(input);
-        let res = res.map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_element
     )
 );
 
 // [40]   	STag	   ::=   	'<' Name (S Attribute)* S? '>'
 test_parse_stag: TestCase;
 test_parse_stag = (
-    make_table_test("test_parse_stag",
+    make_table_test_with_parser("test_parse_stag",
         [
             ("<aaa  >", ok $ (false, XmlElement::make("aaa"))),
             ("<aaa a='1' b=\"&amp;\" >", ok $ (false, XmlElement::make("aaa").attr("b", "&").attr("a", "1"))),
@@ -265,10 +413,7 @@ test_parse_stag = (
             ("<aaa <bbb>", err $ "Missing '>'"),
             ("<aaa  ", err $ "Missing '>'")
         ],
-        |(input, expect)|
-        let res = _parse_empty_elem_tag_or_stag.run_parser_str(input);
-        let res = res.map(|((empty, elem), _)| (empty, elem)).trim_err;
-        assert_equal("res", expect, res)
+        _parse_empty_elem_tag_or_stag
     )
 );
 
@@ -276,21 +421,33 @@ test_parse_stag = (
 // [41]   	Attribute	   ::=   	Name Eq AttValue
 test_parse_attribute: TestCase;
 test_parse_attribute = (
-    make_table_test("test_parse_attribute",
+    make_table_test_with_parser("test_parse_attribute",
         [
-            (":Aa0.='bbb'", ok $ (":Aa0.", "bbb")),
-            ("_:Aa0.-  =  \"bbb &#12354;&#x6F22;&lt;&gt;&amp;&apos;&quot;\"", ok $ ("_:Aa0.-", "bbb あ漢<>&'\"")),
+            (":Aa0.='bbb'", ok $ XmlAttribute::make(":Aa0.", "bbb")),
+            ("_:Aa0.-  =  \"bbb &#12354;&#x6F22;&lt;&gt;&amp;&apos;&quot;\"",
+                            ok $ XmlAttribute::make("_:Aa0.-", "bbb あ漢<>&'\"")),
             ("_:Aa0.-  =  bbb", err $ "Missing start quote"),
             ("_:Aa0.-  =  \"bbb", err $ "Missing end quote"),
             ("_:Aa0.-  =  \"bbb<\"", err $ "Missing end quote"),
             ("_:Aa0.-  =  \"bbb&\"", err $ "Missing end quote")
         ],
-        |(input, expect)|
-        let res = _parse_attribute.run_parser_str(input);
-        let res = res.map(|(attr, _)|
-            (attr.@name, attr.@value)
-        ).trim_err;
-        assert_equal("res", expect, res)
+        _parse_attribute
+    )
+);
+
+// [42]   	ETag	   ::=   	'</' Name S? '>'
+test_parse_etag: TestCase;
+test_parse_etag = (
+    let elem = XmlElement::make("aaa");
+    make_table_test_with_parser("test_parse_etag",
+        [
+            ("</aaa>", ok $ elem),
+            ("</aaa >", ok $ elem),
+            ("</ aaa>", err $ "NotMatch"),
+            ("</abc>", err $ "Tag name mismatch"),
+            ("</aaa", err $ "Missing '>'")
+        ],
+        _parse_etag(elem)
     )
 );
 
@@ -298,7 +455,7 @@ test_parse_attribute = (
 test_parse_content: TestCase;
 test_parse_content = (
     let elem = XmlElement::make("a");
-    make_table_test("test_parse_content",
+    make_table_test_with_parser("test_parse_content",
         [
             ("abc<b/>", ok $ elem.text("abc").add(XmlElement::make("b"))),
             ("ab&amp;c", ok $ elem.text("ab&c")),
@@ -310,44 +467,104 @@ test_parse_content = (
                     .text(" ")
                     .add_node(processing_instruction(XmlProcessingInstruction::make("t"))))
         ],
-        |(input, expect)|
-        let res = _parse_content(elem).run_parser_str(input);
-        let res = res.map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_content(elem)
     )
 );
 
 // [44]   	EmptyElemTag	   ::=   	'<' Name (S Attribute)* S? '/>'
 test_parse_empty_elem: TestCase;
 test_parse_empty_elem = (
-    make_table_test("test_parse_empty_elem",
+    make_table_test_with_parser("test_parse_empty_elem",
         [
             ("<aaa a='1' b=\"&amp;\" />", ok $ (true, XmlElement::make("aaa").attr("b", "&").attr("a", "1"))),
             ("<aaa a=1 b=\"&amp;\" />", err $ "Missing start quote"),
             ("<aaa/>", ok $ (true, XmlElement::make("aaa"))),
             ("<aaa/", err $ "Missing '>'")
         ],
-        |(input, expect)|
-        let res = _parse_empty_elem_tag_or_stag.run_parser_str(input);
-        let res = res.map(|((empty, elem), _)| (empty, elem)).trim_err;
-        assert_equal("res", expect, res)
+        _parse_empty_elem_tag_or_stag
     )
 );
 
 // 4 Physical Structures
 // 4.1 Character and Entity References
-// TODO
+
 // [66]   	CharRef	   ::=   	'&#' [0-9]+ ';'
 //                              | '&#x' [0-9a-fA-F]+ ';'
+test_parse_char_ref: TestCase;
+test_parse_char_ref = (
+    make_table_test_with_parser("test_parse_char_ref",
+        [
+            ("&#0;", ok $ ()),
+            ("&#123456789;", ok $ ()),
+            ("&#;", err $ "NotMatch"),
+            ("&#09AaFf;", err $ "NotMatch"),
+            ("&#x09AaFf;", ok $ ()),
+            ("&#X09AaFf;", err $ "NotMatch"),
+            ("&aaa;", err $ "NotMatch")
+        ],
+        _parse_char_ref
+    )
+);
+
 // [67]   	Reference	   ::=   	EntityRef | CharRef
+test_parse_reference: TestCase;
+test_parse_reference = (
+    make_table_test_with_parser("test_parse_reference",
+        [
+            ("&#0;", ok $ ()),
+            ("&#123456789;", ok $ ()),
+            ("&#;", err $ "NotMatch"),
+            ("&#09AaFf;", err $ "NotMatch"),
+            ("&#x09AaFf;", ok $ ()),
+            ("&#X09AaFf;", err $ "NotMatch"),
+            ("&aaa;", ok $ ()),
+            ("&;", err $ "NotMatch")
+        ],
+        _parse_reference
+    )
+);
+
+test_parse_reference_as_text_node: TestCase;
+test_parse_reference_as_text_node = (
+    make_table_test_with_parser("test_parse_reference_as_text_node",
+        let text = text_node << XmlText::make;
+        [
+            ("&#039;", ok $ text("'")),
+            ("&#28450;", ok $ text("漢")),
+            ("&#x27;", ok $ text("'")),
+            ("&#x6f22;", ok $ text("漢")),
+            ("&lt;", ok $ text("<")),
+            ("&gt;", ok $ text(">")),
+            ("&amp;", ok $ text("&")),
+            ("&quot;", ok $ text("\"")),
+            ("&unknown;", ok $ text("&unknown;")),
+            ("abc", err $ "NotMatch")
+        ],
+        _parse_reference_as_text_node
+    )
+);
+
 // [68]   	EntityRef	   ::=   	'&' Name ';'
+test_parse_entity_ref: TestCase;
+test_parse_entity_ref = (
+    make_table_test_with_parser("test_parse_entity_ref",
+        [
+            ("&aaa;", ok $ ()),
+            ("&012;", err $ "NotMatch"),
+            ("&#012;", err $ "NotMatch"),
+            ("&#x0AaFf;", err $ "NotMatch"),
+            ("&aaa", err $ "NotMatch")
+        ],
+        _parse_entity_ref
+    )
+);
 
 // 4.3.3 Character Encoding in Entities
 
 // [80]   	EncodingDecl	   ::=   	S 'encoding' Eq ('"' EncName '"' | "'" EncName "'" )
 test_parse_encoding_decl: TestCase;
 test_parse_encoding_decl = (
-    make_table_test("test_parse_encoding_decl",
+    make_table_test_with_parser("test_parse_encoding_decl",
         [
             ("encoding='utf-8'", err("NotMatch")),
             (" encoding='utf-8'", ok $ "utf-8"),
@@ -355,16 +572,14 @@ test_parse_encoding_decl = (
             ("  encoding  =  \"UTF8\"", ok $ "UTF8"),
             ("  encoding  =  \"UTF8'", err("NotMatch"))
         ],
-        |(input, expect)|
-        let res = _parse_encoding_decl.run_parser_str(input).map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_encoding_decl
     )
 );
 
 // [81]   	EncName	   ::=   	[A-Za-z] ([A-Za-z0-9._] | '-')*
 test_parse_enc_name: TestCase;
 test_parse_enc_name = (
-    make_table_test("test_parse_enc_name",
+    make_table_test_with_parser("test_parse_enc_name",
         [
             ("", err("NotMatch")),
             ("a", ok $ "a"),
@@ -375,9 +590,7 @@ test_parse_enc_name = (
             (".bc", err("NotMatch")),
             ("aBC09..__--", ok $ "aBC09..__--")
         ],
-        |(input, expect)|
-        let res = _parse_enc_name.run_parser_str(input).map(@0).trim_err;
-        assert_equal("res", expect, res)
+        _parse_enc_name
     )
 );
 
@@ -385,20 +598,33 @@ test_parse_enc_name = (
 main: IO ();
 main = (
     [
+        test_parse_document_from_string,
         test_parse_document,
+        test_parse_s,
+        test_parse_s_as_text_node,
         test_parse_name,
+        test_parse_att_value,
         test_parse_char_data,
         test_parse_comment,
         test_parse_pi,
         test_parse_cdsect,
+        test_parse_prolog,
         test_parse_xml_declaration,
         test_parse_version_info,
+        test_parse_eq,
+        test_parse_misc,
         test_parse_sd_decl,
+        test_parse_element_from_string,
         test_parse_element,
         test_parse_stag,
         test_parse_attribute,
+        test_parse_etag,
         test_parse_content,
         test_parse_empty_elem,
+        test_parse_char_ref,
+        test_parse_reference,
+        test_parse_reference_as_text_node,
+        test_parse_entity_ref,
         test_parse_encoding_decl,
         test_parse_enc_name,
         TestCase::empty

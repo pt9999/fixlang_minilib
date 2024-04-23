@@ -12,10 +12,10 @@ For details, see [Wikipedia: Semigroup](https://en.wikipedia.org/wiki/Semigroup)
 ### trait Semigroup
 
 A trait that represents a semigroup.
-`a.sappend(b)` appends `b` after `a`.
 
 ```
 trait a: Semigroup {
+    // `a.sappend(b)` appends `b` after `a`.
     sappend: a -> a -> a;
 }
 ```

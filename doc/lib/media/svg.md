@@ -10,10 +10,10 @@ This module uses `Minilib.Encoding.Xml` to handle XML.
 
 A trait that can be converted to an attribute value of a SVG element.
 For example, a number, or a list of numbers is an instance of this trait.
-Convert to an attribute value of a SVG element.
 
 ```
 trait a: SvgNum {
+    // Convert to an attribute value of a SVG element.
     to_attr_value: a -> String;
 }
 ```

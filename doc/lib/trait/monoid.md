@@ -11,10 +11,10 @@ For details, see [Wikipedia: Monoid](https://en.wikipedia.org/wiki/Monoid).
 ### trait MEmpty
 
 A trait that represents an identity of a monoid.
-An identity of a monoid, such as an empty instance.
 
 ```
 trait a: MEmpty {
+    // An identity of a monoid, such as an empty instance.
     mempty: a;
 }
 ```

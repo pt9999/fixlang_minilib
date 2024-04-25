@@ -1,68 +1,78 @@
-// Writer monad. (a.k.a Env, CoReader comonad)
+// Writer monad.
 //
 // For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 module Minilib.Monad.Writer;
 
+import Minilib.Monad.Identity;
 import Minilib.Trait.Monoid;
 import Minilib.Trait.Semigroup;
-import Minilib.Trait.Comonad;
 
 // Writer monad wraps a pair of an environment and a value.
 // `e` is a type of an environment.
+// `m` is a type of an underlyind monad.
 // `a` is a type of a value.
-type Writer e a = unbox struct {
-    data: (e, a)
+type [m: * -> *] WriterT e m a = unbox struct {
+    data: m (e, a)
 };
 
+type Writer e a = WriterT e Identity a;
+
 namespace Writer {
+    // Creates a generic writer monad from an enviroment and a value.
+    writer_t: [m: Monad] m (e, a) -> WriterT e m a;
+    writer_t = |ea| WriterT { data: ea };
+
     // Creates a writer monad from an enviroment and a value.
     writer: e -> a -> Writer e a;
-    writer = |e, a| Writer { data: (e, a) };
+    writer = |e, a| writer_t $ Identity::make $ (e, a);
+
+    // Runs a generic writer monad to get an enviroment and a value.
+    run_writer_t: [m: Monad] WriterT e m a -> m (e, a);
+    run_writer_t = @data;
 
     // Runs a writer monad to get an enviroment and a value.
     run_writer: Writer e a -> (e, a);
-    run_writer = @data;
+    run_writer = run_writer_t >> Identity::get;
 
     // Creates a writer monad that appends to the environment.
-    write: [e: Monoid] e -> Writer e ();
-    write = |e| writer(e, ());
+    write: [e: Monoid, m: Monad] e -> WriterT e m ();
+    write = |e| writer_t $ pure $ (e, ());
+
+    // Gets the envirionment from a generic writer monad.
+    get_env_t: [m: Monad] WriterT e m a -> m e;
+    get_env_t = |ma| ma.@data.bind(@0 >> pure);
 
     // Gets the envirionment from a writer monad.
     get_env: Writer e a -> e;
-    get_env = |ma| ma.@data.@0;
+    get_env = |ma| ma.get_env_t.get;
+
+    // Gets the value from a generic writer monad.
+    get_value_t: [m: Monad] WriterT e m a -> m a;
+    get_value_t = |ma| ma.@data.bind(@1 >> pure);
 
     // Gets the value from a writer monad.
     get_value: Writer e a -> a;
-    get_value = |ma| ma.@data.@1;
+    get_value = |ma| ma.get_value_t.get;
+
+    // Lifts an underlyind monad to a writer monad.
+    lift_writer: [e: Monoid, m: Monad] m a -> WriterT e m a;
+    lift_writer = |ma| writer_t $ ma.bind(|a| pure $ (mempty, a));
 }
 
-// Env comonad. this is same as a writer monad.
-type Env e a = Writer e a;
-
-namespace Env {
-    // Creates a env comonad from an enviroment and a value.
-    env: e -> a -> Env e a;
-    env = Writer::writer;
-
-    // Converts a env comonad to a pair of an enviroment and a value.
-    to_tuple: Env e a -> (e, a);
-    to_tuple = @data;
+impl [m: Monad] WriterT e m: Functor {
+    map = |f, ma| writer_t $ do {
+        let (e, a) = *ma.@data;
+        pure $ (e, f(a))
+    };
 }
 
-impl Writer e: Functor {
-    map = |f, ma| writer(ma.get_env, f(ma.get_value));
-}
-
-impl [e: Monoid] Writer e: Monad {
-    pure = |a| writer(mempty, a);
-    bind = |f, ma| (
-        let mb = f(ma.get_value);
-        let env = ma.get_env.sappend(mb.get_env);
-        writer(env, mb.get_value)
-    );
-}
-
-impl Writer e: Comonad {
-    extract = get_value;
-    extend = |f, wb| writer(wb.get_env, f(wb));
+impl [e: Monoid, m: Monad] WriterT e m: Monad {
+    pure = |a| writer_t $ pure $ (mempty, a);
+    bind = |f, env1| writer_t $ do {
+        let (e1, a) = *env1.@data;
+        let env2 = f(a);
+        let (e2, b) = *env2.@data;
+        let e = e1.sappend(e2);
+        pure $ (e, b)
+    };
 }

@@ -1,0 +1,286 @@
+// Scalable Vector Graphics (SVG) 1.1
+//
+// This module uses `Minilib.Encoding.Xml` to handle XML.
+module Minilib.Media.Svg;
+
+import Minilib.Encoding.Xml;
+import Minilib.Text.StringEx;
+
+//---------------------------------------------------------------------------
+//  SvgNum
+//---------------------------------------------------------------------------
+
+// A trait that can be converted to an attribute value of a SVG element.
+// For example, a number, or a list of numbers is an instance of this trait.
+trait a: SvgNum {
+    // Convert to an attribute value of a SVG element.
+    to_attr_value: a -> String;
+}
+
+// Bool is converted to either "1" or "0". For example,
+// `true` -> `"1"`, `false` -> `"0"`.
+impl Bool: SvgNum {
+    to_attr_value = |x| if x { "1" } else { "0" };
+}
+
+// I64 is converted to a decimal string.
+// For example, `100` -> `"100"`.
+impl I64: SvgNum {
+    to_attr_value = |x| x.to_string;
+}
+
+// F64 is converted to a decimal string. Trailing zeros and trailing periods are stripped.
+// For example, `123.45` -> `"123.45"`, `100.00` -> `"100"`.
+impl F64: SvgNum {
+    to_attr_value = |x| (
+        let str = x.to_string;
+        let str = str.strip_last_bytes(|c| c == '0')
+                     .strip_last_bytes(|c| c == '.');
+        str
+    );
+}
+
+// `(a, a)` is converted to a string `a a`.
+// For example, `(123.45, 100.00)` -> `"123.45 100"`.
+impl [a: SvgNum] (a, a): SvgNum {
+    to_attr_value = |(x, y)| x.to_attr_value + " " + y.to_attr_value;
+}
+
+// An array is converted to a string by joining elements with `", "`.
+// For example, `[(123.45, 100.00), (234.60, 345.70)]` -> `"123.45 100, 234.6 345.7"`.
+impl [a: SvgNum] Array a: SvgNum {
+    to_attr_value = |arr| arr.to_iter.map(to_attr_value).join(", ");
+}
+
+//---------------------------------------------------------------------------
+//  PathData
+//---------------------------------------------------------------------------
+
+// Path data of `<path>` element.
+type PathData = unbox struct {
+    data: String
+};
+
+namespace PathData {
+    // `PathData::empty` is an empty PathData.
+    empty: PathData;
+    empty = PathData {
+        data: ""
+    };
+
+    // Synonym for `PathData::empty`.
+    newpath: PathData;
+    newpath = empty;
+
+    // Appends an string to PathData.
+    _append: String -> PathData -> PathData;
+    _append = |str, pathdata| (
+        pathdata.mod_data(|data|
+            let data = if data.is_empty { data } else { data + " " };
+            data + str
+        )
+    );
+
+    // `pathdata.moveto(x, y)` starts a new sub-path at the given `(x,y)` coordinates.
+    // Coordinates are absolute.
+    moveto: [a: SvgNum] a -> a -> PathData -> PathData;
+    moveto = |x, y| _append([x, y].map(to_attr_value).format("M {} {}"));
+
+    // Same as `moveto` but coordinates are relative.
+    rmoveto: [a: SvgNum] a -> a -> PathData -> PathData;
+    rmoveto = |x, y| _append([x, y].map(to_attr_value).format("m {} {}"));
+
+    // `pathdata.lineto(x, y)` draws a line from the current point to the given `(x,y)` coordinates
+    // which becomes the new current point.
+    // Coordinates are absolute.
+    lineto: [a: SvgNum] a -> a -> PathData -> PathData;
+    lineto = |x, y| _append([x, y].map(to_attr_value).format("L {} {}"));
+
+    // Same as `lineto` but coordinates are relative.
+    rlineto: [a: SvgNum] a -> a -> PathData -> PathData;
+    rlineto = |x, y| _append([x, y].map(to_attr_value).format("l {} {}"));
+
+    // `pathdata.closepath` ends the current sub-path by connecting it back to its initial point.
+    closepath: PathData -> PathData;
+    closepath = _append("Z");
+    
+    // `pathdata.curveto(x1, y1, x2, y2, x, y)` draws a cubic Bézier curve
+    // from the current point to `(x,y)` using `(x1,y1)` as the control point
+    // at the beginning of the curve and `(x2,y2)` as the control point at the end of the curve.
+    // Coordinates are absolute.
+    curveto: [a: SvgNum] a -> a -> a -> a -> a -> a -> PathData -> PathData;
+    curveto = |x1, y1, x2, y2, x, y| (
+        _append([x1, y1, x2, y2, x, y].map(to_attr_value).format("C {} {}, {} {}, {} {}"))
+    );
+
+    // Shorthand/smooth version of `curveto`.
+    scurveto: [a: SvgNum] a -> a -> a -> a -> PathData -> PathData;
+    scurveto = |x2, y2, x, y| (
+        _append([x2, y2, x, y].map(to_attr_value).format("S {} {}, {} {}"))
+    );
+
+    // `pathdata.quadto(x1, y1, x, y)` draws a quadratic Bézier curve from the
+    // current point to (x,y) using (x1,y1) as the control point.
+    // Coordinates are absolute.
+    quadto: [a: SvgNum] a -> a -> a -> a -> PathData -> PathData;
+    quadto = |x1, y1, x, y| (
+        _append([x1, y1, x, y].map(to_attr_value).format("Q {} {}, {} {}"))
+    );
+
+    // Shorthand/smooth version of `quadto`.
+    squadto: [a: SvgNum] a -> a -> PathData -> PathData;
+    squadto = |x, y| (
+        _append([x, y].map(to_attr_value).format("T {} {}"))
+    );
+
+    // `pathdata.arcto(rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y)` draws a elliptical arc.
+    // Coordinates are absolute.
+    // For details, see [W3C SVG 1.1: 8.3.8 The elliptical arc curve commands](https://www.w3.org/TR/SVG11/paths.html#PathDataEllipticalArcCommands).
+    arcto: [a: SvgNum, b: SvgNum, r: SvgNum] a -> a -> r -> b -> b -> a -> a -> PathData -> PathData;
+    arcto = |rx, ry, x_axis_rotation, large_arc_flag, sweep_flag, x, y| (
+        _append([rx, ry].map(to_attr_value).format("A {} {} ")
+                + [x_axis_rotation].map(to_attr_value).format("{} ")
+                + [large_arc_flag, sweep_flag].map(to_attr_value).format("{} {} ")
+                + [x, y].map(to_attr_value).format("{} {}"))
+    );
+
+}
+
+//---------------------------------------------------------------------------
+//  Svg
+//---------------------------------------------------------------------------
+
+namespace Svg {
+    //  `Svg::svg(width, height)` creates a `<svg>` element.
+    svg: [a: SvgNum] a -> a -> XmlElement;
+    svg = |width, height| (
+        XmlElement::make("svg")
+            .attr("version", "1.1")
+            .attr("xmlns", "http://www.w3.org/2000/svg")
+            .attr_num("width", width)
+            .attr_num("height", height)
+    );
+
+    // `element.attr_num(name, value)` sets an attribute of specified name to the element.
+    attr_num: [a: SvgNum] String -> a -> XmlElement -> XmlElement;
+    attr_num = |name, value| attr(name, value.to_attr_value);
+
+    // `element.view_box(min_x, min_y, width, height)` sets the `viewBox` attribute to the element.
+    // `element` must be one of `<svg>`, `<marker>`, `<pattern>`, `<symbol>`, `<view>`.
+    view_box: [a: SvgNum] a -> a -> a -> a -> XmlElement -> XmlElement;
+    view_box = |min_x, min_y, width, height| (
+        attr_num("viewBox", [min_x, min_y, width, height])
+    );
+
+    // `element.stroke(paint)` sets a `stroke` attribute to the element.
+    stroke: String -> XmlElement -> XmlElement;
+    stroke = |paint| attr("stroke", paint);
+
+    // `element.stroke_width(num)` sets a `stroke-width` attribute to the element.
+    stroke_width: [a: SvgNum] a -> XmlElement -> XmlElement;
+    stroke_width = |num| attr_num("stroke-width", num);
+
+    // `element.fill(paint)` sets a `fill` attribute to the element.
+    // NOTE: this function may conflict with `Array::fill`.
+    fill: String -> XmlElement -> XmlElement;
+    fill = |paint| attr("fill", paint);
+
+    // Synonym for `Svg::fill` to avoid conflicts.
+    fill_: String -> XmlElement -> XmlElement;
+    fill_ = fill;
+
+    // `element.font_family()` sets a `font-family` attribute to the element.
+    font_family: String -> XmlElement -> XmlElement;
+    font_family = |name| attr("font-family", name);
+
+    // `element.font_size()` sets a `font-size` attribute to the element.
+    font_size: [a: SvgNum] a -> XmlElement -> XmlElement;
+    font_size = |size| attr_num("font-size", size);
+
+    // `element.xy(x, y)` sets `x` and `y` attributes to the element.
+    xy: [a: SvgNum] a -> a -> XmlElement -> XmlElement;
+    xy = |x, y| attr_num("x", x) >> attr_num("y", y);
+
+    // `Svg::group` is an empty `<g>` element.
+    group: XmlElement;
+    group = XmlElement::make("g");
+
+    // `Svg::rect(x, y, width, height)` creates a `<rect>` element.
+    rect: [a: SvgNum] a -> a -> a -> a -> XmlElement;
+    rect = |x, y, width, height| (
+        XmlElement::make("rect")
+            .attr_num("x", x)
+            .attr_num("y", y)
+            .attr_num("width", width)
+            .attr_num("height", height)
+    );
+
+    // `Svg::circle(cx, cy, r)` creates a `<circle>` element.
+    circle: [a: SvgNum] a -> a -> a -> XmlElement;
+    circle = |cx, cy, r| (
+        XmlElement::make("circle")
+            .attr_num("cx", cx)
+            .attr_num("cy", cy)
+            .attr_num("r", r)
+    );
+
+    // `Svg::ellipse(cx, cy, rx, ry)` creates an `<ellipse>` element.
+    ellipse: [a: SvgNum] a -> a -> a -> a -> XmlElement;
+    ellipse = |cx, cy, rx, ry| (
+        XmlElement::make("ellipse")
+            .attr_num("cx", cx)
+            .attr_num("cy", cy)
+            .attr_num("rx", rx)
+            .attr_num("ry", ry)
+    );
+
+    // `Svg::line(x1, y1, x2, y2)` creates a `<line>` element.
+    line: [a: SvgNum] a -> a -> a -> a -> XmlElement;
+    line = |x1, y1, x2, y2| (
+        XmlElement::make("line")
+            .attr_num("x1", x1)
+            .attr_num("y1", y1)
+            .attr_num("x2", x2)
+            .attr_num("y2", y2)
+    );
+
+    // `Svg::polyline(points)` creates a `<polyline>` element.
+    // In most cases, `points` is an array of `(x, y)`, for example `[(x1, y1), (x2, y2), ...]`.
+    polyline: [a: SvgNum] a -> XmlElement;
+    polyline = |points| (
+        XmlElement::make("polyline")
+            .attr_num("points", points)
+    );
+
+    // `Svg::polygon(points)` creates a `<polygon>` element.
+    // In most cases, `points` is an array of `(x, y)`, for example `[(x1, y1), (x2, y2), ...]`.
+    polygon: [a: SvgNum] a -> XmlElement;
+    polygon = |points| (
+        XmlElement::make("polygon")
+            .attr_num("points", points)
+    );
+
+    // `Svg::path(pathdata)` creates a `<path>` element from a pathdata.
+    path: PathData -> XmlElement;
+    path = |pathdata| (
+        XmlElement::make("path")
+            .attr("d", pathdata.@data)
+    );
+
+    // `Svg::text(content)` creates a `<text>` element.
+    text: String -> XmlElement;
+    text = |content| (
+        XmlElement::make("text")
+            .append_child(text_node $ XmlText::make(content))
+    );
+
+    // `element.write_file(filepath)` writes a SVG file.
+    // `element` must be a `<svg>` element.
+    write_file: String -> XmlElement -> IOFail ();
+    write_file = |filepath, svg| (
+        let doc = XmlDocument::make(svg);
+        with_file(Path::parse(filepath).as_some, "w", |fh|
+            write_string(fh, doc.to_string)
+        )
+    );
+}

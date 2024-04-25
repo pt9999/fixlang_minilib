@@ -19,11 +19,24 @@ match_module = do {
     pure $ chars._unsafe_to_string
 };
 
-// Matches `/^type\s+(\w+)/`.
+// Matches predicates such as `[m: * -> *, f: * -> *]`.
+match_predicates: Parser ();
+match_predicates = do {
+    let _ = *match_char('[');
+    let _ = *one_or_more(match_any_char.filter(|c| c != ']'));
+    let _ = *match_char(']');
+    pure()
+};
+
+// Matches `/^type\s+(PREDICATES\s+)?(\w+)/`.
 match_type: Parser String;
 match_type = do {
     let _ = *match_str("type");
     let _ = *one_or_more(match_char_class(is_space));
+    let _ = *do {
+        let _ = *match_predicates;
+        one_or_more(match_char_class(is_space))
+    }.if_exists;
     let chars = *one_or_more(match_char_class(|c| c.is_alnum || c == '_'));
     pure $ chars._unsafe_to_string
 };
@@ -281,7 +294,7 @@ namespace State {
     process_line = |orig_line, state| (
         let line = orig_line.strip_spaces;
         let is_comment = line.substring(0, 2) == "//";
-        if is_comment && state.@type_decl == "" {
+        if is_comment && state.@type_decl == "" && state.@trait_decl == "" {
             state.process_comment(line)
         };
         let module_decl = match_module.matches(line);

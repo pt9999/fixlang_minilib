@@ -34,6 +34,18 @@ TreeSet is a set that manages elements in sorted order.
 
 Common functions such as `id` and `flip`.
 
+### [module Minilib.Comonad.Env (lib/comonad/env.fix)](lib/comonad/env.md)
+
+Env comonad. (a.k.a CoReader comonad)
+
+### [module Minilib.Comonad.IdentityC (lib/comonad/identity_c.fix)](lib/comonad/identity_c.md)
+
+Identity comonad
+
+### [module Minilib.Comonad.Traced (lib/comonad/traced.fix)](lib/comonad/traced.md)
+
+Traced comonad. (a.k.a CoWriter comonad)
+
 ### [module Minilib.Crypto.AES.GCM (lib/crypto/aes/aes_gcm.fix)](lib/crypto/aes/aes_gcm.md)
 
 Galois/Counter Mode (GCM) for AES
@@ -83,6 +95,19 @@ Encodes a JSON value to a string.
 ### [module Minilib.Encoding.Json (lib/encoding/json.fix)](lib/encoding/json.md)
 
 Definition of the structure of a JSON value.
+
+### [module Minilib.Encoding.Xml.XmlHelpers (lib/encoding/xml/xml_helpers.fix)](lib/encoding/xml/xml_helpers.md)
+
+XML helpers, such as:
+- Escape/unescape special characters
+
+### [module Minilib.Encoding.Xml.XmlParser (lib/encoding/xml/xml_parser.fix)](lib/encoding/xml/xml_parser.md)
+
+Simple XML 1.1 Parser.
+
+### [module Minilib.Encoding.Xml (lib/encoding/xml.fix)](lib/encoding/xml.md)
+
+Simple XML Model.
 
 ### [module Minilib.IO.Channel (lib/io/channel.fix)](lib/io/channel.md)
 
@@ -156,13 +181,21 @@ Type definitions for mathematical concepts, for example AdditiveGroup, Ring, Fie
 
 PNG image I/O.
 
+### [module Minilib.Media.Svg (lib/media/svg.fix)](lib/media/svg.md)
+
+Scalable Vector Graphics (SVG) 1.1
+
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 
 `map_m`, `foreach_m` for Array and Iterator.
 
+### [module Minilib.Monad.Identity (lib/monad/identity.fix)](lib/monad/identity.md)
+
+Identity monad
+
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
-Reader monad. (a.k.a Traced, CoWriter comonad)
+Reader monad.
 
 ### [module Minilib.Monad.State (lib/monad/state.fix)](lib/monad/state.md)
 
@@ -170,7 +203,7 @@ State Monad which maintains a mutable state.
 
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
-Writer monad. (a.k.a Env, CoReader comonad)
+Writer monad.
 
 ### [module Minilib.Net.HTML (lib/net/html.fix)](lib/net/html.md)
 
@@ -244,11 +277,10 @@ Simple text parser. Customizable by monadic operations.
 ### [module Minilib.Text.StringEx (lib/text/string_ex.fix)](lib/text/string_ex.md)
 
 String extensions, such as:
-- ToString for Tuple, Option, Result, Array, HashMap
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
-- Hexadecimal String
-- File Path handling
+- Format
+- ToString extensions
 
 ### [module Minilib.Text.Unicode (lib/text/unicode.fix)](lib/text/unicode.md)
 

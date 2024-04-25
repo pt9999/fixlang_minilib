@@ -50,6 +50,11 @@ Creates a stream from specified string.
 
 `stream.read_string(n)` reads at most `n` characters and convert them to a string.
 
+#### read_string_between: Stream -> Stream -> String;
+
+`start_stream.read_string_between(end_stream)` reads characters from `start_stream` to `end_stream`
+and convert them to a string.
+
 #### error: String -> Stream -> Result ErrMsg a;
 
 `stream.error(str)` reports an error along with where it occurred.
@@ -125,6 +130,11 @@ Raises a `_NotMatch` error if the specified condition is not met.
 If the first Parser raises a `_NotMatch` error, tries the second Parser.
 Note that `pa1.or_else(pa2)` is interpreted as `or_else(pa2, pa1)`,
 and  that `pa1.or_else $ pa2` is interpreted as `or_else(pa1, pa2)`.
+
+#### or_elseF: Parser a -> Parser a -> Parser a;
+
+Flipped version of `or_else`.
+`pa1.or_elseF $ pa2` is equivalent to `pa1.or_else(pa2)`.
 
 #### or_error: String -> Parser a -> Parser a;
 

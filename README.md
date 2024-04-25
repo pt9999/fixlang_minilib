@@ -26,6 +26,7 @@ This library is still in alpha stage.
 - Encoding
   - Binary
   - JSON
+  - XML
 - IO
   - File system
   - Platform information
@@ -37,6 +38,10 @@ This library is still in alpha stage.
   - Prime generator using BigInt
   - Rational number
   - Algebra (Ring, Field, Euclid, Modular, Polynomial)
+- Media
+  - Image
+  - PNG (requires libpng)
+  - SVG
 - Monad
   - State / Reader / Writer Monad
   - Functor for Monad (map_m, foreach_m)
@@ -67,6 +72,8 @@ To build example programs, type `make examples`.
 To run test codes, type `make test`. It has been mainly tested in the following environment.
 
 - Ubuntu-22.04 on WSL 2
+- gcc 11.4.0
+- GNU make 4.3
 - rustup 1.26.0
 - rustc 1.72.1
 - llvm 12.0.1

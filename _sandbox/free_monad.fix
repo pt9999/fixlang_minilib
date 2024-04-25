@@ -1,0 +1,110 @@
+module Main;
+
+// Free Monad
+// https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
+// https://eed3si9n.com/herding-cats/ja/Free-monads.html
+type [f: *->*] Free f a = box union {
+    fpure: a,
+    free: f (Free f a)
+};
+
+namespace Free {
+    liftF: [f: Functor] f a -> Free f a;
+    liftF = |command| free $ command.map(fpure);
+}
+
+impl [f: Functor] Free f: Monad {
+    pure = fpure;
+    bind = |g, ma| (
+        if ma.is_fpure {
+            g(ma.as_fpure)
+        };
+        let m = ma.as_free;
+        free $ m.map(bind(g))
+    );
+}
+
+type Toy next = box union {
+    output: (String, next),
+    bell: next,
+    done: ()
+};
+
+impl Toy: Functor {
+    map = |f, toy| (
+        if toy.is_output {
+            let (x, next) = toy.as_output;
+            output $ (x, f(next))
+        };
+        if toy.is_bell {
+            bell $ f(toy.as_bell)
+        };
+        done()
+    );
+}
+
+test_toy_1: IO ();
+test_toy_1 = (
+    let toy1: Toy (Toy ()) = output $ ("A", done());
+    let toy2: Toy (Toy (Toy ()))  = bell $ output $ ("A", done());
+    pure()
+);
+
+impl [a: ToString] Free Toy a: ToString {
+    to_string = |ma| (
+        if ma.is_free {
+            let toy = ma.as_free;
+            if toy.is_output {
+                let (x, next) = toy.as_output;
+                "output " + x + "\n" + next.to_string
+            };
+            if toy.is_bell {
+                let next = toy.as_bell;
+                "bell\n" + next.to_string
+            };
+            "done\n"
+        };
+        let r = ma.as_fpure;
+        "pure " + r.to_string + "\n"
+    );
+}
+
+foutput: String -> Free Toy ();
+foutput = |x| free $ output $ (x, pure());
+
+fbell: Free Toy ();
+fbell = free $ bell $ pure();
+
+fdone: Free Toy r;
+fdone = free $ done();
+
+output_: String -> next -> Toy next;
+output_ = |x, next| output $ (x, next);
+
+test_toy_free: IO ();
+test_toy_free = (
+    let toy = do {
+        eval *output_("A",()).liftF;
+        eval *bell().liftF;
+        eval *done().liftF;
+        pure()
+    };
+    print(toy.to_string)
+);
+
+test_toy_free2: IO ();
+test_toy_free2 = (
+    let pretty = |x| (
+        eval *println("------------");
+        print << to_string $ x
+    );
+    eval *pretty(foutput("A"));
+    eval *pretty(pure("A").bind(foutput));
+    eval *pretty(foutput("A").bind(pure));
+    eval *pretty(do { eval *foutput("A"); foutput("B") });
+    eval *pretty(do { eval *foutput("A"); eval *fdone; foutput("B") });
+    pure()
+);
+
+main: IO ();
+main = test_toy_free2;

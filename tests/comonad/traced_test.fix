@@ -1,0 +1,63 @@
+module Main;
+
+import Debug;
+
+import Minilib.Comonad.Traced;
+import Minilib.Monad.Identity;
+import Minilib.Trait.Monoid;
+import Minilib.Trait.Comonad;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_traced_functor: TestCase;
+test_traced_functor = (
+    make_test("test_traced_functor") $ |_|
+    let r = traced(|e| e.@(0));
+    let r = r.map(add(1));
+    let r = r.map(to_string);
+    assert_equal("eq", "3", r.run_traced([2]))
+);
+
+test_traced_comonad: TestCase;
+test_traced_comonad = (
+    make_test("test_traced_comonad") $ |_|
+    let joiner : Traced (Array String) String = traced $ |items| items.to_iter.join(",");
+    let _ = *assert_equal("joiner.extract", "", joiner.extract);
+    let _ = *assert_equal("joiner.run_traced", "a,b", joiner.run_traced(["a","b"]));
+    let sub = joiner.extend(|t| "(" + t.run_traced(["sub"]) + ")");
+    let main = sub.extend(|t| "<" + t.run_traced(["main"]) + ">");
+    let _ = *assert_equal("main.run_traced", "<(start,main,sub)>", main.run_traced(["start"]));
+    pure()
+);
+
+test_traced_comonad_laws: TestCase;
+test_traced_comonad_laws = (
+    make_test("test_traced_comonad_laws") $ |_|
+    let w = traced $ |str| str + "x";
+    let f: Traced String String -> String = |w| w.extract + "y";
+    let g: Traced String String -> String = |w| w.extract + "z";
+    let h: String -> String = |s| "<" + s + ">";
+    let _ = *assert_equal("", "ax", w.extend(extract).run_traced("a"));
+    let _ = *assert_equal("", "xy", w.extend(f).extract);
+    let _ = *assert_equal("", "axyz", w.extend(f).extend(g).run_traced("a"));
+    let _ = *assert_equal("", "axyz", w.extend(extend(f) >> g).run_traced("a"));
+    let _ = *assert_equal("", "ax", w.duplicate.extract.run_traced("a"));
+    let _ = *assert_equal("", "ax", w.duplicate.map(extract).run_traced("a"));
+    let _ = *assert_equal("", "axy", w.extend(f).run_traced("a"));
+    let _ = *assert_equal("", "axy", w.duplicate.map(f).run_traced("a"));
+    let _ = *assert_equal("", "<ax>", w.map(h).run_traced("a"));
+    let _ = *assert_equal("", "<ax>", w.extend(h << extract).run_traced("a"));
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_traced_functor,
+        test_traced_comonad,
+        test_traced_comonad_laws,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

@@ -2,11 +2,13 @@ module Main;
 
 import Debug;
 import Random;
+import HashSet;
 
 import Minilib.Encoding.Binary;
 import Minilib.Crypto.AES;
 import Minilib.Crypto.AES.GCM;
 import Minilib.Math.RandomEx;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.Hex;
 import Minilib.Thread.Time;
 import Minilib.Text.StringEx;
@@ -56,6 +58,25 @@ namespace TestVector {
         ct: [],
         tag: []
     };
+
+    get_id: TestVector -> String;
+    get_id = |tv| (
+        [@key_len, @iv_len, @pt_len, @aad_len, @tag_len, @count].to_iter.map(|f| tv.f).map(to_string).join(",")
+    );
+
+    get_test_data: TestVector -> String;
+    get_test_data = |tv| (
+        [TestVector::@key, @iv, @pt, @aad, @ct, @tag].to_iter.map(|f| tv.f).map(to_string_hex).join(",")
+    );
+
+    from_test_data: String -> Result ErrMsg TestVector;
+    from_test_data = |str| (
+        let tv = TestVector::empty;
+        let bytes_iter: Iterator (Array U8) = *str.split(",").map_m(from_string_hex);
+        let setters = [TestVector::set_key, set_iv, set_pt, set_aad, set_ct, set_tag].to_iter.zip(bytes_iter)
+        .map(|(setter, bytes)| setter(bytes));
+        pure $ setters.fold(tv, |tv, setter| tv.setter)
+    );
 
     test: TestVector -> TestCase;
     test = |tv| (
@@ -154,13 +175,42 @@ namespace TestVectorParser {
             println(tv.to_string).lift
         )
     );
+
+    dump_vectors2: TestVectorParser -> IOFail ();
+    dump_vectors2 = |tvp| (
+        eval *println("key_len,iv_len,pt_len,aad_len,tag_len,count").lift;
+        tvp.@tvs.to_iter.fold_m(
+            (), |_, tv|
+            println(tv.get_id).lift
+        )
+    );
+
+    write_test_cases: TestVectorParser -> IOFail ();
+    write_test_cases = |tvp| (
+        let ids: HashSet String = [
+            "128,96,256,128,120,0",
+            "128,96,408,0,112,0",
+            "128,8,0,0,128,0",
+            "128,1024,408,720,128,0"
+        ].to_iter.from_iter;
+        tvp.@tvs.to_iter.fold_m(
+            (), |_, tv|
+            if !ids.contains(tv.get_id) { pure () };
+            let str = tv.get_test_data;
+            //let tv2 = *TestVector::from_test_data(str).from_result;
+            //println(tv2.to_string).lift
+            eval *println("// " + tv.get_id).lift;
+            println("\""+str+"\",").lift
+        )
+    );
 }
 
 main: IO ();
 main = do {
     let tvp = TestVectorParser::empty;
     let tvp = *tvp.parse_file(Path::parse("../.local/gcmEncryptExtIV128.rsp").as_some);
-    //let _ = *tvp.dump_vectors;
+    let _ = *tvp.write_test_cases;
+    if true { pure() };
     let tests = tvp.@tvs.map(test);
     tests.run_test_driver.lift
 }.try(eprintln);

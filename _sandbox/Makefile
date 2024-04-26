@@ -50,7 +50,10 @@ aes_test1:
 	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
 
 aes_gcm_test1:
-	../bin/fixautolink build -L ../lib -L . -f aes_gcm_test1.fix -O default
+	../bin/fixautolink run -L ../lib -L . -f aes_gcm_test1.fix -O separated
+
+aes_gcm_test1.out:
+	../bin/fixautolink build -o $@ -L ../lib -L . -f aes_gcm_test1.fix -O default
 
 gcmvs:
 	../bin/fixautolink run -L ../lib -L . -f aes_gcmvs.fix -O separated

@@ -1,0 +1,155 @@
+// RFC 8018 - PKCS #5: Password-Based Cryptography Specification Version 2.1 
+//
+// https://datatracker.ietf.org/doc/html/rfc8018
+//
+// Japanese translation:
+// https://tex2e.github.io/rfc-translater/html/rfc8018.html
+module Main;
+
+import Debug;
+
+import Minilib.Crypto.HMAC;
+import Minilib.Text.Hex;
+
+import Minilib.Crypto.MD5;
+import Minilib.Crypto.SHA1;
+
+
+//-------------------------------------------------------------------------
+type PBKDF1 = unbox struct {
+    hash: Array U8 -> Array U8,
+    hlen: I64
+};
+
+namespace PBKDF1 {
+    make: (Array U8 -> Array U8) -> I64 -> PBKDF1;
+    make = |hash, hlen| (
+        PBKDF1 { hash: hash, hlen: hlen }
+    );
+
+    exec: Array U8 -> Array U8 -> I64 -> I64 -> PBKDF1 -> Result ErrMsg (Array U8);
+    exec = |password, salt, iter_count, derived_key_len, pbkdf1| (
+        let hash = pbkdf1.@hash;
+        let hlen = pbkdf1.@hlen;
+        let dklen = derived_key_len;
+        if dklen > hlen {
+            err $ "derived key too long"
+        };
+        let t_1 = hash(password.append(salt));
+        eval assert(|_| "invalid hlen", hlen == t_1.get_size);
+        let t_c = loop(
+            (t_1, 2),  |(t_prev, i)|
+            let t = hash(t_prev);
+            if i == iter_count { break $ t };
+            continue $ (t, i + 1)
+        );
+        let dk = if dklen == t_c.get_size { t_c } else { t_c.get_sub(0, dklen) };
+        ok $ dk
+    );
+}
+         
+
+//-------------------------------------------------------------------------
+
+type PBKDF2 = unbox struct {
+    prf: HMAC
+};
+
+namespace PBKDF2 {
+    make: HMAC -> PBKDF2;
+    make = |hmac| (
+        PBKDF2 { prf: hmac }
+    );
+
+    exec: Array U8 -> Array U8 -> I64 -> I64 -> PBKDF2 -> Result ErrMsg (Array U8);
+    exec = |password, salt, iter_count, derived_key_len, pbkdf2| (
+        let dklen = derived_key_len;
+        let hlen = pbkdf2.@prf.@output_block_size;
+        if dklen > 0xFFFFFFFF * hlen {
+            err $ "derived key too long"
+        };
+        let l = if dklen % hlen == 0 { dklen / hlen } else { dklen / hlen + 1 };
+        let r = dklen - (l - 1) * hlen;
+        let dk = loop(
+            ([], 1), |(dk, i)|
+            let t = pbkdf2._f(password, salt, iter_count, i);
+            if i == l { 
+                let dk = dk.append(
+                    if r == t.get_size { t } else { t.get_sub(0, r) }
+                );
+                break $ dk
+            };
+            let dk = dk.append(t);
+            continue $ (dk, i + 1)            
+        );
+        ok $ dk
+    );
+
+    _f: Array U8 -> Array U8 -> I64 -> I64 -> PBKDF2 -> Array U8;
+    _f = |password, salt, iter_count, block_index, pbkdf2| (
+        let u_1 = pbkdf2.@prf.digest(password, salt.append(_int(block_index)));
+        let result = u_1;
+        loop(
+            (result, u_1, 2), |(result, u_prev, i)|
+            if i > iter_count {
+                break $ result
+            };
+            let u_i =  pbkdf2.@prf.digest(password, u_prev);
+            let result = _xor_array(result, u_i);
+            continue $ (result, u_i, i + 1)
+        )
+    );
+
+    _int: I64 -> Array U8;
+    _int = |i| (
+        Array::empty(4)
+        .push_back(i.shift_right(24).bit_and(255).to_U8)
+        .push_back(i.shift_right(16).bit_and(255).to_U8)
+        .push_back(i.shift_right(8).bit_and(255).to_U8)
+        .push_back(i.shift_right(0).bit_and(255).to_U8)
+    );
+
+    _xor_array: Array U8 -> Array U8 -> Array U8;
+    _xor_array = |result, u| (
+        let n = result.get_size;
+        loop(
+            (result, 0), |(result, i)|
+            if i >= n { break $ result };
+            let result = result.mod(i, bit_xor(u.@(i)));
+            continue $ (result, i + 1)
+        )
+    );
+}
+
+/*
+type PBES2 = unbox struct {
+};
+*/
+
+test_pbkdf1: IO ();
+test_pbkdf1 = (
+    let pbkdf1 = PBKDF1::make(MD5::digest, 16);
+    let dk: Result ErrMsg (Array U8) = pbkdf1.exec(
+        "hello".get_bytes.pop_back,
+        "1231234".get_bytes.pop_back,
+        1000,
+        16);
+    eval *println(dk.map(to_string_hex).to_string);        
+    pure()
+);
+
+test_pbkdf2: IO ();
+test_pbkdf2 = (
+    let pbkdf2 = PBKDF2::make(hmac_sha1);
+    let dk: Result ErrMsg (Array U8) = pbkdf2.exec(
+        "hello".get_bytes.pop_back,
+        "1231234".get_bytes.pop_back,
+        1000,
+        100);
+    eval *println(dk.map(to_string_hex).to_string);        
+    pure()
+);
+
+main: IO ();
+main = test_pbkdf2;
+

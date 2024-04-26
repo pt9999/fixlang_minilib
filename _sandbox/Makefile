@@ -61,6 +61,8 @@ ecdsa_test1:
 	../bin/fixautolink run -L ../lib -L . -f ecdsa_test1.fix -O separated
 tls:
 	../bin/fixautolink run -L ../lib -L . -f tls.fix -O separated
+pkcs5_test1:
+	../bin/fixautolink run -L ../lib -L . -f pkcs5_test1.fix
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

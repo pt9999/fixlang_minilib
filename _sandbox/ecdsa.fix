@@ -16,6 +16,7 @@ import Character;
 import Debug;
 
 import Minilib.Crypto.SecureRandom;
+import Minilib.Crypto.SHA256;
 import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
@@ -460,6 +461,11 @@ type ECDSASignature = unbox struct {
     s: ECInt
 };
 
+impl ECDSASignature: ToString {
+    to_string = |sig| (sig.@r.to_string_hex, sig.@s.to_string_hex).to_string;
+}
+
+
 namespace ECDSASignature {
     make: ECInt -> ECInt -> ECDSASignature;
     make = |r, s| (
@@ -470,17 +476,24 @@ namespace ECDSASignature {
 type ECDSAScheme = unbox struct {
     ec: ECParam,
     hash: Array U8 -> Array U8,
-    hlen: I64
+    hashlen: I64      // hash length in octets
 };
 
 namespace ECDSAScheme {
+    ecdsa_secp256r1_sha256: ECDSAScheme;
+    ecdsa_secp256r1_sha256 = ECDSAScheme {
+        ec: ECParam::secp256r1,
+        hash: SHA256::digest,
+        hashlen: 32
+    };
+
     // 4.1.1 Scheme Setup
     make: ECParam -> (Array U8 -> Array U8) -> I64 -> ECDSAScheme;
-    make = |ec, hash, hlen| (
+    make = |ec, hash, hashlen| (
         ECDSAScheme {
             ec: ec,
             hash: hash,
-            hlen: hlen      // hash length in octets
+            hashlen: hashlen
         }
     );
 
@@ -527,14 +540,13 @@ namespace ECDSAScheme {
         };
         // 4. Use the hash function selec   ted during the setup procedure to compute the hash value
         let _H: Array U8 = (scheme.@hash)(message);
-        eval assert(|_| "invalid hlen", _H.get_size == scheme.@hlen);
         // 5. Derive an integer e from H
-        let e: ECInt = *_derive_e(_H);
+        let e: ECInt = *scheme._derive_e(_H);
         // 6. Compute:
         //    s = k^−1(e + r dU ) mod n.
         // If s = 0, return to Step 1.
         let n = ec.@n;
-        let dividend = Modular::make(e, n) + Modular::make(r, n) * Modular::make(key_pair.@d, n);
+        let dividend = Modular::make(e, n) + r * Modular::make(key_pair.@d, n);
         let divisor = Modular::make(k, n);
         let s: Modular ECInt = dividend / divisor;
         if s == zero {
@@ -544,20 +556,23 @@ namespace ECDSAScheme {
         pure $ ECDSASignature::make(r.to_ECInt, s.to_ECInt)
     );
 
-    _derive_e: Array U8 -> Result ErrMsg ECInt;
-    _derive_e = |_H| (
+    _derive_e: Array U8 -> ECDSAScheme -> Result ErrMsg ECInt;
+    _derive_e = |_H, scheme| (
+        let ec = scheme.@ec;
+        let hashlen = scheme.@hashlen;
+        eval assert_eq(|_| "invalid hashlen: " + [_H.get_size, scheme.@hashlen].format("{}, {}"), _H.get_size, scheme.@hashlen);
         // 5. Derive an integer e from H as follows:
         // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
         // ...does nothing
         // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
-        let ceil_log2_n = ec.@n.@nat._bit_length;
+        let ceil_log2_n = ec.@n.@nat._bit_length.to_I64;
         eval assert(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0);
         let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
         else { _H.get_sub(0, ceil_log2_n / 8) };
         // 5.3. Convert the bit string E to an octet string E using the conversion routine specified in Section 2.3.1.
         // ...does nothing
         // 5.4. Convert the octet string E to an integer e using the conversion routine specified in Section 2.3.8.
-        let e: ECInt = *from_bytes(_E);
+        let e: ECInt = *ECInt::from_bytes(_E);
         pure $ e
     );
 
@@ -585,9 +600,8 @@ namespace ECDSAScheme {
         };
         // 2. Use the hash function established during the setup procedure to compute the hash value:
         let _H: Array U8 = (scheme.@hash)(message);
-        eval assert(|_| "invalid hlen", _H.get_size == scheme.@hlen);
         // 3. Derive an integer e from H
-        let e: ECInt = *_derive_e(_H);
+        let e: ECInt = *_derive_e(ec, _H);
         // 4. Compute:
         //     u1 = e s^−1 mod n and u2 = r s^−1 mod n.
         let u1: Modular ECInt = Modular::make(e, n) / Modular::make(s, n);

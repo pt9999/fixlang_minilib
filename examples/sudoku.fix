@@ -27,7 +27,9 @@ import Random;
 import Time;
 
 import Minilib.App.Clap;
+import Minilib.Encoding.Xml;
 import Minilib.Math.RandomEx;
+import Minilib.Media.Svg;
 import Minilib.Text.StringEx;
 
 // ------------------------------------------------------------
@@ -372,22 +374,16 @@ namespace Solver {
         fflush(IO::stdout)
     );
 
-    // 指定された文字列から数独の問題を読み込み、問題を解いて出力する。
-    solve_problem_from_string: String -> Solver -> IOFail ();
-    solve_problem_from_string = |problem, solver| (
-        let state = *BoardState::load_problem(problem).from_result;
-        solver.solve_problem_and_print_solutions(state)
-    );
-
     // 数独の問題を解いて解を出力する。
-    solve_problem_and_print_solutions: BoardState -> Solver -> IOFail ();
+    solve_problem_and_print_solutions: BoardState -> Solver -> IOFail (Array BoardState);
     solve_problem_and_print_solutions = |state, solver| (
         let (solutions, step) = *solver.solve(state);
         let _ = *println((solutions.get_size, step).format("{} 個の解が見つかりました。(ステップ数: {})")).lift;
-        solutions.to_iter.fold_m(
+        eval *solutions.to_iter.fold_m(
             (), |_, state|
             println("\n" + state.to_string).lift
-        )
+        );
+        pure $ solutions
     );
 
     // 数独の問題を解く。
@@ -703,6 +699,60 @@ namespace Generator {
 }
 
 // ------------------------------------------------------------
+//  SVG出力
+// ------------------------------------------------------------
+
+namespace BoardSvg {
+    make_board_svg: Board -> XmlElement;
+    make_board_svg = |board| (
+        let fill = Svg::fill;
+        let line_width_L = 5.0;
+        let line_width_S = 2.0;
+        let cell_size = 60.0;
+        let board_size = cell_size * 9.0 + line_width_L;
+        let font_siz = 28.0;
+        let background = rect(0.0, 0.0, board_size, board_size)
+                        .fill("white");
+        let lines = Svg::group.fill("black");
+        let lines = Iterator::range(0, 9 + 1).fold(
+            lines, |lines, i|
+            let lw = if i % 3 == 0 { line_width_L } else { line_width_S };
+            let hline = Svg::rect(0.0, i.to_F64 * cell_size, board_size, lw);
+            let vline = Svg::rect(i.to_F64 * cell_size, 0.0, lw, board_size);
+            lines.add(hline).add(vline)
+        );
+        let texts = Svg::group.fill("black")
+                    .font_family("SansSerif").font_size(font_siz);
+        let texts = Iterator::range(0, 9).fold(
+            texts, |texts, row|
+            Iterator::range(0, 9).fold(
+                texts, |texts, col|
+                let digit = board.get_digit(row, col);
+                if digit.is_none { texts };
+                let text = Svg::text(digit.as_some.to_string)
+                        .xy(col.to_F64 * cell_size + cell_size / 2.0 + line_width_L / 2.0,
+                            row.to_F64 * cell_size + cell_size / 2.0 + line_width_L / 2.0)
+                        .attr("text-anchor","middle")
+                        .attr("alignment-baseline", "middle");
+                texts.add(text)
+            )
+        );
+        let scale = 1.0;
+        Svg::svg(board_size * scale, board_size * scale)
+            .view_box(0.0, 0.0, board_size, board_size)
+            .add(background)
+            .add(lines)
+            .add(texts)
+    );
+
+    write_board_to_svg_file: String -> BoardState -> IOFail ();
+    write_board_to_svg_file = |filepath, state| (
+        let svg = make_board_svg(state.@board);
+        svg.write_file(filepath)
+    );
+}
+
+// ------------------------------------------------------------
 //  テストケース
 // ------------------------------------------------------------
 
@@ -781,7 +831,9 @@ run_command_solve = |submatches| (
     let solver = Solver::make();
     let solver = solver.set_max_step(max_step);
     let solver = solver.set_progress(verbose == "true");
-    solver.solve_problem_from_string(problem)
+    let state = *BoardState::load_problem(problem).from_result;
+    let solutions = *solver.solve_problem_and_print_solutions(state);
+    pure()
 );
 
 command_generate: Command;
@@ -794,12 +846,12 @@ command_generate = (
     .arg(Arg::new("min_digits").short('n').long("min-digits").help("数字の最小配置数").takes_value.default_value("25"))
     .arg(Arg::new("max_step").short('d').long("max-step").help("問題解決の最大ステップ数").takes_value.default_value("100"))
     .arg(Arg::new("seed").short('s').long("seed").help("乱数生成器の種 (default: 現在時刻)").takes_value)
+    .arg(Arg::new("svg").short('g').long("svg").help("SVGファイルを出力する").default_value("false"))
     .arg(Arg::new("verbose").short('v').long("verbose").help("進捗状況を表示する").default_value("false"))
 );
 
 run_command_generate: ArgMatches -> IOFail ();
 run_command_generate = |submatches| (
-    let output_path = submatches.get_one("output").bind(Path::parse);
     let seed = submatches.get_one("seed");
     let max_retry: I64 = *submatches.get_one("max_retry").as_some.from_string.from_result;
     let max_step: I64 = *submatches.get_one("max_step").as_some.from_string.from_result;
@@ -817,15 +869,25 @@ run_command_generate = |submatches| (
     let solver = solver.set_max_step(max_step);
     let gen = Generator::make(max_retry, min_digit_count, var_random, solver);
     let gen = gen.set_progress(verbose == "true");
-    let state = *gen.generate_and_validate;
-    let _ = *println("\n問題:\n" + state.to_string + "\n").lift;
-    let _ = *gen.@solver.solve_problem_and_print_solutions(state);
-    let _ = *if output_path.is_some {
-        write_file_string(output_path.as_some, state.to_string)
-    } else { pure() };
+    let problem: BoardState = *gen.generate_and_validate;
+    eval *println("\n問題:\n" + problem.to_string + "\n").lift;
+    let solutions = *gen.@solver.solve_problem_and_print_solutions(problem);
+    eval *write_problem_file(submatches, problem);
     pure()
 );
 
+write_problem_file: ArgMatches -> BoardState -> IOFail ();
+write_problem_file = |submatches, problem| (
+    let output_path = submatches.get_one("output");
+    if output_path.is_none { pure() };
+    let output_path = output_path.as_some;
+    eval *write_file_string(Path::parse(output_path).as_some, problem.to_string);
+    let output_svg = submatches.get_one("svg").as_some == "true";
+    if !output_svg { pure () };
+    let output_svg_path = output_path + ".svg";
+    eval *write_board_to_svg_file(output_svg_path, problem);
+    pure()
+);
 
 command_main: Command;
 command_main = (

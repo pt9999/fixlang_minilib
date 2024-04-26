@@ -140,6 +140,13 @@ namespace ECField {
         Modular::make(a, zero)
     );
 
+    // 2.3.9 Field-Element-to-Integer Conversion
+    to_ECInt: ECField -> ECInt;
+    to_ECInt = |a| (
+        let a = a.nonneg;               // 1..(q-1)
+        a.@value
+    );
+
     from_I64: I64 -> ECField;
     from_I64 = |i64| (
         Modular::make(BigInt::from_I64(i64), zero)
@@ -444,4 +451,165 @@ namespace ECKeyPair {
         };
         ok()
     );
+}
+
+// 4.1 Elliptic Curve Digital Signature Algorithm
+
+type ECDSASignature = unbox struct {
+    r: ECInt,
+    s: ECInt
+};
+
+namespace ECDSASignature {
+    make: ECInt -> ECInt -> ECDSASignature;
+    make = |r, s| (
+        ECDSASignature { r: r, s: s }
+    );
+}
+
+type ECDSAScheme = unbox struct {
+    ec: ECParam,
+    hash: Array U8 -> Array U8,
+    hlen: I64
+};
+
+namespace ECDSAScheme {
+    // 4.1.1 Scheme Setup
+    make: ECParam -> (Array U8 -> Array U8) -> I64 -> ECDSAScheme;
+    make = |ec, hash, hlen| (
+        ECDSAScheme {
+            ec: ec,
+            hash: hash,
+            hlen: hlen      // hash length in octets
+        }
+    );
+
+    // 4.1.3 Signing Operation
+    sign: ECKeyPair -> Array U8 -> SecureRandom -> ECDSAScheme -> IOFail (ECDSASignature, SecureRandom);
+    sign = |key_pair, message, secure_random, scheme| (
+        // 1. Select an ephemeral elliptic curve key pair (k, R)
+        let ec = scheme.@ec;
+        let n = ec.@n;
+        let (k, secure_random) = *secure_random.generate_ECInt_range(
+            one, n
+        );
+        eval assert(|_| "k is out of range", one <= k && k <= n - one);
+
+        // sign with generated k
+        let res = scheme._sign_with_k(key_pair, message, k);
+        if res.is_err {
+            if res == err $ _Err_Retry {
+                // return to Step 1.
+                scheme.sign(key_pair, message, secure_random)
+            };
+            throw $ res.as_err
+        };
+        pure $ (res.as_ok, secure_random)
+    );
+
+    _Err_Retry: ErrMsg;
+    _Err_Retry = "Retry";
+
+    _sign_with_k: ECKeyPair -> Array U8 -> ECInt -> ECDSAScheme -> Result ErrMsg ECDSASignature;
+    _sign_with_k = |key_pair, message, k, scheme| (
+        // 1. Select an ephemeral elliptic curve key pair (k, R)
+        let ec = scheme.@ec;
+        let g = ec.get_g;
+        let _R = g.mul_by_ECInt(k);
+        let _R = _R.nonneg;
+        // 2. Convert the field element xR to an integer xR using the conversion routine specified in Section 2.3.9.
+        let xR: ECField = _R.@xy.as_some.@0;
+        let xR: ECInt = xR.to_ECInt;
+        // 3. Set r = xR mod n. If r = 0, or optionally r fails to meet other publicly verifiable criteria (see below), return to Step 1.
+        let r: Modular ECInt = Modular::make(xR, ec.@n);
+        if r == zero {
+            err $ _Err_Retry
+        };
+        // 4. Use the hash function selec   ted during the setup procedure to compute the hash value
+        let _H: Array U8 = (scheme.@hash)(message);
+        eval assert(|_| "invalid hlen", _H.get_size == scheme.@hlen);
+        // 5. Derive an integer e from H
+        let e: ECInt = *_derive_e(_H);
+        // 6. Compute:
+        //    s = k^−1(e + r dU ) mod n.
+        // If s = 0, return to Step 1.
+        let n = ec.@n;
+        let dividend = Modular::make(e, n) + Modular::make(r, n) * Modular::make(key_pair.@d, n);
+        let divisor = Modular::make(k, n);
+        let s: Modular ECInt = dividend / divisor;
+        if s == zero {
+            err $ _Err_Retry
+        };
+        // 7. Output S = (r, s). Optionally, output additional information needed to recover R efficiently from r (see below).
+        pure $ ECDSASignature::make(r.to_ECInt, s.to_ECInt)
+    );
+
+    _derive_e: Array U8 -> Result ErrMsg ECInt;
+    _derive_e = |_H| (
+        // 5. Derive an integer e from H as follows:
+        // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
+        // ...does nothing
+        // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
+        let ceil_log2_n = ec.@n.@nat._bit_length;
+        eval assert(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0);
+        let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
+        else { _H.get_sub(0, ceil_log2_n / 8) };
+        // 5.3. Convert the bit string E to an octet string E using the conversion routine specified in Section 2.3.1.
+        // ...does nothing
+        // 5.4. Convert the octet string E to an integer e using the conversion routine specified in Section 2.3.8.
+        let e: ECInt = *from_bytes(_E);
+        pure $ e
+    );
+
+    _Err_Signature_OutOfRange: ErrMsg;
+    _Err_Signature_OutOfRange = "signature out of range";
+
+    _Err_R_Is_Zero: ErrMsg;
+    _Err_R_Is_Zero = "R is zero";
+
+    _Err_Signature_Mismatch: ErrMsg;
+    _Err_Signature_Mismatch = "signature mismatch";
+
+    // 4.1.4 Verifying Operation
+    // _Qu is public key
+    verify: ECPoint -> ECDSASignature -> Array U8 -> ECDSAScheme -> Result ErrMsg ();
+    verify = |_Qu, sigature, message, scheme| (
+        let ec = scheme.@ec;
+        let n = ec.@n;
+        // 1. If r and s are not both integers in the interval [1, n − 1], output “invalid” and stop.
+        let r = signature.@r;
+        let s = signature.@s;
+        if !(one <= r && r < n &&
+             one <= s && s < n) {
+            err $ _Err_Signature_OutOfRange
+        };
+        // 2. Use the hash function established during the setup procedure to compute the hash value:
+        let _H: Array U8 = (scheme.@hash)(message);
+        eval assert(|_| "invalid hlen", _H.get_size == scheme.@hlen);
+        // 3. Derive an integer e from H
+        let e: ECInt = *_derive_e(_H);
+        // 4. Compute:
+        //     u1 = e s^−1 mod n and u2 = r s^−1 mod n.
+        let u1: Modular ECInt = Modular::make(e, n) / Modular::make(s, n);
+        let u2: Modular ECInt = Modular::make(r, n) / Modular::make(s, n);
+        // 5. Compute:
+        //     R = (xR, yR) = u1 G + u2 QU .
+        //      If R = O, output “invalid” and stop.
+        let g = ec.get_g;
+        let _R = g.mul_by_ECInt(u1) + _Qu.mul_by_ECInt(u2);
+        if _R == zero { err $ _Err_R_Is_Zero };
+        // 6. Convert the field element xR to an integer xR using the conversion routine specified in Section 2.3.9.
+        let xR: ECField = _R.@xy.as_some.@0;
+        let xR: ECInt = xR.to_ECInt;
+        // 7. Set v = xR mod n.
+        let v = Modular::make(xR, n);
+        // 8. Compare v and r — if v = r, output “valid”, and if v != r, output “invalid”.
+        let r = Modular::make(r, n);
+        if v == r {
+            ok()
+        } else {
+            err $ "_Err_Signature_Mismatch"
+        }
+    );
+
 }

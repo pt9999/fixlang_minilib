@@ -6,6 +6,7 @@ import Sandbox.ECDSA;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
 
 test1: IO ();
 test1 = (
@@ -63,7 +64,7 @@ S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
 ";
         let hmap = testvec.split("\n").map(split_first("=")).filter(|(k,v)| v != "")
         .fold(HashMap::empty(10), |hmap, (k, v)| hmap.insert(k.strip_spaces, v.strip_spaces));
-        let msg: Array U8 = *hmap.find("Msg").as_some.FromStringHex::from_string_hex.from_result;
+        let message: Array U8 = *hmap.find("Msg").as_some.FromStringHex::from_string_hex.from_result;
         let from_string_hex = ECInt::from_string_hex;
         let d: ECInt = *hmap.find("d").as_some.from_string_hex.from_result;
         let qx: ECInt = *hmap.find("Qx").as_some.from_string_hex.from_result;
@@ -75,13 +76,20 @@ S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
 
         let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
         let ec = scheme.@ec;
-        let key_pair = ECKeyPair {
-            ec: ec,
-            d: d,
-            q: ECPoint::make(ec, ECField::make(qx, ec.@p), ECField::make(qy, ec.@p))
-        };
-        let res = scheme._sign_with_k(key_pair, msg, k);
-        println(res.to_string).lift
+        let q = ECPoint::make(ec, ECField::make(qx, ec.@p), ECField::make(qy, ec.@p));
+        let key_pair = ECKeyPair { ec: ec, d: d, q: q };
+        let sigature = ECDSASignature::make(r, s);
+
+        // Signing
+        let res = scheme._sign_with_k(key_pair, message, k);
+        eval *println(res.to_string).lift;
+        eval *assert_equal("signing", ok $ sigature, res);
+
+        // Verifying
+        let res = scheme.verify(q, sigature, message);
+        eval *assert_equal("verifying", ok $ (), res);
+
+        pure()
     }.try(eprintln)
 );
 

@@ -12,8 +12,8 @@ impl Array a: Trait {
   method = |elem, arr| arr;
 }
 
-main: IO ();
-main = (
+test_higher_kind: IO ();
+test_higher_kind = (
     let arr = [456];
     // Option I64 の例
     let arr = arr.method(some(33));
@@ -23,3 +23,78 @@ main = (
     let arr = arr.method([33]);
     pure()
 );
+
+//-----------------------------------------------------------
+
+trait a: PhantomTrait {
+  type PhantomId a;
+}
+
+type Phantom a = unbox struct { data: () };
+
+phantom: Phantom a;
+phantom = Phantom { data: () };
+
+impl Phantom a: PhantomTrait {
+  type PhantomId (Phantom a) = a;
+}
+
+check_phantom: [a: PhantomTrait, b: PhantomTrait, PhantomId a = e, PhantomId b = e] a -> b -> ();
+check_phantom = |a, b| ();
+
+test_phantom: IO ();
+test_phantom = (
+  let p: Phantom I64 = phantom;
+  let q: Phantom I32 = phantom;
+  eval check_phantom(p, p);
+  //eval check_phantom(p, q); // error
+  pure()
+);
+
+
+//-----------------------------------------------------------
+// 関連型を使うことで、implを選択できる
+
+trait t: Tag {
+  type A t;
+  type B t;
+  type C t;
+  a_to_b: t -> A t -> B t;
+  b_to_c: t -> B t -> C t;
+}
+
+type Impl1 = unbox struct { data: () };
+
+impl1: Impl1;
+impl1 = Impl1 { data: () };
+
+impl Impl1: Tag {
+  type A Impl1 = I64;
+  type B Impl1 = I32;
+  type C Impl1 = String;
+  a_to_b = |t, i| i.to_I32;
+  b_to_c = |t, i| i.to_string;
+}
+
+type Impl2 = unbox struct { data: () };
+
+impl2: Impl2;
+impl2 = Impl2 { data: () };
+
+impl Impl2: Tag {
+  type A Impl2 = I64;
+  type B Impl2 = F64;
+  type C Impl2 = String;
+  a_to_b = |t, i| (i.to_F64 * 2.345);
+  b_to_c = |t, f| "<" + f.to_string + ">";
+}
+
+test_tag: IO ();
+test_tag = (
+  let str1 = 123.a_to_b(impl1).b_to_c(impl1);
+  let str2 = 123.a_to_b(impl2).b_to_c(impl2);
+  println(str1 + "\n" + str2)
+);
+
+main: IO ();
+main = test_tag;

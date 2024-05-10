@@ -1,0 +1,117 @@
+module Main;
+
+import Debug;
+
+import Minilib.Monad.State;
+import Minilib.Encoding.Binary;
+
+type MonadMsgPack a = State ByteBuffer a;
+
+trait [m: Monad] m: WriteByte {
+    write_byte: U8 -> m ();
+}
+
+trait [m: Monad] m: ReadByte {
+    read_byte: m U8;
+}
+
+trait Pack {
+    pack: [m: WriteByte] a -> m ();
+}
+
+impl U8: Pack {
+    pack = |i| (
+        if i <= 0x7f_U8 {
+            // positive fixint 0XXXXXXX
+            write_byte(i)
+        };
+        // 8-bit unsigned integer
+        eval *write_byte(0xcc_U8);
+        write_byte(i)
+    );
+}
+
+impl U16: Pack {
+    pack = |i| (
+        if i <= 0xff_U16 {
+            i.to_U8.pack
+        };
+        // 16-bit unsigned integer (big endian)
+        eval *write_byte(0xcd_U8);
+        eval *write_byte(i.shift_right(8_U16).to_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+impl U32: Pack {
+    pack = |i| (
+        if i <= 0xffff_U32 {
+            i.to_U16.pack
+        };
+        // 32-bit unsigned integer (big endian)
+        eval *write_byte(0xce_U8);
+        eval *write_byte(i.shift_right(24_U32).to_U8);
+        eval *write_byte(i.shift_right(16_U32).to_U8);
+        eval *write_byte(i.shift_right(8_U32).to_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+impl U64: Pack {
+    pack = |i| (
+        if i <= 0xffffffff_U64 {
+            i.to_U32.pack
+        };
+        // 64-bit unsigned integer (big endian)
+        eval *write_byte(0xcf_U8);
+        eval *write_byte(i.shift_right(56_U64).to_U8);
+        eval *write_byte(i.shift_right(48_U64).to_U8);
+        eval *write_byte(i.shift_right(40_U64).to_U8);
+        eval *write_byte(i.shift_right(32_U64).to_U8);
+        eval *write_byte(i.shift_right(24_U64).to_U8);
+        eval *write_byte(i.shift_right(16_U64).to_U8);
+        eval *write_byte(i.shift_right(8_U64).to_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+impl I8: Pack {
+    pack = |i| (
+        if -0x1f_I7 <= i && i <= 0x7f_I8 {
+            // positive fixint 0XXXXXXX
+            // negative fixint 111XXXXX
+            write_byte(i.to_U8)
+        };
+        // 8-bit signed integer
+        eval *write_byte(0xd0_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+impl I64: Pack {
+    pack = |i| (
+        if 0 <= i {
+            if i <= 0x7f {
+                // positive fixint 0XXXXXXX
+                write_byte(i.to_U8)
+            };
+            if i <= 0xff {
+                // 8-bit unsigned integer
+                eval *write_byte(0xcc_U8);
+                write_byte(i.to_U8)
+            };
+            if i <= 0xffff {
+            };
+            if i <= 0xffffffff {
+                // 32-bit unsigned integer (big endian)
+                eval *write_byte(0xce_U8);
+                eval *write_byte(i.shift_right(24).to_U8);
+                eval *write_byte(i.shift_right(16).to_U8);
+                eval *write_byte(i.shift_right(8).to_U8);
+                write_byte(i.to_U8)
+            };
+            
+        }
+    );
+}
+

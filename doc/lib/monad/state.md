@@ -34,18 +34,36 @@ Runs a StateT monad with the supplied initial state.
 
 Runs a State monad with the supplied initial state.
 
-#### get_state: [m: Monad] StateT s m s;
+### trait MonadState = Monad + GetPutState;
 
-A StateT monad that returns the current state as a value.
+A trait for the interface of generic state monads.
 
-#### put_state: [m: Monad] s -> StateT s m ();
+### type StateType
 
-Creates a StateT monad of the specified state.
+The type of the internal state.
 
-#### mod_state: [m: Monad] (s -> s) -> StateT s m ();
+```
+    type StateType sm;
+```
+#### get_state: sm (StateType sm);
 
-Creates a StateT monad that changes the state with the specified function.
+A monad that returns the internal state as a value.
 
+#### put_state: (StateType sm) -> sm ();
+
+A monad that puts the specified value to the internal state.
+
+#### mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();
+
+A monad that modifies the current state with the specified function.
+
+#### `impl [m: Monad] StateT s m: GetPutState`
+
+### type StateType
+
+```
+    type StateType (StateT s m) = s;
+```
 #### lift_state: [m: Monad] m a -> StateT s m a;
 
 Converts an underlying monad to a StateT monad.

@@ -1,3 +1,5 @@
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
 module Main;
 
 import Debug;
@@ -7,8 +9,17 @@ import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
-map_0: (a -> b) -> (a, c) -> (b, c);
-map_0 = |f, (a, c)| (f(a), c);
+namespace Tuple2 {
+    // `tuple2.map_0(f)` maps 0-th element of `tuple2` using `f`.
+    map_0: (a -> b) -> (a, c) -> (b, c);
+    map_0 = |f, (a, c)| (f(a), c);
+}
+
+namespace Result {
+    // `res.map_res_0(f)` maps 0-th element of tuple2 of the result using `f`.
+    map_res_0: (a -> b) -> Result e (a, c) -> Result e (b, c);
+    map_res_0 = map_0 >> map;
+}
 
 type U24 = unbox struct {
     v: U32
@@ -103,22 +114,22 @@ namespace Vector {
         buf
     );
 
-    unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> (Array a, ByteBuffer);
+    unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
     unmarshal_fixed = |byte_size, buf| (
         let begin_pos = buf.get_position;
-        loop(
+        loop_m(
             (buf, []), |(buf, vector)|
             let pos = buf.get_position;
-            if pos - begin_pos >= byte_size { break $ (vector, buf) };
-            let (val, buf) = buf.unmarshal;
+            if pos - begin_pos >= byte_size { break_m $ (vector, buf) };
+            let (val, buf) = *buf.unmarshal;
             let vector = vector.push_back(val);
-            continue $ (buf, vector)
+            continue_m $ (buf, vector)
         )
     );
 
-    unmarshal_var_size: [a: Unmarshal, sz: Unmarshal] (sz -> I64) -> ByteBuffer -> (Array a, ByteBuffer);
+    unmarshal_var_size: [a: Unmarshal, sz: Unmarshal] (sz -> I64) -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
     unmarshal_var_size = |from_size, buf| (
-        let (size, buf) = buf.unmarshal;
+        let (size, buf) = *buf.unmarshal;
         let byte_size = size.from_size;
         buf.unmarshal_fixed(byte_size)
     );
@@ -231,12 +242,12 @@ type ServerHello = unbox struct {
 
 impl ServerHello: Unmarshal {
     unmarshal = |buf| (
-        let (legacy_version:U16, buf) = buf.unmarshal;
-        let (random:Array U8, buf) = buf.unmarshal_fixed(32);
-        let (legacy_session_id_echo:Array U8, buf) = buf.unmarshal_var_size(U8::to_I64);
-        let (cipher_suite, buf) = buf.unmarshal;
-        let (legacy_compression_method, buf) = buf.unmarshal;
-        let (extensions, buf) = buf.unmarshal_var_size(U16::to_I64);
+        let (legacy_version:U16, buf) = *buf.unmarshal;
+        let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
+        let (legacy_session_id_echo:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (cipher_suite, buf) = *buf.unmarshal;
+        let (legacy_compression_method, buf) = *buf.unmarshal;
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
         let msg = ServerHello {
             legacy_version: legacy_version,
             random: random,
@@ -245,7 +256,7 @@ impl ServerHello: Unmarshal {
             legacy_compression_method: legacy_compression_method,
             extensions: extensions
         };
-        (msg, buf)
+        pure $ (msg, buf)
     );
 }
 
@@ -325,15 +336,15 @@ impl Extension: Marshal {
 
 impl Extension: Unmarshal {
     unmarshal = |buf| (
-        let (extension_type, buf) = buf.unmarshal;
-        let (extension_data_size: U16, buf) = buf.unmarshal;
+        let (extension_type, buf) = *buf.unmarshal;
+        let (extension_data_size: U16, buf) = *buf.unmarshal;
 
-        if extension_type == 10_U16 { buf.unmarshal.map_0(supported_groups) };
-        if extension_type == 43_U16 { buf.unmarshal.map_0(supported_versions) };
+        if extension_type == 10_U16 { buf.unmarshal.map_res_0(supported_groups) };
+        if extension_type == 43_U16 { buf.unmarshal.map_res_0(supported_versions) };
 
         // skip unknown extension data
         let buf = buf.set_position(buf.get_position + extension_data_size.to_I64);
-        (unknown_extension(extension_type), buf)
+        pure $ (unknown_extension(extension_type), buf)
     );
 }
 
@@ -352,7 +363,7 @@ impl SupportedVersions: Marshal {
 impl SupportedVersions: Unmarshal {
     unmarshal = |buf| (
         // for ServerHello, HelloRetryRequest
-        buf.unmarshal.map_0(|version|
+        buf.unmarshal.map_res_0(|version|
             SupportedVersions { versions: [ version ] }
         )
     );
@@ -416,7 +427,7 @@ impl SignatureSchemeList: Marshal {
 
 impl SignatureSchemeList: Unmarshal {
     unmarshal = |buf| (
-        buf.unmarshal_var_size(U16::to_I64).map_0(|v|
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(|v|
             SignatureSchemeList { v: v }
         )
     );
@@ -466,16 +477,100 @@ impl NamedGroupList: Marshal {
 
 impl NamedGroupList: Unmarshal {
     unmarshal = |buf| (
-        buf.unmarshal_var_size(U16::to_I64).map_0(|v|
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(|v|
             NamedGroupList { v: v }
         )
     );
 }
 
+// 5. Record Protocol
+
+// 5.1 Record Layer
+
+type ContentType = unbox union {
+    invalid: (),
+    change_cipher_spec: (),
+    alert: (),
+    handshake: (),
+    application_data: ()
+};
+
+impl ContentType: Marshal {
+    marshal = |obj, buf| (
+        let val = (
+            if obj.is_application_data { 23_U8 };
+            if obj.is_handshake { 22_U8 };
+            if obj.is_alert { 21_U8 };
+            if obj.is_change_cipher_spec { 20_U8 };
+            0_U8        // invalid
+        );
+        buf.marshal(val)
+    );
+}
+
+impl ContentType: Unmarshal {
+    unmarshal = |buf| (
+        let (val: U8, buf) = *buf.unmarshal;
+        let obj = (
+            if val == 23_U8 { application_data() };
+            if val == 22_U8 { handshake() };
+            if val == 21_U8 { alert() };
+            if val == 20_U8 { change_cipher_spec() };
+            invalid()
+        );
+        pure $ (obj, buf)
+    );
+}
+
+type TLSPlainText = unbox struct {
+    type: ContentType,
+    legacy_record_version: ProtocolVersion,
+    //length: U16,
+    fragment: Array U8
+};
+
+namespace TLSPlainText {
+    empty: TLSPlainText;
+    empty = TLSPlainText {
+        type: invalid(),
+        legacy_record_version: 0x0303_U16,
+        //length: 0_U16,
+        fragment: []
+    };
+}
+
+impl TLSPlainText: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@type);
+        let buf = buf.marshal(obj.@legacy_record_version);
+        eval assert(|_| "length overflow", obj.@fragment.get_size <= 16384);    // = 2**14
+        let length: U16 = obj.@fragment.get_size.to_U16;
+        let buf = buf.marshal(length);
+        let buf = buf.marshal_fixed(obj.@fragment);
+        buf
+    );
+}
+
+impl TLSPlainText: Unmarshal {
+    unmarshal = |buf| (
+        let (type: ContentType, buf) = *buf.unmarshal;
+        let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
+        let (length: U16, buf) = *buf.unmarshal;
+        let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let obj = TLSPlainText {
+            type: type,
+            legacy_record_version: legacy_record_version,
+            //length: length,
+            fragment: fragment 
+        };
+        pure $ (obj, buf)
+    );
+}
 
 test1: IO ();
 test1 = (
     do {
+        eval *println("===test1===").lift;
         let secure_random = *SecureRandom::make;
         let hello = *ClientHello::make(secure_random);
         let handshake = client_hello(hello);
@@ -488,14 +583,37 @@ test1 = (
 test2: IO ();
 test2 = (
     do {
+        eval *println("===test2===").lift;
         let array = *from_string_hex("03030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a001234000000").from_result;
         let buf = ByteBuffer::make(array, big_endian());
-        let (hello:ServerHello, buf) = buf.unmarshal;
+        let (hello:ServerHello, buf) = *buf.unmarshal.from_result;
         println((hello.@cipher_suite, hello.@legacy_compression_method).format(
             "cipher_suite={} legacy_compression_method={}"
         )).lift
     }.try(eprintln)
 );
 
+test3: IO ();
+test3 = (
+    do {
+        eval *println("===test3===").lift;
+        let pt = TLSPlainText::empty.set_type(application_data()).set_fragment("abc".get_bytes);
+        let buf = ByteBuffer::empty(0, big_endian());
+        let buf = buf.marshal(pt);
+        eval *println(buf.@array.to_string_hex).lift;
+        let buf = buf.set_position(0);
+        let (pt: TLSPlainText, buf) = *buf.unmarshal.from_result;
+        let buf = ByteBuffer::empty(0, big_endian());
+        let buf = buf.marshal(pt);
+        eval *println(buf.@array.to_string_hex).lift;
+        pure()
+    }.try(eprintln)
+);
+
 main: IO ();
-main = test1;
+main = (
+    eval *test1;
+    eval *test2;
+    eval *test3;
+    pure()
+);

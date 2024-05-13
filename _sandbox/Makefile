@@ -59,8 +59,8 @@ gcmvs:
 	../bin/fixautolink run -L ../lib -L . -f aes_gcmvs.fix -O separated
 ecdsa_test1:
 	../bin/fixautolink run -L ../lib -L . -f ecdsa_test1.fix -O separated
-tls:
-	../bin/fixautolink run -L ../lib -L . -f tls.fix -O separated
+tls13:
+	../bin/fixautolink run -L ../lib -L . -f tls13.fix -O separated
 pkcs5_test1:
 	../bin/fixautolink run -L ../lib -L . -f pkcs5_test1.fix
 

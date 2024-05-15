@@ -5,6 +5,21 @@ module Minilib.Monad.Reader;
 
 import Minilib.Monad.Identity;
 
+// A trait for the interface of generic reader monads.
+trait MonadReader = Monad + MonadReaderIF;
+
+// A trait for generic reader monads that manages the internal environment.
+trait [rm: * -> *] rm: MonadReaderIF {
+    // The type of the internal environment.
+    type EnvType rm;
+    // A monad that returns the internal environment as a value.
+    ask: rm (EnvType rm);
+    // `rm.local(f)` creates a reader monad with an environment modified by `f`.
+    local: (EnvType rm -> EnvType rm) -> rm a -> rm a;
+}
+
+//------------------------------------------------------------------------
+
 // Reader monad wraps a function from an environment to a value.
 // `e` is a type of an environment.
 // `m` is a type of an underlyind monad.
@@ -15,31 +30,29 @@ type [m: * -> *] ReaderT e m a = unbox struct {
 
 type Reader e a = ReaderT e Identity a;
 
-namespace Reader {
-    // Creates a generic reader monad from a function.
-    reader_t: [m: Monad] (e -> m a) -> ReaderT e m a;
-    reader_t = |f| ReaderT { data: f };
+// Creates a generic reader monad from a function.
+reader_t: [m: Monad] (e -> m a) -> ReaderT e m a;
+reader_t = |f| ReaderT { data: f };
 
-    // Creates a reader monad from a function.
-    reader: (e -> a) -> Reader e a;
-    reader = |f| reader_t $ |e| Identity::make $ f(e);
+// Creates a reader monad from a function.
+reader: (e -> a) -> Reader e a;
+reader = |f| reader_t $ |e| Identity::make $ f(e);
 
-    // Runs a generic reader monad with the supplied environment.
-    run_reader_t: [m: Monad] e -> ReaderT e m a -> m a;
-    run_reader_t = |e, ma| (ma.@data)(e);
+// Runs a generic reader monad with the supplied environment.
+run_reader_t: [m: Monad] e -> ReaderT e m a -> m a;
+run_reader_t = |e, ma| (ma.@data)(e);
 
-    // Runs a reader monad with the supplied environment.
-    run_reader: e -> Reader e a -> a;
-    run_reader = |e, ma| ma.run_reader_t(e).get;
+// Runs a reader monad with the supplied environment.
+run_reader: e -> Reader e a -> a;
+run_reader = |e, ma| ma.run_reader_t(e).get;
 
-    // A reader monad that returns the environment as a value.
-    read: [m: Monad] ReaderT e m e;
-    read = reader_t $ |e| pure $ e;
+// A reader monad that returns the environment as a value.
+read: [m: Monad] ReaderT e m e;
+read = reader_t $ |e| pure $ e;
 
-    // Lifts an underlyind monad to a reader monad.
-    lift_reader: [m: Monad] m a -> ReaderT e m a;
-    lift_reader = |ma| reader_t $ |_| ma;
-}
+// Lifts an underlyind monad to a reader monad.
+lift_reader: [m: Monad] m a -> ReaderT e m a;
+lift_reader = |ma| reader_t $ |_| ma;
 
 impl [m: Monad] ReaderT e m: Functor {
     map = |f, ma| reader_t $ |e| (
@@ -54,4 +67,10 @@ impl [m: Monad] ReaderT e m: Monad {
         let a = *ma.run_reader_t(e);
         f(a).run_reader_t(e)
     );
+}
+
+impl [m: Monad] ReaderT e m: MonadReaderIF {
+    type EnvType (ReaderT e m) = e;
+    ask = reader_t $ |e| pure $ e;
+    local = |f, rm| reader_t $ f >> rm.@data;
 }

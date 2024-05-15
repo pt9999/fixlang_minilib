@@ -4,6 +4,29 @@
 
 State Monad which maintains a mutable state.
 
+### trait MonadState = Monad + MonadStateIF;
+
+A trait for the interface of generic state monads.
+
+### type StateType
+
+The type of the internal state.
+
+```
+    type StateType sm;
+```
+#### get_state: sm (StateType sm);
+
+A monad that returns the internal state as a value.
+
+#### put_state: (StateType sm) -> sm ();
+
+A monad that puts the specified value to the internal state.
+
+#### mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();
+
+A monad that modifies the current state with the specified function.
+
 ### type StateT
 
 State monad wraps a function from a initial state to a pair of a value and a final state.
@@ -34,18 +57,6 @@ Runs a StateT monad with the supplied initial state.
 
 Runs a State monad with the supplied initial state.
 
-#### get_state: [m: Monad] StateT s m s;
-
-A StateT monad that returns the current state as a value.
-
-#### put_state: [m: Monad] s -> StateT s m ();
-
-Creates a StateT monad of the specified state.
-
-#### mod_state: [m: Monad] (s -> s) -> StateT s m ();
-
-Creates a StateT monad that changes the state with the specified function.
-
 #### lift_state: [m: Monad] m a -> StateT s m a;
 
 Converts an underlying monad to a StateT monad.
@@ -58,3 +69,10 @@ Maps both the return value and final state.
 
 #### `impl [m: Monad] StateT s m: Monad`
 
+#### `impl [m: Monad] StateT s m: MonadStateIF`
+
+### type StateType
+
+```
+    type StateType (StateT s m) = s;
+```

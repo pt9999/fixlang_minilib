@@ -1,0 +1,53 @@
+// From the paper "Associated type synomyms".
+// https://www.researchgate.net/publication/221241277_Associated_type_synonyms
+// DOI:10.1145/1086365.1086397
+module Main;
+
+// 2.1 Formatting: type functions compute function types
+type I f = unbox struct { next: f };
+type C f = unbox struct { next: f };
+type S f = unbox struct { data: String, next: f };
+
+_I: f -> I f;
+_I = |f| I { next: f };
+
+_C: f -> C f;
+_C = |f| C { next: f };
+
+_S: String -> f -> S f;
+_S = |str, f| S { data: str, next: f };
+
+trait fmt: Format {
+    type Sprintf fmt;
+    sprintf_: String -> fmt -> Sprintf fmt;
+}
+impl String: Format {
+    type Sprintf String = String;
+    sprintf_ = |prefix, str| prefix + str;
+}
+impl [a: Format] I a: Format {
+    type Sprintf (I a) = I64 -> Sprintf a;
+    sprintf_ = |prefix, fmt, i| sprintf_(prefix + i.to_string, fmt.@next);
+}
+impl [a: Format] C a: Format {
+    type Sprintf (C a) = U8 -> Sprintf a;
+    sprintf_ = |prefix, fmt, c| sprintf_(prefix + [c, 0_U8]._unsafe_from_c_str.to_string, fmt.@next);
+}
+impl [a: Format] S a: Format {
+    type Sprintf (S a) = Sprintf a;
+    sprintf_ = |prefix, fmt| sprintf_(prefix + fmt.@data, fmt.@next);
+}
+
+sprintf: [fmt: Format] fmt -> Sprintf fmt;
+sprintf = sprintf_("");
+
+test_sprintf: IO ();
+test_sprintf = (
+    let format_spec = _S("Int: ") $ _I $ _S(" Char: ") $ _C $ ".";
+    let msg = sprintf(format_spec, 123, 'a');
+    println(msg)
+);
+
+main: IO ();
+main = test_sprintf;
+

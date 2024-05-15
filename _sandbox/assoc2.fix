@@ -1,0 +1,129 @@
+module Main;
+
+// 関連型の型パラメータには高階カインドも指定可能。
+trait a: Trait {
+  type [f: * -> *] Elem a f;
+  method: [f: * -> *] Elem a f -> a -> a;
+}
+
+impl Array a: Trait {
+  type Elem (Array a) f = f a;
+  // ここでは実験のため、elem は特に使っていない。
+  method = |elem, arr| arr;
+}
+
+test_higher_kind: IO ();
+test_higher_kind = (
+    let arr = [456];
+    // Option I64 の例
+    let arr = arr.method(some(33));
+    // Result ErrMsg I64 の場合、単に `ok(33)` だけでは ErrMsg を型推論できないため、型アノテーションを付ける必要がある。
+    let arr = arr.method(ok(33): Elem (Array I64) (Result ErrMsg));
+    // Array I64 の例
+    let arr = arr.method([33]);
+    pure()
+);
+
+//-----------------------------------------------------------
+
+trait a: PhantomTrait {
+  type PhantomId a;
+}
+
+type Phantom a = unbox struct { data: () };
+
+phantom: Phantom a;
+phantom = Phantom { data: () };
+
+impl Phantom a: PhantomTrait {
+  type PhantomId (Phantom a) = a;
+}
+
+check_phantom: [a: PhantomTrait, b: PhantomTrait, PhantomId a = e, PhantomId b = e] a -> b -> ();
+check_phantom = |a, b| ();
+
+test_phantom: IO ();
+test_phantom = (
+  let p: Phantom I64 = phantom;
+  let q: Phantom I32 = phantom;
+  eval check_phantom(p, p);
+  //eval check_phantom(p, q); // error
+  pure()
+);
+
+
+//-----------------------------------------------------------
+// 関連型を使うことで、implを選択できる
+
+trait t: Tag {
+  type A t;
+  type B t;
+  type C t;
+  a_to_b: t -> A t -> B t;
+  b_to_c: t -> B t -> C t;
+}
+
+type Impl1 = unbox struct { data: () };
+
+impl1: Impl1;
+impl1 = Impl1 { data: () };
+
+impl Impl1: Tag {
+  type A Impl1 = I64;
+  type B Impl1 = I32;
+  type C Impl1 = String;
+  a_to_b = |t, i| i.to_I32;
+  b_to_c = |t, i| i.to_string;
+}
+
+type Impl2 = unbox struct { data: () };
+
+impl2: Impl2;
+impl2 = Impl2 { data: () };
+
+impl Impl2: Tag {
+  type A Impl2 = I64;
+  type B Impl2 = F64;
+  type C Impl2 = String;
+  a_to_b = |t, i| (i.to_F64 * 2.345);
+  b_to_c = |t, f| "<" + f.to_string + ">";
+}
+
+test_tag: IO ();
+test_tag = (
+  let str1 = 123.a_to_b(impl1).b_to_c(impl1);
+  let str2 = 123.a_to_b(impl2).b_to_c(impl2);
+  println(str1 + "\n" + str2)
+);
+
+//-----------------------------------------------------------
+
+trait t: Mut1 {
+  type A1 t;
+}
+
+trait t: Mut2 {
+  type A2 t;
+}
+
+type I1 = I64;
+type I2 = I32;
+
+impl I1: Mut1 {
+  type A1 I1 = A2 I2;
+}
+
+impl I2: Mut2 {
+  type A2 I2 = A1 I1;
+}
+
+test_mut: IO ();
+test_mut = (
+  let f: A2 I2 -> () = |_| ();
+  pure()
+);
+
+//-----------------------------------------------------------
+
+main: IO ();
+main = test_tag;

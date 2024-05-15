@@ -264,5 +264,6 @@ OPTIONS:
     -n, --min-digits <VALUE>    数字の最小配置数 (default: 25)
     -d, --max-step <VALUE>      問題解決の最大ステップ数 (default: 100)
     -s, --seed <VALUE>          乱数生成器の種 (default: 現在時刻)
+    -g, --svg                   SVGファイルを出力する (default: false)
     -v, --verbose               進捗状況を表示する (default: false)
 ```

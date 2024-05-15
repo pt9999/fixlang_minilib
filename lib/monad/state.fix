@@ -3,6 +3,25 @@ module Minilib.Monad.State;
 
 import Minilib.Monad.Identity;
 
+// A trait for the interface of generic state monads.
+trait MonadState = Monad + MonadStateIF;
+
+// A trait for generic state monads that manages the internal state.
+trait [sm: * -> *] sm: MonadStateIF {
+    // The type of the internal state.
+    type StateType sm;
+    // A monad that returns the internal state as a value.
+    get_state: sm (StateType sm);
+    // A monad that puts the specified value to the internal state.
+    put_state: (StateType sm) -> sm ();
+}
+
+// A monad that modifies the current state with the specified function.
+mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();
+mod_state = |f| put_state $ f $ *get_state;
+
+//------------------------------------------------------------------------
+
 // State monad wraps a function from a initial state to a pair of a value and a final state.
 type [m: *->*] StateT s m a = unbox struct {
     data: s -> m (a, s)
@@ -25,18 +44,6 @@ run_state_t = |s, ma| (ma.@data)(s);
 // Runs a State monad with the supplied initial state.
 run_state: s -> State s a -> (a, s);
 run_state = |s, ma| ma.run_state_t(s).get;
-
-// A StateT monad that returns the current state as a value.
-get_state: [m: Monad] StateT s m s;
-get_state = make_state_t_monad $ |s| pure $ (s, s);
-
-// Creates a StateT monad of the specified state.
-put_state: [m: Monad] s -> StateT s m ();
-put_state = |s| make_state_t_monad $ |_| pure $ ((), s);
-
-// Creates a StateT monad that changes the state with the specified function.
-mod_state: [m: Monad] (s -> s) -> StateT s m ();
-mod_state = |f| put_state $ f $ *get_state;
 
 // Converts an underlying monad to a StateT monad.
 lift_state: [m: Monad] m a -> StateT s m a;
@@ -66,4 +73,10 @@ impl [m: Monad] StateT s m: Monad
         let (a,s) = *ma.run_state_t(s);
         f(a).run_state_t(s)
     };
+}
+
+impl [m: Monad] StateT s m: MonadStateIF {
+    type StateType (StateT s m) = s;
+    get_state = make_state_t_monad $ |s| pure $ (s, s);
+    put_state = |s| make_state_t_monad $ |_| pure $ ((), s);
 }

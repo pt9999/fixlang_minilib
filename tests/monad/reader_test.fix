@@ -1,6 +1,7 @@
 module Main;
 
 import Debug;
+import HashMap;
 
 import Minilib.Monad.Reader;
 import Minilib.Text.StringEx;
@@ -15,19 +16,26 @@ test_reader_functor = (
     assert_equal("eq", "3", r.run_reader([2]))
 );
 
+type Config = HashMap String String;
+
 test_reader_monad: TestCase;
 test_reader_monad = (
     make_test("test_reader_monad") $ |_|
-    let get_elt = |i| (
-        let a = *read;
-        pure $ a.@(i)
+    let get_config_value: String -> Reader Config String = |key| (
+        let config = *ask;
+        pure $ config.find(key).as_some_or("")
     );
     let r = do {
-        let x = *get_elt(0);
-        let y = *get_elt(1);
-        pure $ x + y
+        let value1 = *get_config_value("key1");
+        let value2 = *get_config_value("key2");
+        pure $ "value1=" + value1 + " value2=" + value2
     };
-    assert_equal("eq", 5, r.run_reader([2, 3]))
+    let config = HashMap::empty(0).insert("key1", "a").insert("key2", "b");
+    eval *assert_equal("case1", "value1=a value2=b", r.run_reader(config));
+    let rr = r.local(insert("key2", "bb"));
+    eval *assert_equal("case2", "value1=a value2=bb", rr.run_reader(config));
+    eval *assert_equal("case3", "value1= value2=bb", rr.run_reader(HashMap::empty(0)));
+    pure()
 );
 
 test_sub_reader: TestCase;

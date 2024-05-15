@@ -1,0 +1,41 @@
+module Main;
+//module Minilib.Monad.OptionT;
+
+type [m: * -> *] OptionT m a = unbox struct {
+  data: m (Option a)
+};
+
+option_t: [m: * -> *] m (Option a) -> OptionT m a;
+option_t = |ma| OptionT { data: ma };
+
+run: [m: * -> *] OptionT m a -> m (Option a);
+run = @data;
+
+impl [m: Functor] OptionT m: Functor {
+  map = |f, ma| (
+    let run = (ma.run).map(map(f));
+    option_t(run)
+  );
+}
+
+impl [m: Monad] OptionT m: Monad {
+  pure = |a| option_t(pure(pure(a)));
+  bind = |f, m_opt_a| (
+    let run = do {
+        let opt_a = *(m_opt_a.run);        // Option a
+        if opt_a.is_none { pure(none()) };
+        let a = opt_a.as_some;
+        f(a).run
+    };
+    option_t(run)
+  );
+}
+
+main: IO ();
+main = (
+    let oma: OptionT IO I64 = option_t(pure(some(1)));
+    let oma: OptionT IO I32 = oma.bind(|a| pure $ (a + 1).to_I32);
+    let oma: OptionT IO String = oma.map(to_string);
+    let opt_a = *(oma.run);
+    println(opt_a.to_string)
+);

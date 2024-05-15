@@ -87,6 +87,13 @@ Currently only supports `{}`.
 with each element of `array`.
 Currently only supports `{}`.
 
+### namespace Tuple1
+
+#### format: [a: ToString] String -> (a,) -> String;
+
+`(a, ).format(str)` replaces an occurence of `{}` in the format string `str`
+with `a`.
+
 ### namespace Tuple2
 
 #### format: [a: ToString, b: ToString] String -> (a,b) -> String;
@@ -107,6 +114,13 @@ with `a`, `b`, `c`.
 
 `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
 with `a`, `b`, `c`, `d`.
+
+### namespace Tuple5
+
+#### format: [a: ToString, b: ToString, c:ToString, d:ToString, e:ToString] String -> (a,b,c,d,e) -> String;
+
+`(a, b, c, d, e).format(str)` replaces each occurence of `{}` in the format string `str`
+with `a`, `b`, `c`, `d`, `e`.
 
 ### namespace HashMap
 

@@ -54,10 +54,6 @@ Galois/Counter Mode (GCM) for AES
 
 Advanced Encryption Standard (AES)
 
-### [module Minilib.Crypto.AES0 (lib/crypto/aes0.fix)](lib/crypto/aes0.md)
-
-Advanced Encryption Standard (AES)
-
 ### [module Minilib.Crypto.HMAC (lib/crypto/hmac.fix)](lib/crypto/hmac.md)
 
 The Keyed-Hash Message Authentication Code (HMAC)

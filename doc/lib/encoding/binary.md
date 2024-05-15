@@ -121,7 +121,7 @@ trait a: Marshal {
 
 ```
 trait a: Unmarshal {
-    unmarshal: ByteBuffer -> (a, ByteBuffer);
+    unmarshal: ByteBuffer -> Result ErrMsg (a, ByteBuffer);
 }
 ```
 #### `impl U8: Unmarshal`

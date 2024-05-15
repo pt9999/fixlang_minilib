@@ -6,6 +6,26 @@ Writer monad.
 
 For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 
+### trait MonadWriter = Monad + MonadWriterIF;
+
+A trait for the interface of generic writer monads.
+
+### trait MonadWriterIF
+
+A trait for generic writer monads that manages the internal environment.
+
+```
+trait [wm: * -> *] wm: MonadWriterIF {
+    // The type of the environment.
+    type EnvType wm;
+    // Tells specified value to the internal environment.
+    tell: EnvType wm -> wm ();
+    // Listens the internal environment.
+    listen: wm a -> wm (EnvType wm, a);
+    // Provide a writer transformer which changes internals of the written object.
+    pass: wm (EnvType wm -> EnvType wm, a) -> wm a;
+}
+```
 ### type WriterT
 
 Writer monad wraps a pair of an environment and a value.
@@ -61,6 +81,10 @@ Gets the value from a generic writer monad.
 
 Gets the value from a writer monad.
 
+#### map_writer_t: [m: Monad, n: Monad] (m (e, a) -> n (e1, b)) -> WriterT e m a -> WriterT e1 n b;
+
+Maps an underlying monad and a value using the specified function.
+
 #### lift_writer: [e: Monoid, m: Monad] m a -> WriterT e m a;
 
 Lifts an underlyind monad to a writer monad.
@@ -68,4 +92,15 @@ Lifts an underlyind monad to a writer monad.
 #### `impl [m: Monad] WriterT e m: Functor`
 
 #### `impl [e: Monoid, m: Monad] WriterT e m: Monad`
+
+#### `impl [e: Monoid, m: Monad] WriterT e m: MonadWriterIF`
+
+### type EnvType
+
+The type of the environment.
+
+```
+    type EnvType (WriterT e m) = e;
+```
+#### `impl [e: Monoid] WriterT e: MonadTrans`
 

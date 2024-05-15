@@ -3,9 +3,9 @@ module Main;
 import Debug;
 
 import Minilib.Monad.Writer;
+import Minilib.Monad.Trans;
 import Minilib.Trait.Monoid;
 import Minilib.Trait.Semigroup;
-import Minilib.Trait.Comonad;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -30,11 +30,83 @@ test_writer_monad = (
     assert_equal("eq", (["a", "b", "c"], 3), w.run_writer)
 );
 
+test_tell_listen: TestCase;
+test_tell_listen = (
+    make_test("test_tell_listen") $ |_|
+    let w: WriterT String IOFail I64 = do {
+        let i64 = *pure(2);
+        eval *tell("log1");
+        pure(i64 + 1)
+    };
+    let w2: WriterT String IOFail String = do {
+        eval *tell("log0");
+        let (log, i64) = *w.listen;
+        eval *tell("log2");
+        pure("log="+log+" i64="+i64.to_string)
+    };
+    assert_equal("eq", ("log0log1log2", "log=log1 i64=3"), *w2.run_writer_t)
+);
+
+test_pass: TestCase;
+test_pass = (
+    make_test("test_pass") $ |_|
+    let w: WriterT String IOFail I64 = do {
+        let i64 = *pure(2);
+        eval *tell("log1");
+        pure(i64 + 1)
+    };
+
+    let w2: WriterT String IOFail String = do {
+        eval *tell("log0");
+        let f = |e| "<" + e + ">";
+        let i64 = *w.map(|i64| (f, i64)).pass;
+        eval *tell("log2");
+        pure("i64=" + i64.to_string)
+    };
+    assert_equal("eq", ("log0<log1>log2", "i64=3"), *w2.run_writer_t)
+);
+
+test_map_writer_t: TestCase;
+test_map_writer_t = (
+    make_test("test_map_writer_t") $ |_|
+    let w: WriterT String IO I64 = do {
+        let i64 = *pure(2);
+        eval *tell("log1");
+        pure(i64 + 1)
+    };
+    let f: IO (String, I64) -> IOFail (Array String, F64) = |io| (
+        let (e, a) = *io.lift;
+        pure $ ([e], a.to_F64)
+    );
+    let w2: WriterT (Array String) IOFail String = do {
+        eval *tell(["log0"]);
+        let f64 = *w.map_writer_t(f);
+        eval *tell(["log2"]);
+        pure("f64=" + f64.to_string)
+    };
+    assert_equal("eq", (["log0","log1","log2"], "f64=3.000000"), *w2.run_writer_t)
+);
+
+test_writer_trans: TestCase;
+test_writer_trans = (
+    make_test("test_writer_trans") $ |_|
+    let iof: IOFail F64 = pure(123.45);
+    let w: WriterT String IOFail F64 = iof.lift_t;
+    let expected = 123.45;
+    let (e, actual) = *w.run_writer_t;
+    eval *assert_equal("e", "", e);
+    assert_equal("eq", expected, actual)
+);
+
 main: IO ();
 main = (
     [
         test_writer_functor,
         test_writer_monad,
+        test_tell_listen,
+        test_pass,
+        test_map_writer_t,
+        test_writer_trans,
         TestCase::empty
     ]
     .run_test_driver

@@ -1,0 +1,94 @@
+module Minilib.Crypto.Tls13.RecordProtocol;
+
+import Debug;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.SecureRandom;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// 5. Record Protocol
+
+// 5.1 Record Layer
+
+type ContentType = unbox union {
+    invalid: (),
+    change_cipher_spec: (),
+    alert: (),
+    handshake: (),
+    application_data: ()
+};
+
+impl ContentType: Marshal {
+    marshal = |obj, buf| (
+        let val = (
+            if obj.is_application_data { 23_U8 };
+            if obj.is_handshake { 22_U8 };
+            if obj.is_alert { 21_U8 };
+            if obj.is_change_cipher_spec { 20_U8 };
+            0_U8        // invalid
+        );
+        buf.marshal(val)
+    );
+}
+
+impl ContentType: Unmarshal {
+    unmarshal = |buf| (
+        let (val: U8, buf) = *buf.unmarshal;
+        let obj = (
+            if val == 23_U8 { application_data() };
+            if val == 22_U8 { handshake() };
+            if val == 21_U8 { alert() };
+            if val == 20_U8 { change_cipher_spec() };
+            invalid()
+        );
+        pure $ (obj, buf)
+    );
+}
+
+type TLSPlainText = unbox struct {
+    type: ContentType,
+    legacy_record_version: ProtocolVersion,
+    //length: U16,
+    fragment: Array U8
+};
+
+namespace TLSPlainText {
+    empty: TLSPlainText;
+    empty = TLSPlainText {
+        type: invalid(),
+        legacy_record_version: 0x0303_U16,
+        //length: 0_U16,
+        fragment: []
+    };
+}
+
+impl TLSPlainText: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@type);
+        let buf = buf.marshal(obj.@legacy_record_version);
+        eval assert(|_| "length overflow", obj.@fragment.get_size <= 16384);    // = 2**14
+        let length: U16 = obj.@fragment.get_size.to_U16;
+        let buf = buf.marshal(length);
+        let buf = buf.marshal_fixed(obj.@fragment);
+        buf
+    );
+}
+
+impl TLSPlainText: Unmarshal {
+    unmarshal = |buf| (
+        let (type: ContentType, buf) = *buf.unmarshal;
+        let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
+        let (length: U16, buf) = *buf.unmarshal;
+        let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let obj = TLSPlainText {
+            type: type,
+            legacy_record_version: legacy_record_version,
+            //length: length,
+            fragment: fragment 
+        };
+        pure $ (obj, buf)
+    );
+}
+

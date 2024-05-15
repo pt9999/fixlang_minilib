@@ -4,9 +4,6 @@
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
 	png.out ndarray_calc.out
 
-md5_test1.out:
-	../bin/fixautolink build -o $@ -L ../lib -L . -f md5_test1.fix
-
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
 
@@ -40,9 +37,6 @@ state_monad_test2:
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix -O separated
 
-aes_test1:
-	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
-
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix
 
@@ -66,8 +60,7 @@ svg_test1:
 
 clean:
 	rm -f *.out
-
-veryclean: clean
 	rm -f .depend
+	fix clean
 
 -include .depend

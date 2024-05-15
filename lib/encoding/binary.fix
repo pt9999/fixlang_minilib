@@ -12,7 +12,8 @@ type ByteOrder = unbox union {
 
 type ByteBuffer = unbox struct {
     array: Array U8,            // internal byte array
-    byte_order: ByteOrder       // byte order
+    byte_order: ByteOrder,      // byte order
+    position: I64               // read/write position
 };
 
 namespace ByteBuffer {
@@ -23,7 +24,8 @@ namespace ByteBuffer {
     make = |array, byte_order| (
         ByteBuffer { 
             array: array,
-            byte_order: byte_order
+            byte_order: byte_order,
+            position: 0
         }
     );
 
@@ -51,9 +53,30 @@ namespace ByteBuffer {
         buf.@array.borrow_ptr(f)
     );
 
+    // Gets the read/write position.
+    get_position: ByteBuffer -> I64;
+    get_position = @position;
+
+    //set_position: I64 -> ByteBuffer -> ByteBuffer;
+    //set_position = set_position;
+
     // Gets the size of internal byte array.
     get_size: ByteBuffer -> I64;
     get_size = |buf| buf.@array.get_size;
+
+    // `buf.ensure_size(req_size)` ensures that the size of the byte buffer is at least `req_size`.
+    // If not, appends zeros at the end of the byte buffer.
+    ensure_size: I64 -> ByteBuffer -> ByteBuffer;
+    ensure_size = |req_size, buf| (
+        let append_size = max(0, req_size - buf.get_size);
+        if append_size <= 0 { buf };
+        loop(
+            (buf, 0), |(buf, i)|
+            if i >= append_size { break $ buf };
+            let buf = buf.mod_array(push_back(0_U8));
+            continue $ (buf, i + 1)
+        )
+    );
 
     // Gets the internal byte array.
     get_bytes: ByteBuffer -> Array U8;
@@ -99,6 +122,16 @@ namespace ByteBuffer {
         }
     );
 
+    // Reads a value from the byte buffer.
+    _unmarshal: (I64 -> ByteBuffer -> a) -> I64 -> ByteBuffer -> Result ErrMsg (a, ByteBuffer);
+    _unmarshal = |get_val, size, buf| (
+        let pos = buf.get_position;
+        if pos + size > buf.get_size { err $ "end of data reached" };
+        let val = buf.get_val(pos);
+        let buf = buf.set_position(pos + size);
+        pure $ (val, buf)
+    );
+
     // Sets U8 into the byte buffer at position `i`.
     set_u8: I64 -> U8 -> ByteBuffer -> ByteBuffer;
     set_u8 = |i, val, buf| (
@@ -139,6 +172,16 @@ namespace ByteBuffer {
         }
     );
 
+    // Writes a value to the byte buffer.
+    _marshal: (I64 -> a -> ByteBuffer -> ByteBuffer) -> I64 -> a -> ByteBuffer -> ByteBuffer;
+    _marshal = |set_val, size, val, buf| (
+        let pos = buf.get_position;
+        let buf = buf.ensure_size(pos + size);
+        let buf = buf.set_val(pos, val);
+        let buf = buf.set_position(pos + size);
+        buf
+    );
+
     to_u8_array: ByteBuffer -> Array U8;
     to_u8_array = @array;
 
@@ -171,6 +214,46 @@ namespace ByteBuffer {
             continue $ (buf, i + 1)
         )
     );
+}
+
+trait a: Marshal {
+    marshal: a -> ByteBuffer -> ByteBuffer;
+}
+
+impl U8: Marshal {
+    marshal = |val, buf| buf._marshal(set_u8, 1, val);
+}
+
+impl U16: Marshal {
+    marshal = |val, buf| buf._marshal(set_u16, 2, val);
+}
+
+impl U32: Marshal {
+    marshal = |val, buf| buf._marshal(set_u32, 4, val);
+}
+
+impl U64: Marshal {
+    marshal = |val, buf| buf._marshal(set_u64, 8, val);
+}
+
+trait a: Unmarshal {
+    unmarshal: ByteBuffer -> Result ErrMsg (a, ByteBuffer);
+}
+
+impl U8: Unmarshal {
+    unmarshal = |buf| buf._unmarshal(get_u8, 1);
+}
+
+impl U16: Unmarshal {
+    unmarshal = |buf| buf._unmarshal(get_u16, 2);
+}
+
+impl U32: Unmarshal {
+    unmarshal = |buf| buf._unmarshal(get_u32, 4);
+}
+
+impl U64: Unmarshal {
+    unmarshal = |buf| buf._unmarshal(get_u64, 8);
 }
 
 //-----------------------------------------------------------

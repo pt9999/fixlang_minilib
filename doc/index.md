@@ -46,6 +46,10 @@ Identity comonad
 
 Traced comonad. (a.k.a CoWriter comonad)
 
+### [module Minilib.Crypto.AES.GCM (lib/crypto/aes/aes_gcm.fix)](lib/crypto/aes/aes_gcm.md)
+
+Galois/Counter Mode (GCM) for AES
+
 ### [module Minilib.Crypto.AES (lib/crypto/aes.fix)](lib/crypto/aes.md)
 
 Advanced Encryption Standard (AES)
@@ -57,6 +61,10 @@ The Keyed-Hash Message Authentication Code (HMAC)
 ### [module Minilib.Crypto.MD5 (lib/crypto/md5.fix)](lib/crypto/md5.md)
 
 MD5 secure hash function.
+
+### [module Minilib.Crypto.SecureRandom (lib/crypto/secure_random.fix)](lib/crypto/secure_random.md)
+
+Secure random number generator.
 
 ### [module Minilib.Crypto.SHA1 (lib/crypto/sha1.fix)](lib/crypto/sha1.md)
 

@@ -1,0 +1,72 @@
+module Main;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.HandshakeProtocol;
+import Minilib.Crypto.Tls13.RecordProtocol;
+
+import Debug;
+
+import Minilib.Crypto.SecureRandom;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_client_hello_marshal: TestCase;
+test_client_hello_marshal = (
+    make_test("test_client_hello_marshal") $ |_|
+    let secure_random = *SecureRandom::make;
+    let hello = *ClientHello::make(secure_random);
+    let handshake = client_hello(hello);
+    let buf = ByteBuffer::empty(0, big_endian());
+    let buf = buf.marshal(handshake);
+    let expected = "0100002903030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000001000000";
+    let actual = buf.@array.to_string_hex;
+    //eval *println(actual).lift;
+    assert_equal("eq", expected, actual)
+);
+
+test_server_hello_unmarshal: TestCase;
+test_server_hello_unmarshal = (
+    make_test("test_server_hello_unmarshal") $ |_|
+    let array = *from_string_hex("03030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a001234000000").from_result;
+    let buf = ByteBuffer::make(array, big_endian());
+    let (hello:ServerHello, buf) = *buf.unmarshal.from_result;
+    let expected = "cipher_suite=4660 legacy_compression_method=0";
+    let actual = (hello.@cipher_suite, hello.@legacy_compression_method).format(
+        "cipher_suite={} legacy_compression_method={}"
+    ); 
+    //eval *println(actual).lift;
+    assert_equal("eq", expected, actual)
+);
+
+test_tls_plaintext_marshal_unmarshal: TestCase;
+test_tls_plaintext_marshal_unmarshal = (
+    make_test("test_tls_plaintext_marshal_unmarshal") $ |_|
+    let pt = TLSPlainText::empty.set_type(application_data()).set_fragment("abc".get_bytes);
+    let buf = ByteBuffer::empty(0, big_endian());
+    let buf = buf.marshal(pt);
+    let expected = "170303000461626300";
+    let actual = buf.@array.to_string_hex;
+    //eval *println(actual).lift;
+    eval *assert_equal("marshal1", actual, expected);
+ 
+    let buf = buf.set_position(0);
+    let (pt: TLSPlainText, buf) = *buf.unmarshal.from_result;
+    let buf = ByteBuffer::empty(0, big_endian());
+    let buf = buf.marshal(pt);
+    let actual = buf.@array.to_string_hex;
+    //eval *println(actual).lift;
+    eval *assert_equal("marshal2", actual, expected);
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_client_hello_marshal,
+        test_server_hello_unmarshal,
+        test_tls_plaintext_marshal_unmarshal,
+    ]
+    .run_test_driver
+);

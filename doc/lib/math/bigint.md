@@ -55,10 +55,6 @@ Shifts `@nat` to left. NOTE `@sign` does not affect at all.
 
 Shifts `@nat` to right. NOTE `@sign` does not affect at all.
 
-#### one: BigInt;
-
-BigInt constant representing 1.
-
 #### two: BigInt;
 
 BigInt constant representing 2.

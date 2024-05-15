@@ -48,11 +48,15 @@ match_tyvar = do {
     .filter(|s| !s.is_empty && s.get_bytes.@(0).is_lower)
 };
 
-// Matches `/^trait\s+TYVAR\s*:\s*(\w+)/`.
+// Matches `/^trait\s+(PREDICATES\s+)?TYVAR\s*:\s*(\w+)/`.
 match_trait: Parser String;
 match_trait = do {
     let _ = *match_str("trait");
     let _ = *one_or_more(match_char_class(is_space));
+    let _ = *do {
+        let _ = *match_predicates;
+        one_or_more(match_char_class(is_space))
+    }.if_exists;
     let tyvar = *match_tyvar;
     let _ = *zero_or_more(match_char_class(is_space));
     let colon = *match_char(':');
@@ -302,7 +306,7 @@ namespace State {
             state.process_module_decl(module_decl.as_ok)
         };
         let type_name: Result ErrMsg String = match_type.matches(line);
-        if type_name.is_ok || state.@type_decl != "" {
+        if (type_name.is_ok || state.@type_decl != "") && state.@trait_decl == "" {
             state.process_type_decl(orig_line, line, type_name)
         };
         let trait_name: Result ErrMsg String = match_trait.matches(line);

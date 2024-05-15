@@ -8,21 +8,20 @@ State Monad which maintains a mutable state.
 
 A trait for the interface of generic state monads.
 
-### type StateType
+### trait MonadStateIF
 
-The type of the internal state.
+A trait for generic state monads that manages the internal state.
 
 ```
+trait [sm: * -> *] sm: MonadStateIF {
+    // The type of the internal state.
     type StateType sm;
+    // A monad that returns the internal state as a value.
+    get_state: sm (StateType sm);
+    // A monad that puts the specified value to the internal state.
+    put_state: (StateType sm) -> sm ();
+}
 ```
-#### get_state: sm (StateType sm);
-
-A monad that returns the internal state as a value.
-
-#### put_state: (StateType sm) -> sm ();
-
-A monad that puts the specified value to the internal state.
-
 #### mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();
 
 A monad that modifies the current state with the specified function.

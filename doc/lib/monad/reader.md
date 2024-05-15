@@ -10,21 +10,20 @@ For details, see [blog post: The Reader and Writer Monads and Comonads](https://
 
 A trait for the interface of generic reader monads.
 
-### type EnvType
+### trait MonadReaderIF
 
-The type of the internal environment.
+A trait for generic reader monads that manages the internal environment.
 
 ```
+trait [rm: * -> *] rm: MonadReaderIF {
+    // The type of the internal environment.
     type EnvType rm;
+    // A monad that returns the internal environment as a value.
+    ask: rm (EnvType rm);
+    // `rm.local(f)` creates a reader monad with an environment modified by `f`.
+    local: (EnvType rm -> EnvType rm) -> rm a -> rm a;
+}
 ```
-#### ask: rm (EnvType rm);
-
-A monad that returns the internal environment as a value.
-
-#### local: (EnvType rm -> EnvType rm) -> rm a -> rm a;
-
-`rm.local(f)` creates a reader monad with an environment modified by `f`.
-
 ### type ReaderT
 
 Reader monad wraps a function from an environment to a value.

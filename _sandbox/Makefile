@@ -4,9 +4,6 @@
 all: fib1.out fib2.out fib3.out fib4.out fib5.out fib6.out echo.out calc.out \
 	png.out ndarray_calc.out
 
-md5_test1.out:
-	../bin/fixautolink build -o $@ -L ../lib -L . -f md5_test1.fix
-
 channel_test1: 
 	../bin/fixautolink run -L ../lib -f channel_test1.fix
 
@@ -39,30 +36,6 @@ state_monad_test2:
 
 reader_writer_test:
 	../bin/fixautolink run -L ../lib -f reader_writer_test.fix -O separated
-
-cipher_test1:
-	../bin/fixautolink run -L ../lib -L . -f cipher_test1.fix -O minimum
-
-secure_random_test1:
-	../bin/fixautolink run -L ../lib -L . -f secure_random_test1.fix -O separated
-
-aes_test1:
-	../bin/fixautolink run -L ../lib -L . -f aes_test1.fix
-
-aes_gcm_test1:
-	../bin/fixautolink run -L ../lib -L . -f aes_gcm_test1.fix -O separated
-
-aes_gcm_test1.out:
-	../bin/fixautolink build -o $@ -L ../lib -L . -f aes_gcm_test1.fix -O default
-
-gcmvs:
-	../bin/fixautolink run -L ../lib -L . -f aes_gcmvs.fix -O separated
-ecdsa_test1:
-	../bin/fixautolink run -L ../lib -L . -f ecdsa_test1.fix -O separated
-tls13:
-	../bin/fixautolink run -L ../lib -L . -f tls13.fix -O separated
-pkcs5_test1:
-	../bin/fixautolink run -L ../lib -L . -f pkcs5_test1.fix
 
 lnum:
 	../bin/fixautolink build -L ../lib -f lnum.fix

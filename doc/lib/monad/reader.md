@@ -6,6 +6,25 @@ Reader monad.
 
 For details, see [blog post: The Reader and Writer Monads and Comonads](https://www.olivierverdier.com/posts/2014/12/31/reader-writer-monad-comonad/).
 
+### trait MonadReader = Monad + MonadReaderIF;
+
+A trait for the interface of generic reader monads.
+
+### type EnvType
+
+The type of the internal environment.
+
+```
+    type EnvType rm;
+```
+#### ask: rm (EnvType rm);
+
+A monad that returns the internal environment as a value.
+
+#### local: (EnvType rm -> EnvType rm) -> rm a -> rm a;
+
+`rm.local(f)` creates a reader monad with an environment modified by `f`.
+
 ### type ReaderT
 
 Reader monad wraps a function from an environment to a value.
@@ -23,8 +42,6 @@ type [m: * -> *] ReaderT e m a = unbox struct {
 ```
 type Reader e a = ReaderT e Identity a;
 ```
-### namespace Reader
-
 #### reader_t: [m: Monad] (e -> m a) -> ReaderT e m a;
 
 Creates a generic reader monad from a function.
@@ -53,3 +70,10 @@ Lifts an underlyind monad to a reader monad.
 
 #### `impl [m: Monad] ReaderT e m: Monad`
 
+#### `impl [m: Monad] ReaderT e m: MonadReaderIF`
+
+### type EnvType
+
+```
+    type EnvType (ReaderT e m) = e;
+```

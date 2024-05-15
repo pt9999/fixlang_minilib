@@ -197,6 +197,9 @@ Reader monad.
 
 State Monad which maintains a mutable state.
 
+### [module Minilib.Monad.Trans (lib/monad/trans.fix)](lib/monad/trans.md)
+
+
 ### [module Minilib.Monad.Writer (lib/monad/writer.fix)](lib/monad/writer.md)
 
 Writer monad.

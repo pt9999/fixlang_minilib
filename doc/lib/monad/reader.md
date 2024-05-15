@@ -61,9 +61,17 @@ Runs a reader monad with the supplied environment.
 
 A reader monad that returns the environment as a value.
 
+#### map_reader_t: [m: Monad, n: Monad] (m a -> n b) -> ReaderT e m a -> ReaderT e n b;
+
+Maps an underlying monad and a value using the specified function.
+
+#### with_reader_t: [m: Monad] (e1 -> e) -> ReaderT e m a -> ReaderT e1 m a;
+
+Creates a reader monad with the modified environment.
+
 #### lift_reader: [m: Monad] m a -> ReaderT e m a;
 
-Lifts an underlyind monad to a reader monad.
+Lifts an underlying monad to a reader monad.
 
 #### `impl [m: Monad] ReaderT e m: Functor`
 
@@ -76,3 +84,5 @@ Lifts an underlyind monad to a reader monad.
 ```
     type EnvType (ReaderT e m) = e;
 ```
+#### `impl ReaderT e: MonadTrans`
+

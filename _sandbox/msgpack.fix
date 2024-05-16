@@ -4,19 +4,39 @@ import Debug;
 
 import Minilib.Monad.State;
 import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
 
 type MonadMsgPack a = State ByteBuffer a;
 
-trait [m: Monad] m: WriteByte {
+trait [m: * -> *] m: WriteByte {
     write_byte: U8 -> m ();
 }
 
-trait [m: Monad] m: ReadByte {
+trait [m: * -> *] m: ReadByte {
     read_byte: m U8;
 }
 
-trait Pack {
-    pack: [m: WriteByte] a -> m ();
+type ByteRW = StateT ByteBuffer (Result ErrMsg);
+
+impl ByteRW: WriteByte {
+    write_byte = |u8| (
+        mod_state(marshal(u8))
+    );
+}
+
+impl ByteRW: ReadByte {
+    read_byte = do {
+        let buf = *get_state;
+        let (val:U8, buf) = *buf.unmarshal.lift_t;
+        eval *put_state(buf);
+        pure $ val
+    };
+}
+
+//------------------------------------------
+trait a: Pack {
+    pack: [m: Monad, m: WriteByte] a -> m ();
 }
 
 impl U8: Pack {
@@ -77,7 +97,7 @@ impl U64: Pack {
 
 impl I8: Pack {
     pack = |i| (
-        if -0x1f_I7 <= i && i <= 0x7f_I8 {
+        if -0x1f_I8 <= i && i <= 0x7f_I8 {
             // positive fixint 0XXXXXXX
             // negative fixint 111XXXXX
             write_byte(i.to_U8)
@@ -88,30 +108,67 @@ impl I8: Pack {
     );
 }
 
-impl I64: Pack {
+impl I16: Pack {
     pack = |i| (
-        if 0 <= i {
-            if i <= 0x7f {
-                // positive fixint 0XXXXXXX
-                write_byte(i.to_U8)
-            };
-            if i <= 0xff {
-                // 8-bit unsigned integer
-                eval *write_byte(0xcc_U8);
-                write_byte(i.to_U8)
-            };
-            if i <= 0xffff {
-            };
-            if i <= 0xffffffff {
-                // 32-bit unsigned integer (big endian)
-                eval *write_byte(0xce_U8);
-                eval *write_byte(i.shift_right(24).to_U8);
-                eval *write_byte(i.shift_right(16).to_U8);
-                eval *write_byte(i.shift_right(8).to_U8);
-                write_byte(i.to_U8)
-            };
-            
-        }
+        if -0x80_I16 <= i && i <= 0x7f_I16 {
+            i.to_U8.pack
+        };
+        // 16-bit signed integer (big endian)
+        eval *write_byte(0xd1_U8);
+        eval *write_byte(i.shift_right(8_I16).to_U8);
+        write_byte(i.to_U8)
     );
 }
+
+impl I32: Pack {
+    pack = |i| (
+        if -0x8000_I32 <= i && i <= 0x7fff_I32 {
+            i.to_U16.pack
+        };
+        // 32-bit signed integer (big endian)
+        eval *write_byte(0xd2_U8);
+        eval *write_byte(i.shift_right(24_I32).to_U8);
+        eval *write_byte(i.shift_right(16_I32).to_U8);
+        eval *write_byte(i.shift_right(8_I32).to_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+impl I64: Pack {
+    pack = |i| (
+        if -0x80000000 <= i && i <= 0x7fffffff {
+            i.to_U32.pack
+        };
+        // 64-bit signed integer (big endian)
+        eval *write_byte(0xd3_U8);
+        eval *write_byte(i.shift_right(56).to_U8);
+        eval *write_byte(i.shift_right(48).to_U8);
+        eval *write_byte(i.shift_right(40).to_U8);
+        eval *write_byte(i.shift_right(32).to_U8);
+        eval *write_byte(i.shift_right(24).to_U8);
+        eval *write_byte(i.shift_right(16).to_U8);
+        eval *write_byte(i.shift_right(8).to_U8);
+        write_byte(i.to_U8)
+    );
+}
+
+main: IO ();
+main = (
+    let buf = ByteBuffer::empty(0, big_endian());
+    let w: ByteRW () = do {
+        eval *0x12_U8.pack;
+        eval *0x1234_U16.pack;
+        eval *0x12345678_U32.pack;
+        eval *0x123456789abcdef0_U64.pack;
+        eval *-0x12_I8.pack;
+        eval *-0x1234_I16.pack;
+        eval *-0x12345678_I32.pack;
+        eval *-0x123456789abcdef0.pack;
+        pure()
+    };     
+    let res = w.run_state_t(buf);
+    if res.is_err { println("err: " + res.as_err) };
+    let ((), buf) = res.as_ok;
+    println((buf.@array.to_string_hex, ).format("buf={}"))
+);
 

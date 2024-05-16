@@ -58,6 +58,8 @@ xml_test1:
 svg_test1:
 	../bin/fixautolink run -L ../lib -L . -f svg_test1.fix -O minimum
 
+msgpack:
+	../bin/fixautolink run -L ../lib -L . -f msgpack.fix -O separated
 clean:
 	rm -f *.out
 	rm -f .depend

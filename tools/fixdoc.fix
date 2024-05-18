@@ -76,12 +76,12 @@ match_trait_alias = do {
     pure $ chars._unsafe_to_string
 };
 
-// Matches `/^(impl [^{]+)/`.
+// Matches `/^impl ([^{]+)/`.
 match_impl: Parser String;
 match_impl = do {
     let _ = *match_str("impl ");
-    let decl = *one_or_more(match_char_class(|c| c != '{'));
-    pure $ ("impl " + decl._unsafe_to_string).strip_spaces
+    let impl_name = *one_or_more(match_char_class(|c| c != '{'));
+    pure $ (impl_name._unsafe_to_string).strip_spaces
 };
 
 // Matches `/^[a-z]\w*\s*:[^;]*;/`. Note that a line that begins with '_' does not match.
@@ -120,7 +120,9 @@ type State = unbox struct {
     type_name: String,  // name of type declaration
     type_decl: String,  // body of type declaration
     trait_name: String, // name of trait declaration
-    trait_decl: String  // body of trait declaration
+    trait_decl: String, // body of trait declaration
+    impl_name: String, // name of impl declaration
+    impl_decl: String, // body of impl declaration
 };
 
 namespace State {
@@ -135,7 +137,9 @@ namespace State {
             type_name: "",
             type_decl: "",
             trait_name: "",
-            trait_decl: ""
+            trait_decl: "",
+            impl_name: "",
+            impl_decl: "",
         }
     );
 
@@ -151,15 +155,14 @@ namespace State {
         state.print(str + "\n")
     );
 
-    // Prints the doc comment, and clears the doc comment.
-    print_doc: State -> IOFail State;
+    // Prints the doc comment.
+    print_doc: State -> IOFail ();
     print_doc = |state| (
-        let _ = *if state.@doc == "" {
+        if state.@doc == "" {
             state.print("")
         } else {
             state.print(state.@doc + "\n")
-        };
-        pure $ state.set_doc("")
+        }
     );
 
     // Checks whether the doc comment contains "nofixdoc".
@@ -170,21 +173,21 @@ namespace State {
     );
 
     // Prints the declaration of the type.
-    print_type_declaration: State -> IOFail State;
+    print_type_declaration: State -> IOFail ();
     print_type_declaration = |state| (
-        let _ = *state.println("```");
-        let _ = *state.print(state.@type_decl);
-        let _ = *state.println("```");
-        pure $ state.set_type_decl("")
+        eval *state.println("```");
+        eval *state.print(state.@type_decl);
+        eval *state.println("```");
+        pure()
     );
 
     // Prints the declaration of the trait.
-    print_trait_declaration: State -> IOFail State;
+    print_trait_declaration: State -> IOFail ();
     print_trait_declaration = |state| (
-        let _ = *state.println("```");
-        let _ = *state.print(state.@trait_decl);
-        let _ = *state.println("```");
-        pure $ state.set_trait_decl("")
+        eval *state.println("```");
+        eval *state.print(state.@trait_decl);
+        eval *state.println("```");
+        pure()
     );
 
     process_comment: String -> State -> IOFail State;
@@ -199,20 +202,11 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        let _ = *state.println("## module " + module_name + "\n");
+        eval *state.println("## module " + module_name + "\n");
+        eval *state.print_doc;
         let state = state.set_module_name(module_name);
         let state = state.set_module_summary(state.@doc);
-        let state = *state.print_doc;
-        pure $ state
-    );
-
-    process_impl_decl: String -> State -> IOFail State;
-    process_impl_decl = |impl_, state| (
-        if state.contains_nofixdoc {
-            pure $ state.set_doc("")
-        };
-        let _ = *state.println("#### `" + impl_ + "`\n");
-        let state = *state.print_doc;
+        let state = state.set_doc("");
         pure $ state
     );
 
@@ -221,8 +215,9 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        let _ = *state.println("#### " + line + "\n");
-        let state = *state.print_doc;
+        eval *state.println("#### " + line + "\n");
+        eval *state.print_doc;
+        let state = state.set_doc("");
         pure $ state
     );
 
@@ -241,9 +236,10 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_type_decl("").set_doc("")
         };
-        let _ = *state.println("### type " + state.@type_name + "\n");
-        let state = *state.print_doc;
-        let state = *state.print_type_declaration;
+        eval *state.println("### type " + state.@type_name + "\n");
+        eval *state.print_doc;
+        eval *state.print_type_declaration;
+        let state = state.set_doc("").set_type_decl("");
         pure $ state
     );
 
@@ -262,9 +258,10 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_trait_decl("").set_doc("")
         };
-        let _ = *state.println("### trait " + state.@trait_name + "\n");
-        let state = *state.print_doc;
-        let state = *state.print_trait_declaration;
+        eval *state.println("### trait " + state.@trait_name + "\n");
+        eval *state.print_doc;
+        eval *state.print_trait_declaration;
+        let state = state.set_doc("").set_trait_decl("");
         pure $ state
     );
 
@@ -273,8 +270,29 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        let _ = *state.println("### " + line + "\n");
-        let state = *state.print_doc;
+        eval *state.println("### " + line + "\n");
+        eval *state.print_doc;
+        let state = state.set_doc("");
+        pure $ state
+    );
+
+    process_impl_decl: String -> String -> Result ErrMsg String -> State -> IOFail State;
+    process_impl_decl = |orig_line, line, impl_name, state| (
+        let state = if impl_name.is_ok {
+            state.set_impl_name(impl_name.as_ok)
+        } else {
+            state
+        };
+        let state = state.mod_impl_decl(|t| t + orig_line + "\n");
+        if state.@impl_decl.find("}", 0).is_none {
+            pure $ state
+        };
+        if state.contains_nofixdoc {
+            pure $ state.set_impl_decl("").set_doc("")
+        };
+        eval *state.println("#### `impl " + state.@impl_name + "`\n");
+        eval *state.print_doc;
+        let state = state.set_doc("").set_impl_decl("").set_impl_name("");
         pure $ state
     );
 
@@ -283,8 +301,9 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        let _ = *state.println("### namespace " + namespace_name + "\n");
-        let state = *state.print_doc;
+        eval *state.println("### namespace " + namespace_name + "\n");
+        eval *state.print_doc;
+        let state = state.set_doc("");
         pure $ state
     );
 
@@ -298,7 +317,7 @@ namespace State {
     process_line = |orig_line, state| (
         let line = orig_line.strip_spaces;
         let is_comment = line.substring(0, 2) == "//";
-        if is_comment && state.@type_decl == "" && state.@trait_decl == "" {
+        if is_comment && state.@type_decl == "" && state.@trait_decl == "" && state.@impl_decl == "" {
             state.process_comment(line)
         };
         let module_decl = match_module.matches(line);
@@ -306,7 +325,7 @@ namespace State {
             state.process_module_decl(module_decl.as_ok)
         };
         let type_name: Result ErrMsg String = match_type.matches(line);
-        if (type_name.is_ok || state.@type_decl != "") && state.@trait_decl == "" {
+        if (type_name.is_ok || state.@type_decl != "") && state.@trait_decl == "" && state.@impl_decl == "" {
             state.process_type_decl(orig_line, line, type_name)
         };
         let trait_name: Result ErrMsg String = match_trait.matches(line);
@@ -318,9 +337,9 @@ namespace State {
             state.process_trait_alias_decl(line, trait_alias_name.as_ok)
         };
 
-        let impl_decl: Result ErrMsg String = match_impl.matches(line);
-        if impl_decl.is_ok {
-            state.process_impl_decl(impl_decl.as_ok)
+        let impl_name: Result ErrMsg String = match_impl.matches(line);
+        if impl_name.is_ok || state.@impl_decl != "" {
+            state.process_impl_decl(orig_line, line, impl_name)
         };
         let global_decl: Result ErrMsg () = match_global.matches(line);
         if global_decl.is_ok {
@@ -337,21 +356,21 @@ namespace State {
     // Returns the final state.
     process_file: String -> String -> IOFail State;
     process_file = |input_file_path, output_file_path| (
-        let _ = *eprintln("Writing: " + output_file_path).lift;
+        eval *eprintln("Writing: " + output_file_path).lift;
         let contents = *read_file_string(Path::parse(input_file_path).as_some);
         let input_filename = input_file_path.split_ex("/").to_array.get_last.as_some;
-        let _ = *make_parent_dir(output_file_path, none());
+        eval *make_parent_dir(output_file_path, none());
         let output_fh = *open_file(Path::parse(output_file_path).as_some, "w");
         let state = State::make(output_fh);
-        let _ = *state.println("# " + input_filename);
-        let _ = *state.println("");
+        eval *state.println("# " + input_filename);
+        eval *state.println("");
         let state = *contents.split("\n").loop_iter_m(
             state,
             |state, orig_line|
             let state = *state.process_line(orig_line);
             continue_m $ state
         );
-        let _ = *close_file(output_fh).lift;
+        eval *close_file(output_fh).lift;
         pure $ state
     );
 }
@@ -398,18 +417,18 @@ namespace IndexInfo
         let print = |str| write_string(output_fh, str);
         let println = |str| print(str + "\n");
 
-        let _ = *println("# Index\n");
-        let _ = *index.@modules.to_iter.fold_m(
+        eval *println("# Index\n");
+        eval *index.@modules.to_iter.fold_m(
             (), |_, module|
             let fix_path = module.@file_path;
             let doc_path = *fix_path.replace_suffix(".fix", ".md").from_result;
             let link_title = "module " + module.@name + " (" + fix_path + ")";
             let link = "[" + link_title + "](" + doc_path + ")";
-            let _ = *println("### " + link);
+            eval *println("### " + link);
             let summary = module.@summary;
             let (summary, _) = summary.split_first("\n\n");
             let summary = summary.strip_spaces;
-            let _ = *if summary == "" { println("\n") } else { println ("\n" + summary + "\n") };
+            eval *if summary == "" { println("\n") } else { println ("\n" + summary + "\n") };
             pure()
         );
         pure()
@@ -421,7 +440,7 @@ namespace IndexInfo
         let index_file_path = join_paths([output_dir, "index.md"]);
         let output_fh = *open_file(Path::parse(index_file_path).as_some, "w");
         let state = *write_index(output_fh, index);
-        let _ = *close_file(output_fh).lift;
+        eval *close_file(output_fh).lift;
         pure()
     );
 }
@@ -474,9 +493,9 @@ main = (
         let single_mode = matches.get_one("single");
         let input = matches.get_one("input").as_some;
         let output = matches.get_one("output").as_some;
-        //let _ = *process_file(input, output);
-        let _ = *if single_mode == some("true") {
-            let _ = *process_file(input, output);
+        //eval *process_file(input, output);
+        eval *if single_mode == some("true") {
+            let state = *process_file(input, output);
             pure()
         } else {
             process_files_recursively(input, output)

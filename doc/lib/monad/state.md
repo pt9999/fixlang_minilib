@@ -75,3 +75,12 @@ Maps both the return value and final state.
 ```
     type StateType (StateT s m) = s;
 ```
+#### `impl StateT s: MonadTrans`
+
+#### `impl [m: MonadError] StateT s m: MonadErrorIF`
+
+### type ErrorType
+
+```
+    type ErrorType (StateT s m) = ErrorType m;
+```

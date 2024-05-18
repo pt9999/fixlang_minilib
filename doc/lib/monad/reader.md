@@ -86,3 +86,10 @@ Lifts an underlying monad to a reader monad.
 ```
 #### `impl ReaderT e: MonadTrans`
 
+#### `impl [m: MonadError] ReaderT e m: MonadErrorIF`
+
+### type ErrorType
+
+```
+    type ErrorType (ReaderT e m) = ErrorType m;
+```

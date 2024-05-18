@@ -43,8 +43,6 @@ type [m: * -> *] WriterT e m a = unbox struct {
 ```
 type Writer e a = WriterT e Identity a;
 ```
-### namespace Writer
-
 #### writer_t: [m: Monad] m (e, a) -> WriterT e m a;
 
 Creates a generic writer monad from an enviroment and a value.
@@ -104,3 +102,10 @@ The type of the environment.
 ```
 #### `impl [e: Monoid] WriterT e: MonadTrans`
 
+#### `impl [e: Monoid, m: MonadError] WriterT e m: MonadErrorIF`
+
+### type ErrorType
+
+```
+    type ErrorType (WriterT e m) = ErrorType m;
+```

@@ -93,19 +93,7 @@ Lifts an underlyind monad to a writer monad.
 
 #### `impl [e: Monoid, m: Monad] WriterT e m: MonadWriterIF`
 
-### type EnvType
-
-The type of the environment.
-
-```
-    type EnvType (WriterT e m) = e;
-```
 #### `impl [e: Monoid] WriterT e: MonadTrans`
 
 #### `impl [e: Monoid, m: MonadError] WriterT e m: MonadErrorIF`
 
-### type ErrorType
-
-```
-    type ErrorType (WriterT e m) = ErrorType m;
-```

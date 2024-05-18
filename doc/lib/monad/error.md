@@ -21,15 +21,5 @@ trait [m: * -> *] m: MonadErrorIF {
 ```
 #### `impl Result e: MonadErrorIF`
 
-### type ErrorType
-
-```
-    type ErrorType (Result e) = e;
-```
 #### `impl IOFail: MonadErrorIF`
 
-### type ErrorType
-
-```
-    type ErrorType IOFail = ErrMsg;
-```

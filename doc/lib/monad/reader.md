@@ -79,10 +79,7 @@ Lifts an underlying monad to a reader monad.
 
 #### `impl [m: Monad] ReaderT e m: MonadReaderIF`
 
-### type EnvType
-
-```
-    type EnvType (ReaderT e m) = e;
-```
 #### `impl ReaderT e: MonadTrans`
+
+#### `impl [m: MonadError] ReaderT e m: MonadErrorIF`
 

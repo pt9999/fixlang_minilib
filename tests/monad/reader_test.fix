@@ -5,6 +5,7 @@ import HashMap;
 
 import Minilib.Monad.Reader;
 import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -59,6 +60,25 @@ test_reader_trans = (
     assert_equal("eq", expected, actual)
 );
 
+test_reader_iofail_error: TestCase;
+test_reader_iofail_error = (
+    make_test("test_reader_iofail_error") $ |_|
+    let iof: I64 -> IOFail F64 = |i64| (
+        if i64 >= 100 { throw $ "err1" };
+        pure $ i64.to_F64 * 2.0
+    );
+    let r: ReaderT I64 IOFail F64 = do {
+        let i64 = *ask;
+        if i64 < 0 { error $ "err2" };
+        let f64 = *iof(i64).lift_t;
+        pure $ f64
+    };
+    eval *assert_equal("ok", ok(24.0), *r.run_reader_t(12).to_result.lift);
+    eval *assert_equal("err1", err("err1"), *r.run_reader_t(100).to_result.lift);
+    eval *assert_equal("err2", err("err2"), *r.run_reader_t(-1).to_result.lift);
+    pure()
+);
+
 test_map_reader_t: TestCase;
 test_map_reader_t = (
     make_test("test_map_reader_t") $ |_|
@@ -86,6 +106,7 @@ main = (
         test_reader_monad,
         test_sub_reader,
         test_reader_trans,
+        test_reader_iofail_error,
         test_map_reader_t,
         test_with_reader_t,
         TestCase::empty

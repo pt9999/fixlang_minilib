@@ -4,6 +4,7 @@ import Debug;
 
 import Minilib.Monad.Writer;
 import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
 import Minilib.Trait.Monoid;
 import Minilib.Trait.Semigroup;
 import Minilib.Text.StringEx;
@@ -98,6 +99,25 @@ test_writer_trans = (
     assert_equal("eq", expected, actual)
 );
 
+test_writer_iofail_error: TestCase;
+test_writer_iofail_error = (
+    make_test("test_writer_iofail_error") $ |_|
+    let iof: I64 -> IOFail F64 = |i64| (
+        if i64 >= 100 { throw $ "err1" };
+        pure $ i64.to_F64 * 2.0
+    );
+    let w: I64 -> WriterT String IOFail F64 = |i64| (
+        if i64 < 0 { error $ "err2" };
+        eval *tell(i64.to_string);
+        let f64 = *iof(i64).lift_t;
+        pure $ f64
+    );
+    eval *assert_equal("ok", ok $ ("12", 24.0), *w(12).run_writer_t.to_result.lift);
+    eval *assert_equal("err1", err("err1"), *w(100).run_writer_t.to_result.lift);
+    eval *assert_equal("err2", err("err2"), *w(-1).run_writer_t.to_result.lift);
+    pure()
+);
+
 main: IO ();
 main = (
     [
@@ -107,7 +127,7 @@ main = (
         test_pass,
         test_map_writer_t,
         test_writer_trans,
-        TestCase::empty
+        test_writer_iofail_error,
     ]
     .run_test_driver
 );

@@ -70,8 +70,7 @@ Maps both the return value and final state.
 
 #### `impl [m: Monad] StateT s m: MonadStateIF`
 
-### type StateType
+#### `impl StateT s: MonadTrans`
 
-```
-    type StateType (StateT s m) = s;
-```
+#### `impl [m: MonadError] StateT s m: MonadErrorIF`
+

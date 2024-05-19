@@ -1,0 +1,112 @@
+module Minilib.Crypto.Tls13.Aead;
+
+import Minilib.Crypto.AES.GCM;
+
+trait a: AeadEncryptDecrypt {
+    // `aead.aead_encrypt(write_key, nonce, additional_data, plaintext)` encrypts a plaintext with additional data.
+    // It returns an encrypted data, or reports an error.
+    aead_encrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> a -> Result ErrMsg (Array U8);
+    // `aead.aead_decrypt(peer_write_key, nonce, additional_data, encrypted)` decrypts an encrypted data.
+    // It returns a plaintext, or reports an error.
+    aead_decrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> a -> Result ErrMsg (Array U8);
+}
+
+// RFC 5116 - An Interface and Algorithms for Authenticated Encryption
+
+// 5. AEAD Algorithms
+// 5.1. AEAD_AES_128_GCM
+
+type AeadAesGcm = unbox struct {
+    tag_len: I64,
+    k_len: I64,     // key length
+    p_max: I64,     // plaintext max length
+    a_max: I64,     // associated data max length
+    n_min: I64,     // nonce min length
+    n_max: I64,     // nonce max length
+    c_max: I64      // ciphertext max length
+};
+
+_AEAD_AES_128_GCM : AeadAesGcm;
+_AEAD_AES_128_GCM = AeadAesGcm {
+    tag_len: 16,
+    k_len: 16,
+    p_max: 1.shift_left(36) - 31,
+    a_max: 1.shift_left(61) - 1,
+    n_min: 12,
+    n_max: 12,
+    c_max: 1.shift_left(36) - 15,
+};
+
+_AEAD_AES_256_GCM : AeadAesGcm;
+_AEAD_AES_256_GCM = _AEAD_AES_128_GCM.set_k_len(32);
+
+impl AeadAesGcm: AeadEncryptDecrypt {
+    // `aead.aead_encrypt(write_key, nonce, additional_data, plaintext)` encrypts a plaintext with additional data.
+    // It returns an encrypted data.
+    aead_encrypt = |write_key, nonce, additional_data, plaintext, aead| (
+        if write_key.get_size != aead.@k_len {
+            err $ "key length mismatch"
+        };
+        if plaintext.get_size > aead.@p_max {
+            err $ "plaintext too long"
+        };
+        if additional_data.get_size > aead.@a_max {
+            err $ "additional_data too long"
+        };
+        if nonce.get_size < aead.@n_min {
+            err $ "nonce too short"
+        };
+        if nonce.get_size > aead.@n_max {
+            err $ "nonce too long"
+        };
+        let aes = AES::make(write_key);
+        let cipher = _to_cipher(aes);
+        let len_t = aead.@tag_len;
+        let iv = nonce;
+        let plaintext = plaintext;
+        let auth_data = additional_data;
+        let (ciphertext, tag) = gcm_ae(cipher, iv, plaintext, auth_data, len_t);
+        let encrypted = ciphertext.append(tag);
+        if encrypted.get_size > aead.@c_max {
+            err $ "ciphertext too long"
+        };
+        ok $ encrypted
+    );
+
+    // `aead.aead_decrypt(peer_write_key, nonce, additional_data, encrypted)` decrypts an encrypted data.
+    // It returns a plaintext, or reports an error.
+    aead_decrypt = |peer_write_key, nonce, additional_data, encrypted, aead| (
+        if write_key.get_size != aead.@k_len {
+            err $ "key length mismatch"
+        };
+        if encrypted.get_size > aead.@c_max {
+            err $ "ciphertext too long"
+        };
+        if encrypted.get_size < aead.@tag_len {
+            err $ "ciphertext too short"
+        };
+        if additional_data.get_size > aead.@a_max {
+            err $ "additional_data too long"
+        };
+        if nonce.get_size < aead.@n_min {
+            err $ "nonce too short"
+        };
+        if nonce.get_size > aead.@n_max {
+            err $ "nonce too long"
+        };
+        let len_enc = encrypted.get_size;
+        let tag = encrypted.get_sub(len_enc - aead.@tag_len, len_enc);
+        let ciphertext = encrypted.get_sub(0, len_enc - aead.@tag_len);
+
+        let aes = AES::make(write_key);
+        let cipher = _to_cipher(aes);
+        let len_t = aead.@tag_len;
+        let iv = nonce;
+        let auth_data = additional_data;
+        let plaintext = *gcm_ad(cipher, iv, ciphertext, auth_data, tag, len_t);
+        if plaintext.get_size > aead.@p_max {
+            err $ "plaintext too long"
+        };
+        ok $ plaintext
+    );
+}

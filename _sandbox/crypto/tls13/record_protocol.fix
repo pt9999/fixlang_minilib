@@ -48,7 +48,7 @@ impl ContentType: Unmarshal {
 }
 
 type TLSPlainText = unbox struct {
-    type: ContentType,
+    type_: ContentType,
     legacy_record_version: ProtocolVersion,
     //length: U16,
     fragment: Array U8
@@ -57,7 +57,7 @@ type TLSPlainText = unbox struct {
 namespace TLSPlainText {
     empty: TLSPlainText;
     empty = TLSPlainText {
-        type: invalid(),
+        type_: invalid(),
         legacy_record_version: 0x0303_U16,
         //length: 0_U16,
         fragment: []
@@ -66,7 +66,7 @@ namespace TLSPlainText {
 
 impl TLSPlainText: Marshal {
     marshal = |obj, buf| (
-        let buf = buf.marshal(obj.@type);
+        let buf = buf.marshal(obj.@type_);
         let buf = buf.marshal(obj.@legacy_record_version);
         eval assert(|_| "length overflow", obj.@fragment.get_size <= 16384);    // = 2**14
         let length: U16 = obj.@fragment.get_size.to_U16;
@@ -78,12 +78,12 @@ impl TLSPlainText: Marshal {
 
 impl TLSPlainText: Unmarshal {
     unmarshal = |buf| (
-        let (type: ContentType, buf) = *buf.unmarshal;
+        let (type_: ContentType, buf) = *buf.unmarshal;
         let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
         let (length: U16, buf) = *buf.unmarshal;
         let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
         let obj = TLSPlainText {
-            type: type,
+            type_: type_,
             legacy_record_version: legacy_record_version,
             //length: length,
             fragment: fragment 
@@ -92,3 +92,84 @@ impl TLSPlainText: Unmarshal {
     );
 }
 
+// 5.2. Record Payload Protection
+
+type TLSInnerPlaintext = unbox struct {
+    content: Array U8,      // length = TLSPlaintext.length
+    type_: ContentType,
+    zeros: Array U8,
+};
+
+impl TLSInnerPlaintext: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal_fixed(obj.@content);
+        let buf = buf.marshal(obj.@type_);
+        let buf = buf.marshal_fixed(obj.@zeros);
+        buf
+    );
+}
+
+unmarshal_TLSInnerPlaintext: I64 -> I64 -> ByteBuffer -> Result ErrMsg (TLSInnerPlaintext, ByteBuffer);
+unmarshal_TLSInnerPlaintext = |length, length_of_padding, buf| (
+    eval assert("invalid length", length >= 0);
+    eval assert("invalid length_of_padding", length_of_padding >= 0);
+    let (content: Array U8, buf) = *buf.unmarshal_fixed(length);
+    let (type_: ContentType, buf) = *buf.unmarshal_fixed;
+    let (zeros: Array U8, buf) = *buf.unmarshal_fixed(length_of_padding);
+    if zeros.find_by(|u8| u8 != 0_U8).is_some {
+        err $ "not zero padding"
+    };
+    let obj = TLSInnerPlaintext {
+        content: content,
+        type_: type_,
+        zeros: zeros
+    };
+    pure $ (obj, buf)
+);
+
+type TLSCiphertext = unbox struct {
+    opaque_type: ContentType, // = application_data; /* 23 */
+    legacy_record_version: ProtocolVersion, //  = 0x0303; /* TLS v1.2 */
+    //length: U16,
+    encrypted_record: Array U8,
+};
+
+namespace TLSCiphertext {
+    empty: TLSCiphertext;
+    empty = TLSCiphertext {
+        opaque_type: application_data(),
+        legacy_record_version: 0x0303_U16,
+        encrypted_record: []
+    };
+}
+
+impl TLSCiphertext: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@opaque_type);
+        let buf = buf.marshal(obj.@legacy_record_version);
+        eval assert(|_| "length overflow", obj.@encrypted_record.get_size <= 16384 + 256);    // = 2**14 + 256
+        let length: U16 = obj.@encrypted_record.get_size.to_U16;
+        let buf = buf.marshal(length);
+        let buf = buf.marshal_fixed(obj.@encrypted_record);
+        buf
+    );
+}
+
+impl TLSCiphertext: Unmarshal {
+    unmarshal = |buf| (
+        let (opaque_type: ContentType, buf) = *buf.unmarshal;
+        let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
+        let (length: U16, buf) = *buf.unmarshal;
+        if length > 16384 + 256 {
+            err $ "alert_record_overflow"
+        };
+        let (encrypted_record: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let obj = TLSCiphertext {
+            opaque_type: opaque_type,
+            legacy_record_version: legacy_record_version,
+            //length: length,
+            encrypted_record: encrypted_record
+        };
+        pure $ (obj, buf)
+    );
+}

@@ -1,0 +1,120 @@
+module Main;
+
+import Minilib.Crypto.HMAC;
+import Minilib.Crypto.SHA256;
+import Minilib.Crypto.Tls13.Hkdf;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+// RFC5869 Appendix A.  Test Vectors
+
+type TestVec = unbox struct {
+    name: String,
+    hmac: HMAC,
+    ikm: String,
+    salt: String,
+    info: String,
+    out_len: I64,
+    prk: String,
+    okm: String
+};
+
+impl TestVec: ToString {
+    to_string = |tv| "name=" + tv.@name;
+}
+
+test_case_1: TestVec;
+test_case_1 = TestVec {
+    name: "test_case_1",
+    hmac: hmac_sha256,
+    ikm: "0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    salt: "0x000102030405060708090a0b0c",
+    info: "0xf0f1f2f3f4f5f6f7f8f9",
+    out_len: 42,
+    prk: "0x077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5",
+    okm: "0x3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+};
+
+test_case_2: TestVec;
+test_case_2 = TestVec {
+    name: "test_case_2",
+    hmac: hmac_sha256,
+    ikm: "0x000102030405060708090a0b0c0d0e0f
+          101112131415161718191a1b1c1d1e1f
+          202122232425262728292a2b2c2d2e2f
+          303132333435363738393a3b3c3d3e3f
+          404142434445464748494a4b4c4d4e4f",
+    salt: "0x606162636465666768696a6b6c6d6e6f
+          707172737475767778797a7b7c7d7e7f
+          808182838485868788898a8b8c8d8e8f
+          909192939495969798999a9b9c9d9e9f
+          a0a1a2a3a4a5a6a7a8a9aaabacadaeaf",
+    info: "0xb0b1b2b3b4b5b6b7b8b9babbbcbdbebf
+          c0c1c2c3c4c5c6c7c8c9cacbcccdcecf
+          d0d1d2d3d4d5d6d7d8d9dadbdcdddedf
+          e0e1e2e3e4e5e6e7e8e9eaebecedeeef
+          f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+    out_len: 82,
+    prk: "0x06a6b88c5853361a06104c9ceb35b45c
+          ef760014904671014a193f40c15fc244",
+    okm: "0xb11e398dc80327a1c8e7f78c596a4934
+          4f012eda2d4efad8a050cc4c19afa97c
+          59045a99cac7827271cb41c65e590e09
+          da3275600c2f09b8367793a9aca3db71
+          cc30c58179ec3e87c14c01d5c1f3434f
+          1d87"
+};
+
+test_case_3: TestVec;
+test_case_3 = TestVec {
+    name: "test_case_3",
+    hmac: hmac_sha256,
+    ikm: "0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    salt: "",
+    info: "",
+    out_len: 42,
+    prk: "0x19ef24a32c717b167f33a91d6f648bdf
+          96596776afdb6377ac434c1c293ccb04",
+    okm: "0x8da4e775a563c18f715f802a063c5a31
+          b8a11f5c5ee1879ec3454e5f3c738d2d
+          9d201395faa4b61a96c8"
+};
+
+parse_hex: String -> IOFail (Array U8);
+parse_hex = |str| (
+    let str = if str.starts_with("0x") { str.get_sub(2, str.get_size) } else { str };
+    from_string_hex(str).from_result
+);
+
+all_test_cases: TestCase;
+all_test_cases = (
+    make_table_test("all_test_cases",
+        [
+            test_case_1,
+            test_case_2,
+            test_case_3,
+        ],
+        |tv|
+        let ikm  = *parse_hex(tv.@ikm);
+        let salt = *parse_hex(tv.@salt);
+        let info = *parse_hex(tv.@info);
+        let out_len = tv.@out_len;
+        let prk = *parse_hex(tv.@prk);
+        let okm = *parse_hex(tv.@okm);
+        let hkdf = HKDF::make(tv.@hmac);
+        let prk_actual = *hkdf.extract(salt, ikm).from_result;
+        eval *assert_equal("prk", prk, prk_actual);
+        let okm_actual = *hkdf.expand(prk, info, out_len).from_result;
+        eval *assert_equal("okm", okm, okm_actual);
+        pure()
+    )
+);
+
+main: IO ();
+main = (
+    [
+        all_test_cases,
+    ]
+    .run_test_driver
+);

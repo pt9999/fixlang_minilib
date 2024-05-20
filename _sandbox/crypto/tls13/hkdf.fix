@@ -1,0 +1,59 @@
+// HKDF algorithms, which is defined in RFC 5869.
+// https://tex2e.github.io/rfc-translater/html/rfc5869.html
+module Minilib.Crypto.Tls13.Hkdf;
+
+import Minilib.Crypto.HMAC;
+import Minilib.Crypto.SHA256;
+
+// An HMAC instance that uses SHA256 as a hash function.
+hmac_sha256: HMAC;
+hmac_sha256 = HMAC::make(SHA256::digest, 64, 32);
+
+type HKDF = unbox struct {
+    hmac: HMAC,
+};
+
+namespace HKDF {
+    make: HMAC -> HKDF;
+    make = |hmac| HKDF {
+        hmac: hmac
+    };
+
+    // `hkdf.extract(salt, ikm)` executes `HKDF-Extract` algorithm.
+    // Input: `salt` = optional salt value
+    //        `ikm` = input keying material
+    // Output: `prk` = a pseudo random key
+    extract: Array U8 -> Array U8 -> HKDF -> Result ErrMsg (Array U8);
+    extract = |salt, ikm, hkdf| (
+        let hash_len = hkdf.@hmac.@output_block_size;
+        let salt = if salt.get_size != 0 { salt }
+        else { Array::fill(hash_len, 0_U8) };
+        let prk = hkdf.@hmac.digest(salt, ikm);
+        pure $ prk
+    );
+
+    // `hkdf.expand(prk, info, len)` executes `HKDF-Expand` algorithm.
+    // Input: `prk` = a pseudo random key
+    //        `info` = optional context and application specific information
+    //        `out_len` = length of output keying material in octets (<= 255*HashLen)
+    // Output: `okm` = output keying material (of `out_len` octets)
+    expand: Array U8 -> Array U8 -> I64 -> HKDF -> Result ErrMsg (Array U8);
+    expand = |prk, info, out_len, hkdf| (
+        let hash_len = hkdf.@hmac.@output_block_size;
+        if out_len < 0 || out_len > 255 * hash_len {
+            err $ "out_len out of range"
+        };
+        let n = (out_len + hash_len - 1) / hash_len;
+        let okm = loop(
+            (Array::empty(n * hash_len), Array::empty(0), 1),
+            |(okm, t, i)|
+            if i > n { break $ okm };
+            let t = hkdf.@hmac.digest(prk, t.append(info).push_back(i.to_U8));
+            let okm = okm.append(t);
+            continue $ (okm, t, i + 1)
+        );
+        let okm = if okm.get_size == out_len { okm }
+        else { okm.get_sub(0, out_len) };
+        pure $ okm
+    );
+}

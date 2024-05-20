@@ -4,6 +4,9 @@ LIBS = -L ../../../lib -L .
 %.out: %.fix
 	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $<
 
+%.run: %.fix
+	$(FIXAUTOLINK) run $(LIBS) -f $<
+
 all:
 
 tls13_test1:

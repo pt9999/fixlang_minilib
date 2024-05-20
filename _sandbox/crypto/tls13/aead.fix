@@ -1,5 +1,6 @@
 module Minilib.Crypto.Tls13.Aead;
 
+import Minilib.Crypto.AES;
 import Minilib.Crypto.AES.GCM;
 
 trait a: AeadEncryptDecrypt {
@@ -17,13 +18,13 @@ trait a: AeadEncryptDecrypt {
 // 5.1. AEAD_AES_128_GCM
 
 type AeadAesGcm = unbox struct {
-    tag_len: I64,
-    k_len: I64,     // key length
-    p_max: I64,     // plaintext max length
-    a_max: I64,     // associated data max length
-    n_min: I64,     // nonce min length
-    n_max: I64,     // nonce max length
-    c_max: I64      // ciphertext max length
+    tag_len: I64,   // tag length (in octets)
+    k_len: I64,     // key length (in octets)
+    p_max: I64,     // plaintext max length (in octets)
+    a_max: I64,     // associated data max length (in octets)
+    n_min: I64,     // nonce min length (in octets)
+    n_max: I64,     // nonce max length (in octets)
+    c_max: I64      // ciphertext max length (in octets)
 };
 
 _AEAD_AES_128_GCM : AeadAesGcm;
@@ -61,7 +62,7 @@ impl AeadAesGcm: AeadEncryptDecrypt {
         };
         let aes = AES::make(write_key);
         let cipher = _to_cipher(aes);
-        let len_t = aead.@tag_len;
+        let len_t = aead.@tag_len * 8;
         let iv = nonce;
         let plaintext = plaintext;
         let auth_data = additional_data;
@@ -76,7 +77,7 @@ impl AeadAesGcm: AeadEncryptDecrypt {
     // `aead.aead_decrypt(peer_write_key, nonce, additional_data, encrypted)` decrypts an encrypted data.
     // It returns a plaintext, or reports an error.
     aead_decrypt = |peer_write_key, nonce, additional_data, encrypted, aead| (
-        if write_key.get_size != aead.@k_len {
+        if peer_write_key.get_size != aead.@k_len {
             err $ "key length mismatch"
         };
         if encrypted.get_size > aead.@c_max {
@@ -98,9 +99,9 @@ impl AeadAesGcm: AeadEncryptDecrypt {
         let tag = encrypted.get_sub(len_enc - aead.@tag_len, len_enc);
         let ciphertext = encrypted.get_sub(0, len_enc - aead.@tag_len);
 
-        let aes = AES::make(write_key);
+        let aes = AES::make(peer_write_key);
         let cipher = _to_cipher(aes);
-        let len_t = aead.@tag_len;
+        let len_t = aead.@tag_len * 8;
         let iv = nonce;
         let auth_data = additional_data;
         let plaintext = *gcm_ad(cipher, iv, ciphertext, auth_data, tag, len_t);

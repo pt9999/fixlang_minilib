@@ -9,8 +9,11 @@ LIBS = -L ../../../lib -L .
 
 all:
 
-tls13_test1:
-	$(FIXAUTOLINK) run $(LIBS) -f tls13_test1.fix -O separated
+handshake_protocol_test:
+	$(FIXAUTOLINK) run $(LIBS) -f handshake_protocol_test.fix -O separated
+
+record_protocol_test:
+	$(FIXAUTOLINK) run $(LIBS) -f record_protocol_test.fix -O separated
 
 clean:
 	rm -f *.out

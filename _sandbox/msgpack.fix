@@ -3,6 +3,8 @@ module Main;
 import Debug;
 
 import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
@@ -39,6 +41,15 @@ trait a: Pack {
     pack: [m: Monad, m: WriteByte] a -> m ();
 }
 
+trait a: Unpack {
+    // `unpack(i)` unpacks a value from a stream whose first byte is `i`.
+    unpack: [m: MonadError, m: ReadByte, ErrorType m = String] 
+            U8 -> m a;
+}
+
+_TypeErr: ErrMsg;
+_TypeErr = "TypeErr";
+
 impl U8: Pack {
     pack = |i| (
         if i <= 0x7f_U8 {
@@ -51,6 +62,20 @@ impl U8: Pack {
     );
 }
 
+impl U8: Unpack {
+    unpack = |i| (
+        if i <= 0x7f_U8 {
+            // positive fixint 0XXXXXXX
+            pure $ i
+        };
+        if i == 0xcc_U8 {
+            // 8-bit unsigned integer
+            read_byte
+        };
+        error $ _TypeErr 
+    );
+}
+
 impl U16: Pack {
     pack = |i| (
         if i <= 0xff_U16 {
@@ -60,6 +85,20 @@ impl U16: Pack {
         eval *write_byte(0xcd_U8);
         eval *write_byte(i.shift_right(8_U16).to_U8);
         write_byte(i.to_U8)
+    );
+}
+
+impl U16: Unpack {
+    unpack = |i| (
+        if i == 0xcd_U8 {
+            // 16-bit unsigned integer (big endian)
+            let v0 = *read_byte;
+            let v1 = *read_byte;
+            pure $ v0.to_U16.shift_left(8_U16) 
+            .bit_or(v1.to_U16)
+        };
+        let v: U8 = *unpack(i);
+        pure $ v.to_U16
     );
 }
 
@@ -152,8 +191,8 @@ impl I64: Pack {
     );
 }
 
-main: IO ();
-main = (
+test_pack: IO ();
+test_pack = (
     let buf = ByteBuffer::empty(0, big_endian());
     let w: ByteRW () = do {
         eval *0x12_U8.pack;
@@ -171,4 +210,29 @@ main = (
     let ((), buf) = res.as_ok;
     println((buf.@array.to_string_hex, ).format("buf={}"))
 );
+
+test_unpack: IO ();
+test_unpack = (
+    let arr = [ 0x12, 0xcc, 0xab, 0xcd, 0xab, 0xcd ].map(to_U8); 
+    let buf = ByteBuffer::make(arr, big_endian());
+    let r: ByteRW String = do {
+        let i: U8 = *read_byte;
+        let a1: U8 = *unpack(i);
+        let i: U8 = *read_byte;
+        let a2: U8 = *unpack(i);
+        let i: U8 = *read_byte;
+        let a3: U16 = *unpack(i);
+        pure $ (a1.to_string_hex, 
+                a2.to_string_hex,
+                a3.to_string_hex)
+                .format("a1={} a2={} a3={}")
+    };     
+    let res = r.run_state_t(buf);
+    if res.is_err { println("err: " + res.as_err) };
+    let (str, buf) = res.as_ok;
+    println(str)
+);
+
+main: IO ();
+main = test_unpack;
 

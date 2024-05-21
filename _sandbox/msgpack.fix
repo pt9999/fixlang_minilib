@@ -9,93 +9,88 @@ import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
-type MonadMsgPack a = State ByteBuffer a;
-
-trait [m: * -> *] m: WriteByte {
-    write_byte: U8 -> m ();
+trait [m: * -> *] m: MonadMarshalIF {
+    write_marshal: [a: Marshal] a -> m ();
 }
 
-trait MonadWriteByte = Functor + MonadError + WriteByte;
+trait MonadMarshal = Functor + Monad + MonadErrorIF + MonadMarshalIF;
 
-trait [m: * -> *] m: ReadByte {
-    read_byte: m U8;
+trait [m: * -> *] m: MonadUnmarshalIF {
+    read_unmarshal: [a: Unmarshal] m a;
 }
 
-trait MonadReadByte = Functor + MonadError + ReadByte;
+trait MonadUnmarshal = Functor + Monad + MonadErrorIF + MonadUnmarshalIF;
 
-type ByteRW = StateT ByteBuffer (Result ErrMsg);
+type ByteBufferState = StateT ByteBuffer (Result ErrMsg);
 
-impl ByteRW: WriteByte {
-    write_byte = |u8| (
-        mod_state(marshal(u8))
+impl ByteBufferState: MonadMarshalIF {
+    write_marshal = |val| (
+        mod_state(marshal(val))
     );
 }
 
-impl ByteRW: ReadByte {
-    read_byte = make_state_t_monad $ unmarshal;
+impl ByteBufferState: MonadUnmarshalIF {
+    read_unmarshal = make_state_t_monad $ unmarshal;
 }
 
 //------------------------------------------
 trait a: Pack {
-    pack: [m: MonadWriteByte, ErrorType m = String] a -> m ();
+    pack: [m: MonadMarshal, ErrorType m = String] a -> m ();
 }
 
 trait a: Unpack {
-    unpack: [m: MonadReadByte, ErrorType m = String] m a;
+    unpack: [m: MonadUnmarshal, ErrorType m = String] m a;
 }
 
 _TypeErr: ErrMsg;
 _TypeErr = "TypeErr";
 
 impl U8: Pack {
-    pack = |i| (
-        if i <= 0x7f_U8 {
+    pack = |u8: U8| (
+        if u8 <= 0x7f_U8 {
             // positive fixint 0XXXXXXX
-            write_byte(i)
+            write_marshal(u8)
         };
         // 8-bit unsigned integer
-        eval *write_byte(0xcc_U8);
-        write_byte(i)
+        eval *write_marshal(0xcc_U8);
+        write_marshal(u8)
     );
 }
 
 impl U8: Unpack {
     unpack = (
-        let i: U8 = *read_byte;
-        if i <= 0x7f_U8 {
+        let u8: U8 = *read_unmarshal;
+        if u8 <= 0x7f_U8 {
             // positive fixint 0XXXXXXX
-            pure $ i
+            pure $ u8
         };
-        if i == 0xcc_U8 {
+        if u8 == 0xcc_U8 {
             // 8-bit unsigned integer
-            read_byte
+            read_unmarshal
         };
         error $ _TypeErr 
     );
 }
 
 impl U16: Pack {
-    pack = |i| (
-        if i <= 0xff_U16 {
-            i.to_U8.pack
+    pack = |u16: U16| (
+        if u16 <= 0xff_U16 {
+            u16.to_U8.pack
         };
         // 16-bit unsigned integer (big endian)
-        eval *write_byte(0xcd_U8);
-        eval *write_byte(i.shift_right(8_U16).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xcd_U8);
+        write_marshal(u16)
     );
 }
 
 impl U16: Unpack {
     unpack = (
         unpack.map(U8::to_U16).catch(|errmsg|
-            let i: U8 = *read_byte;
-            if i == 0xcd_U8 {
+            let u8: U8 = *read_unmarshal;
+            if u8 == 0xcd_U8 {
                 // 16-bit unsigned integer (big endian)
-                let v0 = *read_byte;
-                let v1 = *read_byte;
-                pure $ v0.to_U16.shift_left(8_U16)
-                .bit_or(v1.to_U16)
+                let u16: U16 = *read_unmarshal;
+                pure $ u16
             };
             error $ _TypeErr
         )
@@ -103,98 +98,90 @@ impl U16: Unpack {
 }
 
 impl U32: Pack {
-    pack = |i| (
-        if i <= 0xffff_U32 {
-            i.to_U16.pack
+    pack = |u32: U32| (
+        if u32 <= 0xffff_U32 {
+            u32.to_U16.pack
         };
         // 32-bit unsigned integer (big endian)
-        eval *write_byte(0xce_U8);
-        eval *write_byte(i.shift_right(24_U32).to_U8);
-        eval *write_byte(i.shift_right(16_U32).to_U8);
-        eval *write_byte(i.shift_right(8_U32).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xce_U8);
+        write_marshal(u32)
+    );
+}
+
+impl U32: Unpack {
+    unpack = (
+        unpack.map(U16::to_U32).catch(|errmsg|
+            let u8: U8 = *read_unmarshal;
+            if u8 == 0xce_U8 {
+                // 32-bit unsigned integer (big endian)
+                read_unmarshal
+            };
+            error $ _TypeErr
+        )
     );
 }
 
 impl U64: Pack {
-    pack = |i| (
-        if i <= 0xffffffff_U64 {
-            i.to_U32.pack
+    pack = |u64: U64| (
+        if u64 <= 0xffffffff_U64 {
+            u64.to_U32.pack
         };
         // 64-bit unsigned integer (big endian)
-        eval *write_byte(0xcf_U8);
-        eval *write_byte(i.shift_right(56_U64).to_U8);
-        eval *write_byte(i.shift_right(48_U64).to_U8);
-        eval *write_byte(i.shift_right(40_U64).to_U8);
-        eval *write_byte(i.shift_right(32_U64).to_U8);
-        eval *write_byte(i.shift_right(24_U64).to_U8);
-        eval *write_byte(i.shift_right(16_U64).to_U8);
-        eval *write_byte(i.shift_right(8_U64).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xcf_U8);
+        write_marshal(u64)
     );
 }
 
 impl I8: Pack {
-    pack = |i| (
-        if -0x1f_I8 <= i && i <= 0x7f_I8 {
+    pack = |i8: I8| (
+        if -0x1f_I8 <= i8 && i8 <= 0x7f_I8 {
             // positive fixint 0XXXXXXX
             // negative fixint 111XXXXX
-            write_byte(i.to_U8)
+            write_marshal(i8.to_U8)
         };
         // 8-bit signed integer
-        eval *write_byte(0xd0_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xd0_U8);
+        write_marshal(i8.to_U8)
     );
 }
 
 impl I16: Pack {
-    pack = |i| (
-        if -0x80_I16 <= i && i <= 0x7f_I16 {
-            i.to_U8.pack
+    pack = |i16| (
+        if -0x80_I16 <= i16 && i16 <= 0x7f_I16 {
+            i16.to_U8.pack
         };
         // 16-bit signed integer (big endian)
-        eval *write_byte(0xd1_U8);
-        eval *write_byte(i.shift_right(8_I16).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xd1_U8);
+        write_marshal(i16.to_U16)
     );
 }
 
 impl I32: Pack {
-    pack = |i| (
-        if -0x8000_I32 <= i && i <= 0x7fff_I32 {
-            i.to_U16.pack
+    pack = |i32| (
+        if -0x8000_I32 <= i32 && i32 <= 0x7fff_I32 {
+            i32.to_U16.pack
         };
         // 32-bit signed integer (big endian)
-        eval *write_byte(0xd2_U8);
-        eval *write_byte(i.shift_right(24_I32).to_U8);
-        eval *write_byte(i.shift_right(16_I32).to_U8);
-        eval *write_byte(i.shift_right(8_I32).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xd2_U8);
+        write_marshal(i32.to_U32)
     );
 }
 
 impl I64: Pack {
-    pack = |i| (
-        if -0x80000000 <= i && i <= 0x7fffffff {
-            i.to_U32.pack
+    pack = |i64| (
+        if -0x80000000 <= i64 && i64 <= 0x7fffffff {
+            i64.to_U32.pack
         };
         // 64-bit signed integer (big endian)
-        eval *write_byte(0xd3_U8);
-        eval *write_byte(i.shift_right(56).to_U8);
-        eval *write_byte(i.shift_right(48).to_U8);
-        eval *write_byte(i.shift_right(40).to_U8);
-        eval *write_byte(i.shift_right(32).to_U8);
-        eval *write_byte(i.shift_right(24).to_U8);
-        eval *write_byte(i.shift_right(16).to_U8);
-        eval *write_byte(i.shift_right(8).to_U8);
-        write_byte(i.to_U8)
+        eval *write_marshal(0xd3_U8);
+        write_marshal(i64.to_U64)
     );
 }
 
 test_pack: IO ();
 test_pack = (
     let buf = ByteBuffer::empty(0, big_endian());
-    let w: ByteRW () = do {
+    let w: ByteBufferState () = do {
         eval *0x12_U8.pack;
         eval *0x1234_U16.pack;
         eval *0x12345678_U32.pack;
@@ -215,7 +202,7 @@ test_unpack: IO ();
 test_unpack = (
     let arr = [ 0x12, 0xcc, 0xab, 0xcd, 0xab, 0xcd ].map(to_U8); 
     let buf = ByteBuffer::make(arr, big_endian());
-    let r: ByteRW String = do {
+    let r: ByteBufferState String = do {
         let a1: U8 = *unpack;
         let a2: U8 = *unpack;
         let a3: U16 = *unpack;
@@ -231,5 +218,5 @@ test_unpack = (
 );
 
 main: IO ();
-main = test_unpack;
+main = test_pack;
 

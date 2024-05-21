@@ -17,6 +17,8 @@ import Minilib.Text.StringEx;
 import Minilib.Text.SimpleParser;
 import Sandbox.NdArray;
 import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 
 _EOF: String;
 _EOF = "EOF";
@@ -343,7 +345,7 @@ type Value = box union {
     v_err: String,
     v_float: F64,
     v_range: (Option I64, Option I64),
-    v_func: (String, Value -> AppStateIOF Value),
+    v_func: (String, Func),
     v_array: Array Value,
     v_ndarray: NdArray F64
 };
@@ -374,10 +376,12 @@ impl Value: ToString {
     );
 }
 
+type EvalEffect = AppStateIOF;
+
 // Expr evaluator
 namespace Evaluator
 {
-    evaluate: Expr -> AppStateIOF Value;
+    evaluate: Expr -> EvalEffect Value;
     evaluate = |expr| (
         if expr.is_ex_ident {
             _eval_ident $ expr.as_ex_ident
@@ -413,7 +417,7 @@ namespace Evaluator
         pure $ v_none()
     );
 
-    _evaluate_array: Array Expr -> AppStateIOF (Array Value);
+    _evaluate_array: Array Expr -> EvalEffect (Array Value);
     _evaluate_array = |array_expr| (
         array_expr.to_iter.fold_m(
             [], |array_value, expr|
@@ -422,7 +426,7 @@ namespace Evaluator
         )
     );
 
-    _eval_ident: String -> AppStateIOF Value;
+    _eval_ident: String -> EvalEffect Value;
     _eval_ident = |name| (
         let app_state: AppState = *get_state;
         let opt = app_state.@env.find(name);
@@ -432,7 +436,7 @@ namespace Evaluator
         pure $ opt.as_some
     );
     
-    _eval_assign: (Expr, Expr) -> AppStateIOF Value;
+    _eval_assign: (Expr, Expr) -> EvalEffect Value;
     _eval_assign = |(lhs, rhs)| (
         if lhs.is_ex_ident {
             let lhs = lhs.as_ex_ident;
@@ -445,7 +449,7 @@ namespace Evaluator
         error $ "assign type mismatch"
     );
 
-    _eval_funcall: (String, Array Expr) -> AppStateIOF Value;
+    _eval_funcall: (String, Array Expr) -> EvalEffect Value;
     _eval_funcall = |(name, args)| (
         let f = *_eval_ident(name);
         args.to_iter.fold_m(
@@ -460,7 +464,7 @@ namespace Evaluator
         )
     );
     
-    _eval_infix: (Expr, String, Expr) -> AppStateIOF Value;
+    _eval_infix: (Expr, String, Expr) -> EvalEffect Value;
     _eval_infix = |(lhs, op, rhs)| (
         let lhs = *evaluate(lhs);
         let rhs = *evaluate(rhs);
@@ -479,7 +483,7 @@ namespace Evaluator
         error $ "_eval_infix: type mismatch"
     );
 
-    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> EvalEffect Value;
     _eval_infix_op = |(lhs, op, rhs), to_value| (
         if op == "+" { pure $ to_value $ lhs + rhs };
         if op == "-" { pure $ to_value $ lhs - rhs };
@@ -488,7 +492,7 @@ namespace Evaluator
         error $ "invalid op: " + op
     );
 
-    _eval_unary: (String, Expr) -> AppStateIOF Value;
+    _eval_unary: (String, Expr) -> EvalEffect Value;
     _eval_unary = |(op, expr)| (
         let value = *evaluate(expr);
         
@@ -501,13 +505,13 @@ namespace Evaluator
         error $ "_eval_unary: type mismatch"
     );
 
-    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> AppStateIOF Value;
+    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> EvalEffect Value;
     _eval_unary_op = |(op, val), to_value| (
         if op == "-" { pure $ to_value $ -val };
         error $ "invalid op: " + op
     );
 
-    _eval_array: Array Expr -> AppStateIOF Value;
+    _eval_array: Array Expr -> EvalEffect Value;
     _eval_array = |array_expr| (
         let array_value = *_evaluate_array(array_expr);
         if array_value.is_all(is_v_float) {
@@ -519,7 +523,7 @@ namespace Evaluator
         pure $ v_array (array_value)
     );
 
-    _eval_subsc: (Expr, Array Expr) -> AppStateIOF Value;
+    _eval_subsc: (Expr, Array Expr) -> EvalEffect Value;
     _eval_subsc = |(lhs, rhs)| (
         let lhs = *evaluate(lhs);
         let rhs = *_evaluate_array(rhs);
@@ -565,9 +569,9 @@ namespace Evaluator
         error $ "invalid subsc: lhs="+lhs.to_string + " rhs="+rhs.to_string
     );
 
-    _eval_range: (Option Expr, Option Expr) -> AppStateIOF Value;
+    _eval_range: (Option Expr, Option Expr) -> EvalEffect Value;
     _eval_range = |(lhs, rhs)| (
-        let inner: Option Expr -> AppStateIOF (Option I64) = |expr| (
+        let inner: Option Expr -> EvalEffect (Option I64) = |expr| (
             if expr.is_none {
                 pure $ none ()
             };
@@ -584,7 +588,7 @@ namespace Evaluator
 }
 
 
-type Func = Value -> AppStateIOF Value;
+type Func = Value -> EvalEffect Value;
 
 namespace Builtin {
 
@@ -602,7 +606,7 @@ namespace Builtin {
         app_state.mod_env(insert(name, func))
     ); 
 
-    ndarray: Value -> AppStateIOF Value;
+    ndarray: Value -> EvalEffect Value;
     ndarray = |arg| (
         if arg.is_v_ndarray {
             pure $ arg
@@ -618,7 +622,7 @@ namespace Builtin {
         error $ "invalid arg: arg=" + arg.to_string
     );
 
-    stack: Value -> AppStateIOF Value;
+    stack: Value -> EvalEffect Value;
     stack = |arg| (
         if !arg.is_v_array {
             error $ "invalid arg type"
@@ -648,7 +652,6 @@ type AppState = struct {
 // Type of State monad with IOFail for application state
 type AppStateIOF = StateT AppState IOFail;
 
-
 namespace AppState {
     // An empty application state
     empty: AppState;
@@ -656,21 +659,18 @@ namespace AppState {
         env: HashMap::empty(100)
     };
 
-    // Throws an error
-    error: String -> AppStateIOF a;
-    error = lift_state << throw;
-
     process_line: String -> AppState -> IO AppState;
     process_line = |line, app_state| (
         do {
-            //let _ = *println("process_line: " + line).lift;
-            let expr = *parse_expr(line).from_result;
-            let (expr, app_state) = *evaluate(expr).run_state_t(app_state);
-            let _ = *println("--> " + expr.to_string).lift;
-            pure $ app_state
+            //eval *println("process_line: " + line).lift_io;
+            let expr = *parse_expr(line).from_result_t;
+            let value = *evaluate(expr);
+            eval *println("--> " + value.to_string).lift_io;
+            pure()
         }
-        .try(|err| 
-            let _ = *eprintln("ERROR: " + err);
+        .exec_state_t(app_state)
+        .try(|err|
+            eval *eprintln("ERROR: " + err).lift_io;
             pure $ app_state
         )
     );

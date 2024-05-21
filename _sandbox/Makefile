@@ -1,6 +1,9 @@
 %.out: %.fix
 	../bin/fixautolink build -o $@ -L ../lib -f $<
 
+%.run: %.fix
+	../bin/fixautolink run -o $@ -L ../lib -f $< -O separated
+
 all:
 
 channel_test1: 
@@ -10,10 +13,10 @@ ndarray:
 	../bin/fixautolink run -L ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
-	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
+	../bin/fixautolink run -L ../lib -f ndarray_calc.fix ndarray.fix -d readline -O separated
 
 ndarray_calc.out:
-	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
+	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix -d readline -O separated
 
 png: 
 	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z

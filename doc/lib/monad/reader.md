@@ -83,3 +83,7 @@ Lifts an underlying monad to a reader monad.
 
 #### `impl [m: MonadError] ReaderT e m: MonadErrorIF`
 
+#### `impl [m: MonadIO] ReaderT e m: MonadIOIF`
+
+#### `impl [m: MonadIOFail] ReaderT e m: MonadIOFailIF`
+

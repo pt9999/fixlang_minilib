@@ -109,6 +109,10 @@ Simple XML Model.
 
 A Channel that can be used for the communication of threads.
 
+### [module Minilib.IO.Errno (lib/io/errno.fix)](lib/io/errno.md)
+
+Functions for `errno` which is set by system calls and some library functions.
+
 ### [module Minilib.IO.FileSystem (lib/io/file_system.fix)](lib/io/file_system.md)
 
 File system module. For example, finding files, checks if file or directory exists,
@@ -181,8 +185,17 @@ PNG image I/O.
 
 Scalable Vector Graphics (SVG) 1.1
 
+### [module Minilib.Monad.Cont (lib/monad/cont.fix)](lib/monad/cont.md)
+
+Continuation Monad.
+
 ### [module Minilib.Monad.Error (lib/monad/error.fix)](lib/monad/error.md)
 
+Definition of `MonadErrorIF` trait which can report errors.
+
+### [module Minilib.Monad.Except (lib/monad/except.fix)](lib/monad/except.md)
+
+Except monad transformer that implements `MonadErrorIF`.
 
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 
@@ -191,6 +204,10 @@ Scalable Vector Graphics (SVG) 1.1
 ### [module Minilib.Monad.Identity (lib/monad/identity.fix)](lib/monad/identity.md)
 
 Identity monad
+
+### [module Minilib.Monad.IO (lib/monad/io.fix)](lib/monad/io.md)
+
+Monadic traits which can lift IO and IOFail monad.
 
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 

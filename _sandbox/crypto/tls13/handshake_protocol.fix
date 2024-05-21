@@ -93,10 +93,32 @@ namespace ClientHello {
             extensions: []
         }
     );
+
+    empty: ClientHello;
+    empty = ClientHello {
+        legacy_version: 0x0303_U16,
+        random: Array::fill(32, 0x00_U8),
+        legacy_session_id: [],
+        cipher_suites: [],
+        legacy_compression_method: [ 0_U8 ],
+        extensions: []
+    };
+
+    init: SecureRandom -> ClientHello -> IOFail ClientHello;
+    init = |secure_random, hello| (
+        let (random, _) = *secure_random.generate_bytes(32);
+        let hello = hello.set_random(random);
+        let hello = hello.set_cipher_suites([
+           _TLS_AES_128_GCM_SHA256() 
+        ]);
+        let hello = hello.set_extensions(Extension::default_extensions);
+        pure $ hello
+    );
 }
 
 impl ClientHello: Marshal {
     marshal = |msg, buf| (
+        eval assert(|_| "invalid random size", msg.@random.get_size == 32);
         let buf = buf.marshal(msg.@legacy_version);
         let buf = buf.marshal_fixed(msg.@random);
         let buf = buf.marshal_var_size(msg.@legacy_session_id, to_U8);
@@ -168,6 +190,12 @@ type Extension = unbox union {
 };
 
 namespace Extension {
+    default_extensions: Array Extension;
+    default_extensions = [
+        supported_groups(NamedGroupList::default),
+        supported_versions(SupportedVersions::default),
+    ];
+
     get_extension_type: Extension -> ExtensionType;
     get_extension_type = |ex| (
         if ex.is_unknown_extension { ex.as_unknown_extension.to_I64 };
@@ -232,6 +260,15 @@ impl Extension: Unmarshal {
 type SupportedVersions = unbox struct {
     versions: Array ProtocolVersion
 };
+
+namespace SupportedVersions {
+    default: SupportedVersions;
+    default = SupportedVersions {
+        versions: [
+            0x0304_U16     // TLS 1.3
+        ]
+    };
+}
 
 impl SupportedVersions: Marshal {
     marshal = |obj, buf| (
@@ -348,6 +385,15 @@ namespace NamedGroup {
 type NamedGroupList = unbox struct {
     v: Array NamedGroup
 };
+
+namespace NamedGroupList {
+    default: NamedGroupList;
+    default = NamedGroupList {
+        v: [
+           NamedGroup::find_by_name("secp256r1").as_some, 
+        ]
+    };
+}
 
 impl NamedGroupList: Marshal {
     marshal = |obj, buf| (

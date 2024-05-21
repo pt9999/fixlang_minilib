@@ -15,9 +15,13 @@ trait [m: * -> *] m: WriteByte {
     write_byte: U8 -> m ();
 }
 
+trait MonadWriteByte = Functor + MonadError + WriteByte;
+
 trait [m: * -> *] m: ReadByte {
     read_byte: m U8;
 }
+
+trait MonadReadByte = Functor + MonadError + ReadByte;
 
 type ByteRW = StateT ByteBuffer (Result ErrMsg);
 
@@ -33,13 +37,11 @@ impl ByteRW: ReadByte {
 
 //------------------------------------------
 trait a: Pack {
-    pack: [m: Monad, m: WriteByte] a -> m ();
+    pack: [m: MonadWriteByte, ErrorType m = String] a -> m ();
 }
 
 trait a: Unpack {
-    // `unpack(i)` unpacks a value from a stream whose first byte is `i`.
-    unpack: [m: MonadError, m: ReadByte, ErrorType m = String] 
-            U8 -> m a;
+    unpack: [m: MonadReadByte, ErrorType m = String] m a;
 }
 
 _TypeErr: ErrMsg;
@@ -58,7 +60,8 @@ impl U8: Pack {
 }
 
 impl U8: Unpack {
-    unpack = |i| (
+    unpack = (
+        let i: U8 = *read_byte;
         if i <= 0x7f_U8 {
             // positive fixint 0XXXXXXX
             pure $ i
@@ -84,16 +87,18 @@ impl U16: Pack {
 }
 
 impl U16: Unpack {
-    unpack = |i| (
-        if i == 0xcd_U8 {
-            // 16-bit unsigned integer (big endian)
-            let v0 = *read_byte;
-            let v1 = *read_byte;
-            pure $ v0.to_U16.shift_left(8_U16) 
-            .bit_or(v1.to_U16)
-        };
-        let v: U8 = *unpack(i);
-        pure $ v.to_U16
+    unpack = (
+        unpack.map(U8::to_U16).catch(|errmsg|
+            let i: U8 = *read_byte;
+            if i == 0xcd_U8 {
+                // 16-bit unsigned integer (big endian)
+                let v0 = *read_byte;
+                let v1 = *read_byte;
+                pure $ v0.to_U16.shift_left(8_U16)
+                .bit_or(v1.to_U16)
+            };
+            error $ _TypeErr
+        )
     );
 }
 
@@ -211,12 +216,9 @@ test_unpack = (
     let arr = [ 0x12, 0xcc, 0xab, 0xcd, 0xab, 0xcd ].map(to_U8); 
     let buf = ByteBuffer::make(arr, big_endian());
     let r: ByteRW String = do {
-        let i: U8 = *read_byte;
-        let a1: U8 = *unpack(i);
-        let i: U8 = *read_byte;
-        let a2: U8 = *unpack(i);
-        let i: U8 = *read_byte;
-        let a3: U16 = *unpack(i);
+        let a1: U8 = *unpack;
+        let a2: U8 = *unpack;
+        let a3: U16 = *unpack;
         pure $ (a1.to_string_hex, 
                 a2.to_string_hex,
                 a3.to_string_hex)

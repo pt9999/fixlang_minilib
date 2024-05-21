@@ -10,15 +10,27 @@ trait [m: * -> *] m: MonadErrorIF {
 
     // Reports an error.
     error: ErrorType m -> m a;
+
+    // Catches any error.
+    catch: (ErrorType m -> m a) -> m a -> m a;
 }
 
 impl Result e: MonadErrorIF {
     type ErrorType (Result e) = e;
     error = Result::err;
+    catch = |handler, res| (
+        if res.is_err { handler(res.as_err) };
+        res
+    );
 }
 
 impl IOFail: MonadErrorIF {
     type ErrorType IOFail = ErrMsg;
     error = IOFail::throw;
+    catch = |handler, iof| (
+        let res = *iof.to_result.lift;
+        if res.is_err { handler(res.as_err) };
+        res.from_result
+    );
 }
 

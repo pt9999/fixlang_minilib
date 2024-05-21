@@ -107,14 +107,28 @@ test_writer_iofail_error = (
         pure $ i64.to_F64 * 2.0
     );
     let w: I64 -> WriterT String IOFail F64 = |i64| (
+        eval *tell("start ");
         if i64 < 0 { error $ "err2" };
         eval *tell(i64.to_string);
         let f64 = *iof(i64).lift_t;
         pure $ f64
     );
-    eval *assert_equal("ok", ok $ ("12", 24.0), *w(12).run_writer_t.to_result.lift);
+    eval *assert_equal("ok", ok $ ("start 12", 24.0), *w(12).run_writer_t.to_result.lift);
     eval *assert_equal("err1", err("err1"), *w(100).run_writer_t.to_result.lift);
     eval *assert_equal("err2", err("err2"), *w(-1).run_writer_t.to_result.lift);
+    let handler: ErrMsg -> WriterT String IOFail F64 = |errmsg| (
+        eval *tell("caught " + errmsg);
+        if errmsg == "err1" { pure $ 999.0 };
+        error $ "rethrow: " + errmsg
+    );
+    let w2 = |i64| (
+        let f64 = *w(i64).catch(handler);
+        eval *tell(" end");
+        pure $ f64
+    );
+    eval *assert_equal("catch ok", ok $ ("start 12 end", 24.0), *w2(12).run_writer_t.to_result.lift);
+    eval *assert_equal("catch err1", ok $ ("caught err1 end", 999.0), *w2(100).run_writer_t.to_result.lift);
+    eval *assert_equal("catch err2", err("rethrow: err2"), *w2(-1).run_writer_t.to_result.lift);
     pure()
 );
 

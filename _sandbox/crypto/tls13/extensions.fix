@@ -92,13 +92,14 @@ impl Extension: Unmarshal {
     unmarshal = |buf| (
         let (extension_type, buf) = *buf.unmarshal;
         let (extension_data_size: U16, buf) = *buf.unmarshal;
+        let (extension_data: Array U8, buf) = *buf.unmarshal_fixed(extension_data_size.to_I64);
 
-        if extension_type == 10_U16 { buf.unmarshal.map_res_0(supported_groups) };
-        if extension_type == 43_U16 { buf.unmarshal.map_res_0(supported_versions) };
-
-        // skip unknown extension data
-        let buf = buf.set_position(buf.get_position + extension_data_size.to_I64);
-        pure $ (unknown_extension(extension_type), buf)
+        let extension: Extension = *do {
+            if extension_type == 10_U16 { unmarshal_from_bytes(extension_data).map(supported_groups) };
+            if extension_type == 43_U16 { unmarshal_from_bytes(extension_data).map(supported_versions) };
+            pure $ unknown_extension(extension_type)
+        };
+        pure $ (extension, buf)
     );
 }
 
@@ -136,46 +137,49 @@ impl SupportedVersions: Unmarshal {
 type SignatureScheme = U16;
 
 namespace SignatureScheme {
-    table: Array (String, SignatureScheme);
-    table = [
-        /* RSASSA-PKCS1-v1_5 algorithms */
-        ("rsa_pkcs1_sha256", 0x0401_U16),
-        ("rsa_pkcs1_sha384", 0x0501_U16),
-        ("rsa_pkcs1_sha512", 0x0601_U16),
+    /* RSASSA-PKCS1-v1_5 algorithms */
+    rsa_pkcs1_sha256: SignatureScheme;
+    rsa_pkcs1_sha256 = 0x0401_U16;
+    rsa_pkcs1_sha384: SignatureScheme;
+    rsa_pkcs1_sha384 = 0x0501_U16;
+    rsa_pkcs1_sha512: SignatureScheme;
+    rsa_pkcs1_sha512 = 0x0601_U16;
 
-        /* ECDSA algorithms */
-        ("ecdsa_secp256r1_sha256", 0x0403_U16),
-        ("ecdsa_secp384r1_sha384", 0x0503_U16),
-        ("ecdsa_secp521r1_sha512", 0x0603_U16),
+    /* ECDSA algorithms */
+    ecdsa_secp256r1_sha256: SignatureScheme;
+    ecdsa_secp256r1_sha256 = 0x0403_U16;
+    ecdsa_secp384r1_sha384: SignatureScheme;
+    ecdsa_secp384r1_sha384 = 0x0503_U16;
+    ecdsa_secp521r1_sha512: SignatureScheme;
+    ecdsa_secp521r1_sha512 = 0x0603_U16;
 
-        /* RSASSA-PSS algorithms with public key OID rsaEncryption */
-        ("rsa_pss_rsae_sha256", 0x0804_U16),
-        ("rsa_pss_rsae_sha384", 0x0805_U16),
-        ("rsa_pss_rsae_sha512", 0x0806_U16),
+    /* RSASSA-PSS algorithms with public key OID rsaEncryption */
+    rsa_pss_rsae_sha256: SignatureScheme;
+    rsa_pss_rsae_sha256 = 0x0804_U16;
+    rsa_pss_rsae_sha384: SignatureScheme;
+    rsa_pss_rsae_sha384 = 0x0805_U16;
+    rsa_pss_rsae_sha512: SignatureScheme;
+    rsa_pss_rsae_sha512 = 0x0806_U16;
 
-        /* EdDSA algorithms */
-        ("ed25519", 0x0807_U16),
-        ("ed448", 0x0808_U16),
+    /* EdDSA algorithms */
+    ed25519: SignatureScheme;
+    ed25519 = 0x0807_U16;
+    ed448: SignatureScheme;
+    ed448 = 0x0808_U16;
 
-        /* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
-        ("rsa_pss_pss_sha256", 0x0809_U16),
-        ("rsa_pss_pss_sha384", 0x080a_U16),
-        ("rsa_pss_pss_sha512", 0x080b_U16),
+    /* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
+    rsa_pss_pss_sha256: SignatureScheme;
+    rsa_pss_pss_sha256 = 0x0809_U16;
+    rsa_pss_pss_sha384: SignatureScheme;
+    rsa_pss_pss_sha384 = 0x080a_U16;
+    rsa_pss_pss_sha512: SignatureScheme;
+    rsa_pss_pss_sha512 = 0x080b_U16;
 
-        /* Legacy algorithms */
-        ("rsa_pkcs1_sha1", 0x0201_U16),
-        ("ecdsa_sha1", 0x0203_U16)
-    ];
-
-    find_by_name: String -> Option SignatureScheme;
-    find_by_name = |name| (
-        table.find_by(@0 >> eq(name)).map(@1)
-    );
-
-    find_by_id: SignatureScheme -> Option String;
-    find_by_id = |id| (
-        table.find_by(@1 >> eq(id)).map(@0)
-    );
+    /* Legacy algorithms */
+    rsa_pkcs1_sha1: SignatureScheme;
+    rsa_pkcs1_sha1 = 0x0201_U16;
+    ecdsa_sha1: SignatureScheme;
+    ecdsa_sha1 = 0x0203_U16;
 }
 
 type SignatureSchemeList = unbox struct {
@@ -223,32 +227,6 @@ namespace NamedGroup {
     ffdhe6144 = 0x0103_U16;
     ffdhe8192: NamedGroup;
     ffdhe8192 = 0x0104_U16;
-/*
-    table: Array (String, NamedGroup);
-    table = [
-        ("secp256r1", 0x0017_U16),
-        ("secp384r1", 0x0018_U16),
-        ("secp521r1", 0x0019_U16),
-        ("x25519", 0x001D_U16),
-        ("x448", 0x001E_U16),
-
-        ("ffdhe2048", 0x0100_U16),
-        ("ffdhe3072", 0x0101_U16),
-        ("ffdhe4096", 0x0102_U16),
-        ("ffdhe6144", 0x0103_U16),
-        ("ffdhe8192", 0x0104_U16)
-    ];
-
-    find_by_name: String -> Option NamedGroup;
-    find_by_name = |name| (
-        table.find_by(@0 >> eq(name)).map(@1)
-    );
-
-    find_by_id: NamedGroup -> Option String;
-    find_by_id = |id| (
-        table.find_by(@1 >> eq(id)).map(@0)
-    );
-*/
 }
 
 type NamedGroupList = unbox struct {

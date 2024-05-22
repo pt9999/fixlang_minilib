@@ -85,7 +85,7 @@ impl KeyShareHelloRetryRequest: Marshal {
 
 impl KeyShareHelloRetryRequest: Unmarshal {
     unmarshal = |buf| (
-        buf.unmarshal.map(map_0(KeyShareHelloRetryRequest::make))
+        buf.unmarshal.map_res_0(KeyShareHelloRetryRequest::make)
     );
 }
 
@@ -106,9 +106,40 @@ impl KeyShareServerHello: Marshal {
 
 impl KeyShareServerHello: Unmarshal {
     unmarshal = |buf| (
-        buf.unmarshal.map(map_0(KeyShareServerHello::make))
+        buf.unmarshal.map_res_0(KeyShareServerHello::make)
     );
 }
 
 
+type KeyShare = unbox union {
+    ks_client_hello: KeyShareClientHello,
+    ks_hello_retry_request: KeyShareHelloRetryRequest,
+    ks_server_hello: KeyShareServerHello,
+};
 
+impl KeyShare: Marshal {
+    marshal = |obj, buf| (
+        if obj.is_ks_client_hello { buf.marshal(obj.as_ks_client_hello) };
+        if obj.is_ks_hello_retry_request { buf.marshal(obj.as_ks_hello_retry_request) };
+        if obj.is_ks_server_hello { buf.marshal(obj.as_ks_server_hello) };
+        eval assert(|_| "invalid keyshare", false);
+        buf
+    );
+}
+
+impl KeyShare: Unmarshal {
+    unmarshal = |buf| (
+        // very hacky
+        if buf.get_size == 2 {
+            // KeyShareHelloRetryRequest
+            buf.unmarshal.map_res_0(ks_hello_retry_request)
+        };
+        let (u16: U16, buf2) = *buf.unmarshal;
+        if (0x0017_U16 <= u16 && u16 < 0x001e_U16) || (0x0100_U16 <= u16 && u16 < 0x0104_U16) {
+            // maybe KeyShareServerHello
+            buf.unmarshal.map_res_0(ks_server_hello)
+        };
+        // maybe KeyShareClientHello
+        buf.unmarshal.map_res_0(ks_client_hello)
+    );
+}

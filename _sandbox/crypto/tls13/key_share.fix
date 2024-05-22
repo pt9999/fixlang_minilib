@@ -1,0 +1,114 @@
+module Minilib.Crypto.Tls13.KeyShare;
+
+import Debug;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Encoding.Binary;
+
+// 4.2.8. Key Share
+
+type KeyShareEntry = unbox struct {
+    group: NamedGroup,
+    key_exchange: Array U8
+};
+
+namespace KeyShareEntry {
+    make: NamedGroup -> Array U8 -> KeyShareEntry;
+    make = |group, key_exchange| KeyShareEntry {
+        group: group,
+        key_exchange: key_exchange
+    };
+}
+
+impl KeyShareEntry: Eq {
+    eq = |a, b| (
+        a.@group == b.@group &&
+        a.@key_exchange == b.@key_exchange
+    );
+}
+
+impl KeyShareEntry: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@group);
+        buf.marshal_var_size(obj.@key_exchange, to_U16)
+    );
+}
+
+impl KeyShareEntry: Unmarshal {
+    unmarshal = |buf| (
+        let (group: NamedGroup, buf) = *buf.unmarshal;
+        let (key_exchange: Array U8, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let obj = KeyShareEntry { group: group, key_exchange: key_exchange };
+        pure $ (obj, buf)
+    );
+}
+
+type KeyShareClientHello = unbox struct {
+    client_shares: Array KeyShareEntry
+};
+
+namespace KeyShareClientHello {
+    make: Array KeyShareEntry -> KeyShareClientHello;
+    make = |client_shares| KeyShareClientHello {
+        client_shares: client_shares
+    };
+}
+
+impl KeyShareClientHello: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@client_shares, to_U16)
+    );
+}
+
+impl KeyShareClientHello: Unmarshal {
+    unmarshal = |buf| (
+        let (client_shares, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let obj = KeyShareClientHello::make(client_shares);
+        pure $ (obj, buf)
+    );
+}
+
+type KeyShareHelloRetryRequest = unbox struct {
+    selected_group: NamedGroup
+};
+
+namespace KeyShareHelloRetryRequest {
+    make: NamedGroup -> KeyShareHelloRetryRequest;
+    make = |selected_group| KeyShareHelloRetryRequest { selected_group: selected_group };
+}
+
+impl KeyShareHelloRetryRequest: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.@selected_group)
+    );
+}
+
+impl KeyShareHelloRetryRequest: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal.map_0(KeyShareHelloRetryRequest::make)
+    );
+}
+
+type KeyShareServerHello = unbox struct {
+    server_share: KeyShareEntry
+};
+
+namespace KeyShareServerHello {
+    make: KeyShareEntry -> KeyShareServerHello;
+    make = |server_share| KeyShareServerHello { server_share: server_share };
+}
+
+impl KeyShareServerHello: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.@server_share)
+    );
+}
+
+impl KeyShareServerHello: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal.map_0(KeyShareServerHello::make)
+    );
+}
+
+
+

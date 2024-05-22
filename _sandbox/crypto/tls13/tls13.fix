@@ -2,3 +2,64 @@
 // https://tex2e.github.io/rfc-translater/html/rfc8446.html
 module Minilib.Crypto.Tls13
 
+import AsyncTask;
+import Debug;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.SecureRandom;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type StateTls = StateT Tls13 IOFail;
+
+type Tls13 = unbox struct {
+    handle: IOHandle,
+    secure_random: SecureRandom,
+};
+
+namespace Tls13 {
+    make: IOHandle -> IOFail Tls13;
+    make = |handle| (
+        let secure_random = *SecureRandom::make;
+        pure $ Tls13 {
+            handle: handle,
+            secure_random: secure_random,
+        }
+    );
+
+    _send_bytes: Array U8 -> StateTls ();
+    _send_bytes = |bytes| (
+        let tls = *get_state;
+        write_bytes(tls.@handle, bytes).lift_t
+    );
+
+    _recv_bytes: I64 -> StateTls (Array U8);
+    _recv_bytes = |length| (
+        let tls = *get_state;
+        read_n_bytes(tls.@handle, length).lift_t
+    );
+
+    _generate_random_bytes: I64 -> StateTls (Array U8);
+    _generate_random_bytes = |length| (
+        _with_secure_random(generate_bytes(length))
+    );
+
+    _with_secure_random: (SecureRandom -> (a, SecureRandom)) -> StateTls a;
+    _with_secure_random = |f| (
+        let tls = *get_state;
+        let (a, secure_random) = f(tls.@secure_random);
+        eval *mod_state(set_secure_random(secure_random));
+        pure $ a
+    );
+
+
+    handshake: StateTls ();
+    handshake = do {
+        eval *_send_client_hello;
+        eval *_recv_server_hello;
+        pure()
+    };
+}
+

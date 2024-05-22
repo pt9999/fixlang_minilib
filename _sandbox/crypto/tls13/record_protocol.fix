@@ -47,16 +47,16 @@ impl ContentType: Unmarshal {
     );
 }
 
-type TLSPlainText = unbox struct {
+type TLSPlaintext = unbox struct {
     type_: ContentType,
     legacy_record_version: ProtocolVersion,
     //length: U16,
     fragment: Array U8
 };
 
-namespace TLSPlainText {
-    empty: TLSPlainText;
-    empty = TLSPlainText {
+namespace TLSPlaintext {
+    empty: TLSPlaintext;
+    empty = TLSPlaintext {
         type_: invalid(),
         legacy_record_version: 0x0303_U16,
         //length: 0_U16,
@@ -64,7 +64,7 @@ namespace TLSPlainText {
     };
 }
 
-impl TLSPlainText: Marshal {
+impl TLSPlaintext: Marshal {
     marshal = |obj, buf| (
         let buf = buf.marshal(obj.@type_);
         let buf = buf.marshal(obj.@legacy_record_version);
@@ -76,13 +76,16 @@ impl TLSPlainText: Marshal {
     );
 }
 
-impl TLSPlainText: Unmarshal {
+impl TLSPlaintext: Unmarshal {
     unmarshal = |buf| (
         let (type_: ContentType, buf) = *buf.unmarshal;
         let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
         let (length: U16, buf) = *buf.unmarshal;
+        if length.to_I64 > 16384 {
+            err $ "alert_record_overflow"
+        };
         let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
-        let obj = TLSPlainText {
+        let obj = TLSPlaintext {
             type_: type_,
             legacy_record_version: legacy_record_version,
             //length: length,
@@ -160,7 +163,7 @@ impl TLSCiphertext: Unmarshal {
         let (opaque_type: ContentType, buf) = *buf.unmarshal;
         let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
         let (length: U16, buf) = *buf.unmarshal;
-        if length > 16384 + 256 {
+        if length.to_I64 > 16384 + 256 {
             err $ "alert_record_overflow"
         };
         let (encrypted_record: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);

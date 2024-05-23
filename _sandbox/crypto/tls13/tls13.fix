@@ -7,6 +7,7 @@ import Debug;
 
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.SecureRandom;
+import Minilib.Crypto.RecordProtocol;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Text.Hex;
@@ -19,6 +20,18 @@ type Tls13 = unbox struct {
     secure_random: SecureRandom,
 };
 
+impl StateTls: TLSConnectionIF {
+    send_bytes = |bytes| (
+        let tls = *get_state;
+        write_bytes(tls.@handle, bytes).lift_t
+    );
+
+    recv_n_bytes = |length| (
+        let tls = *get_state;
+        read_n_bytes(tls.@handle, length).lift_t
+    );
+}
+
 namespace Tls13 {
     make: IOHandle -> IOFail Tls13;
     make = |handle| (
@@ -27,18 +40,6 @@ namespace Tls13 {
             handle: handle,
             secure_random: secure_random,
         }
-    );
-
-    _send_bytes: Array U8 -> StateTls ();
-    _send_bytes = |bytes| (
-        let tls = *get_state;
-        write_bytes(tls.@handle, bytes).lift_t
-    );
-
-    _recv_bytes: I64 -> StateTls (Array U8);
-    _recv_bytes = |length| (
-        let tls = *get_state;
-        read_n_bytes(tls.@handle, length).lift_t
     );
 
     _generate_random_bytes: I64 -> StateTls (Array U8);

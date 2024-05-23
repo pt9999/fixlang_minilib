@@ -3,6 +3,7 @@ module Minilib.Crypto.Tls13.RecordProtocol;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.Connection;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
@@ -62,6 +63,19 @@ namespace TLSPlaintext {
         //length: 0_U16,
         fragment: []
     };
+
+    // Splits data to fragments. Max size of each fragment is 16384 bytes.
+    split_fragments: ContentType -> Array U8 -> Array TLSPlaintext;
+    split_fragments = |type_, data| (
+        let max_fragment_size = 16384;
+        let number_of_fragments = (data.get_size + max_fragment_size - 1) / max_fragment_size;
+        Iterator::range(0, number_of_fragments).map(|i|
+            let start = max_fragment_size * i;
+            let end  = min(max_fragment_size * (i + 1), data.get_size);
+            let fragment = if start == 0 && end == data.get_size { data } else { data.get_sub(start, end) };
+            TLSPlaintText::empty.set_type_(type_).set_fragment(fragment)
+        ).to_array
+    );
 }
 
 impl TLSPlaintext: Marshal {
@@ -175,4 +189,21 @@ impl TLSCiphertext: Unmarshal {
         };
         pure $ (obj, buf)
     );
+}
+
+namespace TLSRecord {
+    send_record: [m: TLSConnection] TLSPlaintext -> m ();
+    send_record = |record| (
+        let bytes = marshal_to_bytes(record);
+        send_bytes(bytes)
+    );
+
+    recv_record:  [m: TLSConnection] m TLSPlaintext;
+    recv_record = do {
+        let header = *recv_n_bytes(6);
+        let length = get_u16_be(4, header);
+        let body = *recv_n_bytes(length.to_I64);
+        let bytes = header.append(body);
+        unmarshal_from_bytes(bytes).from_result
+    };
 }

@@ -1,0 +1,31 @@
+module Minilib.Crypto.Tls13.Connection;
+
+import Debug;
+
+import Minilib.Monad.State;
+
+trait TLSConnection = Functor + Monad + TLSConnectionIF;
+
+trait [m: * -> *] m: TLSConnectionIF {
+    send_bytes: Array U8 -> m ();
+    recv_n_bytes: I64 -> m (Array U8);
+}
+
+type TLSSocket = unbox struct {
+    handle: IOHandle
+};
+
+type StateTLSSocket = StateT TLSSocket IOFail;
+
+impl StateTLSSocket: TLSConnectionIF {
+    send_bytes = |bytes| (
+        let sock = *get_state;
+        write_bytes(sock.@handle, bytes).lift_t
+    );
+
+    recv_n_bytes = |length| (
+        let sock = *get_state;
+        read_n_bytes(sock.@handle, length).lift_t
+    );
+}
+

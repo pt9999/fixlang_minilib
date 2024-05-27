@@ -2,8 +2,10 @@ module Main;
 
 import HashMap;
 
-import Sandbox.ECDSA;
+import Minilib.Crypto.Tls13.ECDSA;
 import Minilib.Crypto.SecureRandom;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
@@ -14,7 +16,7 @@ test1 = (
         let ec = secp256r1;
         let _ = *println("ec="+ec.to_string).lift;
         let secure_random = *SecureRandom::make;
-        let (key_pair, _) = *secure_random.generate_keypair(ec);
+        let (key_pair, _) = *generate_keypair(ec).run_state_t(secure_random);
         let _ = *println("key_pair=" + key_pair.to_string).lift;
 
         let _ = *println("validating public key q").lift;
@@ -36,6 +38,36 @@ test1 = (
         let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
         let _ = *println("q=" + q.to_string).lift;
         pure()
+    }.try(eprintln)
+);
+
+test_sign: IO ();
+test_sign = (
+    do {
+        let sm: StateT SecureRandom IOFail () = do {
+            let log = println >> lift >> lift_t;
+            let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
+            let ec = scheme.@ec;
+
+            let key_pair = *generate_keypair(ec);
+            eval *log("key_pair=" + key_pair.to_string);
+
+            let message: Array U8 = "Hello world".get_bytes;
+
+            // Signing
+            eval *log("signing");
+            let signature = *scheme.sign(key_pair, message);
+            eval *log(signature.to_string);
+            eval *log("signature=" + signature.to_string);
+
+            // Verifying
+            eval *log("verifying");
+            eval *scheme.verify(key_pair.@q, signature, message).from_result.lift_t;
+            eval *log("ok");
+            pure()
+        };
+        let secure_random = *SecureRandom::make;
+        sm.run_state_t(secure_random).forget
     }.try(eprintln)
 );
 
@@ -97,5 +129,5 @@ S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
 
 main: IO ();
 main = (
-    test2
+    test_sign
 );

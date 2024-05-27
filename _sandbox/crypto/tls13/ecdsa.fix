@@ -10,11 +10,12 @@
 // secp256r1（NIST P-256)
 // https://doi.org/10.6028/NIST.FIPS.186-5
 
-module Sandbox.ECDSA;
+module Minilib.Crypto.Tls13.ECDSA;
 
 import Character;
 import Debug;
 
+import Minilib.Crypto.Tls13.RandGen;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Crypto.SHA256;
 import Minilib.Encoding.Binary;
@@ -22,6 +23,7 @@ import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigNat;
 import Minilib.Math.Types;
+import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -108,22 +110,22 @@ namespace ECInt {
     );
 
     // Generates random ECInt `r` such that `begin <= r && r < end`.
-    generate_ECInt_range: ECInt -> ECInt -> SecureRandom -> IOFail (ECInt, SecureRandom);
-    generate_ECInt_range = |begin, end, secure_random| (
+    generate_ECInt_range: [m: RandGen] ECInt -> ECInt -> m ECInt;
+    generate_ECInt_range = |begin, end| (
         if begin > end {
-            secure_random.generate_ECInt_range(end, begin)      // swap range and retry
+            generate_ECInt_range(end, begin)      // swap range and retry
         };
         let n = end - begin;
         eval assert(|_| "invalid range", n > zero);
         let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
-        let (bytes, secure_random) = *secure_random.generate_bytes(num_bits / 8);
+        let bytes = *randgen_bytes(num_bits / 8);
         let r = ECInt::from_bytes(bytes).as_ok;
         if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
-            secure_random.generate_ECInt_range(begin, end)      // try again
+            generate_ECInt_range(begin, end)      // try again
         };
         let r = r % n;
         let r = begin + r;
-        pure $ (r, secure_random)
+        pure $ r
     );
 }
 
@@ -414,11 +416,11 @@ impl ECKeyPair: ToString {
 }
 
 namespace ECKeyPair {
-    // Generates a keypair from a SecureRandom and an ECParam.
-    generate_keypair: ECParam -> SecureRandom -> IOFail (ECKeyPair, SecureRandom);
-    generate_keypair = |ec, secure_random| (
+    // Generates a keypair from a RandGen and an ECParam.
+    generate_keypair: [m: RandGen] ECParam -> m ECKeyPair;
+    generate_keypair = |ec| (
         let n = ec.@n;
-        let (d, secure_random) = *secure_random.generate_ECInt_range(
+        let d = *generate_ECInt_range(
             one, n
         );
         eval assert(|_| "d is out of range", one <= d && d <= n - one);
@@ -430,7 +432,7 @@ namespace ECKeyPair {
             d: d,
             q: q
         };
-        pure $ (key_pair, secure_random)
+        pure $ key_pair
     );
 
     // Validates the public key.
@@ -507,12 +509,12 @@ namespace ECDSAScheme {
     );
 
     // 4.1.3 Signing Operation
-    sign: ECKeyPair -> Array U8 -> SecureRandom -> ECDSAScheme -> IOFail (ECDSASignature, SecureRandom);
-    sign = |key_pair, message, secure_random, scheme| (
+    sign: [m: RandGen, m: MonadError, ErrorType m = ErrMsg] ECKeyPair -> Array U8 -> ECDSAScheme -> m ECDSASignature;
+    sign = |key_pair, message, scheme| (
         // 1. Select an ephemeral elliptic curve key pair (k, R)
         let ec = scheme.@ec;
         let n = ec.@n;
-        let (k, secure_random) = *secure_random.generate_ECInt_range(
+        let k = *generate_ECInt_range(
             one, n
         );
         eval assert(|_| "k is out of range", one <= k && k <= n - one);
@@ -520,13 +522,13 @@ namespace ECDSAScheme {
         // sign with generated k
         let res = scheme._sign_with_k(key_pair, message, k);
         if res.is_err {
-            if res == err $ _Err_Retry {
+            if res == err(_Err_Retry) {
                 // return to Step 1.
-                scheme.sign(key_pair, message, secure_random)
+                scheme.sign(key_pair, message)
             };
-            throw $ res.as_err
+            error $ res.as_err
         };
-        pure $ (res.as_ok, secure_random)
+        pure $ res.as_ok
     );
 
     _Err_Retry: ErrMsg;

@@ -6,6 +6,7 @@ import AsyncTask;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.RandGen;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Crypto.HandshakeProtocol;
 import Minilib.Crypto.RecordProtocol;
@@ -13,6 +14,8 @@ import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
+
+type MonadTls = TLSConnection + RandGen;
 
 type StateTls = StateT Tls13 IOFail;
 
@@ -33,6 +36,15 @@ impl StateTls: TLSConnectionIF {
     );
 }
 
+impl StateTls: RandGenIF {
+    randgen_bytes = |size| (
+        let tls = *get_state;
+        let (random, secure_random) = *randgen_bytes(size).run_state_t(tls.@secure_random).lift_t;
+        eval *mod_state(set_secure_random(secure_random));
+        pure $ random
+    );
+}
+
 namespace Tls13 {
     make: IOHandle -> IOFail Tls13;
     make = |handle| (
@@ -43,34 +55,20 @@ namespace Tls13 {
         }
     );
 
-    _generate_random_bytes: I64 -> StateTls (Array U8);
-    _generate_random_bytes = |length| (
-        _with_secure_random(generate_bytes(length))
-    );
-
-    _with_secure_random: (SecureRandom -> (a, SecureRandom)) -> StateTls a;
-    _with_secure_random = |f| (
-        let tls = *get_state;
-        let (a, secure_random) = f(tls.@secure_random);
-        eval *mod_state(set_secure_random(secure_random));
-        pure $ a
-    );
-
-
-    handshake: StateTls ();
+    handshake: [m: MonadTls] m ();
     handshake = do {
         eval *_send_client_hello;
         eval *_recv_server_hello;
         pure()
     };
 
-    _send_client_hello: StateTls ();
+    _send_client_hello: [m: MonadTls] m ();
     _send_client_hello = do {
         let tls = *get_state;
-        let random = *_generate_random_bytes(64);
+        let random = *randgen_bytes(64);
         let hello = ClientHello::empty.init(random);
         // TODO: init key_share
-
+        pure()
     };
 }
 

@@ -1,0 +1,36 @@
+module Main;
+
+import Random;
+import HashMap;
+
+import Minilib.Crypto.Tls13.ECDSA;
+import Minilib.Crypto.Tls13.ECDHE;
+import Minilib.Crypto.SecureRandom;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test1: IOFail ();
+test1 = (
+    let sm: StateT Random IOFail () = do {
+        let ec = secp256r1;
+        let server_ecdhe = *ECDHE::make(ec);
+        let client_ecdhe = *ECDHE::make(ec);
+        let server_pub_key = server_ecdhe.get_pub_key;
+        let client_pub_key = client_ecdhe.get_pub_key;
+        let server_share_secret = *server_ecdhe.calc_shared_secret(client_pub_key).from_result.lift_t;
+        let client_share_secret = *client_ecdhe.calc_shared_secret(server_pub_key).from_result.lift_t;
+        eval *println("server_share_secret=" + server_share_secret.to_string_hex).lift.lift_t;
+        eval *println("client_share_secret=" + client_share_secret.to_string_hex).lift.lift_t;
+        assert_equal("eq", server_share_secret, client_share_secret).lift_t
+    };
+    let (_, random) = *sm.run_state_t(Random::init_by_seed(123_U64));
+    pure()
+);
+
+main: IO ();
+main = do {
+    test1
+}.try(eprintln);

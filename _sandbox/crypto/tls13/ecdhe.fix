@@ -18,41 +18,47 @@ import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 */
 
-type ECDHE1 = unbox struct {
+type ECDHE = unbox struct {
     ec: ECParam,
-    priv_key: ECKeyPair,
-};
-
-type ECDHE2 = unbox struct {
-    shared_secret: Array U8
+    local_key_pair: ECKeyPair,
 };
 
 namespace ECDHE {
-    make: [m: RandGen] ECParam -> m ECDHE1;
+    make: [m: RandGen] ECParam -> m ECDHE;
     make = |ec| (
-        let priv_key = *generate_keypair(ec);
-        pure $ ECDHE1 {
+        let local_key_pair = *generate_keypair(ec);
+        pure $ ECDHE {
             ec: ec,
-            priv_key: priv_key
+            local_key_pair: local_key_pair
         }
     );
 
-    accept_peer_key: Array U8 -> Array U8 -> ECDHE1 -> Result ErrMsg ECDHE2;
-    accept_peer_key = |peer_x, peer_y, ecdhe1| (
-        let ec = ecdhe1.@ec;
-        let priv_key = ecdhe1.@priv_key;
-        let peer_x: ECField = ECField::make(*ECInt::from_bytes(peer_x));
-        let peer_y: ECField = ECField::make(*ECInt::from_bytes(peer_y));
-        let peer_pub_key: ECPoint = ECPoint::make(ec, peer_x, peer_y);
-        eval *peer_pub_key.validate_pubkey;
-        let dQ = peer_pub_key.mul_by_ECInt(priv_key.@d);
+    get_pub_key: ECDHE -> (Array U8, Array U8);
+    get_pub_key = |ecdhe| (
+        let local_key_pair = ecdhe.@local_key_pair;
+        let (x, y) = local_key_pair.@q.@xy.as_some;
+        (x.to_bytes, y.to_bytes)
+    );
+
+    calc_shared_secret: (Array U8, Array U8) -> ECDHE -> Result ErrMsg (Array U8);
+    calc_shared_secret = |remote_pub_key, ecdhe| (
+        let ec = ecdhe.@ec;
+        let local_key_pair = ecdhe.@local_key_pair;
+        // make uncompressed octetstring
+        let bytes = [ 4_U8 ].append(remote_pub_key.@0).append(remote_pub_key.@1);
+        let remote_pub_key: ECPoint = *ECPoint::from_bytes_ec(ec, bytes);
+        /*
+        let remote_x: ECField = ECField::make(*ECInt::from_bytes(remote_x));
+        let remote_y: ECField = ECField::make(*ECInt::from_bytes(remote_y));
+        let remote_pub_key: ECPoint = ECPoint::make(ec, remote_x, remote_y);
+        */
+        eval *remote_pub_key.validate_pubkey;
+        let dQ = remote_pub_key.mul_by_ECInt(local_key_pair.@d);
         if dQ.@xy.is_none {
             err $ "cannot calculate shared secret"
         };
         let dQx: ECField = dQ.@xy.as_some.@0;
         let shared_secret = dQx.to_bytes;
-        pure $ ECDHE2 {
-            shared_secret: shared_secret
-        }
+        pure $ shared_secret
     );
 }

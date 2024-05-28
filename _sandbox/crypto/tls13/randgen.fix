@@ -1,7 +1,10 @@
 module Minilib.Crypto.Tls13.RandGen;
 
+import Random;
 import Debug;
+
 import Minilib.Crypto.SecureRandom;
+import Minilib.Math.RandomEx;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 
@@ -14,8 +17,25 @@ trait [m: * -> *] m: RandGenIF {
 impl StateT SecureRandom IOFail: RandGenIF {
     randgen_bytes = |size| (
         let secure_random = *get_state;
-        let (random, secure_random) = *secure_random.generate_bytes(size).lift_t;
+        let (bytes, secure_random) = *secure_random.generate_bytes(size).lift_t;
         eval *put_state(secure_random);
-        pure $ random
+        pure $ bytes
+    );
+}
+
+impl [m: Monad] StateT Random m: RandGenIF {
+    randgen_bytes = |size| (
+        let random = *get_state;
+        let (bytes, random) = random.generate_array(size, generate_U8);
+        eval *put_state(random);
+        pure $ bytes
+    );
+}
+
+// Constant RandGen
+impl [m: Monad] StateT U8 m: RandGenIF {
+    randgen_bytes = |size| (
+        let u8 = *get_state;
+        pure $ Array::fill(size, u8)
     );
 }

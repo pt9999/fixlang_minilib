@@ -1,61 +1,36 @@
 module Main;
 
-import Minilib.Crypto.Tls13.Types;
-import Minilib.Crypto.Tls13;
-
 import Debug;
 
-import Minilib.IO.Channel;
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.Connection;
+import Minilib.Crypto.Tls13.MemConnection;
+//import Minilib.Crypto.Tls13;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.FunctorM;
 import Minilib.Monad.Reader;
 import Minilib.Monad.State;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
+import Minilib.Thread.Time;
 import Minilib.Testing.UnitTest;
 
-type ChannelConnection = unbox struct {
-    input: Channel U8,
-    output: Channel U8
-};
+test_mem_connection: IO ();
+test_mem_connection = do {
+    let (local_conn, remote_conn) = *MemConnection::pipe.lift;
+    let n = 102400;
+    let bytes = Array::from_map(n, |i| i.to_U8);
+    let task = do {
+        let _ =  *send_bytes(bytes).run_state_t(local_conn);
+        let (bytes2, _) = *recv_n_bytes(n).run_state_t(remote_conn);
+        pure $ bytes == bytes2
+    }.to_result;
+    let res = *timeit_io("send_recv", task).lift;
+    //eval *println("res="+(bytes == bytes2).to_string).lift;
+    pure()
+}.try(eprintln);
 
-namespace ChannelConnection {
-    make: Channel U8 -> Channel U8 -> ChannelConnection;
-    make = |input, output| ChannelConnection {
-        input: input,
-        output: output
-    };
-
-    swap: ChannelConnection -> ChannelConnection;
-    swap = |conn| ChannelConnection {
-        input: conn.@output,
-        output: conn.@input
-    };
-
-    pipe: IO (ChannelConnection, ChannelConnection);
-    pipe = do {
-        let input = *Channel::make;
-        let output = *Channel::make;
-        let local_conn = ChannelConnection::make(input, output);
-        let remote_conn = ChannelConnection::make(output, input);
-        pure $ (local_conn, remote_conn)
-    };
-}
-
-impl StateT ChannelConnection IOFail: TLSConnectionIF {
-    send_bytes = |bytes| (
-        let conn = *get_state;
-        let output = conn.@output;
-        bytes.map_m(|b| output.send(b))
-    );
-
-    recv_n_bytes = |length| (
-        let conn = *get_state;
-        let input = conn.@input;
-        Array::fill(length, input.recv).map_m
-    );
-}
-
+/*
 type MockServer = unbox struct {
 
 };
@@ -67,9 +42,11 @@ namespace MockServer {
     };
 }
 
-import Minilib.Testing.UnitTest;
-
 test_client_hello: TestCase;
 test_client_hello = (
     let ()
 );
+*/
+
+main: IO ();
+main = test_mem_connection;

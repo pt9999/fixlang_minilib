@@ -1,0 +1,54 @@
+module Minilib.Crypto.Tls13.MemConnection;
+
+import Debug;
+
+import Minilib.Crypto.Tls13.Connection;
+import Minilib.IO.Channel;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
+
+type MemConnection = unbox struct {
+    input: Channel U8,
+    output: Channel U8
+};
+
+namespace MemConnection {
+    make: IO MemConnection;
+    make = (
+        let input = *Channel::make;
+        let output = *Channel::make;
+        pure $ MemConnection {
+            input: input,
+            output: output
+        }
+    );
+
+    swap: MemConnection -> MemConnection;
+    swap = |conn| MemConnection {
+        input: conn.@output,
+        output: conn.@input
+    };
+
+    pipe: IO (MemConnection, MemConnection);
+    pipe = (
+        let local_conn = *MemConnection::make;
+        let remote_conn = local_conn.swap;
+        pure $ (local_conn, remote_conn)
+    );
+
+    _send_bytes: Array U8 -> StateT MemConnection IOFail ();
+    _send_bytes = |bytes| (
+        let conn = *get_state;
+        let output = conn.@output;
+        bytes.foreach_m(|b| output.send(b)).lift_t
+    );
+
+    _recv_n_bytes: I64 -> StateT MemConnection IOFail (Array U8);
+    _recv_n_bytes = |length| (
+        let conn = *get_state;
+        let input = conn.@input;
+        Array::fill(length, input.recv).map_m(|x| x).lift_t
+    );
+}
+

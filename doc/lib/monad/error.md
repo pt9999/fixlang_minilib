@@ -15,10 +15,10 @@ trait [m: * -> *] m: MonadErrorIF {
     // The type of error.
     type ErrorType m;
 
-    // `error(e)` reports an error.
+    // `error(e)` throws an error.
     error: ErrorType m -> m a;
 
-    // `ma.catch(handler)` catches any error that is reported during the computation of `ma`.
+    // `ma.catch(handler)` catches any error that is thrown during the computation of `ma`.
     catch: (ErrorType m -> m a) -> m a -> m a;
 }
 ```

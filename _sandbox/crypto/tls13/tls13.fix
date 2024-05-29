@@ -1,51 +1,49 @@
 // RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
 // https://tex2e.github.io/rfc-translater/html/rfc8446.html
-module Minilib.Crypto.Tls13
+module Minilib.Crypto.Tls13;
 
 import AsyncTask;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.RandGen;
-import Minilib.Crypto.SecureRandom;
-import Minilib.Crypto.HandshakeProtocol;
-import Minilib.Crypto.RecordProtocol;
+import Minilib.Crypto.Tls13.ECDHE;
+import Minilib.Crypto.Tls13.ECDSA;
+import Minilib.Crypto.Tls13.KeyShare;
+import Minilib.Crypto.Tls13.Extensions;
+//import Minilib.Crypto.SecureRandom;
+import Minilib.Crypto.Tls13.HandshakeProtocol;
+import Minilib.Crypto.Tls13.RecordProtocol;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
-type MonadTls = TLSConnection + RandGen;
-
-type StateTls = StateT Tls13 IOFail;
-
-type Tls13 = unbox struct {
-    handle: IOHandle,
-    secure_random: SecureRandom,
+type ClientHelloState = unbox struct {
+    client_hello: ClientHello,
+    ecdhe: ECDHE,
 };
 
-impl StateTls: TLSConnectionIF {
-    send_bytes = |bytes| (
-        let tls = *get_state;
-        write_bytes(tls.@handle, bytes).lift_t
-    );
-
-    recv_n_bytes = |length| (
-        let tls = *get_state;
-        read_n_bytes(tls.@handle, length).lift_t
-    );
+namespace ClientHelloState {
+    make: [m: RandGen] m ClientHelloState;
+    make = do {
+        let hello = ClientHello::empty;
+        let hello = hello.init_random(*randgen_bytes(32));
+        // init key_share
+        let ecdhe = *ECDHE::make(ECParam::secp256r1);
+        let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make $ [
+            ecdhe.to_key_share_entry
+        ];
+        let hello = hello.add_extension(key_share $ ks);
+        pure $ ClientHelloState {
+            client_hello: hello,
+            ecdhe: ecdhe
+        }
+    };
 }
 
-impl StateTls: RandGenIF {
-    randgen_bytes = |size| (
-        let tls = *get_state;
-        let (random, secure_random) = *randgen_bytes(size).run_state_t(tls.@secure_random).lift_t;
-        eval *mod_state(set_secure_random(secure_random));
-        pure $ random
-    );
-}
-
-namespace Tls13 {
+/*
+namespace HandshakeState {
     make: IOHandle -> IOFail Tls13;
     make = |handle| (
         let secure_random = *SecureRandom::make;
@@ -62,13 +60,6 @@ namespace Tls13 {
         pure()
     };
 
-    _send_client_hello: [m: MonadTls] m ();
-    _send_client_hello = do {
-        let tls = *get_state;
-        let random = *randgen_bytes(64);
-        let hello = ClientHello::empty.init(random);
-        // TODO: init key_share
-        pure()
-    };
 }
+*/
 

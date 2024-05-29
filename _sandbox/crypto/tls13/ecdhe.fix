@@ -5,18 +5,22 @@ import Debug;
 
 import Minilib.Crypto.Tls13.ECDSA;
 import Minilib.Crypto.Tls13.RandGen;
+import Minilib.Crypto.Tls13.Extensions;
+import Minilib.Crypto.Tls13.KeyShare;
+import Minilib.Crypto.Tls13.Types;
 import Minilib.Monad.Error;
+
+// 4.2.8.2. ECDHE Parameters
 /*
-import Minilib.Crypto.SecureRandom;
-import Minilib.Crypto.SHA256;
-import Minilib.Encoding.Binary;
-import Minilib.Math.Modular;
-import Minilib.Math.BigInt;
-import Minilib.Math.BigNat;
-import Minilib.Math.Types;
-import Minilib.Text.Hex;
-import Minilib.Text.StringEx;
+type UncompressedPointRepresentation = unbox struct {
+    legacy_form: U8, // uint8 legacy_form = 4;
+    x: Array U8,    // opaque X[coordinate_length];
+    y: Array U8,    // opaque Y[coordinate_length];
+}
 */
+type UncompressedPointRepresentation = Array U8;
+
+type SharedSecret = Array U8;
 
 type ECDHE = unbox struct {
     ec: ECParam,
@@ -33,25 +37,40 @@ namespace ECDHE {
         }
     );
 
-    get_pub_key: ECDHE -> (Array U8, Array U8);
-    get_pub_key = |ecdhe| (
-        let local_key_pair = ecdhe.@local_key_pair;
-        let (x, y) = local_key_pair.@q.@xy.as_some;
-        (x.to_bytes, y.to_bytes)
+    get_named_group: ECDHE -> NamedGroup;
+    get_named_group = |ecdhe| (
+        let id = ecdhe.@ec.@id;
+        if id == "secp256r1" { NamedGroup::secp256r1 };
+        eval assert(|_| "unsupported named group: " + id, false);
+        0_U16
     );
 
-    calc_shared_secret: (Array U8, Array U8) -> ECDHE -> Result ErrMsg (Array U8);
-    calc_shared_secret = |remote_pub_key, ecdhe| (
+    get_pub_key: ECDHE -> UncompressedPointRepresentation;
+    get_pub_key = |ecdhe| (
+        ecdhe.@local_key_pair.@q.to_bytes_uncompressed
+    );
+
+    to_key_share_entry: ECDHE -> KeyShareEntry;
+    to_key_share_entry = |ecdhe| (
+        KeyShareEntry {
+            group: ecdhe.get_named_group,
+            key_exchange: ecdhe.get_pub_key,
+        }
+    );
+
+    accept_server_share: KeyShareEntry -> ECDHE -> Result ErrMsg SharedSecret;
+    accept_server_share = |server_share, ecdhe| (
+        if server_share.@group != ecdhe.get_named_group {
+            err $ "named group unmatch"
+        };
+        ecdhe.accept_remote_pub_key(server_share.@key_exchange)
+    );
+
+    accept_remote_pub_key: UncompressedPointRepresentation -> ECDHE -> Result ErrMsg SharedSecret;
+    accept_remote_pub_key = |remote_pub_key, ecdhe| (
         let ec = ecdhe.@ec;
         let local_key_pair = ecdhe.@local_key_pair;
-        // make uncompressed octetstring
-        let bytes = [ 4_U8 ].append(remote_pub_key.@0).append(remote_pub_key.@1);
-        let remote_pub_key: ECPoint = *ECPoint::from_bytes_ec(ec, bytes);
-        /*
-        let remote_x: ECField = ECField::make(*ECInt::from_bytes(remote_x));
-        let remote_y: ECField = ECField::make(*ECInt::from_bytes(remote_y));
-        let remote_pub_key: ECPoint = ECPoint::make(ec, remote_x, remote_y);
-        */
+        let remote_pub_key: ECPoint = *ECPoint::from_bytes_ec(ec, remote_pub_key);
         eval *remote_pub_key.validate_pubkey;
         let dQ = remote_pub_key.mul_by_ECInt(local_key_pair.@d);
         if dQ.@xy.is_none {

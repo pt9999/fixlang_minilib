@@ -1,11 +1,13 @@
 module Main;
 
+import Random;
 import Debug;
 
+import Minilib.Crypto.Tls13.ECDHE;
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.Connection;
 import Minilib.Crypto.Tls13.MemConnection;
-//import Minilib.Crypto.Tls13;
+import Minilib.Crypto.Tls13;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.FunctorM;
 import Minilib.Monad.Reader;
@@ -15,8 +17,9 @@ import Minilib.Text.StringEx;
 import Minilib.Thread.Time;
 import Minilib.Testing.UnitTest;
 
-test_mem_connection: IO ();
-test_mem_connection = do {
+test_mem_connection: TestCase;
+test_mem_connection = (
+    make_test("test_mem_connection") $ |_|
     let (local_conn, remote_conn) = *MemConnection::pipe.lift;
     let n = 102400;
     let bytes = Array::from_map(n, |i| i.to_U8);
@@ -28,7 +31,7 @@ test_mem_connection = do {
     let res = *timeit_io("send_recv", task).lift;
     //eval *println("res="+(bytes == bytes2).to_string).lift;
     pure()
-}.try(eprintln);
+);
 
 /*
 type MockServer = unbox struct {
@@ -41,12 +44,25 @@ namespace MockServer {
         handle: handle
     };
 }
+*/
 
 test_client_hello: TestCase;
 test_client_hello = (
-    let ()
+    make_test("test_client_hello") $ |_|
+    let random = Random::init_by_seed(123_U64);
+    let (hello, _) = *do {
+        ClientHelloState::make
+    }.run_state_t(random);
+    eval *println(hello.@client_hello.marshal_to_bytes.to_string_hex).lift;
+    eval *println(hello.@ecdhe.get_pub_key.to_string_hex).lift;
+    pure()
 );
-*/
 
 main: IO ();
-main = test_mem_connection;
+main = (
+    [
+        test_mem_connection,
+        test_client_hello,
+    ]
+    .run_test_driver
+);

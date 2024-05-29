@@ -33,6 +33,14 @@ impl Function a: Monad {
 
 //------------------------------------------------------------------------
 
+// A trait for the interface of generic continuation  monads.
+trait MonadCont = Monad + MonadContIF;
+
+// A trait for generic continuation  monads.
+trait [cm: * -> *] cm: MonadContIF {
+    call_cc: ((a -> cm b) -> cm a) -> cm a;
+}
+
 // A continuation monad.
 type [m: * -> *] ContT r m a = unbox struct {
     data: (a -> m r) -> m r
@@ -41,40 +49,24 @@ type [m: * -> *] ContT r m a = unbox struct {
 type Cont r a = ContT r Identity a;
 
 namespace Cont {
+    // Creates a ContT monad from a function.
     cont_t: [m: Monad] ((a -> m r) -> m r) -> ContT r m a;
     cont_t = |f| ContT { data: f };
 
+    // Creates a Cont monad from a function.
     cont: ((a -> r) -> r) -> Cont r a;
     cont = |farr| cont_t $ |famr| (
         Identity::make $ farr $ famr >> Identity::get
     );
-/*
-    make: ((a -> r) -> r) -> Cont r a;
-    make = cont;
-*/
+
     run_cont_t: [m: Monad] (a -> m r) -> ContT r m a -> m r;
-    run_cont_t = |f, ma| (
-        (ma.@data)(f)
+    run_cont_t = |fa_mr, cma| (
+        (cma.@data)(fa_mr)
     );
 
     run_cont: (a -> r) -> Cont r a -> r;
-    run_cont = |f, ma| (
-        ma.run_cont_t(f >> Identity::make).get
-    );
-/*
-    run: (a -> r) -> Cont r a -> r;
-    run = run_cont;
-*/
-    call_cc: ((a -> Cont r b) -> Cont r a) -> Cont r a;
-    call_cc = |fambma| (
-        Cont::cont $ |far|
-        let famb = |a| (
-            Cont::cont $ |fbr|
-            far(a)
-        );
-        let ma = fambma(famb);
-        let r = ma.run_cont(far);
-        r
+    run_cont = |fa_r, cma| (
+        cma.run_cont_t(fa_r >> Identity::make).Identity::get
     );
 }
 
@@ -93,6 +85,19 @@ impl [m: Monad] ContT r m: Monad {
             let cmb = facmb(a); // cmb: ContT r m b
             cmb.run_cont_t(fbmr)
         )
+    );
+}
+
+impl [m: Monad] ContT r m: MonadContIF {
+    //call_cc: ((a -> cm b) -> cm a) -> cm a;
+    call_cc = |fa_cmb_cma| (            // fa_cmb_cma: (a -> ContT r m b) -> ContT r m a
+        Cont::cont_t $ |fa_mr|          // fa_mr: a -> m r
+        let fa_cmb = |a| (              // fa_cmb: a -> ContT r m b
+            Cont::cont_t $ |fb_mr|      // fb_mr: b -> m r (ignored)
+            fa_mr(a)
+        );
+        let cma = fa_cmb_cma(fa_cmb);
+        cma.run_cont_t(fa_mr)
     );
 }
 
@@ -138,31 +143,33 @@ test_monad_cont = (
     assert_equal("eq", expected, actual)
 );
 
-test_call_cc: IO ();
+test_call_cc: TestCase;
 test_call_cc = (
+    make_test("test_call_cc") $ |_|
     let cma: Cont String I64 = call_cc(|exit|
         loop_m(
             (0, 0), |(sum, i)|
             if i >= 10 { break_m $ sum };
             if i >= 5 { exit(sum) };
             let sum = sum + i;
-            eval debug_eprintln("i="+i.to_string+" sum="+sum.to_string);
+            //eval debug_eprintln("i="+i.to_string+" sum="+sum.to_string);
             continue_m $ (sum, i + 1)
         )
     );
-    let ans = cma.run_cont(|sum| sum.to_string);
-    println(ans)
+    let expected = "10";
+    let actual = cma.run_cont(|sum| sum.to_string);
+    assert_equal("eq", expected, actual)
 );
 
 //------------------------------------------------------------------------
 
 main: IO ();
 main = (
-    eval *test_call_cc;
     [
         test_functor_cont,
         test_functor_cont_t,
         test_monad_cont,
+        test_call_cc,
     ]
     .run_test_driver
 );

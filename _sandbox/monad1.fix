@@ -2,6 +2,10 @@ module Main;
 
 import Debug;
 
+import Minilib.Testing.UnitTest;
+import Minilib.Monad.Identity;
+
+
 // Function monad. same as Reader monad
 type Function a b = unbox struct {
     data: a -> b
@@ -27,60 +31,94 @@ impl Function a: Monad {
     );
 }
 
+//------------------------------------------------------------------------
+
 // A continuation monad.
-type Cont r a = unbox struct {
-    data: (a -> r) -> r
+type [m: * -> *] ContT r m a = unbox struct {
+    data: (a -> m r) -> m r
 };
 
-namespace Cont {
-    make: ((a -> r) -> r) -> Cont r a;
-    make = |g| Cont { data: g };
+type Cont r a = ContT r Identity a;
 
-    run: (a -> r) -> Cont r a -> r;
-    run = |f, ma| (
+namespace Cont {
+    cont_t: [m: Monad] ((a -> m r) -> m r) -> ContT r m a;
+    cont_t = |f| ContT { data: f };
+
+    cont: ((a -> r) -> r) -> Cont r a;
+    cont = |farr| cont_t $ |famr| (
+        Identity::make $ farr $ famr >> Identity::get
+    );
+/*
+    make: ((a -> r) -> r) -> Cont r a;
+    make = cont;
+*/
+    run_cont_t: [m: Monad] (a -> m r) -> ContT r m a -> m r;
+    run_cont_t = |f, ma| (
         (ma.@data)(f)
     );
 
+    run_cont: (a -> r) -> Cont r a -> r;
+    run_cont = |f, ma| (
+        ma.run_cont_t(f >> Identity::make).get
+    );
+/*
+    run: (a -> r) -> Cont r a -> r;
+    run = run_cont;
+*/
     call_cc: ((a -> Cont r b) -> Cont r a) -> Cont r a;
     call_cc = |fambma| (
-        Cont::make $ |far|
+        Cont::cont $ |far|
         let famb = |a| (
-            Cont::make $ |fbr|
+            Cont::cont $ |fbr|
             far(a)
         );
         let ma = fambma(famb);
-        let r = ma.run(far);
+        let r = ma.run_cont(far);
         r
     );
 }
 
-impl Cont r: Functor {
-    map = |fab, ma| (       // fab: a -> b
-        Cont::make $ |fbr|  // fbr: b -> r
-        ma.run(fab >> fbr)
+impl [m: Monad] ContT r m: Functor {
+    map = |fab, cma| (          // fab: a -> b, cma: ContT r m a
+        Cont::cont_t $ |fbmr|   // fbmr: b -> m r
+        cma.run_cont_t(fab >> fbmr)
     );
 }
 
-impl Cont r: Monad {
-    pure = |a| Cont::make $ |far| far(a);
-    bind = |famb, ma| (     // famb: a -> m b
-        Cont::make $ |fbr|  // fbr: b -> r
-        ma.run(|a|
-            famb(a).run(fbr)
+impl [m: Monad] ContT r m: Monad {
+    pure = |a| Cont::cont_t $ |famr| famr(a);
+    bind = |facmb, cma| (       // facmb: a -> ContT r m b, cma: ContT r m a
+        Cont::cont_t $ |fbmr|   // fbmr: b -> m r
+        cma.run_cont_t(|a|
+            let cmb = facmb(a); // cmb: ContT r m b
+            cmb.run_cont_t(fbmr)
         )
     );
 }
 
-test_functor_cont: IO ();
+test_functor_cont: TestCase;
 test_functor_cont = (
-    let ma: Cont (Array String) I64 = Cont::make $ |far| far(3);
-    let mb = ma.map(to_string);
-    let c = mb.run(|b| [b, b]);
-    println(c.to_string)
+    make_test("test_functor_cont") $ |_|
+    let cma: Cont (Array String) I64 = Cont::cont $ |far| far(42);
+    let cmb = cma.map(to_string);
+    let expected = ["foo-42", "bar-42"];
+    let actual = cmb.run_cont(|str| ["foo-" + str, "bar-" + str]);
+    assert_equal("eq", expected, actual)
 );
 
-test_monad_cont: IO ();
+test_functor_cont_t: TestCase;
+test_functor_cont_t = (
+    make_test("test_functor_cont_t") $ |_|
+    let cma: ContT (Array String) IOFail I64 = Cont::cont_t $ |far| far(42);
+    let cmb = cma.map(to_string);
+    let expected = ["foo-42", "bar-42"];
+    let actual = *cmb.run_cont_t(|str| pure $ ["foo-" + str, "bar-" + str]);
+    assert_equal("eq", expected, actual)
+);
+
+test_monad_cont: TestCase;
 test_monad_cont = (
+    make_test("test_monad_cont") $ |_|
     let mc: Cont (Array String) (Array I64)  = do {
         let a = *pure(3);
         let b = *pure(4);
@@ -94,13 +132,15 @@ test_monad_cont = (
             pure $ ab.append(ab).map(to_string)
         }
     };
-    let ans = md.run(|x| x);
-    println (ans.to_string)
+    let actual = md.run_cont(|x| x);
+    let expected = ["3", "4", "3", "4"];
+    //eval *println (actual.to_string).lift;
+    assert_equal("eq", expected, actual)
 );
 
 test_call_cc: IO ();
 test_call_cc = (
-    let cont: Cont String I64 = call_cc(|exit|
+    let cma: Cont String I64 = call_cc(|exit|
         loop_m(
             (0, 0), |(sum, i)|
             if i >= 10 { break_m $ sum };
@@ -110,9 +150,19 @@ test_call_cc = (
             continue_m $ (sum, i + 1)
         )
     );
-    let ans = cont.run(|sum| sum.to_string);
+    let ans = cma.run_cont(|sum| sum.to_string);
     println(ans)
 );
 
+//------------------------------------------------------------------------
+
 main: IO ();
-main = test_call_cc;
+main = (
+    eval *test_call_cc;
+    [
+        test_functor_cont,
+        test_functor_cont_t,
+        test_monad_cont,
+    ]
+    .run_test_driver
+);

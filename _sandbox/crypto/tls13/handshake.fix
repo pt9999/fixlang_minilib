@@ -1,0 +1,62 @@
+module Minilib.Crypto.Tls13.Handshake;
+
+import AsyncTask;
+import Debug;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.RandGen;
+import Minilib.Crypto.Tls13.ECDHE;
+import Minilib.Crypto.Tls13.ECDSA;
+import Minilib.Crypto.Tls13.KeyShare;
+import Minilib.Crypto.Tls13.Extensions;
+import Minilib.Crypto.Tls13.HandshakeProtocol;
+//import Minilib.Crypto.Tls13.RecordProtocol;
+//import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type ClientHelloState = unbox struct {
+    client_hello: ClientHello,
+    ecdhe: ECDHE,
+};
+
+namespace ClientHelloState {
+    make: [m: RandGen] m ClientHelloState;
+    make = do {
+        let hello = ClientHello::empty;
+        let hello = hello.init_random(*randgen_bytes(32));
+        // init key_share
+        let ecdhe = *ECDHE::make(ECParam::secp256r1);
+        let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make $ [
+            ecdhe.to_key_share_entry
+        ];
+        let hello = hello.add_extension(key_share $ ks);
+        pure $ ClientHelloState {
+            client_hello: hello,
+            ecdhe: ecdhe
+        }
+    };
+}
+
+/*
+namespace HandshakeState {
+    make: IOHandle -> IOFail Tls13;
+    make = |handle| (
+        let secure_random = *SecureRandom::make;
+        pure $ Tls13 {
+            handle: handle,
+            secure_random: secure_random,
+        }
+    );
+
+    handshake: [m: MonadTls] m ();
+    handshake = do {
+        eval *_send_client_hello;
+        eval *_recv_server_hello;
+        pure()
+    };
+
+}
+*/
+

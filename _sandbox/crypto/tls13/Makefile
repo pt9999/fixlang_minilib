@@ -9,11 +9,14 @@ LIBS = -L ../../../lib -L .
 
 all:
 
+handshake_test:
+	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
+
 handshake_protocol_test:
-	$(FIXAUTOLINK) run $(LIBS) -f handshake_protocol_test.fix -O separated
+	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
 
 record_protocol_test:
-	$(FIXAUTOLINK) run $(LIBS) -f record_protocol_test.fix -O separated
+	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
 
 clean:
 	rm -f *.out

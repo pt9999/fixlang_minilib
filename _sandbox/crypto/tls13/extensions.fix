@@ -3,7 +3,9 @@ module Minilib.Crypto.Tls13.Extensions;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Encoding.Binary;
+import Minilib.Text.StringEx;
 
 
 // 4.2 Extensions
@@ -11,7 +13,7 @@ import Minilib.Encoding.Binary;
 type ExtensionType = U16;
 type Extension = unbox union {
     unknown_extension: ExtensionType,
-    server_name: (),
+    server_name: ServerNameList,
     max_fragment_length: (),
     status_request: (),
     supported_groups: NamedGroupList,
@@ -32,7 +34,7 @@ type Extension = unbox union {
     oid_filters: (),
     post_handshake_auth: (),
     signature_algorithms_cert: (),
-    key_share: ()
+    key_share: KeyShare,
 };
 
 namespace Extension {
@@ -78,8 +80,10 @@ impl Extension: Marshal {
         let size_pos = buf.get_position;
         let buf = buf.marshal(0_U16);       // size
         let buf = (
+            if ex.is_server_name { buf.marshal(ex.as_server_name) };
             if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
             if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
+            if ex.is_key_share { buf.marshal(ex.as_key_share) };
             buf
         );
         let last_pos = buf.get_position;
@@ -95,11 +99,67 @@ impl Extension: Unmarshal {
         let (extension_data: Array U8, buf) = *buf.unmarshal_fixed(extension_data_size.to_I64);
 
         let extension: Extension = *do {
+            if extension_type == 0_U16 { unmarshal_from_bytes(extension_data).map(server_name) };
             if extension_type == 10_U16 { unmarshal_from_bytes(extension_data).map(supported_groups) };
             if extension_type == 43_U16 { unmarshal_from_bytes(extension_data).map(supported_versions) };
+            if extension_type == 51_U16 { unmarshal_from_bytes(extension_data).map(key_share) };
             pure $ unknown_extension(extension_type)
         };
         pure $ (extension, buf)
+    );
+}
+
+// RFC6066 3. Server Name Indication
+type HostName = String;
+
+type ServerName = unbox union {
+    host_name: HostName,
+};
+
+impl ServerName: Marshal {
+    marshal = |obj, buf| (
+        if obj.is_host_name {
+            let buf = buf.marshal(0_U8);
+            let name = obj.as_host_name.get_bytes.pop_back;
+            buf.marshal_var_size(name, to_U16)
+        };
+        eval assert(|_| "invalid server name", false);
+        buf
+    );
+}
+
+impl ServerName: Unmarshal {
+    unmarshal = |buf| (
+        let (name_type: U8, buf) = *buf.unmarshal;
+        if name_type == 0_U8 {
+            let (name: Array U8, buf) = *buf.unmarshal_var_size(U16::to_I64);
+            let name: ServerName = host_name $ name._unsafe_to_string;
+            pure $ (name, buf)
+        };
+        err $ "invalid name_type"
+    );
+}
+
+type ServerNameList = unbox struct {
+    server_name_list: Array ServerName
+};
+
+namespace ServerNameList {
+    make: Array ServerName -> ServerNameList;
+    make = |server_name_list| ServerNameList {
+        server_name_list: server_name_list
+    };
+}
+
+impl ServerNameList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@server_name_list, to_U16)
+    );
+}
+
+impl ServerNameList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(ServerNameList::make)
     );
 }
 

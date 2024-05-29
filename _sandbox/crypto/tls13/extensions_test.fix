@@ -3,6 +3,56 @@ module Main;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.Extensions;
 import Minilib.Encoding.Binary;
+import Debug;
 
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
 
+test_server_name: TestCase;
+test_server_name = (
+    make_test("test_server_name") $ |_|
+    let ext = server_name $ ServerNameList::make $ [host_name $ "example.com"];
+    let bytes = marshal_to_bytes(ext);
+    let expected = "00000010000e00000b6578616d706c652e636f6d";
+    let actual = bytes.to_string_hex;
+    //eval *println(actual).lift;
+    eval *assert_equal("eq", expected, actual);
+    let ext2: Extension = *unmarshal_from_bytes(bytes).from_result;
+    assert_equal("eq", ext.as_server_name.@server_name_list.@(0).as_host_name,
+                       ext2.as_server_name.@server_name_list.@(0).as_host_name)
+);
+
+test_supported_versions: TestCase;
+test_supported_versions = (
+    make_test("test_supported_versions") $ |_|
+    let ext = supported_versions $ SupportedVersions {
+        versions: [
+            0x0304_U16,
+            0x0303_U16,
+        ]
+    };
+    let bytes = marshal_to_bytes(ext);
+    let expected = "002b00050403040303";
+    let actual = bytes.to_string_hex;
+    //eval *println(actual).lift;
+    eval *assert_equal("eq", expected, actual);
+    pure()
+    /*
+    let ext2: Extension = *unmarshal_from_bytes(bytes).from_result;
+    assert_equal("eq", ext.as_supported_versions.@versions,
+                       ext2.as_supported_versions.@versions)
+    */
+);
+
+main: IO ();
+main = (
+    [
+        test_server_name,
+        test_supported_versions,
+    ]
+    .run_test_driver
+);

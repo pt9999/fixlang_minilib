@@ -30,9 +30,6 @@ mandelbrot:
 lens:
 	../bin/fixautolink run -L ../lib -L . -f lens.fix
 
-monad1:
-	../bin/fixautolink run -L ../lib -L . -f monad1.fix -O separated
-
 state_monad_test2:
 	../bin/fixautolink run -L ../lib -L . -f state_monad_test2.fix -O separated
 

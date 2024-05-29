@@ -1,0 +1,82 @@
+module Main;
+
+import Debug;
+
+import Minilib.Monad.Cont;
+/*
+import Minilib.Monad.Identity;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+*/
+import Minilib.Testing.UnitTest;
+
+test_functor_cont: TestCase;
+test_functor_cont = (
+    make_test("test_functor_cont") $ |_|
+    let cma: Cont (Array String) I64 = Cont::cont $ |far| far(42);
+    let cmb = cma.map(to_string);
+    let expected = ["foo-42", "bar-42"];
+    let actual = cmb.run_cont(|str| ["foo-" + str, "bar-" + str]);
+    assert_equal("eq", expected, actual)
+);
+
+test_functor_cont_t: TestCase;
+test_functor_cont_t = (
+    make_test("test_functor_cont_t") $ |_|
+    let cma: ContT (Array String) IOFail I64 = Cont::cont_t $ |far| far(42);
+    let cmb = cma.map(to_string);
+    let expected = ["foo-42", "bar-42"];
+    let actual = *cmb.run_cont_t(|str| pure $ ["foo-" + str, "bar-" + str]);
+    assert_equal("eq", expected, actual)
+);
+
+test_monad_cont: TestCase;
+test_monad_cont = (
+    make_test("test_monad_cont") $ |_|
+    let mc: Cont (Array String) (Array I64)  = do {
+        let a = *pure(3);
+        let b = *pure(4);
+        pure $ [a, b]
+    };
+    let md: Cont (Array String) (Array String) = do {
+        let ab = *mc;
+        if ab.@(0) % 2 == 0 {
+            pure $ ab.map(to_string)
+        } else {
+            pure $ ab.append(ab).map(to_string)
+        }
+    };
+    let actual = md.run_cont(|x| x);
+    let expected = ["3", "4", "3", "4"];
+    //eval *println (actual.to_string).lift;
+    assert_equal("eq", expected, actual)
+);
+
+test_call_cc: TestCase;
+test_call_cc = (
+    make_test("test_call_cc") $ |_|
+    let cma: Cont String I64 = call_cc(|exit|
+        loop_m(
+            (0, 0), |(sum, i)|
+            if i >= 10 { break_m $ sum };
+            if i >= 5 { exit(sum) };
+            let sum = sum + i;
+            //eval debug_eprintln("i="+i.to_string+" sum="+sum.to_string);
+            continue_m $ (sum, i + 1)
+        )
+    );
+    let expected = "10";
+    let actual = cma.run_cont(|sum| sum.to_string);
+    assert_equal("eq", expected, actual)
+);
+
+main: IO ();
+main = (
+    [
+        test_functor_cont,
+        test_functor_cont_t,
+        test_monad_cont,
+        test_call_cc,
+    ]
+    .run_test_driver
+);

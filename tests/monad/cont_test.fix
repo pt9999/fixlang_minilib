@@ -3,11 +3,7 @@ module Main;
 import Debug;
 
 import Minilib.Monad.Cont;
-/*
-import Minilib.Monad.Identity;
 import Minilib.Monad.Trans;
-import Minilib.Monad.Error;
-*/
 import Minilib.Testing.UnitTest;
 
 test_functor_cont: TestCase;
@@ -52,6 +48,16 @@ test_monad_cont = (
     assert_equal("eq", expected, actual)
 );
 
+test_lift_cont: TestCase;
+test_lift_cont = (
+    make_test("test_monad_cont") $ |_|
+    let ma: IOFail I64 = pure(42);
+    let cma: ContT String IOFail I64 = ma.lift_t;
+    let expected = "42";
+    let actual = *cma.run_cont_t(to_string >> pure);
+    assert_equal("eq", expected, actual)
+);
+
 test_call_cc: TestCase;
 test_call_cc = (
     make_test("test_call_cc") $ |_|
@@ -70,13 +76,50 @@ test_call_cc = (
     assert_equal("eq", expected, actual)
 );
 
+type [cm: * -> *] JmpBuf cm a b = box struct {
+    // the argument of a jump
+    arg: a,
+    // current continuation of a jump
+    cc: JmpBuf cm a b -> cm b
+};
+
+namespace JmpBuf {
+    setjmp: [cm: MonadCont] a -> cm (JmpBuf cm a b);
+    setjmp = |arg| (
+        call_cc(|cc| pure $ JmpBuf { arg: arg, cc: cc })
+    );
+
+    longjmp: [cm: MonadCont] a -> JmpBuf cm a b -> cm b;
+    longjmp = |arg, jmpbuf| (
+        (jmpbuf.@cc)(jmpbuf.set_arg(arg))
+    );
+}
+
+test_call_cc_1: TestCase;
+test_call_cc_1 = (
+    make_test("test_call_cc_1") $ |_|
+    let cma: ContT String IOFail String = do {
+        let jmpbuf = *setjmp(0);
+        let i = jmpbuf.@arg;
+        //eval *eprintln("i=" + i.to_string).lift.lift_t;
+        if i < 5 { jmpbuf.longjmp(i + 1) };
+        pure(i.to_string)
+    };
+    let actual = *cma.run_cont_t(|i| pure $ i);
+    //eval *eprintln("result="+ actual.to_string).lift;
+    let expected = "5";
+    assert_equal("eq", expected, actual)
+);
+
 main: IO ();
 main = (
     [
         test_functor_cont,
         test_functor_cont_t,
         test_monad_cont,
+        test_lift_cont,
         test_call_cc,
+        test_call_cc_1,
     ]
     .run_test_driver
 );

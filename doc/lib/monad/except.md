@@ -21,5 +21,7 @@ type [m: *->*] ExceptT e m a = unbox struct {
 
 #### `impl [m: Monad] ExceptT e m: Monad`
 
+#### `impl ExceptT e: MonadTrans`
+
 #### `impl [m: Monad] ExceptT e m: MonadErrorIF`
 

@@ -57,9 +57,15 @@ Runs a ContT monad with the supplied continuation function.
 
 Runs a Cont monad with the supplied continuation function.
 
+#### lift_cont: [m: Monad] m a -> ContT r m a;
+
+Lifts an underlying monad to a continuation monad.
+
 #### `impl [m: Monad] ContT r m: Functor`
 
 #### `impl [m: Monad] ContT r m: Monad`
+
+#### `impl ContT r: MonadTrans`
 
 #### `impl [m: Monad] ContT r m: MonadContIF`
 

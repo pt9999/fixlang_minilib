@@ -14,11 +14,16 @@ trait [m: * -> *] m: RandGenIF {
     randgen_bytes: I64 -> m (Array U8);
 }
 
-impl StateT SecureRandom IOFail: RandGenIF {
+trait a: GetSetSecureRandom {
+    get_secure_random: a -> SecureRandom;
+    set_secure_random: SecureRandom -> a -> a;
+}
+
+impl [s: GetSetSecureRandom] StateT s IOFail: RandGenIF {
     randgen_bytes = |size| (
-        let secure_random = *get_state;
+        let secure_random = *get_state.map(get_secure_random);
         let (bytes, secure_random) = *secure_random.generate_bytes(size).lift_t;
-        eval *put_state(secure_random);
+        eval *mod_state(set_secure_random(secure_random));
         pure $ bytes
     );
 }

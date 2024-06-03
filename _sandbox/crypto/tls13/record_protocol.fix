@@ -5,6 +5,7 @@ import Debug;
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.Connection;
 import Minilib.Encoding.Binary;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -72,9 +73,29 @@ namespace TLSPlaintext {
             let start = max_fragment_size * i;
             let end  = min(max_fragment_size * (i + 1), data.get_size);
             let fragment = if start == 0 && end == data.get_size { data } else { data.get_sub(start, end) };
-            TLSPlaintText::empty.set_type_(type_).set_fragment(fragment)
+            TLSPlaintext::empty.set_type_(type_).set_fragment(fragment)
         ).to_array
     );
+
+    send_plaintext: [m: TLSConnection] TLSPlaintext -> m ();
+    send_plaintext = |record| (
+        let bytes = marshal_to_bytes(record);
+        send_bytes(bytes)
+    );
+
+    send_plaintexts: [m: TLSConnection] Array TLSPlaintext -> m ();
+    send_plaintexts = |records| (
+        records.foreach_m(send_plaintext)
+    );
+
+    recv_plaintext:  [m: TLSConnection] m TLSPlaintext;
+    recv_plaintext = do {
+        let header = *recv_n_bytes(6);
+        let length = get_u16_be(4, header);
+        let body = *recv_n_bytes(length.to_I64);
+        let bytes = header.append(body);
+        unmarshal_from_bytes(bytes).from_result
+    };
 }
 
 impl TLSPlaintext: Marshal {
@@ -191,18 +212,4 @@ impl TLSCiphertext: Unmarshal {
 }
 
 namespace TLSRecord {
-    send_record: [m: TLSConnection] TLSPlaintext -> m ();
-    send_record = |record| (
-        let bytes = marshal_to_bytes(record);
-        send_bytes(bytes)
-    );
-
-    recv_record:  [m: TLSConnection] m TLSPlaintext;
-    recv_record = do {
-        let header = *recv_n_bytes(6);
-        let length = get_u16_be(4, header);
-        let body = *recv_n_bytes(length.to_I64);
-        let bytes = header.append(body);
-        unmarshal_from_bytes(bytes).from_result
-    };
 }

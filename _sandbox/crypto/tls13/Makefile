@@ -2,7 +2,7 @@ FIXAUTOLINK = ../../../bin/fixautolink
 LIBS = -L ../../../lib -L .
 
 %.out: %.fix
-	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $<
+	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< -O separated
 
 %.run: %.fix
 	$(FIXAUTOLINK) run $(LIBS) -f $< -O separated

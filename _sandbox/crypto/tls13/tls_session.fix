@@ -1,0 +1,64 @@
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls13.TLSSession;
+
+import AsyncTask;
+import Debug;
+
+import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.RandGen;
+import Minilib.Crypto.Tls13.Connection;
+import Minilib.Crypto.Tls13.Handshake;
+/*
+import Minilib.Crypto.Tls13.HandshakeProtocol;
+import Minilib.Crypto.Tls13.RecordProtocol;
+import Minilib.Encoding.Binary;
+*/
+import Minilib.Crypto.SecureRandom;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+import Minilib.Net.Tcp;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type TLSSession = unbox struct {
+    socket: Socket,
+    secure_random: SecureRandom,
+    handshake_state: HandshakeState,
+};
+
+type TLSSessionState = StateT TLSSession IOFail;
+
+impl TLSSession: GetSetSecureRandom {
+    get_secure_random = TLSSession::@secure_random;
+    set_secure_random = TLSSession::set_secure_random;
+}
+
+impl TLSSession: GetSocket {
+    get_socket = TLSSession::@socket;
+}
+
+
+namespace TLSSession {
+    make: Socket -> IOFail TLSSession;
+    make = |socket| (
+        let secure_random = *SecureRandom::make;
+        pure $ TLSSession {
+            socket: socket,
+            secure_random: secure_random,
+            handshake_state: HandshakeState::empty(),
+        }
+    );
+
+    send_client_hello: TLSSessionState ();
+    send_client_hello = (
+        let session = *get_state;
+        if !session.@handshake_state.is_empty {
+            error $ "handshake state is not empty"
+        };
+        let client_hello_state = *ClientHelloState::make;
+        eval *client_hello_state.send;
+        mod_state(set_handshake_state(HandshakeState::client_hello_sent $ client_hello_state))
+    );
+}

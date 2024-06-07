@@ -1,0 +1,103 @@
+module Main;
+
+import Minilib.Thread.Time;
+
+append2 : Iterator a -> Iterator a -> Iterator a;
+append2 = |rhs, lhs| (
+    let next = |_| (
+        let opt = lhs.advance;
+        if opt.is_none { rhs.advance };
+        let (e, lhs) = opt.as_some;
+        some $ (e, lhs.append2(rhs))
+    );
+    Iterator { next : next }
+);
+
+/*
+bind2: (a -> Iterator b) -> Iterator a -> Iterator b;
+bind2 = |f, xs| (
+    // 遅延評価にならない
+    xs.advance.map_or(
+        Iterator::empty,
+        |(x, xs)| f(x).append2(xs.bind2(f))
+    )
+);
+*/
+
+bind2: (a -> Iterator b) -> Iterator a -> Iterator b;
+bind2 = |f, xs| (
+    let next = |_| (
+        let opt = xs.advance;
+        if opt.is_none { none() };
+        let (x, xxs) = opt.as_some;
+        f(x).append2(xxs.bind2(f)).advance
+    );
+    Iterator { next : next }
+);
+
+product0: Iterator a -> Iterator b -> Iterator (b, a);
+product0 = |as, bs| (
+    let a = *as;
+    let b = *bs;
+    pure $ (b, a)
+);
+
+product2: Iterator a -> Iterator b -> Iterator (b, a);
+product2 = |as, bs| (
+    as.bind2(|a|
+        bs.bind2(|b|
+            pure $ (b, a)
+        )
+    )
+);
+
+test0: IO ();
+test0 = (
+    eval *pure();
+    Iterator::range(-1, 2).product2(Iterator::range(-1, 2)).fold_m(
+        (), |_, t|
+        println(t.to_string)
+    )
+);
+
+test_append: IO ();
+test_append = (
+    let iter = Iterator::range(0, 3).append2(Iterator::range(10, 12));
+    println(iter.map(to_string).join(","))
+);
+
+// original version (product)
+test1: () -> I64;
+test1 =
+let n = 200 in
+let inner = Iterator::range(-1, 2).product(Iterator::range(-1, 2)) in
+|_| (
+    let ans = 0;
+    let ans = Iterator::range(0, n).product(Iterator::range(0, n)).fold(ans, |ans, (x, y)|
+        inner.fold(ans, |ans, _| ans + x + y)
+    );
+    ans
+);
+
+// modified version (product2)
+test2: () -> I64;
+test2 =
+let n = 200 in
+let inner = Iterator::range(-1, 2).product2(Iterator::range(-1, 2)) in
+//let inner = Iterator::range(0, 9).bang in
+|_| (
+    let ans = 0;
+    let ans = Iterator::range(0, n).product2(Iterator::range(0, n)).fold(ans, |ans, (x, y)|
+        inner.fold(ans, |ans, _| ans + x + y)
+    );
+    ans
+);
+
+main: IO ();
+main = (
+    //test0
+    //test_append
+    eval *timeit("test1", test1).forget;
+    eval *timeit("test2", test2).forget;
+    pure()
+);

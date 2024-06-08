@@ -1,4 +1,5 @@
-module Minilib.Crypto.Tls13.MemConnection;
+module Main;
+//module Minilib.Crypto.Tls13.MemConnection;
 
 import Debug;
 
@@ -12,11 +13,6 @@ type MemConnection = unbox struct {
     input: Channel U8,
     output: Channel U8
 };
-
-impl StateT MemConnection IOFail: TLSConnectionIF {
-    send_bytes = MemConnection::_send_bytes;
-    recv_n_bytes = MemConnection::_recv_n_bytes;
-}
 
 namespace MemConnection {
     make: IO MemConnection;
@@ -42,11 +38,11 @@ namespace MemConnection {
         pure $ (local_conn, remote_conn)
     );
 
+    /*
     _send_bytes: Array U8 -> StateT MemConnection IOFail ();
     _send_bytes = |bytes| (
         let conn = *get_state;
-        let output = conn.@output;
-        bytes.foreach_m(|b| output.send(b)).lift_t
+        let output = .lift_t
     );
 
     _recv_n_bytes: I64 -> StateT MemConnection IOFail (Array U8);
@@ -55,5 +51,35 @@ namespace MemConnection {
         let input = conn.@input;
         Array::fill(length, input.recv).map_m(|x| x).lift_t
     );
+    */
 }
 
+impl MemConnection: ByteIO {
+    send = |bytes, conn| (
+        let output = conn.@output;
+        bytes.foreach_m(|b| output.send(b))
+    );
+    recv = |length, conn| (
+        let input = conn.@input;
+        Array::fill(length, input.recv).map_m(|x| x).lift_t
+    );
+}
+
+// 下記のimplがないと panickする
+/*
+impl MemConnection: GetByteIO {
+    type ByteIOType MemConnection = MemConnection;
+    get_byte_io = |a| a;
+}
+*/
+
+main: IO ();
+main = (
+    do {
+         let (local_conn, remote_conn) = *MemConnection::pipe.lift;
+        let n = 1024;
+        let bytes = Array::from_map(n, |i| i.to_U8);
+        let _ =  *send_bytes(bytes).run_state_t(local_conn);
+        pure()
+    }.try(eprintln)
+);

@@ -14,21 +14,34 @@ trait [m: * -> *] m: TLSConnectionIF {
     recv_n_bytes: I64 -> m (Array U8);
 }
 
-trait a: GetSocket {
-    get_socket: a -> Socket;
+trait a: ByteIO {
+    // type IOType a: * -> *;
+    send: Array U8 -> a -> IOFail ();
+    recv: I64 -> a -> IOFail (Array U8);
 }
 
-impl [s: GetSocket] StateT s IOFail: TLSConnectionIF {
+impl Socket: ByteIO {
+    // type IOType Socket = IOFail;
+    send = |bytes, sock| sock.Socket::send(bytes).forget;
+    recv = Socket::recv;
+}
+
+trait a: GetByteIO {
+    type ByteIOType a;
+    get_byte_io: a -> ByteIOType a;
+}
+
+impl [s: GetByteIO, bio: ByteIO, ByteIOType s = bio]
+    StateT s IOFail: TLSConnectionIF {
     send_bytes = |bytes| (
-        let socket = *get_state.map(get_socket);
-        let size = *socket.send(bytes).lift_t;  // TODO check size
+        let byte_io = (*get_state).get_byte_io;
+        let size = *byte_io.ByteIO::send(bytes).lift_t;  // TODO check size
         eval debug_eprintln("sent:" + size.to_string + " bytes: " + bytes.to_string_hex);
         pure()
     );
 
     recv_n_bytes = |length| (
-        let socket = *get_state.map(get_socket);
-        socket.recv(length).lift_t
+        let byte_io = (*get_state).get_byte_io;
+        byte_io.ByteIO::recv(length).lift_t
     );
 }
-

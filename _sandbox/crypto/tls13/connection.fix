@@ -22,8 +22,20 @@ trait a: ByteIO {
 
 impl Socket: ByteIO {
     // type IOType Socket = IOFail;
-    send = |bytes, sock| sock.Socket::send(bytes).forget;
-    recv = Socket::recv;
+    send = |bytes, sock| (
+        let expected_length = bytes.get_size;
+        let actual_length = *sock.Socket::send(bytes); // TODO check size
+        eval debug_eprintln("sent:" + actual_length.to_string + " bytes: " + bytes.to_string_hex);
+        if actual_length < expected_length {
+            throw $ "send error: expected=" + expected_length.to_string
+                    + " actual=" + actual_length.to_string
+        };
+        pure()
+    );
+    recv = |length, sock| (
+        let bytes = *sock.Socket::recv(length);
+        pure $ bytes
+    );
 }
 
 trait a: GetByteIO {
@@ -35,9 +47,7 @@ impl [s: GetByteIO, bio: ByteIO, ByteIOType s = bio]
     StateT s IOFail: TLSConnectionIF {
     send_bytes = |bytes| (
         let byte_io = (*get_state).get_byte_io;
-        let size = *byte_io.ByteIO::send(bytes).lift_t;  // TODO check size
-        eval debug_eprintln("sent:" + size.to_string + " bytes: " + bytes.to_string_hex);
-        pure()
+        byte_io.ByteIO::send(bytes).lift_t
     );
 
     recv_n_bytes = |length| (

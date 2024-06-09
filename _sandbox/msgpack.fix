@@ -5,9 +5,11 @@ import Debug;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
 
 trait [m: * -> *] m: MonadMarshalIF {
     write_marshal: [a: Marshal] a -> m ();
@@ -35,11 +37,11 @@ impl ByteBufferState: MonadUnmarshalIF {
 
 //------------------------------------------
 trait a: Pack {
-    pack: [m: MonadMarshal, ErrorType m = String] a -> m ();
+    pack: [m: MonadMarshal, ErrorType m = ErrMsg] a -> m ();
 }
 
 trait a: Unpack {
-    unpack: [m: MonadUnmarshal, ErrorType m = String] m a;
+    unpack: [m: MonadUnmarshal, ErrorType m = ErrMsg] m a;
 }
 
 _TypeErr: ErrMsg;
@@ -57,21 +59,6 @@ impl U8: Pack {
     );
 }
 
-impl U8: Unpack {
-    unpack = (
-        let u8: U8 = *read_unmarshal;
-        if u8 <= 0x7f_U8 {
-            // positive fixint 0XXXXXXX
-            pure $ u8
-        };
-        if u8 == 0xcc_U8 {
-            // 8-bit unsigned integer
-            read_unmarshal
-        };
-        error $ _TypeErr 
-    );
-}
-
 impl U16: Pack {
     pack = |u16: U16| (
         if u16 <= 0xff_U16 {
@@ -80,20 +67,6 @@ impl U16: Pack {
         // 16-bit unsigned integer (big endian)
         eval *write_marshal(0xcd_U8);
         write_marshal(u16)
-    );
-}
-
-impl U16: Unpack {
-    unpack = (
-        unpack.map(U8::to_U16).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xcd_U8 {
-                // 16-bit unsigned integer (big endian)
-                let u16: U16 = *read_unmarshal;
-                pure $ u16
-            };
-            error $ _TypeErr
-        )
     );
 }
 
@@ -108,19 +81,6 @@ impl U32: Pack {
     );
 }
 
-impl U32: Unpack {
-    unpack = (
-        unpack.map(U16::to_U32).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xce_U8 {
-                // 32-bit unsigned integer (big endian)
-                read_unmarshal
-            };
-            error $ _TypeErr
-        )
-    );
-}
-
 impl U64: Pack {
     pack = |u64: U64| (
         if u64 <= 0xffffffff_U64 {
@@ -129,19 +89,6 @@ impl U64: Pack {
         // 64-bit unsigned integer (big endian)
         eval *write_marshal(0xcf_U8);
         write_marshal(u64)
-    );
-}
-
-impl U32: Unpack {
-    unpack = (
-        unpack.map(U32::to_U64).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xcf_U8 {
-                // 64-bit unsigned integer (big endian)
-                read_unmarshal
-            };
-            error $ _TypeErr
-        )
     );
 }
 
@@ -158,23 +105,6 @@ impl I8: Pack {
     );
 }
 
-impl I8: Unpack {
-    unpack = (
-        let u8: U8 = *read_unmarshal;
-        let i8: I8 = u8.to_I8;
-        if -0x1f_I8 <= i8 && i8 <= 0x7f_I8 {
-            // positive fixint 0XXXXXXX
-            // negative fixint 111XXXXX
-            pure $ i8
-        };
-        if u8 == 0xd0_U8 {
-            // 8-bit signed integer
-            read_unmarshal
-        };
-        error $ _TypeErr
-    );
-}
-
 impl I16: Pack {
     pack = |i16| (
         if -0x80_I16 <= i16 && i16 <= 0x7f_I16 {
@@ -183,19 +113,6 @@ impl I16: Pack {
         // 16-bit signed integer (big endian)
         eval *write_marshal(0xd1_U8);
         write_marshal(i16.to_U16)
-    );
-}
-
-impl I16: Unpack {
-    unpack = (
-        unpack.map(I8::to_I16).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xd1_U8 {
-                // 16-bit signed integer (big endian)
-                read_unmarshal
-            };
-            error $ _TypeErr
-        )
     );
 }
 
@@ -210,19 +127,6 @@ impl I32: Pack {
     );
 }
 
-impl I32: Unpack {
-    unpack = (
-        unpack.map(I16::to_I32).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xd2_U8 {
-                // 32-bit signed integer (big endian)
-                read_unmarshal
-            };
-            error $ _TypeErr
-        )
-    );
-}
-
 impl I64: Pack {
     pack = |i64| (
         if -0x80000000 <= i64 && i64 <= 0x7fffffff {
@@ -234,17 +138,74 @@ impl I64: Pack {
     );
 }
 
+_unpack_number: [m: MonadUnmarshal, ErrorType m = ErrMsg] m U64;
+_unpack_number = (
+    let first: U8 = *read_unmarshal;
+    if 0x00_U8 <= first && first <= 0x7f_U8 {
+        // positive fixint 0XXXXXXX
+        pure $ first.to_U64
+    };
+    if 0xe0_U8 <= first && first <= 0xff_U8 {
+        // negative fixint 111XXXXX
+        pure $ first.to_I8.to_U64
+    };
+    if first == 0xcc_U8 { // uint8
+        read_unmarshal.map(U8::to_U64)
+    };
+    if first == 0xcd_U8 { // uint16
+        read_unmarshal.map(U16::to_U64)
+    };
+    if first == 0xce_U8 { // uint32
+        read_unmarshal.map(U32::to_U64)
+    };
+    if first == 0xcf_U8 { // uint64
+        read_unmarshal
+    };
+    if first == 0xd0_U8 { // int8
+        read_unmarshal.map(U8::to_U64)  // unmarshal as U8
+    };
+    if first == 0xd1_U8 { // int16
+        read_unmarshal.map(U16::to_U64) // unmarshal as U16
+    };
+    if first == 0xd2_U8 { // int32
+        read_unmarshal.map(U32::to_U64) // unmarshal as U32
+    };
+    if first == 0xd3_U8 { // int64
+        read_unmarshal                  // unmarshal as U64
+    };
+    error $ _TypeErr 
+);
+
+impl U8: Unpack {
+    unpack =  _unpack_number.map(U64::to_U8);
+}
+
+impl U16: Unpack {
+    unpack =  _unpack_number.map(U64::to_U16);
+}
+
+impl U32: Unpack {
+    unpack =  _unpack_number.map(U64::to_U32);
+}
+
+impl U64: Unpack {
+    unpack =  _unpack_number;
+}
+
+impl I8: Unpack {
+    unpack =  _unpack_number.map(U64::to_I8);
+}
+
+impl I16: Unpack {
+    unpack =  _unpack_number.map(U64::to_I16);
+}
+
+impl I32: Unpack {
+    unpack =  _unpack_number.map(U64::to_I32);
+}
+
 impl I64: Unpack {
-    unpack = (
-        unpack.map(I32::to_I64).catch(|errmsg|
-            let u8: U8 = *read_unmarshal;
-            if u8 == 0xd3_U8 {
-                // 64-bit signed integer (big endian)
-                read_unmarshal
-            };
-            error $ _TypeErr
-        )
-    );
+    unpack =  _unpack_number.map(U64::to_I64);
 }
 
 test_pack: IO ();
@@ -267,10 +228,49 @@ test_pack = (
     println((buf.@array.to_string_hex, ).format("buf={}"))
 );
 
-test_unpack: IO ();
+assert_unpack_array_equal: [a:Unpack, a:ToString, a:Eq] String -> Array U8 -> Array a -> IOFail ();
+assert_unpack_array_equal = |label, bytes, expected| (
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let n = expected.get_size;
+    let sm /* : ByteBufferState (Array a) */ = do {
+        Array::fill(n, unpack).map_m(|x| x)
+    };
+    let (actual, buf) = *sm.run_state_t(buf).from_result;
+    assert_equal(label, expected, actual)
+);
+
+
+test_unpack: TestCase;
 test_unpack = (
-    let arr = [ 0x12, 0xcc, 0xab, 0xcd, 0xab, 0xcd ].map(to_U8); 
-    let buf = ByteBuffer::make(arr, big_endian());
+    make_test("test_unpack") $ |_|
+    let bytes = [ 
+        0x12, // positive fixint
+        0xcc, 0xfe, // uint8
+        0xcd, 0xfe, 0xdc, // uint16
+        0xce, 0xfe, 0xdc, 0xba, 0x98, // uint32
+        0xcf, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, // uint64
+        0xe1, // negative fixint
+        0xd0, 0xfe, // int8
+        0xd1, 0xfe, 0xdc, // int16
+        0xd2, 0xfe, 0xdc, 0xba, 0x98, // int32
+        0xcf, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, // int64
+    ].map(to_U8); 
+    
+    let expected: Array I64 = [
+        0x12, 0xfe, 0xfedc, 0xfedcba98, 0xfedcba9876543210_U64.to_I64, 
+        0xe1_U8.to_I8.to_I64, 0xfe, 0xfedc, 0xfedcba98, 0xfedcba9876543210_U64.to_I64, 
+    ];
+
+    eval *assert_unpack_array_equal("u8", bytes, expected.map(to_U8));
+    eval *assert_unpack_array_equal("i8", bytes, expected.map(to_I8));
+    eval *assert_unpack_array_equal("u16", bytes, expected.map(to_U16));
+    eval *assert_unpack_array_equal("i16", bytes, expected.map(to_I16));
+    eval *assert_unpack_array_equal("u32", bytes, expected.map(to_U32));
+    eval *assert_unpack_array_equal("i32", bytes, expected.map(to_I32));
+    eval *assert_unpack_array_equal("u64", bytes, expected.map(to_U64));
+    eval *assert_unpack_array_equal("i64", bytes, expected);
+
+    let buf = ByteBuffer::make(bytes, big_endian());
     let r: ByteBufferState String = do {
         let a1: U8 = *unpack;
         let a2: U8 = *unpack;
@@ -280,12 +280,16 @@ test_unpack = (
                 a3.to_string_hex)
                 .format("a1={} a2={} a3={}")
     };     
-    let res = r.run_state_t(buf);
-    if res.is_err { println("err: " + res.as_err) };
-    let (str, buf) = res.as_ok;
-    println(str)
+    let (str, buf) = *r.run_state_t(buf).from_result;
+    eval *println(str).lift;
+    pure()
 );
 
 main: IO ();
-main = test_pack;
+main = (
+    eval *test_pack;
+    [
+        test_unpack
+    ].run_test_driver
+);
 

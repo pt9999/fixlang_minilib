@@ -5,8 +5,8 @@ import Debug;
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
-
 
 // 4.2 Extensions
 
@@ -77,6 +77,17 @@ namespace Extension {
     ).to_U16;
 }
 
+impl Extension: ToString {
+    to_string = |ex| (
+        if ex.is_server_name { ex.as_server_name.to_string };
+        if ex.is_supported_groups { ex.as_supported_groups.to_string };
+        if ex.is_ec_point_formats { ex.as_ec_point_formats.to_string };
+        if ex.is_supported_versions { ex.as_supported_versions.to_string };
+        if ex.is_key_share { ex.as_key_share.to_string };
+        "unsupported"
+    );
+}
+
 impl Extension: Marshal {
     marshal = |ex, buf| (
         let buf = buf.marshal(ex.get_extension_type);
@@ -85,7 +96,7 @@ impl Extension: Marshal {
         let buf = (
             if ex.is_server_name { buf.marshal(ex.as_server_name) };
             if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
-            if ex.is_ec_point_formats { buf.marshal_var_size(ex.as_ec_point_formats, to_U8) };
+            if ex.is_ec_point_formats { buf.marshal(ex.as_ec_point_formats) };
             if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
             if ex.is_key_share { buf.marshal(ex.as_key_share) };
             buf
@@ -105,6 +116,7 @@ impl Extension: Unmarshal {
         let extension: Extension = *do {
             if extension_type == 0_U16 { unmarshal_from_bytes(extension_data).map(server_name) };
             if extension_type == 10_U16 { unmarshal_from_bytes(extension_data).map(supported_groups) };
+            if extension_type == 11_U16 { unmarshal_from_bytes(extension_data).map(ec_point_formats) };
             if extension_type == 43_U16 { unmarshal_from_bytes(extension_data).map(supported_versions) };
             if extension_type == 51_U16 { unmarshal_from_bytes(extension_data).map(key_share) };
             pure $ unknown_extension(extension_type)
@@ -126,7 +138,7 @@ namespace ServerName {
 }
 
 impl ServerName: ToString {
-    to_string = |obj| "host_name(\"" + obj.as_host_name + "\")";
+    to_string = |obj| obj.as_host_name;
 }
 
 impl ServerName: Marshal {
@@ -165,7 +177,7 @@ namespace ServerNameList {
 }
 
 impl ServerNameList: ToString {
-    to_string = |obj| "ServerNameList { server_name_list: " + obj.@server_name_list.to_string + "}";
+    to_string = |obj| "ServerNameList:" + obj.@server_name_list.to_string;
 }
 
 impl ServerNameList: Marshal {
@@ -192,6 +204,10 @@ namespace SupportedVersions {
             0x0304_U16     // TLS 1.3
         ]
     };
+}
+
+impl SupportedVersions: ToString {
+    to_string = |obj| "SupportedVersions: " + obj.@versions.map(to_string_hex).to_string;
 }
 
 impl SupportedVersions: Marshal {
@@ -263,6 +279,10 @@ type SignatureSchemeList = unbox struct {
     v: Array SignatureScheme
 };
 
+impl SignatureSchemeList: ToString {
+    to_string = |obj| "SignatureSchemeList: " + obj.@v.map(to_string_hex).to_string;
+}
+
 impl SignatureSchemeList: Marshal {
     marshal = |obj, buf| (
         buf.marshal_var_size(obj.@v, to_U16)
@@ -320,6 +340,10 @@ namespace NamedGroupList {
     };
 }
 
+impl NamedGroupList: ToString {
+    to_string = |obj| "NamedGroupList: " + obj.@v.map(to_string_hex).to_string;
+}
+
 impl NamedGroupList: Marshal {
     marshal = |obj, buf| (
         buf.marshal_var_size(obj.@v, to_U16)
@@ -337,11 +361,34 @@ impl NamedGroupList: Unmarshal {
 // RFC8422 5.1.2. Supported Point Formats Extension
 
 type ECPointFormat = U8;
-type ECPointFormatList = Array ECPointFormat;
+
+type ECPointFormatList = unbox struct {
+    v: Array ECPointFormat
+};
 
 namespace ECPointFormatList {
     default: ECPointFormatList;
-    default = [ 0_U8 ];     // uncompressed
+    default = ECPointFormatList {
+        v: [ 0_U8 ]     // uncompressed
+    };
+}
+
+impl ECPointFormatList: ToString {
+    to_string = |obj| "ECPointFormatList: " + obj.@v.map(to_string_hex).to_string;
+}
+
+impl ECPointFormatList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@v, to_U8)
+    );
+}
+
+impl ECPointFormatList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U8::to_I64).map_res_0(|v|
+            ECPointFormatList { v: v }
+        )
+    );
 }
 
 // 4.2.8. Key Share

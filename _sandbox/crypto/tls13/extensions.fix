@@ -18,7 +18,7 @@ type Extension = unbox union {
     status_request: (),
     supported_groups: NamedGroupList,   // a.k.a. elliptic_curves in RFC 8422
     ec_point_formats: ECPointFormatList,   // RFC 8422
-    signature_algorithms: (),
+    signature_algorithms: SignatureSchemeList,
     use_srtp: (),
     heartbeat: (),
     application_layer_protocol_negotiation: (),
@@ -44,6 +44,7 @@ namespace Extension {
         supported_groups(NamedGroupList::default),
         supported_versions(SupportedVersions::default),
         ec_point_formats(ECPointFormatList::default),
+        signature_algorithms(SignatureSchemeList::default),
     ];
 
     get_extension_type: Extension -> ExtensionType;
@@ -82,6 +83,7 @@ impl Extension: ToString {
         if ex.is_server_name { ex.as_server_name.to_string };
         if ex.is_supported_groups { ex.as_supported_groups.to_string };
         if ex.is_ec_point_formats { ex.as_ec_point_formats.to_string };
+        if ex.is_signature_algorithms { ex.as_signature_algorithms.to_string };
         if ex.is_supported_versions { ex.as_supported_versions.to_string };
         if ex.is_key_share { ex.as_key_share.to_string };
         "unsupported"
@@ -97,6 +99,7 @@ impl Extension: Marshal {
             if ex.is_server_name { buf.marshal(ex.as_server_name) };
             if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
             if ex.is_ec_point_formats { buf.marshal(ex.as_ec_point_formats) };
+            if ex.is_signature_algorithms { buf.marshal(ex.as_signature_algorithms) };
             if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
             if ex.is_key_share { buf.marshal(ex.as_key_share) };
             buf
@@ -117,6 +120,7 @@ impl Extension: Unmarshal {
             if extension_type == 0_U16 { unmarshal_from_bytes(extension_data).map(server_name) };
             if extension_type == 10_U16 { unmarshal_from_bytes(extension_data).map(supported_groups) };
             if extension_type == 11_U16 { unmarshal_from_bytes(extension_data).map(ec_point_formats) };
+            if extension_type == 13_U16 { unmarshal_from_bytes(extension_data).map(signature_algorithms) };
             if extension_type == 43_U16 { unmarshal_from_bytes(extension_data).map(supported_versions) };
             if extension_type == 51_U16 { unmarshal_from_bytes(extension_data).map(key_share) };
             pure $ unknown_extension(extension_type)
@@ -278,6 +282,15 @@ namespace SignatureScheme {
 type SignatureSchemeList = unbox struct {
     v: Array SignatureScheme
 };
+
+namespace SignatureSchemeList {
+    default: SignatureSchemeList;
+    default = SignatureSchemeList {
+        v: [
+            ecdsa_secp256r1_sha256,
+        ]
+    };
+}
 
 impl SignatureSchemeList: ToString {
     to_string = |obj| "SignatureSchemeList: " + obj.@v.map(to_string_hex).to_string;

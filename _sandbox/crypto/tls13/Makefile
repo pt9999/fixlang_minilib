@@ -11,7 +11,7 @@ LIBS = -L ../../../lib -L .
 all:
 
 test:
-	$(FIXAUTOTEST) $(LIBS) -T ./tests -k -O separated $(TESTS)
+	$(FIXAUTOTEST) $(LIBS) -T ./tests -O separated $(TESTS) #--keep-going
 
 handshake_test:
 	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated

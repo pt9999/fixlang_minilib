@@ -1,4 +1,5 @@
 FIXAUTOLINK = ../../../bin/fixautolink
+FIXAUTOTEST = ../../../bin/fixautotest
 LIBS = -L ../../../lib -L .
 
 %.out: %.fix
@@ -8,6 +9,9 @@ LIBS = -L ../../../lib -L .
 	$(FIXAUTOLINK) run $(LIBS) -f $< -O separated
 
 all:
+
+test:
+	$(FIXAUTOTEST) $(LIBS) -T ./tests -k -O separated $(TESTS)
 
 handshake_test:
 	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated

@@ -24,15 +24,15 @@ import Minilib.Text.StringEx;
 
 type TLSSession = unbox struct {
     socket: Socket,
-    secure_random: SecureRandom,
+    var_secure_random: Var SecureRandom,
     handshake_state: HandshakeState,
 };
 
 type TLSSessionState = StateT TLSSession IOFail;
 
-impl TLSSession: GetSetSecureRandom {
-    get_secure_random = TLSSession::@secure_random;
-    set_secure_random = TLSSession::set_secure_random;
+impl TLSSession: GetRandomSource {
+    type RandomGeneratorType TLSSession = SecureRandom;
+    get_random_generator = @var_secure_random;
 }
 
 impl TLSSession: GetByteIO {
@@ -45,20 +45,21 @@ namespace TLSSession {
     make: Socket -> IOFail TLSSession;
     make = |socket| (
         let secure_random = *SecureRandom::make;
+        let var_secure_random = *Var::make(secure_random).lift;
         pure $ TLSSession {
             socket: socket,
-            secure_random: secure_random,
+            var_secure_random: var_secure_random,
             handshake_state: HandshakeState::empty(),
         }
     );
 
-    send_client_hello: TLSSessionState ();
-    send_client_hello = (
+    send_client_hello: String -> TLSSessionState ();
+    send_client_hello = |server_name| (
         let session = *get_state;
         if !session.@handshake_state.is_empty {
             error $ "handshake state is not empty"
         };
-        let client_hello_state = *ClientHelloState::make;
+        let client_hello_state = *ClientHelloState::make(server_name);
         eval *client_hello_state.send;
         mod_state(set_handshake_state(HandshakeState::client_hello_sent $ client_hello_state))
     );

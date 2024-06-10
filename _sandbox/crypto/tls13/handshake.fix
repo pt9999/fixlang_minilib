@@ -24,21 +24,27 @@ type ClientHelloState = unbox struct {
 };
 
 namespace ClientHelloState {
-    make: [m: RandGen] m ClientHelloState;
-    make = do {
+    make: [m: MonadRandGen] String -> m ClientHelloState;
+    make = |server_name| (
         let hello = ClientHello::empty;
         let hello = hello.init_random(*randgen_bytes(32));
+        // init server_name
+        let hello = hello.add_extension(Extension::server_name $
+            ServerNameList::make([
+                ServerName::make(server_name)
+            ])
+        );
         // init key_share
         let ecdhe = *ECDHE::make(ECParam::secp256r1);
         let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make $ [
             ecdhe.to_key_share_entry
         ];
-        let hello = hello.add_extension(key_share $ ks);
+        let hello = hello.add_extension(Extension::key_share $ ks);
         pure $ ClientHelloState {
             client_hello: hello,
             ecdhe: ecdhe
         }
-    };
+    );
 
     send: [m: TLSConnection] ClientHelloState -> m ();
     send = |client_hello_state| (

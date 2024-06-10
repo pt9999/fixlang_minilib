@@ -1,5 +1,4 @@
-module Main;
-//module Minilib.Crypto.Tls13.MemConnection;
+module Minilib.Crypto.Tls13.MemConnection;
 
 import Debug;
 
@@ -8,7 +7,6 @@ import Minilib.IO.Channel;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
-import Minilib.Thread.Time;
 
 type MemConnection = unbox struct {
     input: Channel U8,
@@ -38,21 +36,6 @@ namespace MemConnection {
         let remote_conn = local_conn.swap;
         pure $ (local_conn, remote_conn)
     );
-
-    /*
-    _send_bytes: Array U8 -> StateT MemConnection IOFail ();
-    _send_bytes = |bytes| (
-        let conn = *get_state;
-        let output = .lift_t
-    );
-
-    _recv_n_bytes: I64 -> StateT MemConnection IOFail (Array U8);
-    _recv_n_bytes = |length| (
-        let conn = *get_state;
-        let input = conn.@input;
-        Array::fill(length, input.recv).map_m(|x| x).lift_t
-    );
-    */
 }
 
 impl MemConnection: ByteIO {
@@ -70,23 +53,3 @@ impl MemConnection: GetByteIO {
     type ByteIOType MemConnection = MemConnection;
     get_byte_io = |a| a;
 }
-
-main: IO ();
-main = (
-    do {
-        let (local_conn, remote_conn) = *MemConnection::pipe.lift;
-        let n = 10240;
-        let bytes = Array::from_map(n, |i| i.to_U8);
-        let task: IO () = do {
-            eval *send_bytes(bytes).run_state_t(local_conn).map(@0);
-            let received =  *recv_n_bytes(n).run_state_t(remote_conn).map(@0);
-            eval assert_eq(|_|"local2remote", received, bytes);
-            eval *send_bytes(bytes).run_state_t(remote_conn).map(@0);
-            let received =  *recv_n_bytes(n).run_state_t(local_conn).map(@0);
-            eval assert_eq(|_|"remote2local", received, bytes);
-            pure()
-        }.try(eprintln);
-        timeit_io("test", task).lift
-
-    }.try(eprintln)
-);

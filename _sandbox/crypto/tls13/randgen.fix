@@ -1,5 +1,6 @@
 module Minilib.Crypto.Tls13.RandGen;
 
+import AsyncTask;
 import Random;
 import Debug;
 
@@ -8,39 +9,54 @@ import Minilib.Math.RandomEx;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 
-trait RandGen = Functor + Monad + RandGenIF;
+trait MonadRandGen = Functor + Monad + MonadRandGenIF;
 
-trait [m: * -> *] m: RandGenIF {
+trait [m: * -> *] m: MonadRandGenIF {
     randgen_bytes: I64 -> m (Array U8);
 }
 
-trait a: GetSetSecureRandom {
-    get_secure_random: a -> SecureRandom;
-    set_secure_random: SecureRandom -> a -> a;
+trait a: RandomGenerator {
+    generate_bytes: I64 -> Var a -> IOFail (Array U8);
 }
 
-impl [s: GetSetSecureRandom] StateT s IOFail: RandGenIF {
-    randgen_bytes = |size| (
-        let secure_random = *get_state.map(get_secure_random);
-        let (bytes, secure_random) = *secure_random.generate_bytes(size).lift_t;
-        eval *mod_state(set_secure_random(secure_random));
-        pure $ bytes
+impl Random: RandomGenerator {
+    generate_bytes = |size, var_random| (
+        var_random.lock(|random|
+            let (bytes, random) = random.generate_array(size, generate_U8);
+            eval *var_random.Var::set(random);
+            pure $ bytes
+        ).lift
     );
 }
 
-impl [m: Monad] StateT Random m: RandGenIF {
-    randgen_bytes = |size| (
-        let random = *get_state;
-        let (bytes, random) = random.generate_array(size, generate_U8);
-        eval *put_state(random);
-        pure $ bytes
+impl SecureRandom: RandomGenerator {
+    generate_bytes = |size, var_secure_random| (
+        let res = *var_secure_random.lock(|secure_random|
+            let res = *secure_random.generate_bytes(size).to_result;
+            if res.is_err { pure $ err $ res.as_err };
+            let (bytes, secure_random) = res.as_ok;
+            eval *var_secure_random.Var::set(secure_random);
+            pure $ ok $ bytes
+        ).lift;
+        res.from_result
     );
 }
 
-// Constant RandGen
-impl [m: Monad] StateT U8 m: RandGenIF {
+trait a: GetRandomSource {
+    type RandomGeneratorType a;
+    get_random_generator: a -> Var (RandomGeneratorType a);
+}
+
+impl [a: RandomGenerator] Var a: GetRandomSource {
+    type RandomGeneratorType (Var a) = a;
+    get_random_generator = |var| var;
+}
+
+impl [s: GetRandomSource, rg: RandomGenerator, RandomGeneratorType s = rg]
+    StateT s IOFail: MonadRandGenIF {
     randgen_bytes = |size| (
-        let u8 = *get_state;
-        pure $ Array::fill(size, u8)
+        let var_random_generator = *get_state.map(get_random_generator);
+        var_random_generator.generate_bytes(size).lift_t
     );
 }
+

@@ -7,6 +7,7 @@ import Minilib.Crypto.Tls13.Extensions;
 import Minilib.Crypto.Tls13.CipherSuite;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Encoding.Binary;
+import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -14,7 +15,7 @@ import Minilib.Text.StringEx;
 
 type Handshake = unbox union {
     client_hello: ClientHello,
-    server_hello: (),
+    server_hello: ServerHello,
     new_session_ticket: (),
     end_of_early_data: (),
     encrypted_extensions: (),
@@ -26,10 +27,10 @@ type Handshake = unbox union {
     message_hash: ()
 };
 
-type HandhshakeType = U8;
+type HandshakeType = U8;
 
 namespace Handshake {
-    get_msg_type: Handshake -> HandhshakeType;
+    get_msg_type: Handshake -> HandshakeType;
     get_msg_type = |h| (
         if h.is_client_hello { 1_U8 };
         if h.is_server_hello { 2_U8 };
@@ -51,6 +52,12 @@ namespace Handshake {
         if h.is_client_hello { buf.marshal(h.as_client_hello) };
         buf
     );
+
+    _unmarshal_body: HandshakeType -> ByteBuffer -> Result ErrMsg (Handshake, ByteBuffer);
+    _unmarshal_body = |msg_type, buf| (
+        if msg_type == 2_U8 { buf.unmarshal.map_res_0(Handshake::server_hello) };
+        err $ "unsupported msg_type"
+    );
 }
 
 impl Handshake: Marshal {
@@ -67,6 +74,20 @@ impl Handshake: Marshal {
     );
 }
 
+impl Handshake: Unmarshal {
+    unmarshal = |buf| (
+        let (msg_type: HandshakeType, buf) = *buf.unmarshal;
+        let length_pos = buf.get_position;
+        let (length: U24, buf) = *buf.unmarshal;
+        let (handshake: Handshake, buf) = *buf._unmarshal_body(msg_type);
+        let last_pos = buf.get_position;
+        let expected_length = last_pos - (length_pos + 3);
+        if expected_length.to_U32 != length.to_U32 {
+            err $ "unexpected length"
+        };
+        ok $ (handshake, buf)
+    );
+}
 
 // 4.1.2 ClientHello
 
@@ -81,6 +102,15 @@ type ClientHello = unbox struct {
 };
 
 namespace ClientHello {
+    to_handshake: ClientHello -> Handshake;
+    to_handshake = |hello| Handshake::client_hello(hello);
+
+    from_handshake: [m: MonadError] Handshake -> m ClientHello;
+    from_handshake = |handshake| (
+        if !handshake.is_client_hello { error $ "from_handshake: not a client hello" };
+        handshake.as_client_hello
+    );
+
     /*
     make: SecureRandom -> IOFail ClientHello;
     make = |secure_random| (
@@ -163,3 +193,13 @@ impl ServerHello: Unmarshal {
     );
 }
 
+namespace ServerHello {
+    to_handshake: ServerHello -> Handshake;
+    to_handshake = |hello| Handshake::server_hello(hello);
+
+    from_handshake: [m: MonadError] Handshake -> m ServerHello;
+    from_handshake = |handshake| (
+        if !handshake.is_server_hello { error $ "from_handshake: not a server hello" };
+        handshake.as_server_hello
+    );
+}

@@ -14,6 +14,7 @@ import Minilib.Crypto.Tls13.HandshakeProtocol;
 import Minilib.Crypto.Tls13.RecordProtocol;
 //import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
+import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -48,9 +49,36 @@ namespace ClientHelloState {
     );
 }
 
+type ServerHelloState = unbox struct {
+    server_hello: ServerHello,
+    ecdhe: ECDHE,
+};
+
+namespace ServerHelloState {
+    recv: [m: TLSConnection, ErrorType m = ErrMsg] ClientHelloState -> m ServerHelloState;
+    recv = |client_hello_state| (
+        let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
+        if !plaintext.@type_.is_handshake {
+            error $ "unexpected content type"
+        };
+        let fragment = plaintext.@fragment;
+        let handshake: Handshake = *unmarshal_from_bytes(fragment).from_result_t;
+        if !handshake.is_server_hello {
+            error $ "unexpected handshake type"
+        };
+        let hello: ServerHello = handshake.as_server_hello;
+        pure $ ServerHelloState {
+            server_hello: hello,
+            ecdhe: client_hello_state.@ecdhe
+        }
+    );
+}
+
+
 type HandshakeState = unbox union {
     empty: (),
     client_hello_sent: ClientHelloState,
+    server_hello_received: ServerHelloState,
 };
 
 namespace HandshakeState {

@@ -16,7 +16,8 @@ type Extension = unbox union {
     server_name: ServerNameList,
     max_fragment_length: (),
     status_request: (),
-    supported_groups: NamedGroupList,
+    supported_groups: NamedGroupList,   // a.k.a. elliptic_curves in RFC 8422
+    ec_point_formats: ECPointFormatList,   // RFC 8422
     signature_algorithms: (),
     use_srtp: (),
     heartbeat: (),
@@ -42,6 +43,7 @@ namespace Extension {
     supported_extensions = [
         supported_groups(NamedGroupList::default),
         supported_versions(SupportedVersions::default),
+        ec_point_formats(ECPointFormatList::default),
     ];
 
     get_extension_type: Extension -> ExtensionType;
@@ -50,7 +52,8 @@ namespace Extension {
         if ex.is_server_name { 0 };
         if ex.is_max_fragment_length { 1 };
         if ex.is_status_request { 5 };
-        if ex.is_supported_groups { 10 };
+        if ex.is_supported_groups { 10 };   // a.k.a. elliptic_curves in RFC 8422
+        if ex.is_ec_point_formats { 11 };   // RFC 8422
         if ex.is_signature_algorithms { 13 };
         if ex.is_use_srtp { 14 };
         if ex.is_heartbeat { 15 };
@@ -82,6 +85,7 @@ impl Extension: Marshal {
         let buf = (
             if ex.is_server_name { buf.marshal(ex.as_server_name) };
             if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
+            if ex.is_ec_point_formats { buf.marshal_var_size(ex.as_ec_point_formats, to_U8) };
             if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
             if ex.is_key_share { buf.marshal(ex.as_key_share) };
             buf
@@ -116,6 +120,15 @@ type ServerName = unbox union {
     host_name: HostName,
 };
 
+namespace ServerName {
+    make: String -> ServerName;
+    make = |name| ServerName::host_name(name);
+}
+
+impl ServerName: ToString {
+    to_string = |obj| "host_name(\"" + obj.as_host_name + "\")";
+}
+
 impl ServerName: Marshal {
     marshal = |obj, buf| (
         if obj.is_host_name {
@@ -146,9 +159,13 @@ type ServerNameList = unbox struct {
 
 namespace ServerNameList {
     make: Array ServerName -> ServerNameList;
-    make = |server_name_list| ServerNameList {
-        server_name_list: server_name_list
-    };
+    make = |server_name_list| (
+        ServerNameList { server_name_list: server_name_list }
+    );
+}
+
+impl ServerNameList: ToString {
+    to_string = |obj| "ServerNameList { server_name_list: " + obj.@server_name_list.to_string + "}";
 }
 
 impl ServerNameList: Marshal {
@@ -261,6 +278,7 @@ impl SignatureSchemeList: Unmarshal {
 }
 
 // 4.2.7 Supported Groups
+// RFC8422 5.1.1. Supported Elliptic Curves Extension
 
 namespace NamedGroup {
     /* Elliptic Curve Groups (ECDHE) */
@@ -314,6 +332,16 @@ impl NamedGroupList: Unmarshal {
             NamedGroupList { v: v }
         )
     );
+}
+
+// RFC8422 5.1.2. Supported Point Formats Extension
+
+type ECPointFormat = U8;
+type ECPointFormatList = Array ECPointFormat;
+
+namespace ECPointFormatList {
+    default: ECPointFormatList;
+    default = [ 0_U8 ];     // uncompressed
 }
 
 // 4.2.8. Key Share

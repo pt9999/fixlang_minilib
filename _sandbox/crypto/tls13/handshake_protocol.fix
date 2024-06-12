@@ -18,9 +18,9 @@ type Handshake = unbox union {
     server_hello: ServerHello,
     new_session_ticket: (),
     end_of_early_data: (),
-    encrypted_extensions: (),
-    certificate: (),
-    certificate_request: (),
+    encrypted_extensions: EncryptedExtensions,
+    certificate: Certificate,
+    certificate_request: CertificateRequest,
     certificate_verify: (),
     finished: (),
     key_update: (),
@@ -55,8 +55,30 @@ namespace Handshake {
 
     _unmarshal_body: HandshakeType -> ByteBuffer -> Result ErrMsg (Handshake, ByteBuffer);
     _unmarshal_body = |msg_type, buf| (
+        eval debug_println("Handshake::_unmarshal_body: msg_type=" + msg_type.to_string);
         if msg_type == 2_U8 { buf.unmarshal.map_res_0(Handshake::server_hello) };
-        err $ "unsupported msg_type"
+        if msg_type == 8_U8 { buf.unmarshal.map_res_0(Handshake::encrypted_extensions) };
+        if msg_type == 11_U8 { buf.unmarshal.map_res_0(Handshake::certificate) };
+        if msg_type == 13_U8 { buf.unmarshal.map_res_0(Handshake::certificate_request) };
+        err $ "unsupported msg_type: " + msg_type.to_string
+    );
+}
+
+impl Handshake: ToString {
+    to_string = |h| (
+        if h.is_client_hello { h.as_client_hello.to_string };
+        if h.is_server_hello { h.as_server_hello.to_string };
+        if h.is_new_session_ticket { h.as_new_session_ticket.to_string };
+        if h.is_end_of_early_data { h.as_end_of_early_data.to_string };
+        if h.is_encrypted_extensions { h.as_encrypted_extensions.to_string };
+        if h.is_certificate { h.as_certificate.to_string };
+        if h.is_certificate_request { h.as_certificate_request.to_string };
+        if h.is_certificate_verify { h.as_certificate_verify.to_string };
+        if h.is_finished { h.as_finished.to_string };
+        if h.is_key_update { h.as_key_update.to_string };
+        if h.is_message_hash { h.as_message_hash.to_string };
+        eval assert(|_| "unknown msg_type", false);
+        ""
     );
 }
 
@@ -211,5 +233,114 @@ namespace ServerHello {
     from_handshake = |handshake| (
         if !handshake.is_server_hello { error $ "from_handshake: not a server hello" };
         handshake.as_server_hello
+    );
+}
+
+// 4.3.1. Encrypted Extensions
+
+type EncryptedExtensions = unbox struct {
+    extensions: Array Extension
+};
+
+impl EncryptedExtensions: ToString {
+    to_string = |exs| (
+        "EncryptedExtensions { extensions=" + exs.@extensions.to_string + " }"
+    );
+}
+
+impl EncryptedExtensions: Unmarshal {
+    unmarshal = |buf| (
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let extensions = EncryptedExtensions { extensions: extensions };
+        pure $ (extensions, buf)
+    );
+}
+
+// 4.3.2. Certificate Request
+
+type CertificateRequest = unbox struct {
+    certificate_request_context: Array U8,  // <0..2^8-1>
+    extensions: Array Extension,
+};
+
+impl CertificateRequest: ToString {
+    to_string = |req| (
+        "CertificateRequest {" +
+        " context=" + req.@certificate_request_context.to_string_hex +
+        " extensions=" + req.@extensions.to_string +
+        " }"
+    );
+}
+
+impl CertificateRequest: Unmarshal {
+    unmarshal = |buf| (
+        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let cerreq = CertificateRequest {
+            certificate_request_context: context,
+            extensions: extensions
+        };
+        pure $ (cerreq, buf)
+    );
+}
+
+// 4.4.2. Certificate
+
+type CertificateType = unbox union {
+    _X509: (),              // 0
+    _RawPublicKey: (),      // 2
+};
+
+type CertificateEntry = unbox struct {
+    // NOTE: cert_data should be interpreted as ASN1_subjectPublicKeyInfo if certificate_type == RawPublicKey
+    cert_data: Array U8,                        // <1..2^24-1>
+    extensions: Array Extension,                // <0..2^16-1>
+};
+
+impl CertificateEntry: ToString {
+    to_string = |entry| (
+        "CertificateEntry {" +
+        " cert_data=" + entry.@cert_data.to_string_hex +
+        " extensions=" + entry.@extensions.to_string +
+        " }"
+    );
+}
+
+impl CertificateEntry: Unmarshal {
+    unmarshal = |buf| (
+        let (cert_data:Array U8, buf) = *buf.unmarshal_var_size(U24::to_I64);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let entry = CertificateEntry {
+            cert_data: cert_data,
+            extensions: extensions
+        };
+        pure $ (entry, buf)
+    );
+}
+
+type Certificate = unbox struct {
+    certificate_request_context: Array U8,      // <0..2^8-1>
+    certificate_list: Array CertificateEntry,   // <0..2^24-1>
+};
+
+impl Certificate: ToString {
+    to_string = |cert| (
+        "Certificate {" +
+        "\n certificate_request_context=" + cert.@certificate_request_context.to_string_hex +
+        "\n certificate_list=" +
+        "\n  " + cert.@certificate_list.to_array.map(to_string).join("\n  ") +
+        "\n}"
+    );
+}
+
+impl Certificate: Unmarshal {
+    unmarshal = |buf| (
+        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (certificate_list:Array CertificateEntry, buf) = *buf.unmarshal_var_size(U24::to_I64);
+        let entry = Certificate {
+            certificate_request_context: context,
+            certificate_list: certificate_list
+        };
+        pure $ (entry, buf)
     );
 }

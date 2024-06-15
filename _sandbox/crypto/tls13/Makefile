@@ -2,25 +2,20 @@ FIXAUTOLINK = ../../../bin/fixautolink
 FIXAUTOTEST = ../../../bin/fixautotest
 LIBS = -L ../../../lib -L .
 
+OPT_BUILD = -O separated
+OPT_RUN = -O separated
+OPT_TESTS = -O separated
+
 %.out: %.fix
-	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< -O separated
+	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< $(OPT_BUILD)
 
 %.run: %.fix
-	$(FIXAUTOLINK) run $(LIBS) -f $< -O separated
+	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN)
 
 all:
 
 test:
-	$(FIXAUTOTEST) $(LIBS) -T ./tests -O separated $(TESTS) #--keep-going
-
-handshake_test:
-	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
-
-handshake_protocol_test:
-	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
-
-record_protocol_test:
-	$(FIXAUTOLINK) run $(LIBS) -f $@.fix -O separated
+	$(FIXAUTOTEST) $(LIBS) -T ./tests $(OPTIMIZE) $(OPT_TESTS) --keep-going
 
 clean:
 	rm -f *.out

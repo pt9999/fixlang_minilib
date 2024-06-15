@@ -21,8 +21,8 @@ type Handshake = unbox union {
     encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_request: CertificateRequest,
-    certificate_verify: (),
-    finished: (),
+    certificate_verify: CertificateVerify,
+    finished: Finished,
     key_update: (),
     message_hash: ()
 };
@@ -61,6 +61,8 @@ namespace Handshake {
         if msg_type == 8_U8 { buf.unmarshal.map_res_0(Handshake::encrypted_extensions) };
         if msg_type == 11_U8 { buf.unmarshal.map_res_0(Handshake::certificate) };
         if msg_type == 13_U8 { buf.unmarshal.map_res_0(Handshake::certificate_request) };
+        if msg_type == 15_U8 { buf.unmarshal.map_res_0(Handshake::certificate_verify) };
+        if msg_type == 20_U8 { buf.unmarshal.map_res_0(Handshake::finished) };
         err $ "unsupported msg_type: " + msg_type.to_string
     );
 }
@@ -367,3 +369,59 @@ impl Certificate: Unmarshal {
         pure $ (entry, buf)
     );
 }
+
+// 4.4.3. Certificate Verify
+
+type CertificateVerify = unbox struct {
+    algorithm: SignatureScheme,
+    signature: Array U8,            // <0..2^16-1>
+};
+
+impl CertificateVerify: ToString {
+    to_string = |cv| (
+        "CertificateVerify {" +
+        " algorithm=" + cv.@algorithm.to_string_hex +
+        " signature=" + cv.@signature.to_string_hex +
+        " }"
+    );
+}
+
+impl CertificateVerify: Unmarshal {
+    unmarshal = |buf| (
+        let (algorithm, buf) = *buf.unmarshal;
+        let (signature, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let cv = CertificateVerify {
+            algorithm: algorithm,
+            signature: signature
+        };
+        pure $ (cv, buf)
+    );
+}
+
+// 4.4.4. Finished
+
+type Finished = unbox struct {
+    verify_data: Array U8
+};
+
+impl Finished: ToString {
+    to_string = |fin| (
+        "Finished {" +
+        " verify_data=" + fin.@verify_data.to_string_hex +
+        " }"
+    );
+}
+
+impl Finished: Unmarshal {
+    unmarshal = |buf| (
+        // TODO: use Hash.length
+        let (verify_data, buf) = *buf.unmarshal_fixed(buf.get_size - buf.get_position);
+        let fi = Finished {
+            verify_data: verify_data,
+        };
+        pure $ (fi, buf)
+    );
+}
+
+
+

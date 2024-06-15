@@ -3,29 +3,154 @@ module Minilib.Crypto.Tls13.Protection;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
+import Minilib.Crypto.Tls13.CipherSuite;
 import Minilib.Crypto.Tls13.RecordProtocol;
+import Minilib.Crypto.Tls13.Aead;
+import Minilib.Crypto.Tls13.Hkdf;
+import Minilib.Crypto.Tls13.Secret;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.FunctorM;
 import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+
+type Secrets = unbox struct {
+    hkdf: HKDF,
+    psk: Array U8,
+    early_secret: Array U8,
+    handshake_secret: Array U8,
+    master_secret: Array U8,
+};
+
+namespace Secrets {
+    from_cipher_suite: CipherSuite -> Result ErrMsg Secrets;
+    from_cipher_suite = |cipher_suite| (
+        let hkdf = *HKDF::from_cipher_suite(cipher_suite);
+        let psk = hkdf.zero_secret;
+        let early_secret = *hkdf.calc_early_secret(psk);
+        pure $ Secrets {
+            hkdf: hkdf,
+            psk: psk,
+            early_secret: early_secret,
+            handshake_secret: [],
+            master_secret: [],
+        }
+    );
+
+    calc_handshake_secret: Array U8 -> Secrets -> Result ErrMsg Secrets;
+    calc_handshake_secret = |dhe, secrets| (
+        let hkdf = secrets.@hkdf;
+        let secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
+        ok $ secrets.set_handshake_secret(secret)
+    );
+}
+
 type RecordProtection = unbox struct {
     write_key: Array U8,
     write_iv: Array U8,
-    seqno: I64,
+    sequence_number: I64,
+    additional_data: Array U8,
 };
+
+impl RecordProtection: ToString {
+    to_string = |p| (
+        "RecordProtection {" +
+        " write_key=" + p.@write_key.to_string_hex +
+        " write_iv=" + p.@write_iv.to_string_hex +
+        " sequence_number=" + p.@sequence_number.to_U64.to_string_hex +
+        " additional_data=" + p.@additional_data.to_string_hex +
+        "}"
+    );
+}
 
 namespace RecordProtection {
     empty: RecordProtection;
     empty = RecordProtection {
         write_key: [],
         write_iv: [],
-        seqno: 0
+        sequence_number: 0,
+        additional_data: [],
     };
+
+    set_traffic_keys: (HKDF -> Result ErrMsg (Array U8)) -> AEAD -> Secrets -> RecordProtection -> Result ErrMsg RecordProtection;
+    set_traffic_keys = |calc_secret, aead, secrets, record_protection| (
+        let hkdf = secrets.@hkdf;
+        let secret = *calc_secret(hkdf);
+        let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
+        ok $ record_protection
+            .set_write_key(key)
+            .set_write_iv(iv)
+            .set_sequence_number(0)
+    );
+
+    increment_sequence_number: RecordProtection -> RecordProtection;
+    increment_sequence_number = mod_sequence_number(add(1));
+
+    // 5.3. Per-Record Nonce
+    get_per_record_nonce: RecordProtection -> Array U8;
+    get_per_record_nonce = |prot| (
+        let iv = prot.@write_iv;
+        let seqnum = prot.@sequence_number;
+        let seqnum = Array::fill(iv.get_size, 0_U8).set_u64_be(iv.get_size - 8, seqnum);
+        let nonce = Array::from_map(iv.get_size, |i| iv.@(i).bit_xor(seqnum.@(i)));
+        nonce
+    );
 }
 
+
 type Protection = unbox struct {
+    secrets: Secrets,
+    aead: AEAD,
+    transcript: Array U8,
     server: RecordProtection,
     client: RecordProtection,
 };
+
+impl Protection: ToString {
+    to_string = |p| (
+        "Protection {" +
+        " server=" + p.@server.to_string +
+        " client=" + p.@client.to_string +
+        "}"
+    );
+}
+
+namespace Protection {
+    make: CipherSuite -> Result ErrMsg Protection;
+    make = |cipher_suite| (
+        let secrets = *Secrets::from_cipher_suite(cipher_suite);
+        let aead = *AEAD::from_cipher_suite(cipher_suite);
+
+        pure $ Protection {
+            secrets: secrets,
+            aead: aead,
+            transcript: [],
+            server: RecordProtection::empty,
+            client: RecordProtection::empty,
+        }
+    );
+
+    add_transcript: Array U8 -> Protection -> Protection;
+    add_transcript = |handshake_bytes| (
+        mod_transcript(append(handshake_bytes))
+    );
+
+    init_handshake: Array U8 -> Protection -> Result ErrMsg Protection;
+    init_handshake = |dhe, prot| (
+        let Protection {
+            secrets: secrets,
+            aead: aead,
+            transcript: transcript,
+            server: server,
+            client: client
+        } = prot;
+        let secrets = *secrets.calc_handshake_secret(dhe);
+        let client = *client.set_traffic_keys(calc_client_handshake_traffic_secret(secrets.@handshake_secret, transcript),
+                        aead, secrets);
+        let server = *server.set_traffic_keys(calc_server_handshake_traffic_secret(secrets.@handshake_secret, transcript),
+                        aead, secrets);
+        ok $ prot.set_secrets(secrets).set_client(client).set_server(server)
+    );
+
+}

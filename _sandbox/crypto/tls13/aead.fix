@@ -3,6 +3,9 @@
 
 module Minilib.Crypto.Tls13.Aead;
 
+import Debug;
+
+import Minilib.Crypto.Tls13.CipherSuite;
 import Minilib.Crypto.AES;
 import Minilib.Crypto.AES.GCM;
 
@@ -13,19 +16,27 @@ type AeadDecryptFunc = Array U8 -> Array U8 -> Array U8 -> Array U8 -> Result Er
 type AEAD = unbox struct {
     encrypt_func: AeadEncryptFunc,
     decrypt_func: AeadDecryptFunc,
+    key_len: I64,
+    iv_len: I64
 };
 
 namespace AEAD {
-    make: AeadEncryptFunc -> AeadDecryptFunc -> AEAD;
-    make = |encrypt_func, decrypt_func| AEAD {
-        encrypt_func: encrypt_func,
-        decrypt_func: decrypt_func,
-    };
+    from_cipher_suite: CipherSuite -> Result ErrMsg AEAD;
+    from_cipher_suite = |cipher_suite| (
+        if cipher_suite.is__TLS_AES_128_GCM_SHA256 { ok $ AEAD::make_aes_gcm $ _AEAD_AES_128_GCM };
+        if cipher_suite.is__TLS_AES_256_GCM_SHA384 { ok $ AEAD::make_aes_gcm $ _AEAD_AES_256_GCM };
+        err $ "no matching AEAD algorithm found"
+    );
 
     make_aes_gcm: AeadAesGcm -> AEAD;
     make_aes_gcm = |aes_gcm| AEAD {
         encrypt_func: _aead_aes_gcm_encrypt(aes_gcm),
         decrypt_func: _aead_aes_gcm_decrypt(aes_gcm),
+        key_len: aes_gcm.@k_len,
+        iv_len: (
+            eval assert_eq(|_| "n_min and n_max mismatch", aes_gcm.@n_min, aes_gcm.@n_max);
+            aes_gcm.@n_min
+        ),
     };
 
     // `aead.aead_encrypt(write_key, nonce, additional_data, plaintext)` encrypts a plaintext with additional data.

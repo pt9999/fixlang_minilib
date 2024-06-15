@@ -56,6 +56,7 @@ namespace Handshake {
     _unmarshal_body: HandshakeType -> ByteBuffer -> Result ErrMsg (Handshake, ByteBuffer);
     _unmarshal_body = |msg_type, buf| (
         eval debug_println("Handshake::_unmarshal_body: msg_type=" + msg_type.to_string);
+        if msg_type == 1_U8 { buf.unmarshal.map_res_0(Handshake::client_hello) };
         if msg_type == 2_U8 { buf.unmarshal.map_res_0(Handshake::server_hello) };
         if msg_type == 8_U8 { buf.unmarshal.map_res_0(Handshake::encrypted_extensions) };
         if msg_type == 11_U8 { buf.unmarshal.map_res_0(Handshake::certificate) };
@@ -178,6 +179,26 @@ impl ClientHello: Marshal {
         let buf = buf.marshal_var_size(msg.@legacy_compression_method, to_U8);
         let buf = buf.marshal_var_size(msg.@extensions, to_U16);
         buf
+    );
+}
+
+impl ClientHello: Unmarshal {
+    unmarshal = |buf| (
+        let (legacy_version:U16, buf) = *buf.unmarshal;
+        let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
+        let (legacy_session_id:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (cipher_suites:Array CipherSuite, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (legacy_compression_method, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let msg = ClientHello {
+            legacy_version: legacy_version,
+            random: random,
+            legacy_session_id: legacy_session_id,
+            cipher_suites: cipher_suites,
+            legacy_compression_method: legacy_compression_method,
+            extensions: extensions
+        };
+        pure $ (msg, buf)
     );
 }
 
@@ -328,7 +349,7 @@ impl Certificate: ToString {
         "Certificate {" +
         "\n certificate_request_context=" + cert.@certificate_request_context.to_string_hex +
         "\n certificate_list=" +
-        "\n  " + cert.@certificate_list.to_array.map(to_string).join("\n  ") +
+        "\n  " + cert.@certificate_list.to_iter.map(to_string).join("\n  ") +
         "\n}"
     );
 }

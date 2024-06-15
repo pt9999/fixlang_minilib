@@ -6,13 +6,41 @@ module Minilib.Crypto.Tls13.Aead;
 import Minilib.Crypto.AES;
 import Minilib.Crypto.AES.GCM;
 
-trait a: AeadEncryptDecrypt {
+type AeadEncryptFunc = Array U8 -> Array U8 -> Array U8 -> Array U8 -> Result ErrMsg (Array U8);
+type AeadDecryptFunc = Array U8 -> Array U8 -> Array U8 -> Array U8 -> Result ErrMsg (Array U8);
+
+
+type AEAD = unbox struct {
+    encrypt_func: AeadEncryptFunc,
+    decrypt_func: AeadDecryptFunc,
+};
+
+namespace AEAD {
+    make: AeadEncryptFunc -> AeadDecryptFunc -> AEAD;
+    make = |encrypt_func, decrypt_func| AEAD {
+        encrypt_func: encrypt_func,
+        decrypt_func: decrypt_func,
+    };
+
+    make_aes_gcm: AeadAesGcm -> AEAD;
+    make_aes_gcm = |aes_gcm| AEAD {
+        encrypt_func: _aead_aes_gcm_encrypt(aes_gcm),
+        decrypt_func: _aead_aes_gcm_decrypt(aes_gcm),
+    };
+
     // `aead.aead_encrypt(write_key, nonce, additional_data, plaintext)` encrypts a plaintext with additional data.
     // It returns an encrypted data, or reports an error.
-    aead_encrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> a -> Result ErrMsg (Array U8);
+    aead_encrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> AEAD -> Result ErrMsg (Array U8);
+    aead_encrypt = |write_key, nonce, additional_data, plaintext, aead| (
+        (aead.@encrypt_func)(write_key, nonce, additional_data, plaintext)
+    );
+
     // `aead.aead_decrypt(peer_write_key, nonce, additional_data, encrypted)` decrypts an encrypted data.
     // It returns a plaintext, or reports an error.
-    aead_decrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> a -> Result ErrMsg (Array U8);
+    aead_decrypt: Array U8 -> Array U8 -> Array U8 -> Array U8 -> AEAD -> Result ErrMsg (Array U8);
+    aead_decrypt = |peer_write_key, nonce, additional_data, encrypted, aead| (
+        (aead.@decrypt_func)(peer_write_key, nonce, additional_data, encrypted)
+    );
 }
 
 // RFC 5116 - An Interface and Algorithms for Authenticated Encryption
@@ -44,10 +72,12 @@ _AEAD_AES_128_GCM = AeadAesGcm {
 _AEAD_AES_256_GCM : AeadAesGcm;
 _AEAD_AES_256_GCM = _AEAD_AES_128_GCM.set_k_len(32);
 
-impl AeadAesGcm: AeadEncryptDecrypt {
+namespace AeadAesGcm {
+
     // `aead.aead_encrypt(write_key, nonce, additional_data, plaintext)` encrypts a plaintext with additional data.
     // It returns an encrypted data.
-    aead_encrypt = |write_key, nonce, additional_data, plaintext, aead| (
+    _aead_aes_gcm_encrypt: AeadAesGcm -> AeadEncryptFunc;
+    _aead_aes_gcm_encrypt = |aead, write_key, nonce, additional_data, plaintext| (
         if write_key.get_size != aead.@k_len {
             err $ "key length mismatch"
         };
@@ -79,7 +109,8 @@ impl AeadAesGcm: AeadEncryptDecrypt {
 
     // `aead.aead_decrypt(peer_write_key, nonce, additional_data, encrypted)` decrypts an encrypted data.
     // It returns a plaintext, or reports an error.
-    aead_decrypt = |peer_write_key, nonce, additional_data, encrypted, aead| (
+    _aead_aes_gcm_decrypt: AeadAesGcm -> AeadDecryptFunc;
+    _aead_aes_gcm_decrypt = |aead, peer_write_key, nonce, additional_data, encrypted| (
         if peer_write_key.get_size != aead.@k_len {
             err $ "key length mismatch"
         };

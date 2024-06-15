@@ -148,6 +148,32 @@ impl TLSInnerPlaintext: Marshal {
     );
 }
 
+impl TLSInnerPlaintext: Unmarshal {
+    unmarshal = |buf| (
+        let start = buf.get_position;
+        let end = buf.get_size;
+        // find non-zero byte from end
+        let content_type_pos = loop(
+            end - 1, |i|
+            if i < start { break $ i };
+            if buf.@array.@(i) != 0_U8 { break $ i };
+            continue $ i - 1
+        );
+        if content_type_pos < start { err $ "content type not found" };
+
+        let (content, buf) = *buf.unmarshal_fixed(content_type_pos - start);
+        let (type_, buf) = *buf.unmarshal;
+        let (zeros, buf) = *buf.unmarshal_fixed(end - (content_type_pos + 1));
+        let obj = TLSInnerPlaintext {
+            content: content,
+            type_: type_,
+            zeros: zeros
+        };
+        ok $ (obj, buf)
+    );
+}
+
+/*
 unmarshal_TLSInnerPlaintext: I64 -> I64 -> ByteBuffer -> Result ErrMsg (TLSInnerPlaintext, ByteBuffer);
 unmarshal_TLSInnerPlaintext = |length, length_of_padding, buf| (
     eval assert("invalid length", length >= 0);
@@ -165,6 +191,7 @@ unmarshal_TLSInnerPlaintext = |length, length_of_padding, buf| (
     };
     pure $ (obj, buf)
 );
+*/
 
 type TLSCiphertext = unbox struct {
     opaque_type: ContentType, // = application_data; /* 23 */

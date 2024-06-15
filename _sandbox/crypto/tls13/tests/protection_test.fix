@@ -92,6 +92,19 @@ test_1 = (
     let dhe = *parse_hex("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
     let protection = *protection.init_handshake(dhe).from_result;
     eval debug_println(protection.to_string);
+    let ciphertext_bytes = *server_encrypted_bytes;
+    let ciphertext: TLSCiphertext = *unmarshal_from_bytes(ciphertext_bytes).from_result;
+    let additional_data = ciphertext_bytes.get_sub(0, 5);
+    let aead = protection.@aead;
+    let server = protection.@server.set_additional_data(additional_data);
+    let inner_plaintext_bytes = *server.decrypt(ciphertext.@encrypted_record, aead).from_result;
+    //eval debug_println("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex);
+    let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes).from_result;
+    eval debug_println("inner_plaintext.@content=" + inner_plaintext.@content.to_string_hex);
+    eval *assert_equal("type_", true, inner_plaintext.@type_.is_handshake);
+    let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
+    let (handshakes: Array Handshake, buf) = *buf.unmarshal_fixed(buf.get_size).from_result;
+    eval debug_println(handshakes.to_iter.map(to_string).join("\n"));
     pure()
 );
 

@@ -19,7 +19,8 @@ import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
 type ClientHelloState = unbox struct {
-    client_hello: ClientHello,
+    transcript: Array U8,
+    client_hello_handshake_bytes: Array U8,
     ecdhe: ECDHE,
 };
 
@@ -45,45 +46,76 @@ namespace ClientHelloState {
         // TODO: signature_algorithms_cert
 
         eval debug_println("client_hello: extensions=" + hello.@extensions.to_string);
+        let handshake: Handshake = Handshake::client_hello $ hello;
+        let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
+
         pure $ ClientHelloState {
-            client_hello: hello,
+            transcript: handshake_bytes,
+            client_hello_handshake_bytes: handshake_bytes,
             ecdhe: ecdhe
         }
     );
 
     send: [m: TLSConnection] ClientHelloState -> m ();
     send = |client_hello_state| (
-        let handshake: Handshake = Handshake::client_hello $ client_hello_state.@client_hello;
-        let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
+        let handshake_bytes = client_hello_state.@client_hello_handshake_bytes;
         let plaintexts: Array TLSPlaintext = TLSPlaintext::split_fragments(ContentType::handshake(), handshake_bytes);
         TLSPlaintext::send_plaintexts(plaintexts)
     );
 }
 
 type ServerHelloState = unbox struct {
+    transcript: Array U8,
     server_hello: ServerHello,
-    ecdhe: ECDHE,
+    shared_secret: Array U8,
 };
 
 namespace ServerHelloState {
     recv: [m: TLSConnection, ErrorType m = ErrMsg] ClientHelloState -> m ServerHelloState;
     recv = |client_hello_state| (
+        let transcript = client_hello_state.@transcript;
+        let ecdhe = client_hello_state.@ecdhe;
+
         let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
         if !plaintext.@type_.is_handshake {
             error $ "unexpected content type"
         };
-        let fragment = plaintext.@fragment;
-        let handshake: Handshake = *unmarshal_from_bytes(fragment).from_result_t;
+        let handshake_bytes = plaintext.@fragment;
+        let transcript = transcript.append(handshake_bytes);
+        let handshake: Handshake = *unmarshal_from_bytes(handshake_bytes).from_result_t;
         if !handshake.is_server_hello {
             error $ "unexpected handshake type"
         };
-        let hello: ServerHello = handshake.as_server_hello;
-        eval debug_println("server_hello=" + hello.to_string);
+        /*
+        let handshake_bytes2 = marshal_to_bytes(handshake);
+        eval if handshake_bytes == handshake_bytes2 { () } else {
+            debug_println([handshake_bytes.get_size, handshake_bytes2.get_size].format("handshake bytes mismatch: {}, {}"))
+        };
+        */
+        let server_hello: ServerHello = handshake.as_server_hello;
+        eval debug_println("server_hello=" + server_hello.to_string);
+
+        let key_share_entry = *server_hello._find_key_share_entry;
+        let shared_secret: SharedSecret = *ecdhe.accept_server_share(key_share_entry).from_result_t;
+        eval debug_println("shared_secret=" + shared_secret.to_string_hex);
+
         pure $ ServerHelloState {
-            server_hello: hello,
-            ecdhe: client_hello_state.@ecdhe
+            transcript: transcript,
+            server_hello: server_hello,
+            shared_secret: shared_secret,
         }
     );
+
+    _find_key_share_entry: [m: MonadError, ErrorType m = ErrMsg] ServerHello -> m KeyShareEntry;
+    _find_key_share_entry = |hello| (
+        let opt = hello.@extensions.find(is_key_share).map(as_key_share);
+        if opt.is_none { error $ "key_share not found" };
+        let ks: KeyShare = opt.as_some;
+        if !ks.is_ks_server_hello { error $ "not ks_server_hello" };
+        let kse: KeyShareEntry = ks.as_ks_server_hello.@server_share;
+        pure $ kse
+    );
+
 }
 
 

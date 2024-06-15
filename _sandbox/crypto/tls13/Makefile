@@ -15,7 +15,7 @@ OPT_TESTS = -O separated
 all:
 
 test:
-	$(FIXAUTOTEST) $(LIBS) -T ./tests $(OPTIMIZE) $(OPT_TESTS) --keep-going
+	$(FIXAUTOTEST) $(LIBS) -T ./tests $(OPT_TESTS) $(TESTS) --keep-going
 
 clean:
 	rm -f *.out

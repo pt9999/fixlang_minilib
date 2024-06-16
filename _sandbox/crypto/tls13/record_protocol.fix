@@ -180,6 +180,15 @@ type TLSInnerPlaintext = unbox struct {
     zeros: Array U8,
 };
 
+namespace TLSInnerPlaintext {
+    make: Array U8 -> ContentType -> I64 -> TLSInnerPlaintext;
+    make = |content, content_type, zeros_length| TLSInnerPlaintext {
+        content: content,
+        content_type: content_type,
+        zeros: Array::fill(zeros_length, 0_U8)
+    };
+}
+
 impl TLSInnerPlaintext: Marshal {
     marshal = |obj, buf| (
         let buf = buf.marshal_fixed(obj.@content);
@@ -235,6 +244,25 @@ namespace TLSCiphertext {
         legacy_record_version: plaintext.@legacy_record_version,
         encrypted_record: plaintext.@fragment
     };
+
+    get_additional_data: TLSCiphertext -> Array U8;
+    get_additional_data = |ciphertext| (
+        ciphertext.get_additional_data_with_length(ciphertext.@encrypted_record.get_size)
+    );
+
+    get_additional_data_with_length: I64 -> TLSCiphertext -> Array U8;
+    get_additional_data_with_length = |length, ciphertext| (
+        // additional_data = TLSCiphertext.opaque_type ||
+        //                    TLSCiphertext.legacy_record_version ||
+        //                    TLSCiphertext.length
+        // TLSCiphertext.length = TLSInnerPlaintext.@content.get_size + 1(=content_type) + 16(=tag_len)
+        let buf =  ByteBuffer::empty(5, big_endian());
+        let buf = buf.marshal(ciphertext.@opaque_type);
+        let buf = buf.marshal(ciphertext.@legacy_record_version);
+        eval assert(|_| "length overflow", length <= 16384 + 256);    // = 2**14 + 256
+        let buf = buf.marshal(length.to_U16);
+        buf.@array
+    );
 }
 
 impl TLSCiphertext: Marshal {

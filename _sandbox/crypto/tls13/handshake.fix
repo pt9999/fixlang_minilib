@@ -10,6 +10,7 @@ import Minilib.Crypto.Tls13.ECDSA;
 import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Crypto.Tls13.Extensions;
 import Minilib.Crypto.Tls13.Connection;
+import Minilib.Crypto.Tls13.Protection;
 import Minilib.Crypto.Tls13.HandshakeProtocol;
 import Minilib.Crypto.Tls13.RecordProtocol;
 //import Minilib.Encoding.Binary;
@@ -18,11 +19,22 @@ import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+// TODO: support other key agreement type
+type KeyAgreement = ECDHE;
+
 type ClientHelloState = unbox struct {
-    transcript: Array U8,
     client_hello_handshake_bytes: Array U8,
-    ecdhe: ECDHE,
+    key_agreement: KeyAgreement,
 };
+
+impl ClientHelloState: ToString {
+    to_string = |hello| (
+        "ClientHelloState {" +
+        " client_hello_handshake_bytes=" + hello.@client_hello_handshake_bytes.to_string_hex +
+        " key_agreement=" + hello.@key_agreement.to_string +
+        "}"
+    );
+}
 
 namespace ClientHelloState {
     make: [m: MonadRandGen] String -> m ClientHelloState;
@@ -36,9 +48,10 @@ namespace ClientHelloState {
             ])
         );
         // init key_share
-        let ecdhe = *ECDHE::make(ECParam::secp256r1);
+        // TODO: support other key agreement type
+        let key_agreement = *ECDHE::make(ECParam::secp256r1);
         let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make $ [
-            ecdhe.to_key_share_entry
+            key_agreement.to_key_share_entry
         ];
         let hello = hello.add_extension(Extension::key_share $ ks);
         // 9.2. Mandatory-to-Implement Extensions
@@ -50,9 +63,8 @@ namespace ClientHelloState {
         let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
 
         pure $ ClientHelloState {
-            transcript: handshake_bytes,
             client_hello_handshake_bytes: handshake_bytes,
-            ecdhe: ecdhe
+            key_agreement: key_agreement
         }
     );
 
@@ -65,45 +77,48 @@ namespace ClientHelloState {
 }
 
 type ServerHelloState = unbox struct {
-    transcript: Array U8,
+    protection: Protection,
     server_hello: ServerHello,
-    shared_secret: Array U8,
 };
 
 namespace ServerHelloState {
+    make: [m: MonadError, ErrorType m = ErrMsg] ClientHelloState -> Array U8 -> m ServerHelloState;
+    make = |client_hello_state, server_hello_handshake_bytes| (
+        let handshake: Handshake = *unmarshal_from_bytes(server_hello_handshake_bytes).from_result_t;
+        if !handshake.is_server_hello {
+            error $ "unexpected handshake type"
+        };
+        let server_hello: ServerHello = handshake.as_server_hello;
+        eval debug_println("server_hello=" + server_hello.to_string);
+
+        // key agreement
+        let key_agreement = client_hello_state.@key_agreement;
+        let key_share_entry = *server_hello._find_key_share_entry;
+        let shared_secret: SharedSecret = *key_agreement.accept_server_share(key_share_entry).from_result_t;
+        eval debug_println("shared_secret=" + shared_secret.to_string_hex);
+
+        // construct protection
+        let cipher_suite = server_hello.@cipher_suite;
+        let protection = *Protection::make(cipher_suite).from_result_t;
+        let protection = protection.add_transcript(client_hello_state.@client_hello_handshake_bytes);
+        let protection = protection.add_transcript(server_hello_handshake_bytes);
+        let protection = *protection.init_handshake(shared_secret).from_result_t;
+
+        pure $ ServerHelloState {
+            protection: protection,
+            server_hello: server_hello,
+        }
+    );
+
+
     recv: [m: TLSConnection, ErrorType m = ErrMsg] ClientHelloState -> m ServerHelloState;
     recv = |client_hello_state| (
-        let transcript = client_hello_state.@transcript;
-        let ecdhe = client_hello_state.@ecdhe;
-
         let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
         if !plaintext.@type_.is_handshake {
             error $ "unexpected content type"
         };
-        let handshake_bytes = plaintext.@fragment;
-        let transcript = transcript.append(handshake_bytes);
-        let handshake: Handshake = *unmarshal_from_bytes(handshake_bytes).from_result_t;
-        if !handshake.is_server_hello {
-            error $ "unexpected handshake type"
-        };
-        /*
-        let handshake_bytes2 = marshal_to_bytes(handshake);
-        eval if handshake_bytes == handshake_bytes2 { () } else {
-            debug_println([handshake_bytes.get_size, handshake_bytes2.get_size].format("handshake bytes mismatch: {}, {}"))
-        };
-        */
-        let server_hello: ServerHello = handshake.as_server_hello;
-        eval debug_println("server_hello=" + server_hello.to_string);
-
-        let key_share_entry = *server_hello._find_key_share_entry;
-        let shared_secret: SharedSecret = *ecdhe.accept_server_share(key_share_entry).from_result_t;
-        eval debug_println("shared_secret=" + shared_secret.to_string_hex);
-
-        pure $ ServerHelloState {
-            transcript: transcript,
-            server_hello: server_hello,
-            shared_secret: shared_secret,
-        }
+        let server_hello_handshake_bytes = plaintext.@fragment;
+        ServerHelloState::make(client_hello_state, server_hello_handshake_bytes)
     );
 
     _find_key_share_entry: [m: MonadError, ErrorType m = ErrMsg] ServerHello -> m KeyShareEntry;

@@ -8,6 +8,7 @@ import Minilib.Crypto.Tls13.RecordProtocol;
 import Minilib.Crypto.Tls13.Aead;
 import Minilib.Crypto.Tls13.Hkdf;
 import Minilib.Crypto.Tls13.Secret;
+import Minilib.Crypto.HMAC;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.FunctorM;
 import Minilib.Monad.Error;
@@ -20,8 +21,23 @@ type Secrets = unbox struct {
     psk: Array U8,
     early_secret: Array U8,
     handshake_secret: Array U8,
+    server_handshake_traffic_secret: Array U8,
+    client_handshake_traffic_secret: Array U8,
     master_secret: Array U8,
 };
+
+impl Secrets: ToString {
+    to_string = |secrets| (
+        "Secrets {" +
+        "\n psk=" + secrets.@psk.to_string_hex +
+        "\n early_secret=" + secrets.@early_secret.to_string_hex +
+        "\n handshake_secret=" + secrets.@handshake_secret.to_string_hex +
+        "\n server_handshake_traffic_secret=" + secrets.@server_handshake_traffic_secret.to_string_hex +
+        "\n client_handshake_traffic_secret=" + secrets.@client_handshake_traffic_secret.to_string_hex +
+        "\n master_secret=" + secrets.@master_secret.to_string_hex +
+        "\n}"
+    );
+}
 
 namespace Secrets {
     from_cipher_suite: CipherSuite -> Result ErrMsg Secrets;
@@ -34,15 +50,21 @@ namespace Secrets {
             psk: psk,
             early_secret: early_secret,
             handshake_secret: [],
+            server_handshake_traffic_secret: [],
+            client_handshake_traffic_secret: [],
             master_secret: [],
         }
     );
 
-    calc_handshake_secret: Array U8 -> Secrets -> Result ErrMsg Secrets;
-    calc_handshake_secret = |dhe, secrets| (
+    calc_handshake_secrets: Array U8 -> Array U8 -> Secrets -> Result ErrMsg Secrets;
+    calc_handshake_secrets = |dhe, transcript, secrets| (
         let hkdf = secrets.@hkdf;
-        let secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
-        ok $ secrets.set_handshake_secret(secret)
+        let handshake_secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
+        let server_handshake_traffic_secret = *hkdf.calc_server_handshake_traffic_secret(handshake_secret, transcript);
+        let client_handshake_traffic_secret = *hkdf.calc_client_handshake_traffic_secret(handshake_secret, transcript);
+        ok $ secrets.set_handshake_secret(handshake_secret)
+                    .set_server_handshake_traffic_secret(server_handshake_traffic_secret)
+                    .set_client_handshake_traffic_secret(client_handshake_traffic_secret)
     );
 }
 
@@ -73,10 +95,8 @@ namespace RecordProtection {
         additional_data: [],
     };
 
-    set_traffic_keys: (HKDF -> Result ErrMsg (Array U8)) -> AEAD -> Secrets -> RecordProtection -> Result ErrMsg RecordProtection;
-    set_traffic_keys = |calc_secret, aead, secrets, record_protection| (
-        let hkdf = secrets.@hkdf;
-        let secret = *calc_secret(hkdf);
+    set_traffic_keys: Array U8 -> AEAD -> HKDF -> RecordProtection -> Result ErrMsg RecordProtection;
+    set_traffic_keys = |secret, aead, hkdf, record_protection| (
         let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
         ok $ record_protection
             .set_write_key(key)
@@ -127,6 +147,7 @@ type Protection = unbox struct {
 impl Protection: ToString {
     to_string = |p| (
         "Protection {" +
+        " secrets=" + p.@secrets.to_string +
         " server=" + p.@server.to_string +
         " client=" + p.@client.to_string +
         "}"
@@ -162,12 +183,23 @@ namespace Protection {
             server: server,
             client: client
         } = prot;
-        let secrets = *secrets.calc_handshake_secret(dhe);
-        let client = *client.set_traffic_keys(calc_client_handshake_traffic_secret(secrets.@handshake_secret, transcript),
-                        aead, secrets);
-        let server = *server.set_traffic_keys(calc_server_handshake_traffic_secret(secrets.@handshake_secret, transcript),
-                        aead, secrets);
+        let hkdf = secrets.@hkdf;
+        let secrets = *secrets.calc_handshake_secrets(dhe, transcript);
+        let client = *client.set_traffic_keys(secrets.@client_handshake_traffic_secret, aead, hkdf);
+        let server = *server.set_traffic_keys(secrets.@server_handshake_traffic_secret, aead, hkdf);
         ok $ prot.set_secrets(secrets).set_client(client).set_server(server)
     );
 
+    calc_finished_verify_data: Bool -> Protection -> Result ErrMsg (Array U8);
+    calc_finished_verify_data = |is_server, prot| (
+        let secrets = prot.@secrets;
+        let transcript = prot.@transcript;
+        let hkdf = secrets.@hkdf;
+        let base_key = if is_server { secrets.@server_handshake_traffic_secret }
+        else { secrets.@client_handshake_traffic_secret };
+        let finished_key = *hkdf.expand_label(base_key, "finished", [], hkdf.hash_length);
+        eval debug_println("finished_key="+finished_key.to_string_hex);
+        let verify_data = hkdf.@hmac.digest(finished_key, hkdf.transcript_hash(transcript));
+        ok $ verify_data
+    );
 }

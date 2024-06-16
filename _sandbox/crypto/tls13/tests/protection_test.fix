@@ -101,14 +101,41 @@ test_1 = (
     let additional_data = ciphertext_bytes.get_sub(0, 5);
     let aead = protection.@aead;
     let server = protection.@server.set_additional_data(additional_data);
+    eval debug_eprintln("pre decrypt");
     let inner_plaintext_bytes = *server.decrypt(ciphertext.@encrypted_record, aead).from_result;
+    eval debug_eprintln("post decrypt");
     //eval debug_println("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex);
     let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes).from_result;
     eval debug_println("inner_plaintext.@content=" + inner_plaintext.@content.to_string_hex);
     eval *assert_equal("type_", true, inner_plaintext.@type_.is_handshake);
+    //let protection = protection.add_transcript(inner_plaintext.@content);
     let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
-    let (handshakes: Array Handshake, buf) = *buf.unmarshal_fixed(buf.get_size).from_result;
-    eval debug_println(handshakes.to_iter.map(to_string).join("\n"));
+    let (protection, buf) = *loop_m(
+        (protection, buf), |(protection, buf)|
+        let start = buf.get_position;
+        let (handshake: Handshake, buf) = *buf.unmarshal.from_result;
+        let end = buf.get_position;
+        eval debug_println(handshake.to_string);
+        let protection = (
+            if handshake.is_encrypted_extensions || handshake.is_certificate_request ||
+                handshake.is_certificate || handshake.is_certificate_verify {
+                    let handshake_bytes = buf.@array.subarray(start, end);
+                    eval debug_println("add to transcript");
+                    protection.add_transcript(handshake_bytes)
+            } else { protection }
+        );
+        if handshake.is_finished {
+            let finished: Finished = handshake.as_finished;
+            let verify_data = *protection.calc_finished_verify_data(true).from_result;
+            eval debug_println("verify_data expected="+ verify_data.to_string_hex);
+            eval debug_println("verify_data actual="+ finished.@verify_data.to_string_hex);
+            if verify_data != finished.@verify_data {
+                throw $ "verify_data mismatch"
+            };
+            break_m $ (protection, buf)
+        };
+        continue_m $ (protection, buf)
+    );
     pure()
 );
 

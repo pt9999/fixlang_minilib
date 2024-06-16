@@ -111,18 +111,9 @@ test_1 = (
 
     let ciphertext_bytes = *iof_server_encrypted_handshake_bytes;
     let ciphertext: TLSCiphertext = *unmarshal_from_bytes(ciphertext_bytes).from_result;
-    // additional_data = TLSCiphertext.opaque_type ||
-    //                    TLSCiphertext.legacy_record_version ||
-    //                    TLSCiphertext.length
-    // TLSCiphertext.length = TLSInnerPlaintext.@content.get_size + 1(=content_type) + 16(=tag_len)
-    let additional_data = ciphertext_bytes.subarray(0, 5);
-    let aead = protection.@aead;
-    let server = protection.@server.set_additional_data(additional_data);
-    let inner_plaintext_bytes = *server.decrypt(ciphertext.@encrypted_record, aead).from_result;
-    //eval debug_println("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex);
-    let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes).from_result;
+    let inner_plaintext: TLSInnerPlaintext = *protection.decrypt_server(ciphertext).from_result;
     eval debug_println("inner_plaintext.@content=" + inner_plaintext.@content.to_string_hex);
-    eval *assert_equal("type_", true, inner_plaintext.@type_.is_handshake);
+    eval *assert_equal("content_type", true, inner_plaintext.@content_type.is_handshake);
 
 
     let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());

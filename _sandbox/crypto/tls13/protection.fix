@@ -190,6 +190,22 @@ namespace Protection {
         ok $ prot.set_secrets(secrets).set_client(client).set_server(server)
     );
 
+    decrypt_server: TLSCiphertext -> Protection -> Result ErrMsg TLSInnerPlaintext;
+    decrypt_server = |ciphertext, protection| (
+        let ciphertext_bytes = marshal_to_bytes(ciphertext);    // TODO optimize
+        // additional_data = TLSCiphertext.opaque_type ||
+        //                    TLSCiphertext.legacy_record_version ||
+        //                    TLSCiphertext.length
+        // TLSCiphertext.length = TLSInnerPlaintext.@content.get_size + 1(=content_type) + 16(=tag_len)
+        let additional_data = ciphertext_bytes.subarray(0, 5);
+        let aead = protection.@aead;
+        let server = protection.@server.set_additional_data(additional_data);       // TODO `additional_data` should be an argument of `decrypt`?
+        let inner_plaintext_bytes = *server.decrypt(ciphertext.@encrypted_record, aead);
+        //eval debug_println("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex);
+        let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes);
+        pure $ inner_plaintext
+    );
+
     calc_finished_verify_data: Bool -> Protection -> Result ErrMsg (Array U8);
     calc_finished_verify_data = |is_server, prot| (
         let secrets = prot.@secrets;

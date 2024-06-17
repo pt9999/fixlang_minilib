@@ -61,7 +61,7 @@ namespace TLSSession {
     send_client_hello: String -> StateT TLSSession IOFail ();
     send_client_hello = |server_name| (
         let hstate = *get_hstate;
-        let hstate = *hstate.start_handshake;
+        let hstate = *hstate.start_handshake(server_name);
         eval *hstate.send_records;
         set_hstate(hstate)
     );
@@ -70,6 +70,18 @@ namespace TLSSession {
     recv_server_hello = (
         let hstate = *get_hstate;
         let hstate = *hstate.recv_record;
+        set_hstate(hstate)
+    );
+
+    recv_server_params: StateT TLSSession IOFail ();
+    recv_server_params = (
+        let hstate = *get_hstate;
+        let hstate = *loop_m(
+            hstate, |hstate|
+            let hstate = *hstate.recv_record;
+            if hstate.is_after_server_finished { break_m $ hstate };
+            continue_m $ hstate
+        );
         set_hstate(hstate)
     );
 }

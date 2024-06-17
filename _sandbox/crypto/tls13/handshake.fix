@@ -13,16 +13,35 @@ import Minilib.Crypto.Tls13.Connection;
 import Minilib.Crypto.Tls13.Protection;
 import Minilib.Crypto.Tls13.HandshakeProtocol;
 import Minilib.Crypto.Tls13.RecordProtocol;
-//import Minilib.Encoding.Binary;
+import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+
+namespace TLSRecordHelper {
+    split_handshakes: TLSInnerPlaintext -> Result ErrMsg (Array (Handshake, Array U8));
+    split_handshakes = |inner_plaintext| (
+        let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
+        loop_m(
+            ([], buf), |(output, buf)|
+            if buf.get_position >= buf.get_size { break_m $ output };
+            let start = buf.get_position;
+            let (handshake: Handshake, buf) = *buf.unmarshal;
+            let end = buf.get_position;
+            let handshake_bytes = buf.@array.subarray(start, end);
+            let output = output.push_back((handshake, handshake_bytes));
+            continue_m $ (output, buf)
+        )
+    );
+}
+
 type HandshakeState = unbox union {
     before_client_hello: BeforeClientHello,
     after_client_hello: AfterClientHello,
     after_server_hello: AfterServerHello,
+    after_server_finished: AfterServerFinished,
 };
 
 impl HandshakeState: ToString {
@@ -30,6 +49,7 @@ impl HandshakeState: ToString {
         if hstate.is_before_client_hello { hstate.as_before_client_hello.to_string };
         if hstate.is_after_client_hello { hstate.as_after_client_hello.to_string };
         if hstate.is_after_server_hello { hstate.as_after_server_hello.to_string };
+        if hstate.is_after_server_finished { hstate.as_after_server_finished.to_string };
         ""
     );
 }
@@ -38,51 +58,54 @@ namespace HandshakeState {
     make: [m: Monad] m HandshakeState;
     make = pure $ before_client_hello $ BeforeClientHello { dummy: () };
 
-    start_handshake: [m: MonadRandGen, m: MonadError] String -> m HandshakeState;
-    start_handshake = |server_name| (
-        if state.is_before_client_hello { state.as_before_client_hello.start_handshake(server_name) };
-        error $ "start_handshake: wrong state"
+    start_handshake: [m: MonadRandGen, m: MonadError] String -> HandshakeState -> m HandshakeState;
+    start_handshake = |server_name, hstate| (
+        if hstate.is_before_client_hello { hstate.as_before_client_hello.start_handshake(server_name) };
+        error $ "start_handshake: wrong hstate"
     );
 
     send_records: [m: TLSConnection] HandshakeState -> m ();
-    send_records = |state| (
-        let records = state.get_records_to_send;
+    send_records = |hstate| (
+        let records = *hstate.get_records_to_send;
         TLSPlaintext::send_plaintexts(records)
     );
 
-    get_records_to_send: HandshakeState -> m (Array TLSPlaintext);
-    get_records_to_send = |state| (
-        if state.is_after_client_hello {
-            pure $ state.as_after_client_hello.@client_hello_records
+    get_records_to_send: [m: MonadError] HandshakeState -> m (Array TLSPlaintext);
+    get_records_to_send = |hstate| (
+        if hstate.is_after_client_hello {
+            pure $ hstate.as_after_client_hello.@client_hello_records
         };
-        if state.is_after_server_finished {
-            pure $ state.as_after_server_finished.@records_to_send
+        if hstate.is_after_server_finished {
+            pure $ hstate.as_after_server_finished.@records_to_send
         };
         pure $ []
     );
 
     recv_record: [m: TLSConnection] HandshakeState -> m HandshakeState;
-    recv_record = |state| (
+    recv_record = |hstate| (
         let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
-        state.on_recv_record(plaintext)
+        hstate.on_recv_record(plaintext)
     );
 
     on_recv_record: [m: MonadError] TLSPlaintext -> HandshakeState -> m HandshakeState;
-    on_recv_record = |plaintext, state| (
+    on_recv_record = |plaintext, hstate| (
         if plaintext.@content_type.is_alert {
             error $ "received alert: " + plaintext.@fragment.to_string_hex
         };
         if plaintext.@content_type.is_change_cipher_spec {
             eval debug_println("received change_cipher_spec");
-            pure $ state
+            pure $ hstate
         };
-        if state.is_after_client_hello {
-            state.as_after_client_hello.on_recv_record(plaintext)
+        if hstate.is_after_client_hello {
+            hstate.as_after_client_hello.on_recv_record(plaintext)
         };
-        if state.is_after_server_hello {
-            state.as_after_server_hello.on_recv_record(plaintext)
+        if hstate.is_after_server_hello {
+            hstate.as_after_server_hello.on_recv_record(plaintext)
         };
-        pure $ state
+        if hstate.is_after_server_finished {
+            hstate.as_after_server_finished.on_recv_record(plaintext)
+        };
+        pure $ hstate
     );
 }
 
@@ -154,7 +177,7 @@ namespace AfterClientHello {
             error $ "after_client_hello: unexpected content type"
         };
         let client_hello_handshake_bytes = *after_client_hello.@client_hello_records.join_fragments;
-        let server_hello_handshake_bytes = *server_hello_records.join_fragments;
+        let server_hello_handshake_bytes = plaintext.@fragment;
         let handshake: Handshake = *unmarshal_from_bytes(server_hello_handshake_bytes).from_result_t;
         if !handshake.is_server_hello {
             error $ "after_client_hello: unexpected handshake type"
@@ -177,8 +200,7 @@ namespace AfterClientHello {
 
         pure $ after_server_hello $ AfterServerHello {
             protection: protection,
-            server_params: ServerParams::make $ server_hello,
-            records_to_send: [],
+            server_hello: server_hello,
         }
     );
 
@@ -193,30 +215,9 @@ namespace AfterClientHello {
     );
 }
 
-type ServerParams = unbox struct {
-    server_hello: ServerHello,
-    encrypted_extensions: Option EncryptedExtensions,
-    certificate_request: Option CertificateRequest,
-    certificate: Option Certificate,
-    certificate_verify: Option CertificateVerify,
-};
-
-namespace ServerParams {
-    make: ServerHello -> ServerParams;
-    make = |server_hello| ServerParams {
-        server_hello: server_hello,
-        encrypted_extensions: none(),
-        certificate_request: none(),
-        certificate: none(),
-        certificate_verify: none(),
-    }
-}
-
 type AfterServerHello = unbox struct {
     protection: Protection,
-    server_hello: server_hello,
-    handshakes: Array (Handshake, Array U8), // EncryptedExceptions, [CertificateRequest], Certificate, CertificateVerify, Finished
-    records_to_send: Array TLSPlaintext,
+    server_hello: ServerHello,
 };
 
 impl AfterServerHello: ToString {
@@ -227,37 +228,38 @@ namespace AfterServerHello {
     on_recv_record: [m: MonadError] TLSPlaintext -> AfterServerHello -> m HandshakeState;
     on_recv_record = |plaintext, after_server_hello| (
         let protection = after_server_hello.@protection;
-        let inner_plaintext = *protecion.decrypt_server(plaintext.to_ciphertext).from_result_t;
+        let inner_plaintext = *protection.decrypt_server(plaintext.to_ciphertext).from_result_t;
         if !inner_plaintext.@content_type.is_handshake {
             error $ "after_server_hello: unexpected content type"
         };
         let handshakes = *inner_plaintext.split_handshakes.from_result_t;
-        eval *_check_handshakes_order(handshakes);
+        eval *_check_handshakes_order(handshakes.map(@0));
         eval *_verify_server_finished(handshakes, protection);
         let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
-        pure $ AfterServerFinished::make(protection, server_params)
+        let asf: AfterServerFinished = *AfterServerFinished::make(protection, server_params);
+        pure $ HandshakeState::after_server_finished $ asf
     );
 
-    _check_handshakes_order: [m: MonadError] Array (Handshake, Array U8) -> m ();
+    _check_handshakes_order: [m: MonadError] Array Handshake -> m ();
     _check_handshakes_order = |handshakes| (
         let size = handshakes.get_size;
-        let get_count = |f| handshakes.to_iter.map(@0).filter(f).fold(0, add(1));
-        let get_order = |f| handshakes.find_by(@0 >> f).as_some_or(-1);
+        let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |i, _| i + 1);
+        let get_order: (Handshake -> Bool) -> I64 = |f| handshakes.find_by(f).as_some_or(-1);
         let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
-        eval *(get_count(is_encrypted_exceptions) == 1).or_error;
-        eval *(get_count(is_certificate_request) <= 1).or_error;
-        eval *(get_count(is_certificate) == 1).or_error;
-        eval *(get_count(is_certificate_verify) == 1).or_error;
-        eval *(get_count(is_finished) == 1).or_error;
-        eval *(get_order(is_encrypted_exceptions) == 0).or_error;
-        eval *(get_order(is_finished) == size - 1).or_error;
+        eval *(get_count(Handshake::is_encrypted_extensions) == 1).or_error;
+        eval *(get_count(Handshake::is_certificate_request) <= 1).or_error;
+        eval *(get_count(Handshake::is_certificate) == 1).or_error;
+        eval *(get_count(Handshake::is_certificate_verify) == 1).or_error;
+        eval *(get_count(Handshake::is_finished) == 1).or_error;
+        eval *(get_order(Handshake::is_encrypted_extensions) == 0).or_error;
+        eval *(get_order(Handshake::is_finished) == size - 1).or_error;
         pure()
     );
 
     _update_handshake_context: Array (Handshake, Array U8) -> (I64, I64) -> Protection -> Protection;
     _update_handshake_context = |handshakes, (start, end), protection| (
-        hanshakes.subarray(start, end).map(@1).to_iter.fold(
+        handshakes.subarray(start, end).map(@1).to_iter.fold(
             protection, |protection, handshake_bytes|
             protection.add_handshake_context(handshake_bytes)
         )
@@ -267,12 +269,12 @@ namespace AfterServerHello {
     _verify_server_finished = |handshakes, protection| (
         let size = handshakes.get_size;
         let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
-        let finished = handshakes.@(size - 1).map(@0);
-        let verify_data = *protection.calc_finished_verify_data(true);
+        let finished = handshakes.@(size - 1).@0.as_finished;
+        let verify_data = *protection.calc_finished_verify_data(true).from_result_t;
         eval debug_println("verify_data expected="+ verify_data.to_string_hex);
         eval debug_println("verify_data actual  ="+ finished.@verify_data.to_string_hex);
         if verify_data != finished.@verify_data {
-            err $ "verify_data mismatch"
+            error $ "verify_data mismatch"
         };
         pure $ ()
     );
@@ -297,16 +299,20 @@ type AfterServerFinished = unbox struct {
     records_to_send: Array TLSPlaintext,
 };
 
+impl AfterServerFinished: ToString {
+    to_string = |obj| "AfterServerFinished {}";
+}
+
 namespace AfterServerFinished {
-    make: Protection -> ServerParams -> m AfterServerFinished;
+    make: [m: MonadError] Protection -> ServerParams -> m AfterServerFinished;
     make = |protection, server_params| (
-        let handshake_bytes = _make_client_finished(protection);
+        let handshake_bytes = *_make_client_finished(protection).from_result_t;
         let inner_plaintext = TLSInnerPlaintext::make(
             handshake_bytes,
             ContentType::handshake(),
             0
         );
-        let ciphertext = *protection.encrypt_client(inner_plaintext);
+        let ciphertext = *protection.encrypt_client(inner_plaintext).from_result_t;
         let records_to_send = [
             ciphertext.to_plaintext
         ];
@@ -322,7 +328,12 @@ namespace AfterServerFinished {
         let verify_data = *protection.calc_finished_verify_data(true);
         let client_finished = Finished { verify_data: verify_data };
         let handshake_bytes = marshal_to_bytes(Handshake::finished $ client_finished);
-        pure $ handshake_bytes;
+        pure $ handshake_bytes
+    );
+
+    on_recv_record: [m: MonadError] TLSPlaintext -> AfterServerFinished -> m HandshakeState;
+    on_recv_record = |plaintext, after_server_finished| (
+        pure $ HandshakeState::after_server_finished $ after_server_finished
     );
 }
 

@@ -64,21 +64,30 @@ namespace HandshakeState {
         error $ "start_handshake: wrong hstate"
     );
 
-    send_records: [m: TLSConnection] HandshakeState -> m ();
+    send_records: [m: TLSConnection] HandshakeState -> m HandshakeState;
     send_records = |hstate| (
-        let records = *hstate.get_records_to_send;
-        TLSRecord::send_records(records)
+        let (records, hstate) = *hstate.pop_records_to_send;
+        eval *TLSRecord::send_records(records);
+        pure $ hstate
     );
 
-    get_records_to_send: [m: MonadError] HandshakeState -> m (Array TLSRecord);
-    get_records_to_send = |hstate| (
+    pop_records_to_send: [m: MonadError] HandshakeState -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |hstate| (
         if hstate.is_after_client_hello {
-            pure $ hstate.as_after_client_hello.@client_hello_records
+            hstate.as_after_client_hello.pop_records_to_send
         };
         if hstate.is_after_server_finished {
-            pure $ hstate.as_after_server_finished.@records_to_send
+            hstate.as_after_server_finished.pop_records_to_send
         };
-        pure $ []
+        pure $ ([], hstate)
+    );
+
+    pop_appdata_received: [m: MonadError] HandshakeState -> m (Array U8, HandshakeState);
+    pop_appdata_received = |hstate| (
+        if hstate.is_after_server_finished {
+            hstate.as_after_server_finished.pop_appdata_received
+        };
+        pure $ ([], hstate)
     );
 
     recv_record: [m: TLSConnection] HandshakeState -> m HandshakeState;
@@ -154,7 +163,8 @@ namespace BeforeClientHello {
 
         pure $ after_client_hello $ AfterClientHello {
             client_hello_records: client_hello_records,
-            key_agreement: key_agreement
+            key_agreement: key_agreement,
+            records_to_send: client_hello_records,
         }
     );
 }
@@ -166,6 +176,7 @@ type KeyAgreement = ECDHE;
 type AfterClientHello = unbox struct {
     client_hello_records: Array TLSRecord,
     key_agreement: KeyAgreement,
+    records_to_send: Array TLSRecord,
 };
 
 impl AfterClientHello: ToString {
@@ -178,6 +189,14 @@ impl AfterClientHello: ToString {
 }
 
 namespace AfterClientHello {
+
+    pop_records_to_send: [m: MonadError] AfterClientHello -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |after_client_hello| (
+        pure $ (
+            after_client_hello.@records_to_send,
+            HandshakeState::after_client_hello $ after_client_hello.set_records_to_send([])
+        )
+    );
 
     on_recv_record: [m: MonadError] TLSRecord -> AfterClientHello -> m HandshakeState;
     on_recv_record = |record, after_client_hello| (
@@ -324,6 +343,7 @@ type AfterServerFinished = unbox struct {
     protection: Protection,
     server_params: ServerParams,
     records_to_send: Array TLSRecord,
+    appdata_received: Array U8,
 };
 
 impl AfterServerFinished: ToString {
@@ -347,6 +367,7 @@ namespace AfterServerFinished {
             protection: protection,
             server_params: server_params,
             records_to_send: records_to_send,
+            appdata_received: [],
         }
     );
 
@@ -358,10 +379,25 @@ namespace AfterServerFinished {
         pure $ handshake_bytes
     );
 
+    pop_records_to_send: [m: MonadError] AfterServerFinished -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |after_server_finished| (
+        pure $ (
+            after_server_finished.@records_to_send,
+            HandshakeState::after_server_finished $ after_server_finished.set_records_to_send([])
+        )
+    );
+
+    pop_appdata_received: [m: MonadError] AfterServerFinished -> m (Array U8, HandshakeState);
+    pop_appdata_received = |after_server_finished| (
+        pure $ (
+            after_server_finished.@appdata_received,
+            HandshakeState::after_server_finished $ after_server_finished.set_appdata_received([])
+        )
+    );
+
     on_recv_record: [m: MonadError] TLSRecord -> AfterServerFinished -> m HandshakeState;
     on_recv_record = |record, after_server_finished| (
+
         pure $ HandshakeState::after_server_finished $ after_server_finished
     );
 }
-
-

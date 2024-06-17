@@ -201,6 +201,7 @@ namespace AfterClientHello {
         pure $ after_server_hello $ AfterServerHello {
             protection: protection,
             server_hello: server_hello,
+            handshakes: [],
         }
     );
 
@@ -218,6 +219,7 @@ namespace AfterClientHello {
 type AfterServerHello = unbox struct {
     protection: Protection,
     server_hello: ServerHello,
+    handshakes: Array (Handshake, Array U8),
 };
 
 impl AfterServerHello: ToString {
@@ -233,13 +235,30 @@ namespace AfterServerHello {
             error $ "after_server_hello: unexpected content type"
         };
         let handshakes = *inner_plaintext.split_handshakes.from_result_t;
+        eval debug_println("received handshakes=" + handshakes.to_string);
+
+        // concat handshakes
+        let after_server_hello = after_server_hello.mod_handshakes(append(handshakes));
+        let handshakes = after_server_hello.@handshakes;
+
+        let have_finished = handshakes.map(@0).find_by(is_finished).is_some;
+        if !have_finished {
+            let after_server_hello = after_server_hello.mod_protection(mod_server(increment_sequence_number));
+            // continue receiving
+            pure $ HandshakeState::after_server_hello $ after_server_hello
+        };
+
+        // check finished
         eval *_check_handshakes_order(handshakes.map(@0));
         eval *_verify_server_finished(handshakes, protection);
         let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
+        let protection = protection.mod_server(increment_sequence_number);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
         let asf: AfterServerFinished = *AfterServerFinished::make(protection, server_params);
         pure $ HandshakeState::after_server_finished $ asf
     );
+
+
 
     _check_handshakes_order: [m: MonadError] Array Handshake -> m ();
     _check_handshakes_order = |handshakes| (

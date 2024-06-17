@@ -38,6 +38,14 @@ impl TLSSession: GetByteIO {
     get_byte_io = TLSSession::@socket;
 }
 
+/*
+trait [m: * -> *] GetSetHandshakeStateIF {
+    get_hstate: m HandshakeState;
+    set_hstate: HandshakeState -> m ();
+}
+*/
+
+type StateTLSSession = StateT TLSSession IOFail;
 
 namespace TLSSession {
     make: Socket -> IOFail TLSSession;
@@ -52,37 +60,47 @@ namespace TLSSession {
         }
     );
 
-    get_hstate: StateT TLSSession IOFail HandshakeState;
+    get_hstate: StateTLSSession HandshakeState;
     get_hstate = get_state.map(@handshake_state);
 
-    set_hstate: HandshakeState -> StateT TLSSession IOFail ();
+    set_hstate: HandshakeState -> StateTLSSession ();
     set_hstate = |hstate| mod_state(set_handshake_state(hstate));
 
-    send_client_hello: String -> StateT TLSSession IOFail ();
+    lift_hstate: (HandshakeState -> StateTLSSession HandshakeState) -> StateTLSSession ();
+    lift_hstate = |f| (
+        let hstate = *get_hstate;
+        let hstate = *f(hstate);
+        set_hstate(hstate)
+    );
+
+    send_client_hello: String -> StateTLSSession ();
     send_client_hello = |server_name| (
-        let hstate = *get_hstate;
-        let hstate = *hstate.start_handshake(server_name);
-        let hstate = *hstate.send_records;
-        set_hstate(hstate)
+        eval *HandshakeState::start_handshake(server_name).lift_hstate;
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
     );
 
-    recv_server_hello: StateT TLSSession IOFail ();
+    recv_server_hello: StateTLSSession ();
     recv_server_hello = (
-        let hstate = *get_hstate;
-        let hstate = *hstate.recv_record;
-        set_hstate(hstate)
+        eval *HandshakeState::recv_record.lift_hstate;
+        pure()
     );
 
-    recv_server_params: StateT TLSSession IOFail ();
+    recv_server_params: StateTLSSession ();
     recv_server_params = (
-        let hstate = *get_hstate;
-        let hstate = *loop_m(
-            hstate, |hstate|
-            let hstate = *hstate.recv_record;
-            if hstate.is_after_server_finished { break_m $ hstate };
-            continue_m $ hstate
-        );
-        let hstate = *hstate.send_records;
-        set_hstate(hstate)
+        eval *HandshakeState::recv_record.lift_hstate;
+        if !(*get_hstate).is_after_server_finished {
+            recv_server_params  // try again
+        };
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
     );
+
+    recv_appdata: StateTLSSession ();
+    recv_appdata = (
+        eval *HandshakeState::send_records.lift_hstate;
+        eval *HandshakeState::recv_record.lift_hstate;
+        recv_appdata
+    );
+
 }

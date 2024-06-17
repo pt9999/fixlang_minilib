@@ -41,7 +41,7 @@ type HandshakeState = unbox union {
     before_client_hello: BeforeClientHello,
     after_client_hello: AfterClientHello,
     after_server_hello: AfterServerHello,
-    after_server_finished: AfterServerFinished,
+    after_finished: AfterFinished,
 };
 
 impl HandshakeState: ToString {
@@ -49,7 +49,7 @@ impl HandshakeState: ToString {
         if hstate.is_before_client_hello { hstate.as_before_client_hello.to_string };
         if hstate.is_after_client_hello { hstate.as_after_client_hello.to_string };
         if hstate.is_after_server_hello { hstate.as_after_server_hello.to_string };
-        if hstate.is_after_server_finished { hstate.as_after_server_finished.to_string };
+        if hstate.is_after_finished { hstate.as_after_finished.to_string };
         ""
     );
 }
@@ -76,16 +76,16 @@ namespace HandshakeState {
         if hstate.is_after_client_hello {
             hstate.as_after_client_hello.pop_records_to_send
         };
-        if hstate.is_after_server_finished {
-            hstate.as_after_server_finished.pop_records_to_send
+        if hstate.is_after_finished {
+            hstate.as_after_finished.pop_records_to_send
         };
         pure $ ([], hstate)
     );
 
     pop_appdata_received: [m: MonadError] HandshakeState -> m (Array U8, HandshakeState);
     pop_appdata_received = |hstate| (
-        if hstate.is_after_server_finished {
-            hstate.as_after_server_finished.pop_appdata_received
+        if hstate.is_after_finished {
+            hstate.as_after_finished.pop_appdata_received
         };
         pure $ ([], hstate)
     );
@@ -119,8 +119,8 @@ namespace HandshakeState {
         if hstate.is_after_server_hello {
             hstate.as_after_server_hello.on_recv_record(record)
         };
-        if hstate.is_after_server_finished {
-            hstate.as_after_server_finished.on_recv_record(record)
+        if hstate.is_after_finished {
+            hstate.as_after_finished.on_recv_record(record)
         };
         pure $ hstate
     );
@@ -281,8 +281,8 @@ namespace AfterServerHello {
         let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
         let protection = protection.mod_server(increment_sequence_number);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
-        let asf: AfterServerFinished = *AfterServerFinished::make(protection, server_params);
-        pure $ HandshakeState::after_server_finished $ asf
+        let asf: AfterFinished = *AfterFinished::make(protection, server_params);
+        pure $ HandshakeState::after_finished $ asf
     );
 
 
@@ -339,31 +339,25 @@ namespace ServerParams {
     };
 }
 
-type AfterServerFinished = unbox struct {
+type AfterFinished = unbox struct {
     protection: Protection,
     server_params: ServerParams,
     records_to_send: Array TLSRecord,
     appdata_received: Array U8,
 };
 
-impl AfterServerFinished: ToString {
-    to_string = |obj| "AfterServerFinished {}";
+impl AfterFinished: ToString {
+    to_string = |obj| "AfterFinished {}";
 }
 
-namespace AfterServerFinished {
-    make: [m: MonadError] Protection -> ServerParams -> m AfterServerFinished;
+namespace AfterFinished {
+    make: [m: MonadError] Protection -> ServerParams -> m AfterFinished;
     make = |protection, server_params| (
-        let handshake_bytes = *_make_client_finished(protection).from_result_t;
-        let inner_plaintext = TLSInnerPlaintext::make(
-            handshake_bytes,
-            ContentType::handshake(),
-            0
-        );
-        let ciphertext = *protection.encrypt_client(inner_plaintext).from_result_t;
+        let ciphertext = *_make_client_finished(protection).from_result_t;
         let records_to_send = [
             ciphertext.to_record
         ];
-        pure $ AfterServerFinished {
+        pure $ AfterFinished {
             protection: protection,
             server_params: server_params,
             records_to_send: records_to_send,
@@ -371,33 +365,56 @@ namespace AfterServerFinished {
         }
     );
 
-    _make_client_finished: Protection -> Result ErrMsg (Array U8);
+    _make_client_finished: Protection -> Result ErrMsg TLSCiphertext;
     _make_client_finished = |protection| (
         let verify_data = *protection.calc_finished_verify_data(true);
         let client_finished = Finished { verify_data: verify_data };
         let handshake_bytes = marshal_to_bytes(Handshake::finished $ client_finished);
-        pure $ handshake_bytes
+        // TODO: client Certificate, CerfiticateVerify?
+        let inner_plaintext = TLSInnerPlaintext::make(
+            handshake_bytes,
+            ContentType::handshake(),
+            0
+        );
+        let ciphertext = *protection.encrypt_client(inner_plaintext).from_result_t;
+        pure $ ciphertext
     );
 
-    pop_records_to_send: [m: MonadError] AfterServerFinished -> m (Array TLSRecord, HandshakeState);
-    pop_records_to_send = |after_server_finished| (
+    pop_records_to_send: [m: MonadError] AfterFinished -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |after_finished| (
         pure $ (
-            after_server_finished.@records_to_send,
-            HandshakeState::after_server_finished $ after_server_finished.set_records_to_send([])
+            after_finished.@records_to_send,
+            HandshakeState::after_finished $ after_finished.set_records_to_send([])
         )
     );
 
-    pop_appdata_received: [m: MonadError] AfterServerFinished -> m (Array U8, HandshakeState);
-    pop_appdata_received = |after_server_finished| (
+    pop_appdata_received: [m: MonadError] AfterFinished -> m (Array U8, HandshakeState);
+    pop_appdata_received = |after_finished| (
         pure $ (
-            after_server_finished.@appdata_received,
-            HandshakeState::after_server_finished $ after_server_finished.set_appdata_received([])
+            after_finished.@appdata_received,
+            HandshakeState::after_finished $ after_finished.set_appdata_received([])
         )
     );
 
-    on_recv_record: [m: MonadError] TLSRecord -> AfterServerFinished -> m HandshakeState;
-    on_recv_record = |record, after_server_finished| (
+    on_recv_record: [m: MonadError] TLSRecord -> AfterFinished -> m HandshakeState;
+    on_recv_record = |record, after_finished| (
+        let protection = after_finished.@protection;
+        let inner_plaintext = *protection.decrypt_server(record.to_ciphertext).from_result_t;
+        let after_finished = after_finished.mod_protection(mod_server(increment_sequence_number));
+        if inner_plaintext.@content_type.is_handshake {
+            let handshakes = *inner_plaintext.split_handshakes.from_result_t;
+            eval debug_println("received handshakes=" + handshakes.to_string);
+            pure $ HandshakeState::after_finished $ after_finished
+        };
+        if inner_plaintext.@content_type.is_application_data {
+            eval debug_println("received application_data");
+            let after_finished = after_finished.mod_appdata_received(
+                append(inner_plaintext.@content)
+            );
+            pure $ HandshakeState::after_finished $ after_finished
+        };
 
-        pure $ HandshakeState::after_server_finished $ after_server_finished
+        eval debug_println("unsupported content_type: " + inner_plaintext.@content_type.to_string);
+        pure $ HandshakeState::after_finished $ after_finished
     );
 }

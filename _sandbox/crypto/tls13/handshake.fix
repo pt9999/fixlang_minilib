@@ -208,7 +208,8 @@ namespace ServerParams {
 
 type AfterServerHello = unbox struct {
     protection: Protection,
-    server_params: ServerParams,
+    server_hello: server_hello,
+    handshakes: Array (Handshake, Array U8), // EncryptedExceptions, [CertificateRequest], Certificate, CertificateVerify, Finished
     records_to_send: Array TLSPlaintext,
 };
 
@@ -225,70 +226,97 @@ namespace AfterServerHello {
             error $ "after_server_hello: unexpected content type"
         };
         let handshakes = *inner_plaintext.split_handshakes.from_result_t;
-        let after_server_hello = *handshakes.to_iter.loop_iter_m(
-        );
+        eval *_check_handshakes_order(handshakes);
+    );
 
+    _check_handshakes_order: [m: MonadError] Array (Handshake, Array U8) -> m ();
+    _check_handshakes_order = |handshakes| (
+        let size = handshakes.get_size;
+        let get_count = |f| handshakes.to_iter.map(@0).filter(f).fold(0, add(1));
+        let get_order = |f| handshakes.find_by(@0 >> f).as_some_or(-1);
+        let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
+        eval *(get_count(is_encrypted_exceptions) == 1).or_error;
+        eval *(get_count(is_certificate_request) <= 1).or_error;
+        eval *(get_count(is_certificate) == 1).or_error;
+        eval *(get_count(is_certificate_verify) == 1).or_error;
+        eval *(get_count(is_finished) == 1).or_error;
+        eval *(get_order(is_encrypted_exceptions) == 0).or_error;
+        eval *(get_order(is_finished) == size - 1).or_error;
+        pure()
     );
 
     _process_handshakes: [m: MonadError] Iterator (Handshake, Array U8) -> AfterServerHello -> m HandshakeState;
     _process_handshakes = |handshakes, after_server_hello| (
-        let hstate = HandshakeState::after_server_hello $ after_server_hello;
         handshakes.to_iter.loop_iter_m(
-            hstate, |hstate, (handshake, handshake_bytes)|
+            after_server_hello, |after_server_hello, (handshake, handshake_bytes)|
             eval debug_println(handshake.to_string);
             if handshake.is_encrypted_extensions {
-                let after_server_hello = after_server_hello.set_encrypted_extensions(
-                    some $ handshake.as_encrypted_extensions
-                );
-                let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
+                let after_server_hello = after_server_hello
+                .mod_server_params(set_encrypted_extensions(some $ handshake.as_encrypted_exceptions))
+                .mod_protection(add_handshake_context(handshake_bytes));
+                continue_m $ (after_server_hello, buf)
+            };
+            if handshake.is_certificate_request {
+                let after_server_hello = after_server_hello
+                .mod_server_params(set_certificate_request(some $ handshake.as_certificate_request))
+                .mod_protection(add_handshake_context(handshake_bytes));
+                continue_m $ (after_server_hello, buf)
+            };
+            if handshake.is_certificate {
+                let after_server_hello = after_server_hello
+                .mod_server_params(set_certificate(some $ handshake.as_certificate))
+                .mod_protection(add_handshake_context(handshake_bytes));
+                continue_m $ (after_server_hello, buf)
+            };
+            if handshake.is_certificate_verify {
+                let after_server_hello = after_server_hello
+                .mod_server_params(set_certificate_verify(some $ handshake.as_certificate_verify))
+                .mod_protection(add_handshake_context(handshake_bytes));
                 continue_m $ (after_server_hello, buf)
             };
             if handshake.is_finished {
                 eval *after_server_hello._verify_server_finished(handshake.as_finished);
-                let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
+                let after_server_hello = after_server_hello
+                .mod_server_params(set_finished(some $ handshake.as_finished))
+                .mod_protection(add_handshake_context(handshake_bytes));
                 break_m $ (after_server_hello, buf)
             };
-            let after_server_hello = (
-                if handshake.is_encrypted_extensions || handshake.is_certificate_request ||
-                    handshake.is_certificate || handshake.is_certificate_verify {
-                        after_server_hello.mod_protection(add_handshake_context(handshake_bytes))
-                } else { after_server_hello }
-            );
-            continue_m $ (after_server_hello, buf)
-        )
-        let opt = handshakes.advance;
-        if opt.is_none { error $ "server Finished not found" };
-        let (handshake, handshakes) = opt.as_some;
-        if handshake.is_encrypted_extensions {
-            _process_encrypted_extensions((handshake.as_encrypted_extensions, handshake_bytes), after_server_hello)
-        };
-        if handshake.is_certificate_request {
-            _process_certificate_request((handshake.as_certificate_request, handshake_bytes), after_server_hello)
-        };
-
-    );
-
-    _assert_after_server_hello: [m: MonadError] HandshakeState -> m ();
-
-    _process_encrypted_exceptions: [m: MonadError] (EncryptedExceptions, Array U8) -> HandshakeState -> m HandshakeState;
-    _process_encrypted_exceptions = |(encrypted_exceptions, handshake_bytes), hstate| (
-        eval *hstate._assert_after_server_hello;
-
-        let after_server_hello = after_server_hello.set_encrypted_extensions(
-            some $ handshake.as_encrypted_extensions
+            eval debug_println("invalid handshake: " + handshake.to_string);
+            error $ "invalid handshake"
         );
-        let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
-        continue_m $ (after_server_hello, buf)
+
     );
 
-         || handshake.is_certificate_request ||
-                    handshake.is_certificate || handshake.is_certificate_verify {
-                        after_server_hello.mod_protection(add_handshake_context(handshake_bytes))
-                } else { after_server_hello }
+    _process_encrypted_exceptions: [m: MonadError] (EncryptedExceptions, Array U8) -> AfterServerHello -> m AfterServerHello;
+    _process_encrypted_exceptions = |(encrypted_exceptions, handshake_bytes), after_server_hello| (
+        pure $ after_server_hello
+                .mod_server_params(set_encrypted_extensions(some $ encrypted_exceptions))
+                .mod_protection(add_handshake_context(handshake_bytes))
     );
 
-    _process_server_finished: Finished -> AfterServerHello -> Result ErrMsg ();
-    _process_server_finished = |finished, after_server_hello| (
+    _process_certificate_request: [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
+    _process_certificate_request = |(certificate_request, handshake_bytes), after_server_hello| (
+        pure $ after_server_hello
+                .mod_server_params(set_certificate_request(some $ certificate_request))
+                .mod_protection(add_handshake_context(handshake_bytes))
+    );
+
+    _process_certificate: [m: MonadError] (Certificate, Array U8) -> AfterServerHello -> m AfterServerHello;
+    _process_certificate = |(certificate, handshake_bytes), after_server_hello| (
+        pure $ after_server_hello
+                .mod_server_params(set_certificate(some $ certificate))
+                .mod_protection(add_handshake_context(handshake_bytes))
+    );
+
+    _process_certificate_verify: [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
+    _process_certificate_verify = |(certificate_verify, handshake_bytes), after_server_hello| (
+        pure $ after_server_hello
+                .mod_server_params(set_certificate_verify(some $ certificate_verify))
+                .mod_protection(add_handshake_context(handshake_bytes))
+    );
+
+    _process_server_finished:  [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
+    _process_server_finished = |(finished, handshake_bytes) after_server_hello| (
         let protection = after_server_hello.@protection;
         let verify_data = *protection.calc_finished_verify_data(true);
         eval debug_println("verify_data expected="+ verify_data.to_string_hex);
@@ -296,7 +324,8 @@ namespace AfterServerHello {
         if verify_data != finished.@verify_data {
             err $ "verify_data mismatch"
         };
-        pure()
+        pure $ after_server_hello
+                .mod_protection(add_handshake_context(handshake_bytes))
     );
 }
 

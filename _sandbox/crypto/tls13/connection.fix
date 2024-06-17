@@ -13,12 +13,14 @@ trait TLSConnection = Functor + Monad + MonadErrorIF + TLSConnectionIF;
 trait [m: * -> *] m: TLSConnectionIF {
     send_bytes: Array U8 -> m ();
     recv_n_bytes: I64 -> m (Array U8);
+    try_recv_n_bytes: I64 -> m (Option (Array U8));
 }
 
 trait a: ByteIO {
     // type IOType a: * -> *;
     send: Array U8 -> a -> IOFail ();
     recv: I64 -> a -> IOFail (Array U8);
+    try_recv: I64 -> a -> IOFail (Option (Array U8));
 }
 
 impl Socket: ByteIO {
@@ -39,6 +41,18 @@ impl Socket: ByteIO {
         eval debug_eprintln("received " + bytes.get_size.to_string + " bytes: " + bytes.to_string_hex);
         pure $ bytes
     );
+
+    try_recv = |length, sock| (
+        eval debug_eprintln("try receiving " + length.to_string + " bytes");
+        let opt_bytes = *sock.Socket::try_recv(length);
+        eval debug_eprintln(
+            opt_bytes.map_or(
+                "data not available",
+                |bytes| "received " + bytes.get_size.to_string + " bytes: " + bytes.to_string_hex
+            )
+        );
+        pure $ opt_bytes
+    );
 }
 
 trait a: GetByteIO {
@@ -56,5 +70,10 @@ impl [s: GetByteIO, bio: ByteIO, ByteIOType s = bio]
     recv_n_bytes = |length| (
         let byte_io = (*get_state).get_byte_io;
         byte_io.ByteIO::recv(length).lift_t
+    );
+
+    try_recv_n_bytes = |length| (
+        let byte_io = (*get_state).get_byte_io;
+        byte_io.ByteIO::try_recv(length).lift_t
     );
 }

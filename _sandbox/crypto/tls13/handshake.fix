@@ -145,13 +145,13 @@ namespace AfterClientHello {
     on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> AfterClientHello -> m HandshakeState;
     on_recv_record = |plaintext, after_client_hello| (
         if !plaintext.@content_type.is_handshake {
-            error $ "unexpected content type"
+            error $ "after_client_hello: unexpected content type"
         };
         let client_hello_handshake_bytes = *after_client_hello.@client_hello_records.join_fragments;
         let server_hello_handshake_bytes = *server_hello_records.join_fragments;
         let handshake: Handshake = *unmarshal_from_bytes(server_hello_handshake_bytes).from_result_t;
         if !handshake.is_server_hello {
-            error $ "unexpected handshake type"
+            error $ "after_client_hello: unexpected handshake type"
         };
         let server_hello: ServerHello = handshake.as_server_hello;
         eval debug_println("server_hello=" + server_hello.to_string);
@@ -171,7 +171,8 @@ namespace AfterClientHello {
 
         pure $ after_server_hello $ AfterServerHello {
             protection: protection,
-            server_hello: server_hello,
+            server_params: ServerParams::make $ server_hello,
+            records_to_send: [],
         }
     );
 
@@ -186,9 +187,29 @@ namespace AfterClientHello {
     );
 }
 
+type ServerParams = unbox struct {
+    server_hello: ServerHello,
+    encrypted_extensions: Option EncryptedExtensions,
+    certificate_request: Option CertificateRequest,
+    certificate: Option Certificate,
+    certificate_verify: Option CertificateVerify,
+};
+
+namespace ServerParams {
+    make: ServerHello -> ServerParams;
+    make = |server_hello| ServerParams {
+        server_hello: server_hello,
+        encrypted_extensions: none(),
+        certificate_request: none(),
+        certificate: none(),
+        certificate_verify: none(),
+    }
+}
+
 type AfterServerHello = unbox struct {
     protection: Protection,
-    server_hello: ServerHello,
+    server_params: ServerParams,
+    records_to_send: Array TLSPlaintext,
 };
 
 impl AfterServerHello: ToString {
@@ -200,22 +221,94 @@ namespace AfterServerHello {
     on_recv_record = |plaintext, after_server_hello| (
         let protection = after_server_hello.@protection;
         let inner_plaintext = *protecion.decrypt_server(plaintext.to_ciphertext).from_result_t;
+        if !inner_plaintext.@content_type.is_handshake {
+            error $ "after_server_hello: unexpected content type"
+        };
+        let handshakes = *inner_plaintext.split_handshakes.from_result_t;
+        let after_server_hello = *handshakes.to_iter.loop_iter_m(
+        );
 
-        
     );
 
+    _process_handshakes: [m: MonadError, ErrorType m = ErrMsg] Iterator (Handshake, Array U8) -> AfterServerHello -> m HandshakeState;
+    _process_handshakes = |handshakes, after_server_hello| (
+        let hstate = HandshakeState::after_server_hello $ after_server_hello;
+        handshakes.to_iter.loop_iter_m(
+            hstate, |hstate, (handshake, handshake_bytes)|
+            eval debug_println(handshake.to_string);
+            if handshake.is_encrypted_extensions {
+                let after_server_hello = after_server_hello.set_encrypted_extensions(
+                    some $ handshake.as_encrypted_extensions
+                );
+                let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
+                continue_m $ (after_server_hello, buf)
+            };
+            if handshake.is_finished {
+                eval *after_server_hello._verify_server_finished(handshake.as_finished);
+                let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
+                break_m $ (after_server_hello, buf)
+            };
+            let after_server_hello = (
+                if handshake.is_encrypted_extensions || handshake.is_certificate_request ||
+                    handshake.is_certificate || handshake.is_certificate_verify {
+                        after_server_hello.mod_protection(add_handshake_context(handshake_bytes))
+                } else { after_server_hello }
+            );
+            continue_m $ (after_server_hello, buf)
+        )
+        let opt = handshakes.advance;
+        if opt.is_none { error $ "server Finished not found" };
+        let (handshake, handshakes) = opt.as_some;
+        if handshake.is_encrypted_extensions {
+            _process_encrypted_extensions((handshake.as_encrypted_extensions, handshake_bytes), after_server_hello)
+        };
+        if handshake.is_certificate_request {
+            _process_certificate_request((handshake.as_certificate_request, handshake_bytes), after_server_hello)
+        };
+
+    );
+
+    _assert_after_server_hello: [m: MonadError, ErrorType m = ErrMsg] HandshakeState -> m ();
+
+    _process_encrypted_exceptions: [m: MonadError, ErrorType m = ErrMsg] (EncryptedExceptions, Array U8) -> HandshakeState -> m HandshakeState;
+    _process_encrypted_exceptions = |(encrypted_exceptions, handshake_bytes), hstate| (
+        eval *hstate._assert_after_server_hello;
+
+        let after_server_hello = after_server_hello.set_encrypted_extensions(
+            some $ handshake.as_encrypted_extensions
+        );
+        let after_server_hello = after_server_hello.mod_protection(add_handshake_context(handshake_bytes));
+        continue_m $ (after_server_hello, buf)
+    );
+
+         || handshake.is_certificate_request ||
+                    handshake.is_certificate || handshake.is_certificate_verify {
+                        after_server_hello.mod_protection(add_handshake_context(handshake_bytes))
+                } else { after_server_hello }
+    );
+
+    _process_server_finished: Finished -> AfterServerHello -> Result ErrMsg ();
+    _process_server_finished = |finished, after_server_hello| (
+        let protection = after_server_hello.@protection;
+        let verify_data = *protection.calc_finished_verify_data(true);
+        eval debug_println("verify_data expected="+ verify_data.to_string_hex);
+        eval debug_println("verify_data actual  ="+ finished.@verify_data.to_string_hex);
+        if verify_data != finished.@verify_data {
+            err $ "verify_data mismatch"
+        };
+        pure()
+    );
 }
 
-type ServerFinishedState = unbox struct {
+type AfterEncryptedExceptions = unbox struct {
     protection: Protection,
-    server_hello: ServerHello,
 };
 
-namespace ServerFinishedState {
-    make = |server_hello_state| (
+type AfterServerFinished = unbox struct {
+    protection: Protection,
+};
 
-    );
-
+namespace AfterServerFinished {
 }
 
 

@@ -25,10 +25,23 @@ type HandshakeState = unbox union {
     after_server_hello: AfterServerHello,
 };
 
+impl HandshakeState: ToString {
+    to_string = |hstate| (
+        if hstate.is_before_client_hello { hstate.as_before_client_hello.to_string };
+        if hstate.is_after_client_hello { hstate.as_after_client_hello.to_string };
+        if hstate.is_after_server_hello { hstate.as_after_server_hello.to_string };
+        ""
+    );
+}
+
 namespace HandshakeState {
-    start_handshake: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
+    make: [m: Monad] m HandshakeState;
+    make = pure $ before_client_hello $ BeforeClientHello { dummy: () };
+
+    start_handshake: [m: MonadRandGen, m: MonadError, ErrorType m = ErrMsg] String -> m HandshakeState;
     start_handshake = |server_name| (
-        BeforeClientHello::make_client_hello(server_name)
+        if state.is_before_client_hello { state.as_before_client_hello.start_handshake(server_name) };
+        error $ "start_handshake: wrong state"
     );
 
     send_records: [m: TLSConnection] HandshakeState -> m ();
@@ -53,6 +66,13 @@ namespace HandshakeState {
 
     on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> HandshakeState -> m HandshakeState;
     on_recv_record = |plaintext, state| (
+        if plaintext.@content_type.is_alert {
+            error $ "received alert: " + plaintext.@fragment.to_string_hex
+        };
+        if plaintext.@content_type.is_change_cipher_spec {
+            eval debug_println("received change_cipher_spec");
+            pure $ state
+        };
         if state.is_after_client_hello {
             state.as_after_client_hello.on_recv_record(plaintext)
         };
@@ -64,9 +84,13 @@ type BeforeClientHello = unbox struct {
     dummy: ()
 };
 
+impl BeforeClientHello: ToString {
+    to_string = |obj| "BeforeClientHello {}";
+}
+
 namespace BeforeClientHello {
-    make_client_hello: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
-    make_client_hello = |server_name, _| (
+    start_handshake: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
+    start_handshake = |server_name, _| (
         let hello = ClientHello::empty;
         let hello = hello.init_random(*randgen_bytes(32));
         // init server_name
@@ -167,10 +191,18 @@ type AfterServerHello = unbox struct {
     server_hello: ServerHello,
 };
 
+impl AfterServerHello: ToString {
+    to_string = |obj| "AfterServerHello {}";
+}
+
 namespace AfterServerHello {
+    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> AfterServerHello -> m HandshakeState;
+    on_recv_record = |plaintext, after_server_hello| (
+        let protection = after_server_hello.@protection;
+        let inner_plaintext = *protecion.decrypt_server(plaintext.to_ciphertext).from_result_t;
 
-
-
+        
+    );
 
 }
 

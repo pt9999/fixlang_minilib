@@ -187,6 +187,22 @@ namespace TLSInnerPlaintext {
         content_type: content_type,
         zeros: Array::fill(zeros_length, 0_U8)
     };
+
+    split_handshakes: TLSInnerPlaintext -> Result ErrMsg (Array (Handshake, Array U8));
+    split_handshakes = |inner_plaintext| (
+        let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
+        let output = [];
+        loop_m(
+            ([], buf), |(output, buf)|
+            if buf.get_position >= buf.get_size { break_m $ output };
+            let start = buf.get_position;
+            let (handshake: Handshake, buf) = *buf.unmarshal;
+            let end = buf.get_position;
+            let handshake_bytes = buf.@array.subarray(start, end);
+            let output = output.push_back $ (handshake, handshake_bytes);
+            continue_m $ (output, buf)
+        )
+    );
 }
 
 impl TLSInnerPlaintext: Marshal {
@@ -238,8 +254,8 @@ namespace TLSCiphertext {
         encrypted_record: []
     };
 
-    from_plaintext: TLSPlaintext -> TLSCiphertext;
-    from_plaintext = |plaintext| TLSCiphertext {
+    to_ciphertext: TLSPlaintext -> TLSCiphertext;
+    to_ciphertext = |plaintext| TLSCiphertext {
         opaque_type: plaintext.@content_type,
         legacy_record_version: plaintext.@legacy_record_version,
         encrypted_record: plaintext.@fragment

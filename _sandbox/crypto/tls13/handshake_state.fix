@@ -82,6 +82,14 @@ namespace HandshakeState {
         pure $ ([], hstate)
     );
 
+    send_appdata: [m: MonadError] Array U8 -> HandshakeState -> m HandshakeState;
+    send_appdata = |appdata, hstate| (
+        if hstate.is_after_finished {
+            hstate.as_after_finished.send_appdata(appdata)
+        };
+        error $ "send_appdata: invalid state"
+    );
+
     pop_appdata_received: [m: MonadError] HandshakeState -> m (Array U8, HandshakeState);
     pop_appdata_received = |hstate| (
         if hstate.is_after_finished {
@@ -388,6 +396,23 @@ namespace AfterFinished {
             after_finished.@records_to_send,
             HandshakeState::after_finished $ after_finished.set_records_to_send([])
         )
+    );
+
+    send_appdata: [m: MonadError] Array U8 -> AfterFinished -> m HandshakeState;
+    send_appdata = |appdata, after_finished| (
+        // TODO: need to split large records?
+        let inner_plaintext = TLSInnerPlaintext::make(
+            appdata,
+            ContentType::application_data(),
+            0
+        );
+        let protection = after_finished.@protection;
+        let (ciphertext, protection) = protection.encrypt_record(inner_plaintext, TrafficKeyType::client_hs());
+        let after_finished = after_finished.set_protection(protection);
+        let after_finished = after_finished.mod_records_to_send(push_back(
+            ciphertext.to_record
+        ));
+        HandshakeState::after_finished $ after_finished
     );
 
     pop_appdata_received: [m: MonadError] AfterFinished -> m (Array U8, HandshakeState);

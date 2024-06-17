@@ -68,6 +68,14 @@ namespace TLSSession {
         set_hstate(hstate)
     );
 
+    act_hstate: (HandshakeState -> StateTLSSession (a, HandshakeState)) -> StateTLSSession a;
+    act_hstate = |f| (
+        let hstate = *get_hstate;
+        let (a, hstate) = *f(hstate);
+        eval *set_hstate(hstate);
+        pure $ a
+    );
+
     send_client_hello: String -> StateTLSSession ();
     send_client_hello = |server_name| (
         eval *HandshakeState::start_handshake(server_name).lift_hstate;
@@ -91,11 +99,23 @@ namespace TLSSession {
         pure()
     );
 
-    recv_appdata: StateTLSSession ();
+    send_appdata: Array U8 -> StateTLSSession ();
+    send_appdata = |appdata| (
+        eval *HandshakeState::send_appdata(appdata).lift_hstate;
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
+    );
+
+    recv_appdata: StateTLSSession (Array U8);
     recv_appdata = (
         eval *HandshakeState::send_records.lift_hstate;
         eval *HandshakeState::recv_record.lift_hstate;
-        recv_appdata
+        let appdata = *HandshakeState::pop_appdata_received.act_hstate;
+        if appdata.is_empty {
+            // try again
+            recv_appdata
+        };
+        pure $ appdata
     );
 
 }

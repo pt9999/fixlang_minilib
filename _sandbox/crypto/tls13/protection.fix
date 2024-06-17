@@ -50,11 +50,13 @@ namespace Secrets {
         }
     );
 
-    calc_handshake_secrets: Array U8 -> Array U8 -> Secrets -> Result ErrMsg Secrets;
-    calc_handshake_secrets = |dhe, handshake_context, secrets| (
+    calc_secrets: Array U8 -> Secrets -> Result ErrMsg Secrets;
+    calc_secrets = |dhe, secrets| (
         let hkdf = secrets.@hkdf;
         let handshake_secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
+        let master_secret = *hkdf.calc_master_secret(handshake_secret);
         ok $ secrets.set_handshake_secret(handshake_secret)
+                    .set_master_secret(master_secret)
     );
 }
 
@@ -85,11 +87,11 @@ namespace TrafficKey {
         sequence_number: 0_U64,
     };
 
-    update_keys: AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
-    update_keys = |aead, hkdf, traffic_key| (
-        let secret = traffic_key.@traffic_secret;
+    update_keys: Array U8 -> AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
+    update_keys = |secret, aead, hkdf, traffic_key| (
         let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
         ok $ traffic_key
+            .set_traffic_secret(secret)
             .set_write_key(key)
             .set_write_iv(iv)
             .set_sequence_number(0_U64)
@@ -206,16 +208,33 @@ namespace Protection {
             client_hs: client_hs
         } = protection;
         let hkdf = secrets.@hkdf;
-        let secrets = *secrets.calc_handshake_secrets(dhe, handshake_context);
-        let server_hs = server_hs.set_traffic_secret(
-            *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context)
-        );
-        let client_hs = client_hs.set_traffic_secret(
-            *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context)
-        );
-        let server_hs = *server_hs.update_keys(aead, hkdf);
-        let client_hs = *client_hs.update_keys(aead, hkdf);
+        let secrets = *secrets.calc_secrets(dhe);
+        let server_hs = *server_hs.update_keys(
+            *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
+            aead, hkdf);
+        let client_hs = *client_hs.update_keys(
+            *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
+            aead, hkdf);
         ok $ protection.set_secrets(secrets).set_client_hs(client_hs).set_server_hs(server_hs)
+    );
+
+    init_appdata: Protection -> Result ErrMsg Protection;
+    init_appdata = |protection| (
+        let Protection {
+            secrets: secrets,
+            aead: aead,
+            handshake_context: handshake_context,   // ClientHello...server Finished
+            server_hs: server_hs,
+            client_hs: client_hs
+        } = protection;
+        let hkdf = secrets.@hkdf;
+        let server_hs = *server_hs.update_keys(
+            *hkdf.calc_server_application_traffic_secret_0(secrets.@handshake_secret, handshake_context),
+            aead, hkdf);
+        let client_hs = *client_hs.update_keys(
+            *hkdf.calc_client_application_traffic_secret_0(secrets.@handshake_secret, handshake_context),
+            aead, hkdf);
+        ok $ protection.set_client_hs(client_hs).set_server_hs(server_hs)
     );
 
     decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);

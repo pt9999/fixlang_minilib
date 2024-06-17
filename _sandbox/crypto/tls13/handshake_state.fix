@@ -5,8 +5,7 @@ import Debug;
 
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.RandGen;
-import Minilib.Crypto.Tls13.ECDHE;
-import Minilib.Crypto.Tls13.ECDSA;
+import Minilib.Crypto.Tls13.KeyAgreement;
 import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Crypto.Tls13.Extensions;
 import Minilib.Crypto.Tls13.Connection;
@@ -154,11 +153,10 @@ namespace BeforeClientHello {
             ])
         );
         // init key_share
-        // TODO: support other key agreement type
-        let key_agreement = *ECDHE::make(ECParam::secp256r1);
-        let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make $ [
-            key_agreement.to_key_share_entry
-        ];
+        let key_agreements = *KeyAgreement::make_defaults;
+        let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make(
+            key_agreements.map(to_key_share_entry)
+        );
         let hello = hello.add_extension(Extension::key_share $ ks);
         // 9.2. Mandatory-to-Implement Extensions
         // TODO: cookie
@@ -171,19 +169,16 @@ namespace BeforeClientHello {
 
         pure $ after_client_hello $ AfterClientHello {
             client_hello_records: client_hello_records,
-            key_agreement: key_agreement,
+            key_agreements: key_agreements,
             records_to_send: client_hello_records,
         }
     );
 }
 
 
-// TODO: support other key agreement type
-type KeyAgreement = ECDHE;
-
 type AfterClientHello = unbox struct {
     client_hello_records: Array TLSRecord,
-    key_agreement: KeyAgreement,
+    key_agreements: Array KeyAgreement,
     records_to_send: Array TLSRecord,
 };
 
@@ -191,7 +186,7 @@ impl AfterClientHello: ToString {
     to_string = |hello| (
         "AfterClientHello {" +
         " client_hello_records=" + hello.@client_hello_records.to_string +
-        " key_agreement=" + hello.@key_agreement.to_string +
+        " key_agreements=" + hello.@key_agreements.to_string +
         "}"
     );
 }
@@ -221,9 +216,9 @@ namespace AfterClientHello {
         eval debug_println("server_hello=" + server_hello.to_string);
 
         // key agreement
-        let key_agreement = after_client_hello.@key_agreement;
+        let key_agreements = after_client_hello.@key_agreements;
         let key_share_entry = *server_hello._find_key_share_entry;
-        let shared_secret: SharedSecret = *key_agreement.accept_server_share(key_share_entry).from_result_t;
+        let shared_secret: SharedSecret = *key_agreements.accept_server_share(key_share_entry).from_result_t;
         eval debug_println("shared_secret=" + shared_secret.to_string_hex);
 
         // construct protection

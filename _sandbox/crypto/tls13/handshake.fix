@@ -19,26 +19,54 @@ import Minilib.Monad.Error;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
-// TODO: support other key agreement type
-type KeyAgreement = ECDHE;
-
-type ClientHelloState = unbox struct {
-    client_hello_records: Array TLSPlaintext,
-    key_agreement: KeyAgreement,
+type HandshakeState = unbox union {
+    before_client_hello: BeforeClientHello,
+    after_client_hello: AfterClientHello,
+    after_server_hello: AfterServerHello,
 };
 
-impl ClientHelloState: ToString {
-    to_string = |hello| (
-        "ClientHelloState {" +
-        " client_hello_records=" + hello.@client_hello_records.to_string +
-        " key_agreement=" + hello.@key_agreement.to_string +
-        "}"
+namespace HandshakeState {
+    start_handshake: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
+    start_handshake = |server_name| (
+        BeforeClientHello::make_client_hello(server_name)
+    );
+
+    send_records: [m: TLSConnection] HandshakeState -> m ();
+    send_records = |state| (
+        let records = state.get_records_to_send;
+        TLSPlaintext::send_plaintexts(records)
+    );
+
+    get_records_to_send: HandshakeState -> m (Array TLSPlaintext);
+    get_records_to_send = |state| (
+        if state.is_after_client_hello {
+            pure $ state.as_after_client_hello.@client_hello_records
+        };
+        pure $ []
+    );
+
+    recv_record: [m: TLSConnection, ErrorType m = ErrMsg] HandshakeState -> m HandshakeState;
+    recv_record = |state| (
+        let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
+        state.on_recv_record(plaintext)
+    );
+
+    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> HandshakeState -> m HandshakeState;
+    on_recv_record = |plaintext, state| (
+        if state.is_after_client_hello {
+            state.as_after_client_hello.on_recv_record(plaintext)
+        };
+        pure $ state
     );
 }
 
-namespace ClientHelloState {
-    make: [m: MonadRandGen] String -> m ClientHelloState;
-    make = |server_name| (
+type BeforeClientHello = unbox struct {
+    dummy: ()
+};
+
+namespace BeforeClientHello {
+    make_client_hello: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
+    make_client_hello = |server_name, _| (
         let hello = ClientHello::empty;
         let hello = hello.init_random(*randgen_bytes(32));
         // init server_name
@@ -63,27 +91,39 @@ namespace ClientHelloState {
         let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
         let client_hello_records: Array TLSPlaintext = TLSPlaintext::split_fragments(ContentType::handshake(), handshake_bytes);
 
-        pure $ ClientHelloState {
+        pure $ after_client_hello $ AfterClientHello {
             client_hello_records: client_hello_records,
             key_agreement: key_agreement
         }
     );
+}
 
-    send: [m: TLSConnection] ClientHelloState -> m ();
-    send = |client_hello_state| (
-        TLSPlaintext::send_plaintexts(client_hello_state.@client_hello_records)
+
+// TODO: support other key agreement type
+type KeyAgreement = ECDHE;
+
+type AfterClientHello = unbox struct {
+    client_hello_records: Array TLSPlaintext,
+    key_agreement: KeyAgreement,
+};
+
+impl AfterClientHello: ToString {
+    to_string = |hello| (
+        "AfterClientHello {" +
+        " client_hello_records=" + hello.@client_hello_records.to_string +
+        " key_agreement=" + hello.@key_agreement.to_string +
+        "}"
     );
 }
 
-type ServerHelloState = unbox struct {
-    protection: Protection,
-    server_hello: ServerHello,
-};
+namespace AfterClientHello {
 
-namespace ServerHelloState {
-    make: [m: MonadError, ErrorType m = ErrMsg] ClientHelloState -> Array TLSPlaintext -> m ServerHelloState;
-    make = |client_hello_state, server_hello_records| (
-        let client_hello_handshake_bytes = *client_hello_state.@client_hello_records.join_fragments;
+    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> AfterClientHello -> m HandshakeState;
+    on_recv_record = |plaintext, after_client_hello| (
+        if !plaintext.@content_type.is_handshake {
+            error $ "unexpected content type"
+        };
+        let client_hello_handshake_bytes = *after_client_hello.@client_hello_records.join_fragments;
         let server_hello_handshake_bytes = *server_hello_records.join_fragments;
         let handshake: Handshake = *unmarshal_from_bytes(server_hello_handshake_bytes).from_result_t;
         if !handshake.is_server_hello {
@@ -93,7 +133,7 @@ namespace ServerHelloState {
         eval debug_println("server_hello=" + server_hello.to_string);
 
         // key agreement
-        let key_agreement = client_hello_state.@key_agreement;
+        let key_agreement = after_client_hello.@key_agreement;
         let key_share_entry = *server_hello._find_key_share_entry;
         let shared_secret: SharedSecret = *key_agreement.accept_server_share(key_share_entry).from_result_t;
         eval debug_println("shared_secret=" + shared_secret.to_string_hex);
@@ -101,24 +141,14 @@ namespace ServerHelloState {
         // construct protection
         let cipher_suite = server_hello.@cipher_suite;
         let protection = *Protection::make(cipher_suite).from_result_t;
-        let protection = protection.add_transcript(client_hello_handshake_bytes);
-        let protection = protection.add_transcript(server_hello_handshake_bytes);
+        let protection = protection.add_handshake_context(client_hello_handshake_bytes);
+        let protection = protection.add_handshake_context(server_hello_handshake_bytes);
         let protection = *protection.init_handshake(shared_secret).from_result_t;
 
-        pure $ ServerHelloState {
+        pure $ after_server_hello $ AfterServerHello {
             protection: protection,
             server_hello: server_hello,
         }
-    );
-
-
-    recv: [m: TLSConnection, ErrorType m = ErrMsg] ClientHelloState -> m ServerHelloState;
-    recv = |client_hello_state| (
-        let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
-        if !plaintext.@content_type.is_handshake {
-            error $ "unexpected content type"
-        };
-        ServerHelloState::make(client_hello_state, [plaintext])
     );
 
     _find_key_share_entry: [m: MonadError, ErrorType m = ErrMsg] ServerHello -> m KeyShareEntry;
@@ -130,16 +160,30 @@ namespace ServerHelloState {
         let kse: KeyShareEntry = ks.as_ks_server_hello.@server_share;
         pure $ kse
     );
-
 }
 
-
-type HandshakeState = unbox union {
-    empty: (),
-    client_hello_sent: ClientHelloState,
-    server_hello_received: ServerHelloState,
+type AfterServerHello = unbox struct {
+    protection: Protection,
+    server_hello: ServerHello,
 };
 
-namespace HandshakeState {
+namespace AfterServerHello {
+
+
+
+
 }
+
+type ServerFinishedState = unbox struct {
+    protection: Protection,
+    server_hello: ServerHello,
+};
+
+namespace ServerFinishedState {
+    make = |server_hello_state| (
+
+    );
+
+}
+
 

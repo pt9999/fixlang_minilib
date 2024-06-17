@@ -51,15 +51,18 @@ namespace TLSSession {
         }
     );
 
+    get_hstate: StateT TLSSession IOFail HandshakeState;
+    get_hstate = get_state.map(@handshake_state);
+
+    set_hstate: HandshakeState -> StateT TLSSession IOFail ();
+    set_hstate = |hstate| mod_state(set_handshake_state(hstate));
+
     send_client_hello: String -> StateT TLSSession IOFail ();
     send_client_hello = |server_name| (
-        let session = *get_state;
-        if !session.@handshake_state.is_empty {
-            error $ "handshake state is not empty"
-        };
-        let client_hello_state = *ClientHelloState::make(server_name);
-        eval *client_hello_state.send;
-        mod_state(set_handshake_state(HandshakeState::client_hello_sent $ client_hello_state))
+        let hstate = *get_hstate;
+        let hstate = *hstate.make_client_hello;
+        eval *hstate.send_records;
+        set_hstate(hstate)
     );
 
     recv_server_hello: StateT TLSSession IOFail ();

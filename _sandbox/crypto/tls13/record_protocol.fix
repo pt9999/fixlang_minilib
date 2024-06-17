@@ -86,49 +86,6 @@ namespace TLSPlaintext {
         fragment: []
     };
 
-    // Splits data to fragments. Max size of each fragment is 16384 bytes.
-    split_fragments: ContentType -> Array U8 -> Array TLSPlaintext;
-    split_fragments = |content_type, data| (
-        let max_fragment_size = 16384;
-        let number_of_fragments = (data.get_size + max_fragment_size - 1) / max_fragment_size;
-        Iterator::range(0, number_of_fragments).map(|i|
-            let start = max_fragment_size * i;
-            let end  = min(max_fragment_size * (i + 1), data.get_size);
-            let fragment = data.subarray(start, end);
-            TLSPlaintext::empty.set_content_type(content_type).set_fragment(fragment)
-        ).to_array
-    );
-
-    // Joins fragments of plaintexts.
-    join_fragments:  [m: MonadError] Array TLSPlaintext -> m (Array U8);
-    join_fragments = |plaintexts| (
-        if plaintexts.is_empty { pure $ [] };
-        let content_type = plaintexts.@(0).@content_type;
-        if plaintexts.find_by(|p| p.@content_type != content_type).is_some {
-            error $ "join_fragments: all `content_type`s should be same"
-        };
-        pure $ plaintexts.map(@fragment).flatten
-    );
-
-    send_plaintext: [m: TLSConnection] TLSPlaintext -> m ();
-    send_plaintext = |record| (
-        let bytes = marshal_to_bytes(record);
-        send_bytes(bytes)
-    );
-
-    send_plaintexts: [m: TLSConnection] Array TLSPlaintext -> m ();
-    send_plaintexts = |records| (
-        records.foreach_m(send_plaintext)
-    );
-
-    recv_plaintext:  [m: TLSConnection] m TLSPlaintext;
-    recv_plaintext = do {
-        let header = *recv_n_bytes(5);
-        let length = get_u16_be(3, header);
-        let body = *recv_n_bytes(length.to_I64);
-        let bytes = header.append(body);
-        unmarshal_from_bytes(bytes).from_result_t
-    };
 }
 
 impl TLSPlaintext: ToString {
@@ -238,15 +195,15 @@ namespace TLSCiphertext {
         encrypted_record: []
     };
 
-    to_ciphertext: TLSPlaintext -> TLSCiphertext;
-    to_ciphertext = |plaintext| TLSCiphertext {
-        opaque_type: plaintext.@content_type,
-        legacy_record_version: plaintext.@legacy_record_version,
-        encrypted_record: plaintext.@fragment
+    to_ciphertext: TLSRecord -> TLSCiphertext;
+    to_ciphertext = |record| TLSCiphertext {
+        opaque_type: record.@content_type,
+        legacy_record_version: record.@legacy_record_version,
+        encrypted_record: record.@fragment
     };
 
-    to_plaintext: TLSCiphertext -> TLSPlaintext;
-    to_plaintext = |ciphertext| TLSPlaintext {
+    to_record: TLSCiphertext -> TLSRecord;
+    to_record = |ciphertext| TLSPlaintext {
         content_type: ciphertext.@opaque_type,
         legacy_record_version: ciphertext.@legacy_record_version,
         fragment: ciphertext.@encrypted_record,
@@ -303,17 +260,62 @@ impl TLSCiphertext: Unmarshal {
     );
 }
 
-/*
-type TLSRecord = unbox union {
-    plaintext: TLSPlaintext,
-    ciphertext: TLSCiphertext
-};
+type TLSRecord = TLSPlaintext;
 
-impl TLSRecord: Marshal {
-    marshal = |obj, buf| (
-        if obj.is_plaintext { buf.marshal(obj.as_plaintext) };
-        if obj.is_ciphertext { buf.marshal(obj.as_ciphertext) };
-        buf
+namespace TLSRecord {
+    // Splits data to fragments. Max size of each fragment is 16384 bytes.
+    split_fragments: ContentType -> Array U8 -> Array TLSRecord;
+    split_fragments = |content_type, data| (
+        let max_fragment_size = 16384;
+        let number_of_fragments = (data.get_size + max_fragment_size - 1) / max_fragment_size;
+        Iterator::range(0, number_of_fragments).map(|i|
+            let start = max_fragment_size * i;
+            let end  = min(max_fragment_size * (i + 1), data.get_size);
+            let fragment = data.subarray(start, end);
+            TLSPlaintext::empty.set_content_type(content_type).set_fragment(fragment)
+        ).to_array
     );
+
+    // Joins fragments of records.
+    join_fragments:  [m: MonadError] Array TLSRecord -> m (Array U8);
+    join_fragments = |records| (
+        if records.is_empty { pure $ [] };
+        let content_type = records.@(0).@content_type;
+        if records.find_by(|p| p.@content_type != content_type).is_some {
+            error $ "join_fragments: all `content_type`s should be same"
+        };
+        pure $ records.map(@fragment).flatten
+    );
+
+    send_record: [m: TLSConnection] TLSRecord -> m ();
+    send_record = |record| (
+        let bytes = marshal_to_bytes(record);
+        send_bytes(bytes)
+    );
+
+    send_records: [m: TLSConnection] Array TLSRecord -> m ();
+    send_records = |records| (
+        records.foreach_m(send_record)
+    );
+
+    recv_record:  [m: TLSConnection] m TLSRecord;
+    recv_record = do {
+        let header = *recv_n_bytes(5);
+        let length = get_u16_be(3, header);
+        let body = *recv_n_bytes(length.to_I64);
+        let bytes = header.append(body);
+        unmarshal_from_bytes(bytes).from_result_t
+    };
+
+    try_recv_record:  [m: TLSConnection] m (Option TLSRecord);
+    try_recv_record = do {
+        let header = *try_recv_n_bytes(5);
+        if header.is_none { pure $ none() };
+        let header = header.as_some;
+        let length = get_u16_be(3, header);
+        let body = *recv_n_bytes(length.to_I64);
+        let bytes = header.append(body);
+        unmarshal_from_bytes(bytes).from_result_t.map(some)
+    };
 }
-*/
+

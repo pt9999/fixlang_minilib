@@ -55,6 +55,9 @@ namespace HandshakeState {
         if state.is_after_client_hello {
             pure $ state.as_after_client_hello.@client_hello_records
         };
+        if state.is_after_server_finished {
+            pure $ state.as_after_server_finished.@records_to_send
+        };
         pure $ []
     );
 
@@ -75,6 +78,9 @@ namespace HandshakeState {
         };
         if state.is_after_client_hello {
             state.as_after_client_hello.on_recv_record(plaintext)
+        };
+        if state.is_after_server_hello {
+            state.as_after_server_hello.on_recv_record(plaintext)
         };
         pure $ state
     );
@@ -227,6 +233,10 @@ namespace AfterServerHello {
         };
         let handshakes = *inner_plaintext.split_handshakes.from_result_t;
         eval *_check_handshakes_order(handshakes);
+        eval *_verify_server_finished(handshakes, protection);
+        let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
+        let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
+        pure $ AfterServerFinished::make(protection, server_params)
     );
 
     _check_handshakes_order: [m: MonadError] Array (Handshake, Array U8) -> m ();
@@ -245,99 +255,75 @@ namespace AfterServerHello {
         pure()
     );
 
-    _process_handshakes: [m: MonadError] Iterator (Handshake, Array U8) -> AfterServerHello -> m HandshakeState;
-    _process_handshakes = |handshakes, after_server_hello| (
-        handshakes.to_iter.loop_iter_m(
-            after_server_hello, |after_server_hello, (handshake, handshake_bytes)|
-            eval debug_println(handshake.to_string);
-            if handshake.is_encrypted_extensions {
-                let after_server_hello = after_server_hello
-                .mod_server_params(set_encrypted_extensions(some $ handshake.as_encrypted_exceptions))
-                .mod_protection(add_handshake_context(handshake_bytes));
-                continue_m $ (after_server_hello, buf)
-            };
-            if handshake.is_certificate_request {
-                let after_server_hello = after_server_hello
-                .mod_server_params(set_certificate_request(some $ handshake.as_certificate_request))
-                .mod_protection(add_handshake_context(handshake_bytes));
-                continue_m $ (after_server_hello, buf)
-            };
-            if handshake.is_certificate {
-                let after_server_hello = after_server_hello
-                .mod_server_params(set_certificate(some $ handshake.as_certificate))
-                .mod_protection(add_handshake_context(handshake_bytes));
-                continue_m $ (after_server_hello, buf)
-            };
-            if handshake.is_certificate_verify {
-                let after_server_hello = after_server_hello
-                .mod_server_params(set_certificate_verify(some $ handshake.as_certificate_verify))
-                .mod_protection(add_handshake_context(handshake_bytes));
-                continue_m $ (after_server_hello, buf)
-            };
-            if handshake.is_finished {
-                eval *after_server_hello._verify_server_finished(handshake.as_finished);
-                let after_server_hello = after_server_hello
-                .mod_server_params(set_finished(some $ handshake.as_finished))
-                .mod_protection(add_handshake_context(handshake_bytes));
-                break_m $ (after_server_hello, buf)
-            };
-            eval debug_println("invalid handshake: " + handshake.to_string);
-            error $ "invalid handshake"
-        );
-
+    _update_handshake_context: Array (Handshake, Array U8) -> (I64, I64) -> Protection -> Protection;
+    _update_handshake_context = |handshakes, (start, end), protection| (
+        hanshakes.subarray(start, end).map(@1).to_iter.fold(
+            protection, |protection, handshake_bytes|
+            protection.add_handshake_context(handshake_bytes)
+        )
     );
 
-    _process_encrypted_exceptions: [m: MonadError] (EncryptedExceptions, Array U8) -> AfterServerHello -> m AfterServerHello;
-    _process_encrypted_exceptions = |(encrypted_exceptions, handshake_bytes), after_server_hello| (
-        pure $ after_server_hello
-                .mod_server_params(set_encrypted_extensions(some $ encrypted_exceptions))
-                .mod_protection(add_handshake_context(handshake_bytes))
-    );
-
-    _process_certificate_request: [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
-    _process_certificate_request = |(certificate_request, handshake_bytes), after_server_hello| (
-        pure $ after_server_hello
-                .mod_server_params(set_certificate_request(some $ certificate_request))
-                .mod_protection(add_handshake_context(handshake_bytes))
-    );
-
-    _process_certificate: [m: MonadError] (Certificate, Array U8) -> AfterServerHello -> m AfterServerHello;
-    _process_certificate = |(certificate, handshake_bytes), after_server_hello| (
-        pure $ after_server_hello
-                .mod_server_params(set_certificate(some $ certificate))
-                .mod_protection(add_handshake_context(handshake_bytes))
-    );
-
-    _process_certificate_verify: [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
-    _process_certificate_verify = |(certificate_verify, handshake_bytes), after_server_hello| (
-        pure $ after_server_hello
-                .mod_server_params(set_certificate_verify(some $ certificate_verify))
-                .mod_protection(add_handshake_context(handshake_bytes))
-    );
-
-    _process_server_finished:  [m: MonadError] (CertificateRequest, Array U8) -> AfterServerHello -> m AfterServerHello;
-    _process_server_finished = |(finished, handshake_bytes) after_server_hello| (
-        let protection = after_server_hello.@protection;
+    _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
+    _verify_server_finished = |handshakes, protection| (
+        let size = handshakes.get_size;
+        let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
+        let finished = handshakes.@(size - 1).map(@0);
         let verify_data = *protection.calc_finished_verify_data(true);
         eval debug_println("verify_data expected="+ verify_data.to_string_hex);
         eval debug_println("verify_data actual  ="+ finished.@verify_data.to_string_hex);
         if verify_data != finished.@verify_data {
             err $ "verify_data mismatch"
         };
-        pure $ after_server_hello
-                .mod_protection(add_handshake_context(handshake_bytes))
+        pure $ ()
     );
 }
 
-type AfterEncryptedExceptions = unbox struct {
-    protection: Protection,
+type ServerParams = unbox struct {
+    server_hello: ServerHello,
+    handshakes: Array Handshake, // EncryptedExceptions, [CertificateRequest], Certificate, CertificateVerify, Finished
 };
+
+namespace ServerParams {
+    make: ServerHello -> Array Handshake -> ServerParams;
+    make = |server_hello, handshakes| ServerParams {
+        server_hello: server_hello,
+        handshakes: handshakes
+    };
+}
 
 type AfterServerFinished = unbox struct {
     protection: Protection,
+    server_params: ServerParams,
+    records_to_send: Array TLSPlaintext,
 };
 
 namespace AfterServerFinished {
+    make: Protection -> ServerParams -> m AfterServerFinished;
+    make = |protection, server_params| (
+        let handshake_bytes = _make_client_finished(protection);
+        let inner_plaintext = TLSInnerPlaintext::make(
+            handshake_bytes,
+            ContentType::handshake(),
+            0
+        );
+        let ciphertext = *protection.encrypt_client(inner_plaintext);
+        let records_to_send = [
+            ciphertext.to_plaintext
+        ];
+        pure $ AfterServerFinished {
+            protection: protection,
+            server_params: server_params,
+            records_to_send: records_to_send,
+        }
+    );
+
+    _make_client_finished: Protection -> Result ErrMsg (Array U8);
+    _make_client_finished = |protection| (
+        let verify_data = *protection.calc_finished_verify_data(true);
+        let client_finished = Finished { verify_data: verify_data };
+        let handshake_bytes = marshal_to_bytes(Handshake::finished $ client_finished);
+        pure $ handshake_bytes;
+    );
 }
 
 

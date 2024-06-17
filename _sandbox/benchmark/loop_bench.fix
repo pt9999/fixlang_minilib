@@ -37,13 +37,29 @@ loop_fold = |n| (
     Iterator::range(0, n).fold(0, |sum, i| sum + i)
 );
 
+    fold2 : b -> (b -> a -> b) -> Iterator a -> b;
+    fold2 = |init, op, iter| (
+        let next = iter.advance;
+        if next.is_none {
+            init
+        } else {
+            let (next, iter) = next.as_some;
+            iter.fold2(op(init, next), op)
+        }
+    );
+
+loop_fold2: I64 -> I64;
+loop_fold2 = |n| (
+    Iterator::range(0, n).fold2(0, |sum, i| sum + i)
+);
+
 bench: String -> I64 -> I64 -> (I64 -> I64) -> IO ();
 bench = |name, times, n, f| (
     let (result, time) = consumed_time_while(|n|
         loop(
             (f(n), 0), |(sum, i)|
             if i >= times - 1 { break $ sum };
-            eval f(n);
+            let ans = f(n);
             continue $ (sum, i + 1)
         )
     , n);
@@ -54,11 +70,14 @@ main: IO ();
 main = (
     let times = 100;
     let n = 1000000;
+/*
     let _ = *bench("loop_loop", times, n, loop_loop);
     let _ = *bench("loop_rec", times, n, loop_rec(0));
     let _ = *bench("loop_rec2", times, n, |n| loop_rec2(n, 0));
     let _ = *bench("loop_fix", times, n, loop_fix);
+*/
     let _ = *bench("loop_fold", times, n, loop_fold);
+    let _ = *bench("loop_fold2", times, n, loop_fold2);
     pure()
 );
 

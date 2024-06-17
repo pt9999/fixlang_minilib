@@ -38,7 +38,7 @@ namespace HandshakeState {
     make: [m: Monad] m HandshakeState;
     make = pure $ before_client_hello $ BeforeClientHello { dummy: () };
 
-    start_handshake: [m: MonadRandGen, m: MonadError, ErrorType m = ErrMsg] String -> m HandshakeState;
+    start_handshake: [m: MonadRandGen, m: MonadError] String -> m HandshakeState;
     start_handshake = |server_name| (
         if state.is_before_client_hello { state.as_before_client_hello.start_handshake(server_name) };
         error $ "start_handshake: wrong state"
@@ -58,13 +58,13 @@ namespace HandshakeState {
         pure $ []
     );
 
-    recv_record: [m: TLSConnection, ErrorType m = ErrMsg] HandshakeState -> m HandshakeState;
+    recv_record: [m: TLSConnection] HandshakeState -> m HandshakeState;
     recv_record = |state| (
         let plaintext: TLSPlaintext = *TLSPlaintext::recv_plaintext;
         state.on_recv_record(plaintext)
     );
 
-    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> HandshakeState -> m HandshakeState;
+    on_recv_record: [m: MonadError] TLSPlaintext -> HandshakeState -> m HandshakeState;
     on_recv_record = |plaintext, state| (
         if plaintext.@content_type.is_alert {
             error $ "received alert: " + plaintext.@fragment.to_string_hex
@@ -142,7 +142,7 @@ impl AfterClientHello: ToString {
 
 namespace AfterClientHello {
 
-    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> AfterClientHello -> m HandshakeState;
+    on_recv_record: [m: MonadError] TLSPlaintext -> AfterClientHello -> m HandshakeState;
     on_recv_record = |plaintext, after_client_hello| (
         if !plaintext.@content_type.is_handshake {
             error $ "after_client_hello: unexpected content type"
@@ -176,7 +176,7 @@ namespace AfterClientHello {
         }
     );
 
-    _find_key_share_entry: [m: MonadError, ErrorType m = ErrMsg] ServerHello -> m KeyShareEntry;
+    _find_key_share_entry: [m: MonadError] ServerHello -> m KeyShareEntry;
     _find_key_share_entry = |hello| (
         let opt = hello.@extensions.find(is_key_share).map(as_key_share);
         if opt.is_none { error $ "key_share not found" };
@@ -217,7 +217,7 @@ impl AfterServerHello: ToString {
 }
 
 namespace AfterServerHello {
-    on_recv_record: [m: MonadError, ErrorType m = ErrMsg] TLSPlaintext -> AfterServerHello -> m HandshakeState;
+    on_recv_record: [m: MonadError] TLSPlaintext -> AfterServerHello -> m HandshakeState;
     on_recv_record = |plaintext, after_server_hello| (
         let protection = after_server_hello.@protection;
         let inner_plaintext = *protecion.decrypt_server(plaintext.to_ciphertext).from_result_t;
@@ -230,7 +230,7 @@ namespace AfterServerHello {
 
     );
 
-    _process_handshakes: [m: MonadError, ErrorType m = ErrMsg] Iterator (Handshake, Array U8) -> AfterServerHello -> m HandshakeState;
+    _process_handshakes: [m: MonadError] Iterator (Handshake, Array U8) -> AfterServerHello -> m HandshakeState;
     _process_handshakes = |handshakes, after_server_hello| (
         let hstate = HandshakeState::after_server_hello $ after_server_hello;
         handshakes.to_iter.loop_iter_m(
@@ -268,9 +268,9 @@ namespace AfterServerHello {
 
     );
 
-    _assert_after_server_hello: [m: MonadError, ErrorType m = ErrMsg] HandshakeState -> m ();
+    _assert_after_server_hello: [m: MonadError] HandshakeState -> m ();
 
-    _process_encrypted_exceptions: [m: MonadError, ErrorType m = ErrMsg] (EncryptedExceptions, Array U8) -> HandshakeState -> m HandshakeState;
+    _process_encrypted_exceptions: [m: MonadError] (EncryptedExceptions, Array U8) -> HandshakeState -> m HandshakeState;
     _process_encrypted_exceptions = |(encrypted_exceptions, handshake_bytes), hstate| (
         eval *hstate._assert_after_server_hello;
 

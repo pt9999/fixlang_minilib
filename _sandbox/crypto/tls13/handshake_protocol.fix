@@ -16,14 +16,14 @@ import Minilib.Text.StringEx;
 type Handshake = unbox union {
     client_hello: ClientHello,
     server_hello: ServerHello,
-    new_session_ticket: (),
+    new_session_ticket: NewSessionTicket,
     end_of_early_data: (),
     encrypted_extensions: EncryptedExtensions,
     certificate: Certificate,
     certificate_request: CertificateRequest,
     certificate_verify: CertificateVerify,
     finished: Finished,
-    key_update: (),
+    key_update: KeyUpdate,
     message_hash: ()
 };
 
@@ -59,11 +59,13 @@ namespace Handshake {
         eval debug_println("Handshake::_unmarshal_body: msg_type=" + msg_type.to_string);
         if msg_type == 1_U8 { buf.unmarshal.map_res_0(Handshake::client_hello) };
         if msg_type == 2_U8 { buf.unmarshal.map_res_0(Handshake::server_hello) };
+        if msg_type == 4_U8 { buf.unmarshal.map_res_0(Handshake::new_session_ticket) };
         if msg_type == 8_U8 { buf.unmarshal.map_res_0(Handshake::encrypted_extensions) };
         if msg_type == 11_U8 { buf.unmarshal.map_res_0(Handshake::certificate) };
         if msg_type == 13_U8 { buf.unmarshal.map_res_0(Handshake::certificate_request) };
         if msg_type == 15_U8 { buf.unmarshal.map_res_0(Handshake::certificate_verify) };
         if msg_type == 20_U8 { buf.unmarshal.map_res_0(Handshake::finished) };
+        if msg_type == 24_U8 { buf.unmarshal.map_res_0(Handshake::key_update) };
         err $ "unsupported msg_type: " + msg_type.to_string
     );
 }
@@ -431,3 +433,109 @@ impl Finished: Unmarshal {
         pure $ (fi, buf)
     );
 }
+
+// 4.6.1. New Session Ticket Message
+
+type NewSessionTicket = unbox struct {
+    ticket_lifetime: U32,
+    ticket_age_add: U32,
+    ticket_nonce: Array U8,     // <0..255>
+    ticket: Array U8,           // <1..2^16-1>
+    extensions: Array Extension, // <0..2^16-2>
+};
+
+impl NewSessionTicket: ToString {
+    to_string = |nst| (
+        "NewSessionTicket {" +
+        " ticket_lifetime=" + nst.@ticket_lifetime.to_string +
+        " ticket_age_add=" + nst.@ticket_age_add.to_string +
+        " ticket_nonce=" + nst.@ticket_nonce.to_string_hex +
+        " ticket=" + nst.@ticket.to_string_hex +
+        " extensions=" + nst.@extensions.to_string +
+        " }"
+    );
+}
+
+impl NewSessionTicket: Unmarshal {
+    unmarshal = |buf| (
+        let (ticket_lifetime, buf) = *buf.unmarshal;
+        let (ticket_age_add, buf) = *buf.unmarshal;
+        let (ticket_nonce, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (ticket, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let nst = NewSessionTicket {
+            ticket_lifetime: ticket_lifetime,
+            ticket_age_add: ticket_age_add,
+            ticket_nonce: ticket_nonce,     // <0..255>
+            ticket: ticket,           // <1..2^16-1>
+            extensions: extensions, // <0..2^16-2>
+        };
+        pure $ (nst, buf)
+    );
+}
+
+// 4.6.3. Key and Initialization Vector Update
+
+/*
+type KeyUpdateRequest = U8;
+
+namespace KeyUpdateRequest {
+    update_not_requested: KeyUpdateRequest;
+    update_not_requested = 0_U8;
+
+    update_requested: KeyUpdateRequest;
+    update_requested = 1_U8;
+}
+
+type KeyUpdate = unbox struct {
+    request_update: KeyUpdateRequest,
+};
+
+impl KeyUpdate: Unmarshal {
+    unmarshal = |buf| (
+        let (request_update, buf) = *buf.unmarshal;
+        let ku = KeyUpdate {
+            request_update: request_update,
+        };
+        pure $ (nst, buf)
+    );
+}
+*/
+
+type KeyUpdate = unbox union {
+    update_not_requested: (),
+    update_requested: (),
+};
+
+impl KeyUpdate: ToString {
+    to_string = |ku| (
+        if ku.is_update_not_requested { "update_not_requested()" };
+        if ku.is_update_requested { "update_requested()" };
+        ""
+    );
+}
+
+impl KeyUpdate: Marshal {
+    marshal = |ku, buf| (
+        let u8 = (
+            if ku.is_update_not_requested { 0_U8 };
+            if ku.is_update_requested { 1_U8 };
+            0_U8
+        );
+        buf.marshal(u8)
+    );
+}
+
+impl KeyUpdate: Unmarshal {
+    unmarshal = |buf| (
+        let (u8: U8, buf) = *buf.unmarshal;
+        let ku = *(
+            if u8 == 0_U8 { pure $ update_not_requested() };
+            if u8 == 1_U8 { pure $ update_requested() };
+            err $ "unexpected_message"
+        );
+        pure $ (ku, buf)
+    );
+}
+
+

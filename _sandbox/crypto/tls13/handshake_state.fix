@@ -260,7 +260,7 @@ namespace AfterServerHello {
     on_recv_record: [m: MonadError] TLSRecord -> AfterServerHello -> m HandshakeState;
     on_recv_record = |record, after_server_hello| (
         let protection = after_server_hello.@protection;
-        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_hs()).from_result_t;
+        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
         let after_server_hello = after_server_hello.set_protection(protection);
 
         if !inner_plaintext.@content_type.is_handshake {
@@ -283,7 +283,7 @@ namespace AfterServerHello {
         eval *_check_handshakes_order(handshakes.map(@0));
         eval *_verify_server_finished(handshakes, protection);
         let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
-        //let protection = protection.mod_server_hs(increment_sequence_number);
+        //let protection = protection.mod_server_tk(increment_sequence_number);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
         let asf: AfterFinished = *AfterFinished::make(protection, server_params);
         pure $ HandshakeState::after_finished $ asf
@@ -320,7 +320,7 @@ namespace AfterServerHello {
         let size = handshakes.get_size;
         let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
         let finished = handshakes.@(size - 1).@0.as_finished;
-        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_hs()).from_result_t;
+        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_tk()).from_result_t;
         eval debug_println("verify_data expected="+ verify_data.to_string_hex);
         eval debug_println("verify_data actual  ="+ finished.@verify_data.to_string_hex);
         if verify_data != finished.@verify_data {
@@ -378,7 +378,7 @@ namespace AfterFinished {
 
     _make_client_finished: Protection -> Result ErrMsg (Array U8, TLSCiphertext, Protection);
     _make_client_finished = |protection| (
-        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::client_hs());
+        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::client_tk());
         let client_finished = Finished { verify_data: verify_data };
         let handshake = Handshake::finished $ client_finished;
         let handshake_bytes = marshal_to_bytes(handshake);
@@ -388,7 +388,7 @@ namespace AfterFinished {
             ContentType::handshake(),
             0
         );
-        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_hs());
+        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_tk());
         pure $ (handshake_bytes, ciphertext, protection)
     );
 
@@ -409,7 +409,7 @@ namespace AfterFinished {
             0
         );
         let protection = after_finished.@protection;
-        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_hs()).from_result_t;
+        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_tk()).from_result_t;
         let after_finished = after_finished.set_protection(protection);
         let after_finished = after_finished.mod_records_to_send(push_back(
             ciphertext.to_record
@@ -428,7 +428,7 @@ namespace AfterFinished {
     on_recv_record: [m: MonadError] TLSRecord -> AfterFinished -> m HandshakeState;
     on_recv_record = |record, after_finished| (
         let protection = after_finished.@protection;
-        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_hs()).from_result_t;
+        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
         let after_finished = after_finished.set_protection(protection);
         if inner_plaintext.@content_type.is_handshake {
             let handshakes = *inner_plaintext.split_handshakes.from_result_t;

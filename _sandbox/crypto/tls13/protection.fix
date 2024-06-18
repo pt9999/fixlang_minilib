@@ -131,31 +131,24 @@ namespace TrafficKey {
 }
 
 type TrafficKeyType = unbox union {
-    server_hs: (),
-    client_hs: (),
-    server_ap: (),
-    client_ap: (),
+    server_tk: (),
+    client_tk: (),
 };
-
 
 type Protection = unbox struct {
     secrets: Secrets,
     aead: AEAD,
     handshake_context: Array U8,
-    server_hs: TrafficKey,
-    client_hs: TrafficKey,
-    server_ap: TrafficKey,
-    client_ap: TrafficKey,
+    server_tk: TrafficKey,
+    client_tk: TrafficKey,
 };
 
 impl Protection: ToString {
     to_string = |p| (
         "Protection {" +
         " secrets=" + p.@secrets.to_string +
-        " server_hs=" + p.@server_hs.to_string +
-        " client_hs=" + p.@client_hs.to_string +
-        " server_ap=" + p.@server_ap.to_string +
-        " client_ap=" + p.@client_ap.to_string +
+        " server_tk=" + p.@server_tk.to_string +
+        " client_tk=" + p.@client_tk.to_string +
         "}"
     );
 }
@@ -170,31 +163,25 @@ namespace Protection {
             secrets: secrets,
             aead: aead,
             handshake_context: [],
-            server_hs: TrafficKey::empty,
-            client_hs: TrafficKey::empty,
-            server_ap: TrafficKey::empty,
-            client_ap: TrafficKey::empty,
+            server_tk: TrafficKey::empty,
+            client_tk: TrafficKey::empty,
         }
     );
 
     get_traffic_key: TrafficKeyType -> Protection -> TrafficKey;
     get_traffic_key = |typ| (
-        if typ.is_server_hs { @server_hs };
-        if typ.is_client_hs { @client_hs };
-        if typ.is_server_ap { @server_ap };
-        if typ.is_client_ap { @client_ap };
+        if typ.is_server_tk { @server_tk };
+        if typ.is_client_tk { @client_tk };
         eval assert(|_|"invalid traffic key type", false);
-        @server_hs
+        @server_tk
     );
 
     mod_traffic_key: TrafficKeyType -> (TrafficKey -> TrafficKey) -> Protection -> Protection;
     mod_traffic_key = |typ| (
-        if typ.is_server_hs { mod_server_hs };
-        if typ.is_client_hs { mod_client_hs };
-        if typ.is_server_ap { mod_server_ap };
-        if typ.is_client_ap { mod_client_ap };
+        if typ.is_server_tk { mod_server_tk };
+        if typ.is_client_tk { mod_client_tk };
         eval assert(|_|"invalid traffic key type", false);
-        mod_server_hs
+        mod_server_tk
     );
 
     add_handshake_context: Array U8 -> Protection -> Protection;
@@ -208,18 +195,18 @@ namespace Protection {
             secrets: secrets,
             aead: aead,
             handshake_context: handshake_context,
-            server_hs: server_hs,
-            client_hs: client_hs
+            server_tk: server_tk,
+            client_tk: client_tk
         } = protection;
         let hkdf = secrets.@hkdf;
         let secrets = *secrets.calc_secrets(dhe);
-        let server_hs = *server_hs.update_keys(
+        let server_tk = *server_tk.update_keys(
             *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
             aead, hkdf);
-        let client_hs = *client_hs.update_keys(
+        let client_tk = *client_tk.update_keys(
             *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
             aead, hkdf);
-        ok $ protection.set_secrets(secrets).set_client_hs(client_hs).set_server_hs(server_hs)
+        ok $ protection.set_secrets(secrets).set_client_tk(client_tk).set_server_tk(server_tk)
     );
 
     init_appdata: Protection -> Result ErrMsg Protection;
@@ -228,16 +215,16 @@ namespace Protection {
             secrets: secrets,
             aead: aead,
             handshake_context: handshake_context,   // ClientHello...server Finished
-            server_hs: server_hs,
-            client_hs: client_hs
+            server_tk: server_tk,
+            client_tk: client_tk
         } = protection;
         let hkdf = secrets.@hkdf;
 
         let server_application_traffic_secret_0 = *hkdf.calc_server_application_traffic_secret_0(secrets.@master_secret, handshake_context);
-        let server_hs = *server_hs.update_keys(server_application_traffic_secret_0, aead, hkdf);
+        let server_tk = *server_tk.update_keys(server_application_traffic_secret_0, aead, hkdf);
         let client_application_traffic_secret_0 = *hkdf.calc_client_application_traffic_secret_0(secrets.@master_secret, handshake_context);
-        let client_hs = *client_hs.update_keys(client_application_traffic_secret_0, aead, hkdf);
-        ok $ protection.set_client_hs(client_hs).set_server_hs(server_hs)
+        let client_tk = *client_tk.update_keys(client_application_traffic_secret_0, aead, hkdf);
+        ok $ protection.set_client_tk(client_tk).set_server_tk(server_tk)
     );
 
     init_after_client_finished: Protection -> Result ErrMsg Protection;
@@ -246,8 +233,8 @@ namespace Protection {
             secrets: secrets,
             aead: aead,
             handshake_context: handshake_context,   // ClientHello...client Finished
-            server_hs: server_hs,
-            client_hs: client_hs
+            server_tk: server_tk,
+            client_tk: client_tk
         } = protection;
         let hkdf = secrets.@hkdf;
         let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
@@ -278,7 +265,7 @@ namespace Protection {
         let length = inner_plaintext_bytes.get_size + aead.@tag_len;
         let additional_data = ciphertext.get_additional_data_with_length(length);
         let traffic_key = protection.get_traffic_key(traffic_key_type);
-        let encrypted_record = *protection.@client_hs.encrypt(inner_plaintext_bytes, additional_data, aead);
+        let encrypted_record = *protection.@client_tk.encrypt(inner_plaintext_bytes, additional_data, aead);
         let ciphertext = ciphertext.set_encrypted_record(encrypted_record);
         let protection = protection.mod_traffic_key(traffic_key_type, increment_sequence_number);
         pure $ (ciphertext, protection)

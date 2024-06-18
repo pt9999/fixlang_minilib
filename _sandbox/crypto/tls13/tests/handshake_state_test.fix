@@ -9,6 +9,7 @@ import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.HandshakeState;
 import Minilib.Crypto.Tls13.RecordProtocol;
 import Minilib.Crypto.Tls13.KeyAgreement;
+import Minilib.Crypto.Tls13.Protection;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -102,6 +103,42 @@ d8 7f 38 f8 03 38 ac 98 fc 46 de b3 84 bd 1c ae ac ab 68 67 d7
 26 c4 05 46
 ");
 
+// {server}  send handshake record:
+// complete record (227 octets):
+res_server_encrypted_newsessionticket_bytes: Result ErrMsg (Array U8);
+res_server_encrypted_newsessionticket_bytes = parse_hex("
+17 03 03 00 de 3a 6b 8f 90 41 4a 97
+d6 95 9c 34 87 68 0d e5 13 4a 2b 24 0e 6c ff ac 11 6e 95 d4 1d
+6a f8 f6 b5 80 dc f3 d1 1d 63 c7 58 db 28 9a 01 59 40 25 2f 55
+71 3e 06 1d c1 3e 07 88 91 a3 8e fb cf 57 53 ad 8e f1 70 ad 3c
+73 53 d1 6d 9d a7 73 b9 ca 7f 2b 9f a1 b6 c0 d4 a3 d0 3f 75 e0
+9c 30 ba 1e 62 97 2a c4 6f 75 f7 b9 81 be 63 43 9b 29 99 ce 13
+06 46 15 13 98 91 d5 e4 c5 b4 06 f1 6e 3f c1 81 a7 7c a4 75 84
+00 25 db 2f 0a 77 f8 1b 5a b0 5b 94 c0 13 46 75 5f 69 23 2c 86
+51 9d 86 cb ee ac 87 aa c3 47 d1 43 f9 60 5d 64 f6 50 db 4d 02
+3e 70 e9 52 ca 49 fe 51 37 12 1c 74 bc 26 97 68 7e 24 87 46 d6
+df 35 30 05 f3 bc e1 86 96 12 9c 81 53 55 6b 3b 6c 67 79 b3 7b
+f1 59 85 68 4f
+");
+
+// {client}  send application_data record:
+res_client_appdata_bytes: Result ErrMsg (Array U8);
+res_client_appdata_bytes = parse_hex("
+00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e
+0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23
+24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31
+");
+
+// {server}  send application_data record:
+res_server_appdata_bytes: Result ErrMsg (Array U8);
+res_server_appdata_bytes = parse_hex("
+00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e
+0f 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f 20 21 22 23
+24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31
+");
+
+
+
 make_after_client_hello: [m: MonadError] m HandshakeState;
 make_after_client_hello = (
     let handshake_bytes = *res_client_hello_bytes.from_result_t;
@@ -138,6 +175,26 @@ check_client_finished = |records| (
     pure()
 );
 
+make_server_encrypted_newsessionticket_record: [m: MonadError] m TLSRecord;
+make_server_encrypted_newsessionticket_record = (
+    let ciphertext_bytes = *res_server_encrypted_newsessionticket_bytes.from_result_t;
+    let ciphertext: TLSCiphertext = *unmarshal_from_bytes(ciphertext_bytes).from_result_t;
+    pure $ ciphertext.to_record
+);
+
+make_server_encrypted_appdata_record: [m: MonadError] HandshakeState -> m TLSRecord;
+make_server_encrypted_appdata_record = |hstate| (
+    let appdata = *res_server_appdata_bytes.from_result_t;
+    let inner_plaintext = TLSInnerPlaintext::make(
+        appdata,
+        ContentType::application_data(),
+        0
+    );
+    let protection = hstate.as_after_finished.@protection;
+    let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::server_hs()).from_result_t;
+    pure $ ciphertext.to_record
+);
+
 test_x25519_handshake: TestCase;
 test_x25519_handshake = (
     make_test("test_x25519_handshake") $ |_|
@@ -151,6 +208,18 @@ test_x25519_handshake = (
     //eval debug_println(hstate.to_string);
     let (records, hstate) = *hstate.pop_records_to_send;
     eval *check_client_finished(records);
+    let record: TLSRecord = *make_server_encrypted_newsessionticket_record;
+    let hstate = *hstate.on_recv_record(record);
+
+
+    let appdata = *res_client_appdata_bytes.from_result_t;
+    let hstate = *hstate.send_appdata(appdata);
+    let (records, hstate) = *hstate.pop_records_to_send;
+    eval debug_println("client appdata encrypted=" + records.to_string);
+
+    let record: TLSRecord = *make_server_encrypted_appdata_record(hstate);
+    eval debug_println("server appdata encrypted=" + record.to_string);
+
     pure()
 );
 

@@ -92,6 +92,16 @@ d5 02 78 40 16 e4 b3 be 7e f0 4d da 49 f4 b4 40 a3 0c b5 d2 af
 bf 02 53 fe 51 75 be 89 8e 75 0e dc 53 37 0d 2b
 ");
 
+// {client}  send handshake record:
+// complete record (58 octets):
+res_client_encrypted_finished_bytes: Result ErrMsg (Array U8);
+res_client_encrypted_finished_bytes = parse_hex("
+17 03 03 00 35 75 ec 4d c2 38 cc e6
+0b 29 80 44 a7 1e 21 9c 56 cc 77 b0 51 7f e9 b9 3c 7a 4b fc 44
+d8 7f 38 f8 03 38 ac 98 fc 46 de b3 84 bd 1c ae ac ab 68 67 d7
+26 c4 05 46
+");
+
 make_after_client_hello: [m: MonadError] m HandshakeState;
 make_after_client_hello = (
     let handshake_bytes = *res_client_hello_bytes.from_result_t;
@@ -119,6 +129,15 @@ make_server_encrypted_handshake_record = (
     pure $ ciphertext.to_record
 );
 
+check_client_finished: Array TLSRecord -> IOFail ();
+check_client_finished = |records| (
+    eval *assert_equal("records_to_send", 1, records.get_size);
+    let expected = *res_client_encrypted_finished_bytes.from_result_t;
+    let actual = marshal_to_bytes(records.@(0));
+    eval *assert_equal("ciphertext_bytes", expected, actual);
+    pure()
+);
+
 test_x25519_handshake: TestCase;
 test_x25519_handshake = (
     make_test("test_x25519_handshake") $ |_|
@@ -129,7 +148,9 @@ test_x25519_handshake = (
     let record: TLSRecord = *make_server_encrypted_handshake_record;
     let hstate = *hstate.on_recv_record(record);
     eval *assert_equal("after_finished", true, hstate.is_after_finished);
-    eval debug_println(hstate.to_string);
+    //eval debug_println(hstate.to_string);
+    let (records, hstate) = *hstate.pop_records_to_send;
+    eval *check_client_finished(records);
     pure()
 );
 

@@ -22,6 +22,8 @@ type Secrets = unbox struct {
     early_secret: Array U8,
     handshake_secret: Array U8,
     master_secret: Array U8,
+    //exporter_master_secret: Array U8,
+    resumption_master_secret: Array U8,
 };
 
 impl Secrets: ToString {
@@ -31,6 +33,7 @@ impl Secrets: ToString {
         "\n early_secret=" + secrets.@early_secret.to_string_hex +
         "\n handshake_secret=" + secrets.@handshake_secret.to_string_hex +
         "\n master_secret=" + secrets.@master_secret.to_string_hex +
+        "\n resumption_master_secret=" + secrets.@resumption_master_secret.to_string_hex +
         "\n}"
     );
 }
@@ -47,6 +50,7 @@ namespace Secrets {
             early_secret: early_secret,
             handshake_secret: [],
             master_secret: [],
+            resumption_master_secret: [],
         }
     );
 
@@ -228,13 +232,27 @@ namespace Protection {
             client_hs: client_hs
         } = protection;
         let hkdf = secrets.@hkdf;
-        let server_hs = *server_hs.update_keys(
-            *hkdf.calc_server_application_traffic_secret_0(secrets.@handshake_secret, handshake_context),
-            aead, hkdf);
-        let client_hs = *client_hs.update_keys(
-            *hkdf.calc_client_application_traffic_secret_0(secrets.@handshake_secret, handshake_context),
-            aead, hkdf);
+
+        let server_application_traffic_secret_0 = *hkdf.calc_server_application_traffic_secret_0(secrets.@master_secret, handshake_context);
+        let server_hs = *server_hs.update_keys(server_application_traffic_secret_0, aead, hkdf);
+        let client_application_traffic_secret_0 = *hkdf.calc_client_application_traffic_secret_0(secrets.@master_secret, handshake_context);
+        let client_hs = *client_hs.update_keys(client_application_traffic_secret_0, aead, hkdf);
         ok $ protection.set_client_hs(client_hs).set_server_hs(server_hs)
+    );
+
+    init_after_client_finished: Protection -> Result ErrMsg Protection;
+    init_after_client_finished = |protection| (
+        let Protection {
+            secrets: secrets,
+            aead: aead,
+            handshake_context: handshake_context,   // ClientHello...client Finished
+            server_hs: server_hs,
+            client_hs: client_hs
+        } = protection;
+        let hkdf = secrets.@hkdf;
+        let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
+        eval debug_println("resumption_master_secret=" + resumption_master_secret.to_string_hex);
+        ok $ protection.mod_secrets(set_resumption_master_secret(resumption_master_secret))
     );
 
     decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);

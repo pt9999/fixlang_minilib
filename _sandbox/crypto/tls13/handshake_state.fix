@@ -359,12 +359,17 @@ impl AfterFinished: ToString {
 namespace AfterFinished {
     make: [m: MonadError] Protection -> ServerParams -> m AfterFinished;
     make = |protection, server_params| (
-        let (ciphertext, protection) = *_make_client_finished(protection).from_result_t;
+        let (client_finished_handshake_bytes, ciphertext, protection) = *_make_client_finished(protection).from_result_t;
         let records_to_send = [
             ciphertext.to_record
         ];
         // NOTE: now handshake_context = ClientHello...server Finished
         let protection = *protection.init_appdata.from_result_t;
+
+        // NOTE: now handshake_context = ClientHello...client Finished
+        let protection = protection.add_handshake_context(client_finished_handshake_bytes);
+        let protection = *protection.init_after_client_finished.from_result_t;
+
         pure $ AfterFinished {
             protection: protection,
             server_params: server_params,
@@ -373,18 +378,20 @@ namespace AfterFinished {
         }
     );
 
-    _make_client_finished: Protection -> Result ErrMsg (TLSCiphertext, Protection);
+    _make_client_finished: Protection -> Result ErrMsg (Array U8, TLSCiphertext, Protection);
     _make_client_finished = |protection| (
         let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::client_hs());
         let client_finished = Finished { verify_data: verify_data };
-        let handshake_bytes = marshal_to_bytes(Handshake::finished $ client_finished);
+        let handshake = Handshake::finished $ client_finished;
+        let handshake_bytes = marshal_to_bytes(handshake);
         // TODO: client Certificate, CerfiticateVerify?
         let inner_plaintext = TLSInnerPlaintext::make(
             handshake_bytes,
             ContentType::handshake(),
             0
         );
-        protection.encrypt_record(inner_plaintext, TrafficKeyType::client_hs())
+        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_hs());
+        pure $ (handshake_bytes, ciphertext, protection)
     );
 
     pop_records_to_send: [m: MonadError] AfterFinished -> m (Array TLSRecord, HandshakeState);

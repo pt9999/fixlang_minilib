@@ -17,7 +17,6 @@ import Minilib.Text.StringEx;
 
 
 type Secrets = unbox struct {
-    hkdf: HKDF,
     psk: Array U8,
     early_secret: Array U8,
     handshake_secret: Array U8,
@@ -39,28 +38,39 @@ impl Secrets: ToString {
 }
 
 namespace Secrets {
-    from_cipher_suite: CipherSuite -> Result ErrMsg Secrets;
-    from_cipher_suite = |cipher_suite| (
-        let hkdf = *HKDF::from_cipher_suite(cipher_suite);
+    empty: Secrets;
+    empty = Secrets {
+        psk: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        resumption_master_secret: [],
+    };
+
+    calc_early_secret: HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_early_secret = |hkdf, secrets| (
         let psk = hkdf.zero_secret;
         let early_secret = *hkdf.calc_early_secret(psk);
-        pure $ Secrets {
-            hkdf: hkdf,
-            psk: psk,
-            early_secret: early_secret,
-            handshake_secret: [],
-            master_secret: [],
-            resumption_master_secret: [],
-        }
+        pure $ secrets.set_psk(psk).set_early_secret(early_secret)
     );
 
-    calc_secrets: Array U8 -> Secrets -> Result ErrMsg Secrets;
-    calc_secrets = |dhe, secrets| (
-        let hkdf = secrets.@hkdf;
+    calc_handshake_secret: Array U8 -> HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_handshake_secret = |dhe, hkdf, secrets| (
         let handshake_secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
-        let master_secret = *hkdf.calc_master_secret(handshake_secret);
-        ok $ secrets.set_handshake_secret(handshake_secret)
-                    .set_master_secret(master_secret)
+        pure $ secrets.set_handshake_secret(handshake_secret)
+    );
+
+    calc_master_secret: HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_master_secret = |hkdf, secrets| (
+        let master_secret = *hkdf.calc_master_secret(secrets.@handshake_secret);
+        pure $ secrets.set_master_secret(master_secret)
+    );
+
+    calc_resumption_master_secret: Array U8 -> HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_resumption_master_secret = |handshake_context, hkdf, secrets| (
+        let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
+        //eval debug_println("resumption_master_secret=" + resumption_master_secret.to_string_hex);
+        pure $ secrets.set_resumption_master_secret(resumption_master_secret)
     );
 }
 
@@ -94,7 +104,7 @@ namespace TrafficKey {
     update_keys: Array U8 -> AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
     update_keys = |secret, aead, hkdf, traffic_key| (
         let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
-        ok $ traffic_key
+        pure $ traffic_key
             .set_traffic_secret(secret)
             .set_write_key(key)
             .set_write_iv(iv)
@@ -127,7 +137,6 @@ namespace TrafficKey {
         let nonce = traffic_key.get_per_record_nonce;
         aead.aead_decrypt(write_key, nonce, additional_data, aead_encrypted)
     );
-
 }
 
 type TrafficKeyType = unbox union {
@@ -136,9 +145,10 @@ type TrafficKeyType = unbox union {
 };
 
 type Protection = unbox struct {
-    secrets: Secrets,
+    hkdf: HKDF,
     aead: AEAD,
     handshake_context: Array U8,
+    secrets: Secrets,
     server_tk: TrafficKey,
     client_tk: TrafficKey,
 };
@@ -156,13 +166,16 @@ impl Protection: ToString {
 namespace Protection {
     make: CipherSuite -> Result ErrMsg Protection;
     make = |cipher_suite| (
-        let secrets = *Secrets::from_cipher_suite(cipher_suite);
+        let hkdf = *HKDF::from_cipher_suite(cipher_suite);
         let aead = *AEAD::from_cipher_suite(cipher_suite);
+        let secrets = Secrets::empty;
+        let secrets = *secrets.calc_early_secret(hkdf);
 
         pure $ Protection {
-            secrets: secrets,
+            hkdf: hkdf,
             aead: aead,
             handshake_context: [],
+            secrets: secrets,
             server_tk: TrafficKey::empty,
             client_tk: TrafficKey::empty,
         }
@@ -173,7 +186,7 @@ namespace Protection {
         if typ.is_server_tk { @server_tk };
         if typ.is_client_tk { @client_tk };
         eval assert(|_|"invalid traffic key type", false);
-        @server_tk
+        abort()
     );
 
     mod_traffic_key: TrafficKeyType -> (TrafficKey -> TrafficKey) -> Protection -> Protection;
@@ -181,7 +194,7 @@ namespace Protection {
         if typ.is_server_tk { mod_server_tk };
         if typ.is_client_tk { mod_client_tk };
         eval assert(|_|"invalid traffic key type", false);
-        mod_server_tk
+        abort()
     );
 
     add_handshake_context: Array U8 -> Protection -> Protection;
@@ -192,54 +205,49 @@ namespace Protection {
     init_handshake: Array U8 -> Protection -> Result ErrMsg Protection;
     init_handshake = |dhe, protection| (
         let Protection {
-            secrets: secrets,
+            hkdf: hkdf,
             aead: aead,
             handshake_context: handshake_context,
+            secrets: secrets,
             server_tk: server_tk,
             client_tk: client_tk
         } = protection;
-        let hkdf = secrets.@hkdf;
-        let secrets = *secrets.calc_secrets(dhe);
-        let server_tk = *server_tk.update_keys(
-            *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
-            aead, hkdf);
-        let client_tk = *client_tk.update_keys(
-            *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context),
-            aead, hkdf);
-        ok $ protection.set_secrets(secrets).set_client_tk(client_tk).set_server_tk(server_tk)
+        let secrets = *secrets.calc_handshake_secret(dhe, hkdf);
+        let secrets = *secrets.calc_master_secret(hkdf);
+        let server_handshake_traffic_secret = *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context);
+        let server_tk = *server_tk.update_keys(server_handshake_traffic_secret, aead, hkdf);
+        let client_handshake_traffic_secret = *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context);
+        let client_tk = *client_tk.update_keys(client_handshake_traffic_secret, aead, hkdf);
+        pure $ protection.set_secrets(secrets).set_server_tk(server_tk).set_client_tk(client_tk)
     );
 
     init_appdata: Protection -> Result ErrMsg Protection;
     init_appdata = |protection| (
         let Protection {
-            secrets: secrets,
+            hkdf: hkdf,
             aead: aead,
             handshake_context: handshake_context,   // ClientHello...server Finished
+            secrets: secrets,
             server_tk: server_tk,
             client_tk: client_tk
         } = protection;
-        let hkdf = secrets.@hkdf;
 
         let server_application_traffic_secret_0 = *hkdf.calc_server_application_traffic_secret_0(secrets.@master_secret, handshake_context);
         let server_tk = *server_tk.update_keys(server_application_traffic_secret_0, aead, hkdf);
         let client_application_traffic_secret_0 = *hkdf.calc_client_application_traffic_secret_0(secrets.@master_secret, handshake_context);
         let client_tk = *client_tk.update_keys(client_application_traffic_secret_0, aead, hkdf);
-        ok $ protection.set_client_tk(client_tk).set_server_tk(server_tk)
+        pure $ protection.set_server_tk(server_tk).set_client_tk(client_tk)
     );
 
     init_after_client_finished: Protection -> Result ErrMsg Protection;
     init_after_client_finished = |protection| (
         let Protection {
-            secrets: secrets,
-            aead: aead,
+            hkdf: hkdf,
             handshake_context: handshake_context,   // ClientHello...client Finished
-            server_tk: server_tk,
-            client_tk: client_tk
+            secrets: secrets
         } = protection;
-        let hkdf = secrets.@hkdf;
-        let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
-        eval debug_println("resumption_master_secret=" + resumption_master_secret.to_string_hex);
-        ok $ protection.mod_secrets(set_resumption_master_secret(resumption_master_secret))
+        let secrets = *secrets.calc_resumption_master_secret(handshake_context, hkdf);
+        pure $ protection.set_secrets(secrets)
     );
 
     decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);
@@ -273,14 +281,16 @@ namespace Protection {
 
     calc_finished_verify_data: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_finished_verify_data = |traffic_key_type, protection| (
-        let secrets = protection.@secrets;
-        let handshake_context = protection.@handshake_context;
-        let hkdf = secrets.@hkdf;
+        let Protection {
+            hkdf: hkdf,
+            handshake_context: handshake_context,   // ClientHello...server Finished
+            secrets: secrets
+        } = protection;
         let traffic_key = protection.get_traffic_key(traffic_key_type);
         let base_key = traffic_key.@traffic_secret;
         let finished_key = *hkdf.expand_label(base_key, "finished", [], hkdf.hash_length);
         eval debug_println("finished_key=" + finished_key.to_string_hex);
         let verify_data = hkdf.@hmac.digest(finished_key, hkdf.transcript_hash(handshake_context));
-        ok $ verify_data
+        pure $ verify_data
     );
 }

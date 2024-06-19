@@ -1,0 +1,92 @@
+module Main;
+
+//import AsyncTask;
+import Debug;
+
+import Minilib.App.Clap;
+import Minilib.Crypto.Tls13.TLSSession;
+import Minilib.Net.Tcp;
+import Minilib.Net.URL;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+
+http_fetch: URL -> IOFail ();
+http_fetch = |url| (
+    if url.@scheme != "http" {
+        throw $ "url does not start with 'http://': url=" + url.@url
+    };
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+    //let _ = *println("host_port = " + host_port).lift;
+    //let _ = *println("path = " + path).lift;
+    let socket = *connect_to_tcp_server(host_port);
+    let bufsock = BufferedSocket::make(socket);
+    let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
+    let bufsock = *bufsock.flush;
+    loop_m(
+        bufsock, |bufsock|
+        let (line, bufsock) = *(bufsock.read_line);
+        if line == "" {
+            break_m $ ()
+        };
+        eval *(lift $ eprint(line));
+        continue_m $ bufsock
+    )
+);
+
+
+https_fetch: URL -> IOFail ();
+https_fetch = |url| (
+    if url.@scheme != "https" {
+        throw $ "url does not start with 'http://' nor 'https://': url=" + url.@url
+    };
+    let host = url.@host;
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+
+    let socket: Socket = *connect_to_tcp_server(host_port);
+    let session: TLSSession = *TLSSession::make(socket);
+    let sm: StateT TLSSession IOFail () = do {
+        eval *send_client_hello(host);
+        eval *recv_server_hello;
+        eval *recv_server_params;
+        let request = "GET " + path + " HTTP/1.1\nHost: " + host + "\nUser-Agent: fixlang_minilib\n\n";
+        eval *send_appdata(request.get_bytes.pop_back);
+        loop_m (
+            (), |_|
+            let appdata = *recv_appdata;
+            //eval debug_println("appdata=" + appdata.to_string_hex);
+            eval debug_println("appdata(text)=" + appdata.push_back(0_U8)._unsafe_from_c_str);
+            // NOTE: should exit when the body specified by Content-Length has been read
+            continue_m $ ()
+        ).catch(|err|
+            if err == "EOF" { pure () } else { error $ err }
+        )
+    };
+    sm.run_state_t(session).map(@0)
+);
+
+main: IO ();
+main = (
+    do {
+        let command = (
+            Command::new("sample_https_client")
+            .version("0.1")
+            .about("Fetches contents from remote HTTP/HTTPS server.")
+            .arg(Arg::new("URL").takes_value.default_value("https://localhost")
+                .help("The URL to fetch."))
+        );
+        let matches = *command.get_matches;
+        let url = matches.get_one("URL").as_some;
+        //let _ = *println("url = " + url).lift;
+        let url = *URL::parse(url).from_result;
+        if url.@scheme == "http" {
+            http_fetch(url)
+        } else {
+            https_fetch(url)
+        }
+    }.try (
+        |err| eprintln(err)
+    )
+);

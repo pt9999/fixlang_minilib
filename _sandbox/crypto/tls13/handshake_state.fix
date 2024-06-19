@@ -117,7 +117,7 @@ namespace HandshakeState {
             error $ "received alert: " + record.@fragment.to_string_hex
         };
         if record.@content_type.is_change_cipher_spec {
-            eval debug_println("received change_cipher_spec");
+            eval debug_eprintln("received change_cipher_spec");
             pure $ hstate
         };
         if hstate.is_after_client_hello {
@@ -162,7 +162,7 @@ namespace BeforeClientHello {
         // TODO: cookie
         // TODO: signature_algorithms_cert
 
-        eval debug_println("client_hello: extensions=" + hello.@extensions.to_string);
+        eval debug_eprintln("client_hello: extensions=" + hello.@extensions.to_string);
         let handshake: Handshake = Handshake::client_hello $ hello;
         let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
         let client_hello_records: Array TLSRecord = TLSRecord::split_fragments(ContentType::handshake(), handshake_bytes);
@@ -213,13 +213,13 @@ namespace AfterClientHello {
             error $ "after_client_hello: unexpected handshake type"
         };
         let server_hello: ServerHello = handshake.as_server_hello;
-        eval debug_println("server_hello=" + server_hello.to_string);
+        eval debug_eprintln("server_hello=" + server_hello.to_string);
 
         // key agreement
         let key_agreements = after_client_hello.@key_agreements;
         let key_share_entry = *server_hello._find_key_share_entry;
         let shared_secret: SharedSecret = *key_agreements.accept_server_share(key_share_entry).from_result_t;
-        eval debug_println("shared_secret=" + shared_secret.to_string_hex);
+        eval debug_eprintln("shared_secret=" + shared_secret.to_string_hex);
 
         // construct protection
         let cipher_suite = server_hello.@cipher_suite;
@@ -267,7 +267,7 @@ namespace AfterServerHello {
             error $ "after_server_hello: unexpected content type"
         };
         let handshakes = *inner_plaintext.split_handshakes.from_result_t;
-        eval debug_println("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
+        eval debug_eprintln("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
 
         // concat handshakes
         let after_server_hello = after_server_hello.mod_handshakes(append(handshakes));
@@ -321,8 +321,8 @@ namespace AfterServerHello {
         let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
         let finished = handshakes.@(size - 1).@0.as_finished;
         let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_tk()).from_result_t;
-        eval debug_println("verify_data expected="+ verify_data.to_string_hex);
-        eval debug_println("verify_data actual  ="+ finished.@verify_data.to_string_hex);
+        eval debug_eprintln("verify_data expected="+ verify_data.to_string_hex);
+        eval debug_eprintln("verify_data actual  ="+ finished.@verify_data.to_string_hex);
         if verify_data != finished.@verify_data {
             error $ "verify_data mismatch"
         };
@@ -437,7 +437,7 @@ namespace AfterFinished {
         let after_finished = after_finished.set_protection(protection);
         if inner_plaintext.@content_type.is_handshake {
             let handshakes = *inner_plaintext.split_handshakes.from_result_t;
-            eval debug_println("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
+            eval debug_eprintln("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
             let after_finished = *handshakes.to_iter.fold_m(after_finished,
                 |after_finished, (handshake, handshake_bytes)| after_finished._handle_handshake(handshake)
             );
@@ -445,14 +445,14 @@ namespace AfterFinished {
             pure $ HandshakeState::after_finished $ after_finished
         };
         if inner_plaintext.@content_type.is_application_data {
-            eval debug_println("received application_data");
+            eval debug_eprintln("received application_data");
             let after_finished = after_finished.mod_appdata_received(
                 append(inner_plaintext.@content)
             );
             pure $ HandshakeState::after_finished $ after_finished
         };
 
-        eval debug_println("unsupported content_type: " + inner_plaintext.@content_type.to_string);
+        eval debug_eprintln("unsupported content_type: " + inner_plaintext.@content_type.to_string);
         pure $ HandshakeState::after_finished $ after_finished
     );
 

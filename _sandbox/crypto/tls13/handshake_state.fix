@@ -364,8 +364,8 @@ namespace AfterFinished {
         // NOTE: now handshake_context = ClientHello...server Finished
         let protection = *protection.init_appdata.from_result_t;
 
-        // NOTE: now handshake_context = ClientHello...client Finished
         let protection = protection.add_handshake_context(client_finished_handshake_bytes);
+        // NOTE: now handshake_context = ClientHello...client Finished
         let protection = *protection.init_after_client_finished.from_result_t;
 
         pure $ AfterFinished {
@@ -400,12 +400,12 @@ namespace AfterFinished {
         )
     );
 
-    send_appdata: [m: MonadError] Array U8 -> AfterFinished -> m HandshakeState;
-    send_appdata = |appdata, after_finished| (
+    _push_record_to_send: [m: MonadError] Array U8 -> ContentType -> AfterFinished -> m HandshakeState;
+    _push_record_to_send = |content, content_type, after_finished| (
         // TODO: need to split large records?
         let inner_plaintext = TLSInnerPlaintext::make(
-            appdata,
-            ContentType::application_data(),
+            content,
+            content_type,
             0
         );
         let protection = after_finished.@protection;
@@ -415,6 +415,11 @@ namespace AfterFinished {
             ciphertext.to_record
         ));
         pure $ HandshakeState::after_finished $ after_finished
+    );
+
+    send_appdata: [m: MonadError] Array U8 -> AfterFinished -> m HandshakeState;
+    send_appdata = |appdata, after_finished| (
+        after_finished._push_record_to_send(appdata, ContentType::application_data())
     );
 
     pop_appdata_received: [m: MonadError] AfterFinished -> m (Array U8, HandshakeState);
@@ -433,6 +438,9 @@ namespace AfterFinished {
         if inner_plaintext.@content_type.is_handshake {
             let handshakes = *inner_plaintext.split_handshakes.from_result_t;
             eval debug_println("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
+            let after_finished = *handshakes.to_iter.fold_m(after_finished,
+                |after_finished, (handshake, handshake_bytes)| after_finished._handle_handshake(handshake)
+            );
             // TODO: support KeyUpdate
             pure $ HandshakeState::after_finished $ after_finished
         };
@@ -446,5 +454,50 @@ namespace AfterFinished {
 
         eval debug_println("unsupported content_type: " + inner_plaintext.@content_type.to_string);
         pure $ HandshakeState::after_finished $ after_finished
+    );
+
+    _handle_handshake: [m: MonadError] Handshake -> AfterFinished ->  m AfterFinished;
+    _handle_handshake = |handshake, after_finished| (
+        if handshake.is_new_session_ticket {
+            after_finished._handle_new_session_ticket(handshake.as_new_session_ticket)
+        };
+        if handshake.is_key_update {
+            after_finished._handle_key_update(handshake.as_key_update)
+        };
+        if handshake.is_certificate_request {
+            error $ "unexpected_message"
+        };
+        error $ "unexpected_message"
+    );
+
+    _handle_new_session_ticket: [m: MonadError] NewSessionTicket -> AfterFinished -> m AfterFinished;
+    _handle_new_session_ticket = |new_session_ticket, after_finished| (
+        pure $ after_finished
+    );
+
+    _handle_key_update: [m: MonadError] KeyUpdate -> AfterFinished -> m AfterFinished;
+    _handle_key_update = |key_update, after_finished| (
+        if key_update.is_update_requested {
+            // Send KeyUpdate::update_not_requested with the old key
+            let key_update = KeyUpdate::update_not_requested();
+            let handshake: Handshake = Handshake::key_update $ key_update;
+            let handshake_bytes = marshal_to_bytes(handshake);
+            let hstate = *after_finished._push_record_to_send(handshake_bytes, ContentType::handshake());
+            let after_finished = hstate.as_after_finished;  // FIXME
+
+            // update both the server and client key
+            let protection = after_finished.@protection;
+            let protection = *protection.handle_key_update(TrafficKeyType::server_tk()).from_result_t;
+            let protection = *protection.handle_key_update(TrafficKeyType::client_tk()).from_result_t;
+            let after_finished = after_finished.set_protection(protection);
+
+            pure $ after_finished
+        };
+
+        if key_update.is_update_not_requested {
+            // Currently we don't send KeyUpdate::update_requested
+            error $ "unexpected_message"
+        };
+        error $ "unexpected_message"
     );
 }

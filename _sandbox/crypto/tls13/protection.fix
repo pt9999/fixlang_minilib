@@ -114,6 +114,17 @@ namespace TrafficKey {
     increment_sequence_number: TrafficKey -> TrafficKey;
     increment_sequence_number = mod_sequence_number(add(1_U64));
 
+    // 7.2. Updating Traffic Secrets
+    increment_generation: AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
+    increment_generation = |aead, hkdf, traffic_key| (
+        let traffic_secret = traffic_key.@traffic_secret;
+        let traffic_secret = *hkdf.expand_label(traffic_secret,
+                             "traffic upd", [], hkdf.hash_length);
+        let traffic_key = traffic_key.set_traffic_secret(traffic_secret);
+        let traffic_key = *traffic_key.update_keys(traffic_secret, aead, hkdf);
+        pure $ traffic_key
+    );
+
     // 5.3. Per-Record Nonce
     get_per_record_nonce: TrafficKey -> Array U8;
     get_per_record_nonce = |traffic_key| (
@@ -248,6 +259,18 @@ namespace Protection {
         } = protection;
         let secrets = *secrets.calc_resumption_master_secret(handshake_context, hkdf);
         pure $ protection.set_secrets(secrets)
+    );
+
+    handle_key_update: TrafficKeyType -> Protection -> Result ErrMsg Protection;
+    handle_key_update = |traffic_key_type, protection| (
+        let Protection {
+            hkdf: hkdf,
+            aead: aead
+        } = protection;
+        let traffic_key = protection.get_traffic_key(traffic_key_type);
+        let traffic_key = *traffic_key.increment_generation(aead, hkdf);
+        let protection = protection.mod_traffic_key(traffic_key_type, |_| traffic_key);
+        pure $ protection
     );
 
     decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);

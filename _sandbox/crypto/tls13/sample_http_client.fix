@@ -9,14 +9,26 @@ import Minilib.Text.StringEx;
 import Minilib.Net.URL;
 import Minilib.Net.Request;
 
+// TODO: use Coroutine
+
 type ResponseParserState = unbox union {
     parsing_status_line: (),
     parsing_headers: (),
     parsed_headers: (),
-    parsing_body: I64,
-    parse_success: (),
-    parse_error: ErrMsg,
+    parsing_body: (),
+    completed: (),
 };
+
+impl ResponseParserState: ToString {
+    to_string = |state| (
+        if state.is_parsing_status_line { "parsing_status_line" };
+        if state.is_parsing_headers { "parsing_headers" };
+        if state.is_parsed_headers { "parsed_headers" };
+        if state.is_parsing_body { "parsing_body" };
+        if state.is_completed { "completed" };
+        ""
+    );
+}
 
 type ResponseParser = unbox struct {
     state: ResponseParserState,
@@ -27,36 +39,54 @@ type ResponseParser = unbox struct {
     reason: String,             // reason phrase (eg. "Not Found")
     headers: Headers,           // response headers
     body: Array U8,
+    body_start: I64,
+    content_length: Option I64,
 };
 
 namespace ResponseParser {
     empty: ResponseParser;
     empty = ResponseParser {
         state: parsing_status_line(),
-        array: data,
+        array: [],
         position: 0,
         http_version: "",
         status: 0,
         reason: "",
         headers: Headers::empty,
-        body: []
+        body: [],
+        body_start: 0,
+        content_length: none(),
     };
 
-    add_data: Array U8 -> ResponseParser -> ResponseParser;
+    add_data: Array U8 -> ResponseParser -> Result ErrMsg ResponseParser;
     add_data = |data, parser| (
         let parser = parser.mod_array(append(data));
-        let res = *parser._process_parse;
-        if res.is_err {
-            parser.set_state(parse_error $ res.as_err);
+        parser._process_parse
+    );
+
+    end_data: ResponseParser -> Result ErrMsg ResponseParser;
+    end_data = |parser| (
+        let state = parser.@state;
+        if !(state.is_parsing_body || state.is_completed) {
+            err $ "unexpected EOF"
         };
-        let parser = res.as_ok;
-        parser
+        if parser.@content_length.is_some {
+            err $ "unexpected EOF"
+        };
+        let start = parser.@body_start;
+        let end = parser.@array.get_size;
+        let body = parser.@array.subarray(start, end);
+        pure $ parser
+            .set_body(body)
+            .set_position(end)
+            .set_state(completed())
     );
 
     _process_parse: ResponseParser -> Result ErrMsg ResponseParser;
     _process_parse = |parser| (
         loop_m(
             parser, |parser|
+            eval debug_eprintln("_process_parse: state=" + parser.@state.to_string + " position=" + parser.@position.to_string);
             let state = parser.@state;
             if state.is_parsing_status_line {
                 let (line, parser) = parser._read_line;
@@ -68,38 +98,36 @@ namespace ResponseParser {
                 let (line, parser) = parser._read_line;
                 if line.is_none { break_m $ parser };
                 if line.as_some == "" {
-                    continue_m $ parser.set_state(parsed_headers())
+                    continue_m $ parser
+                        .set_body_start(parser.@position)
+                        .set_state(parsed_headers())
                 };
                 let parser = *parser._parse_header(line.as_some);
                 continue_m $ parser
             };
             if state.is_parsed_headers {
-                let end_of_body = *parser._get_end_of_body;
-                continue_m $ parser.set_state(parsing_body(end_of_body))
+                let content_length = *parser._get_content_length;
+                continue_m $ parser
+                    .set_content_length(content_length)
+                    .set_state(parsing_body())
             };
             if state.is_parsing_body {
-                let end_of_body = state.as_parsing_body;
-                if end_of_body.is_some && parser.@array.get_size < end_of_body.as_some {
-                    break_m $ parser
-                };
-            };
-            if state.is_parse_success {
+                let parser = *parser._parse_body;
                 break_m $ parser
             };
-            if state.is_parse_error {
+            if state.is_completed {
                 break_m $ parser
             };
             break_m $ parser
         )
     );
 
-    _get_end_of_body: ResponseParser -> Result ErrMsg (Option I64);
-    _get_end_of_body = |parser| (
+    _get_content_length: ResponseParser -> Result ErrMsg (Option I64);
+    _get_content_length = |parser| (
         let opt = parser.@headers.find("Content-Length");
         if opt.is_none { ok $ none() };
         let content_length: I64 = *from_string(opt.as_some);
-        let end_of_body = parser.@position + content_length;
-        ok $ end_of_body
+        ok $ some $ content_length
     );
 
     _parse_status_line: String -> ResponseParser -> Result ErrMsg ResponseParser;
@@ -112,7 +140,7 @@ namespace ResponseParser {
         let status: I64 = *status.from_string;
         pure $ parser.set_http_version(http_version)
                         .set_status(status)
-                        .set_reason(reason);
+                        .set_reason(reason)
                         .set_state(parsing_headers())
     );
 
@@ -135,15 +163,22 @@ namespace ResponseParser {
         ok $ parser
     );
 
-    _parse_body: I64 -> ResponseParser -> Result ErrMsg ResponseParser;
-    _parse_body = |content_length, parser| (
+    _parse_body: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_body = |parser| (
+        let content_length = parser.@content_length;
+        if content_length.is_none {
+            pure $ parser
+        };
+        let start = parser.@body_start;
+        let end = start + content_length.as_some;
         let array = parser.@array;
         let array_size = array.get_size;
-        let start = parser.@position;
-        let end = start + content_length;
-        if end > array_size { err $ "cannot read" };
+        if end > array_size {
+            pure $ parser
+        };
         let body = array.subarray(start, end);
-        let parser = parser.set_body(body).set_position(end);
+        let parser = parser.set_body(body).set_position(end)
+                        .set_state(completed());
         pure $ parser
     );
 
@@ -190,19 +225,18 @@ http_fetch = |url| (
         continue_m $ start + len
     );
     let parser = *loop_m(
-        [], |data|
+        ResponseParser::empty, |parser|
         let recv_bytes = *socket.recv(4096);
         eval debug_eprintln("received " + recv_bytes.get_size.to_string + " bytes");
-        let data = data.append(recv_bytes);
-        let res = ResponseParser::make(data).parse;
-        if res.is_ok {
-            break_m $ res.as_ok
-        };
-        eval debug_eprintln("err="+res.as_err);
         if recv_bytes.get_size == 0 {
-            throw $ "unexpected EOF"
+            let parser = *parser.end_data.from_result;
+            break_m $ parser
         };
-        continue_m $ data
+        let parser = *parser.add_data(recv_bytes).from_result;
+        if parser.@state.is_completed {
+            break_m $ parser
+        };
+        continue_m $ parser
     );
     eval *print(parser.@body._unsafe_to_string).lift;
     pure()

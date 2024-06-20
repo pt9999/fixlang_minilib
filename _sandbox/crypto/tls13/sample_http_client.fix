@@ -9,7 +9,17 @@ import Minilib.Text.StringEx;
 import Minilib.Net.URL;
 import Minilib.Net.Request;
 
+type ResponseParserState = unbox union {
+    parsing_status_line: (),
+    parsing_headers: (),
+    parsed_headers: (),
+    parsing_body: I64,
+    parse_success: (),
+    parse_error: ErrMsg,
+};
+
 type ResponseParser = unbox struct {
+    state: ResponseParserState,
     array: Array U8,
     position: I64,
     http_version: String,       // eg. "HTTP/1.1"
@@ -20,8 +30,9 @@ type ResponseParser = unbox struct {
 };
 
 namespace ResponseParser {
-    make: Array U8 -> ResponseParser;
-    make = |data| ResponseParser {
+    empty: ResponseParser;
+    empty = ResponseParser {
+        state: parsing_status_line(),
         array: data,
         position: 0,
         http_version: "",
@@ -31,33 +42,78 @@ namespace ResponseParser {
         body: []
     };
 
-    parse: ResponseParser -> Result ErrMsg ResponseParser;
-    parse = |parser| (
-        let parser = *parser._parse_status_line;
-        let parser = *parser._parse_headers;
-        let content_length: String = *parser.@headers.find("Content-Length").map_or(
-            eval debug_eprintln(parser.@headers.to_string);
-            err $ "Content-Length header not found",
-            pure
-        );
-        let content_length: I64 = *from_string(content_length);
-        let parser = *parser._parse_body(content_length);
-        pure $ parser
+    add_data: Array U8 -> ResponseParser -> ResponseParser;
+    add_data = |data, parser| (
+        let parser = parser.mod_array(append(data));
+        let res = *parser._process_parse;
+        if res.is_err {
+            parser.set_state(parse_error $ res.as_err);
+        };
+        let parser = res.as_ok;
+        parser
     );
 
-    _parse_status_line: ResponseParser -> Result ErrMsg ResponseParser;
-    _parse_status_line = |parser| (
-        let (line, parser) = *parser._read_line;
+    _process_parse: ResponseParser -> Result ErrMsg ResponseParser;
+    _process_parse = |parser| (
+        loop_m(
+            parser, |parser|
+            let state = parser.@state;
+            if state.is_parsing_status_line {
+                let (line, parser) = parser._read_line;
+                if line.is_none { break_m $ parser };
+                let parser = *parser._parse_status_line(line.as_some);
+                continue_m $ parser
+            };
+            if state.is_parsing_headers {
+                let (line, parser) = parser._read_line;
+                if line.is_none { break_m $ parser };
+                if line.as_some == "" {
+                    continue_m $ parser.set_state(parsed_headers())
+                };
+                let parser = *parser._parse_header(line.as_some);
+                continue_m $ parser
+            };
+            if state.is_parsed_headers {
+                let end_of_body = *parser._get_end_of_body;
+                continue_m $ parser.set_state(parsing_body(end_of_body))
+            };
+            if state.is_parsing_body {
+                let end_of_body = state.as_parsing_body;
+                if end_of_body.is_some && parser.@array.get_size < end_of_body.as_some {
+                    break_m $ parser
+                };
+            };
+            if state.is_parse_success {
+                break_m $ parser
+            };
+            if state.is_parse_error {
+                break_m $ parser
+            };
+            break_m $ parser
+        )
+    );
+
+    _get_end_of_body: ResponseParser -> Result ErrMsg (Option I64);
+    _get_end_of_body = |parser| (
+        let opt = parser.@headers.find("Content-Length");
+        if opt.is_none { ok $ none() };
+        let content_length: I64 = *from_string(opt.as_some);
+        let end_of_body = parser.@position + content_length;
+        ok $ end_of_body
+    );
+
+    _parse_status_line: String -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_status_line = |line, parser| (
         let (http_version, rest) = line.split_first(" ");
         let (status, reason) = rest.split_first(" ");
         if http_version == "" || status == "" {
              err $ "Invalid status line: `" + line + "`"
         };
         let status: I64 = *status.from_string;
-        let parser = parser.set_http_version(http_version)
+        pure $ parser.set_http_version(http_version)
                         .set_status(status)
                         .set_reason(reason);
-        ok $ parser
+                        .set_state(parsing_headers())
     );
 
     _parse_headers: ResponseParser -> Result ErrMsg ResponseParser;
@@ -91,8 +147,9 @@ namespace ResponseParser {
         pure $ parser
     );
 
-    _read_line: ResponseParser -> Result ErrMsg (String, ResponseParser);
+    _read_line: ResponseParser -> (Option String, ResponseParser);
     _read_line = |parser| (
+        let parser_orig = parser;
         let array = parser.@array;
         let array_size = array.get_size;
         let start = parser.@position;
@@ -102,11 +159,11 @@ namespace ResponseParser {
             if array.@(i) == '\n' { break $ (i + 1) };
             continue $ i + 1
         );
-        if start >= end { err $ "EOF" };
+        if start >= end { (none(), parser_orig) };
         let line = array.subarray(start, end)._unsafe_to_string;
         let line = line.strip_last_newlines;
         let parser = parser.set_position(end);
-        ok $ (line, parser)
+        (some(line), parser)
     );
 }
 

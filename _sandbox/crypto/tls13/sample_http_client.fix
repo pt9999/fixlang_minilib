@@ -4,8 +4,114 @@ import Debug;
 
 import Minilib.App.Clap;
 import Minilib.Net.Tcp;
+import Minilib.Encoding.Binary;
 import Minilib.Text.StringEx;
 import Minilib.Net.URL;
+import Minilib.Net.Request;
+
+type ResponseParser = unbox struct {
+    array: Array U8,
+    position: I64,
+    http_version: String,       // eg. "HTTP/1.1"
+    status: I64,                // HTTP status (eg. 404)
+    reason: String,             // reason phrase (eg. "Not Found")
+    headers: Headers,           // response headers
+    body: Array U8,
+};
+
+namespace ResponseParser {
+    make: Array U8 -> ResponseParser;
+    make = |data| ResponseParser {
+        array: data,
+        position: 0,
+        http_version: "",
+        status: 0,
+        reason: "",
+        headers: Headers::empty,
+        body: []
+    };
+
+    parse: ResponseParser -> Result ErrMsg ResponseParser;
+    parse = |parser| (
+        let parser = *parser._parse_status_line;
+        let parser = *parser._parse_headers;
+        let content_length: String = *parser.@headers.find("Content-Length").map_or(
+            eval debug_eprintln(parser.@headers.to_string);
+            err $ "Content-Length header not found",
+            pure
+        );
+        let content_length: I64 = *from_string(content_length);
+        let parser = *parser._parse_body(content_length);
+        pure $ parser
+    );
+
+    _parse_status_line: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_status_line = |parser| (
+        let (line, parser) = *parser._read_line;
+        let (http_version, rest) = line.split_first(" ");
+        let (status, reason) = rest.split_first(" ");
+        if http_version == "" || status == "" {
+             err $ "Invalid status line: `" + line + "`"
+        };
+        let status: I64 = *status.from_string;
+        let parser = parser.set_http_version(http_version)
+                        .set_status(status)
+                        .set_reason(reason);
+        ok $ parser
+    );
+
+    _parse_headers: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_headers = |parser| (
+        loop_m(
+            parser, |parser|
+            let (line, parser) = *parser._read_line;
+            if line == "" { break_m $ parser };
+            let parser = *parser._parse_header(line);
+            continue_m $ parser
+        )
+    );
+
+    _parse_header: String -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_header = |line, parser| (
+        let (field_name, field_value) = line.split_first(":");
+        let field_value = field_value.strip_spaces;
+        let parser = parser.mod_headers(append(field_name, field_value));
+        ok $ parser
+    );
+
+    _parse_body: I64 -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_body = |content_length, parser| (
+        let array = parser.@array;
+        let array_size = array.get_size;
+        let start = parser.@position;
+        let end = start + content_length;
+        if end > array_size { err $ "cannot read" };
+        let body = array.subarray(start, end);
+        let parser = parser.set_body(body).set_position(end);
+        pure $ parser
+    );
+
+    _read_line: ResponseParser -> Result ErrMsg (String, ResponseParser);
+    _read_line = |parser| (
+        let array = parser.@array;
+        let array_size = array.get_size;
+        let start = parser.@position;
+        let end = loop(
+            start, |i|
+            if i >= array_size { break $ array_size };
+            if array.@(i) == '\n' { break $ (i + 1) };
+            continue $ i + 1
+        );
+        if start >= end { err $ "EOF" };
+        let line = array.subarray(start, end)._unsafe_to_string;
+        let line = line.strip_last_newlines;
+        let parser = parser.set_position(end);
+        ok $ (line, parser)
+    );
+}
+
+
+
 
 http_fetch: URL -> IOFail ();
 http_fetch = |url| (
@@ -17,18 +123,32 @@ http_fetch = |url| (
     //let _ = *println("host_port = " + host_port).lift;
     //let _ = *println("path = " + path).lift;
     let socket = *connect_to_tcp_server(host_port);
-    let bufsock = BufferedSocket::make(socket);
-    let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
-    let bufsock = *bufsock.flush;
-    loop_m(
-        bufsock, |bufsock|
-        let (line, bufsock) = *(bufsock.read_line);
-        if line == "" {
-            break_m $ ()
+    let request = "GET " + path + " HTTP/1.0\n\n";
+    let request = request.get_bytes.pop_back;
+    let (start, end) = (0, request.get_size);
+    eval *loop_m(
+        start, |start|
+        if start >= end  { break_m $ () };
+        let len = *socket.send(request.subarray(start, end));
+        continue_m $ start + len
+    );
+    let parser = *loop_m(
+        [], |data|
+        let recv_bytes = *socket.recv(4096);
+        eval debug_eprintln("received " + recv_bytes.get_size.to_string + " bytes");
+        let data = data.append(recv_bytes);
+        let res = ResponseParser::make(data).parse;
+        if res.is_ok {
+            break_m $ res.as_ok
         };
-        eval *(lift $ print(line));
-        continue_m $ bufsock
-    )
+        eval debug_eprintln("err="+res.as_err);
+        if recv_bytes.get_size == 0 {
+            throw $ "unexpected EOF"
+        };
+        continue_m $ data
+    );
+    eval *print(parser.@body._unsafe_to_string).lift;
+    pure()
 );
 
 main: IO ();

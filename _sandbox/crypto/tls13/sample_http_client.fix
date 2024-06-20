@@ -1,0 +1,52 @@
+module Main;
+
+import Debug;
+
+import Minilib.App.Clap;
+import Minilib.Net.Tcp;
+import Minilib.Text.StringEx;
+import Minilib.Net.URL;
+
+http_fetch: URL -> IOFail ();
+http_fetch = |url| (
+    if url.@scheme != "http" {
+        throw $ "url does not start with 'http://': url=" + url.@url
+    };
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+    //let _ = *println("host_port = " + host_port).lift;
+    //let _ = *println("path = " + path).lift;
+    let socket = *connect_to_tcp_server(host_port);
+    let bufsock = BufferedSocket::make(socket);
+    let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
+    let bufsock = *bufsock.flush;
+    loop_m(
+        bufsock, |bufsock|
+        let (line, bufsock) = *(bufsock.read_line);
+        if line == "" {
+            break_m $ ()
+        };
+        eval *(lift $ print(line));
+        continue_m $ bufsock
+    )
+);
+
+main: IO ();
+main = (
+    do {
+        let command = (
+            Command::new("sample_client")
+            .version("0.1")
+            .about("Fetches contents from remote HTTP server.")
+            .arg(Arg::new("URL").takes_value.default_value("http://localhost")
+                .help("The URL to fetch. NOTE: URL should start with 'http://'."))
+        );
+        let matches = *command.get_matches;
+        let url = matches.get_one("URL").as_some;
+        //let _ = *println("url = " + url).lift;
+        let url = *URL::parse(url).from_result;
+        http_fetch(url)
+    }.try (
+        |err| eprintln(err)
+    )
+);

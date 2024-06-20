@@ -9,7 +9,18 @@ import Minilib.Net.Tcp;
 import Minilib.Net.URL;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
+
+fflush : IOHandle -> IOFail ();
+fflush = |handle| (
+    let _ = *pure();    // make it lazy
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 {
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
+);
 
 http_fetch: URL -> IOFail ();
 http_fetch = |url| (
@@ -57,7 +68,8 @@ https_fetch = |url| (
             (), |_|
             let appdata = *recv_appdata;
             //eval debug_eprintln("appdata=" + appdata.to_string_hex);
-            eval debug_eprintln("appdata(text)=" + appdata.push_back(0_U8)._unsafe_from_c_str);
+            eval *println(appdata.push_back(0_U8)._unsafe_from_c_str).lift.lift_t;
+            eval *fflush(IO::stdout).lift_t;
             // NOTE: should exit when the body specified by Content-Length has been read
             continue_m $ ()
         ).catch(|err|

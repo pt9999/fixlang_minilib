@@ -12,7 +12,7 @@ OPT_TESTS = -O separated
 %.run: %.fix
 	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN)
 
-all: sample_https_client.out
+all: sample_https_client.out sample_http_client.out
 
 test:
 	$(FIXAUTOTEST) $(LIBS) -T ./tests $(OPT_TESTS) $(TESTS) --keep-going

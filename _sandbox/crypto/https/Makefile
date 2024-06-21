@@ -1,6 +1,6 @@
 FIXAUTOLINK = ../../../bin/fixautolink
 FIXAUTOTEST = ../../../bin/fixautotest
-LIBS = -L ../../../lib -L .
+LIBS = -L ../../../lib -L ../tls13 -L .
 
 OPT_BUILD = -O separated
 OPT_RUN = -O separated
@@ -12,7 +12,7 @@ OPT_TESTS = -O separated
 %.run: %.fix
 	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN)
 
-all:
+all: sample_https_client.out sample_http_client.out
 
 test:
 	$(FIXAUTOTEST) $(LIBS) -T ./tests $(OPT_TESTS) $(TESTS) --keep-going

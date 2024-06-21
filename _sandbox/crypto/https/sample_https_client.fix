@@ -5,9 +5,11 @@ import Debug;
 
 import Minilib.App.Clap;
 import Minilib.Crypto.Tls13.TLSSession;
+import Minilib.Crypto.Tls13.HandshakeState;
 import Minilib.Net.Tcp;
 import Minilib.Net.URL;
 import Minilib.Net.Https.ResponseParser;
+import Minilib.Monad.FunctorM;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
@@ -77,8 +79,20 @@ https_fetch = |url| (
         eval *send_client_hello(host);
         eval *recv_server_hello;
         eval *recv_server_params;
+
+        // save certificates to file
+        let hstate = *get_hstate;
+        let certs = hstate.get_certificates;
+        eval *Iterator::range(0, certs.get_size).foreach_m(|i|
+            let cert_data = certs.@(i);
+            let filename = [i].format("tmp.cert_{}.cer");
+            eval debug_eprintln("writing " + filename);
+            write_file_bytes(Path::parse(filename).as_some, cert_data)
+        ).lift_t;
+
+
         let request = "GET " + path + " HTTP/1.1\nHost: " + host + "\nUser-Agent: fixlang_minilib\n\n";
-        eval *send_appdata(request.get_bytes.pop_back);
+        eval *TLSSession::send_appdata(request.get_bytes.pop_back);
         let parser = *loop_m(
             ResponseParser::empty, |parser|
             let recv_bytes = *recv_appdata;

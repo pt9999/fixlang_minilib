@@ -131,6 +131,14 @@ namespace HandshakeState {
         };
         pure $ hstate
     );
+
+    get_certificates: HandshakeState -> Array (Array U8);
+    get_certificates = |hstate| (
+        if hstate.is_after_finished {
+            hstate.as_after_finished.get_certificates
+        };
+        []
+    );
 }
 
 type BeforeClientHello = unbox struct {
@@ -341,6 +349,14 @@ namespace ServerParams {
         server_hello: server_hello,
         handshakes: handshakes
     };
+
+    get_certificates: ServerParams -> Array (Array U8);
+    get_certificates = |params| (
+        let opt = params.@handshakes.to_iter.filter(is_certificate).get_first;
+        if opt.is_none { [] };
+        let cert: Certificate = opt.as_some.as_certificate;
+        cert.@certificate_list.map(@cert_data)
+    );
 }
 
 type AfterFinished = unbox struct {
@@ -375,6 +391,9 @@ namespace AfterFinished {
             appdata_received: [],
         }
     );
+
+    get_certificates: AfterFinished -> Array (Array U8);
+    get_certificates = @server_params >> get_certificates;
 
     _make_client_finished: Protection -> Result ErrMsg (Array U8, TLSCiphertext, Protection);
     _make_client_finished = |protection| (

@@ -2,6 +2,7 @@
 // https://en.wikipedia.org/wiki/X.690
 module Minilib.Crypto.Asn1.Der;
 
+import Minilib.Crypto.Asn1;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -26,10 +27,6 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
     };
 }
 
-trait a: DecodeDer {
-    decode_der: [m: MonadReadByte] m a;
-}
-
 type Identifier = unbox struct {
     tag_class: TagClass,
     constructed: Bool,
@@ -43,6 +40,14 @@ namespace Identifier {
         constructed: constructed,
         tag: tag
     };
+
+    assert_tag: [m: MonadError] Tag -> Identifier -> m ();
+    assert_tag = |tag, identifier| (
+        if identifier.@tag != tag {
+            error $ [tag, identifier.@tag].format("tag mismatch: expected={} actual={}")
+        };
+        pure $ ()
+    );
 }
 
 impl Identifier: Eq {
@@ -113,130 +118,88 @@ decode_n_bytes = |length| (
     Array::fill(length, read_byte).map_m(|x| x)
 );
 
+decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
+decode_primitive = (
+    let identifier = *decode_identifier;
+    if identifier.@constructed {
+        error $ "not a primitive"
+    };
+    let length = *decode_length;
+    let contents = *decode_n_bytes(length);
+    pure $ (identifier, contents)
+);
 
-type TagClass = U8;
+choice: [m: MonadError] Array (m a) -> m a;
+choice = |mas| (
+    let inner = fix $ |inner, i| (
+        if i >= mas.get_size - 1 { mas.@(i) };
+        mas.@(i).catch(|err| inner(i + 1))
+    );
+    inner(0)
+);
 
-namespace TagClass {
-    tc_universal: TagClass;
-    tc_universal = 0_U8;
-
-    tc_application: TagClass;
-    tc_application = 1_U8;
-
-    tc_context_specific: TagClass;
-    tc_context_specific = 2_U8;
-
-    tc_private: TagClass;
-    tc_private = 3_U8;
-}
-
-type Tag = U8;
-
-namespace Tag {
-    tag_boolean: Tag;
-    tag_boolean = 1_U8;
-
-    tag_integer: Tag;
-    tag_integer = 2_U8;
-
-    tag_bit_string: Tag;
-    tag_bit_string = 3_U8;
-
-    tag_octet_string: Tag;
-    tag_octet_string = 4_U8;
-
-    tag_null: Tag;
-    tag_null = 5_U8;
-
-    tag_object_identifier: Tag;
-    tag_object_identifier = 6_U8;
-
-    tag_object_descriptor: Tag;
-    tag_object_descriptor = 7_U8;
-
-    tag_external: Tag;
-    tag_external = 8_U8;
-
-    tag_real: Tag;
-    tag_real = 9_U8;
-
-    tag_enumerated: Tag;
-    tag_enumerated = 10_U8;
-
-    tag_embedded_pdv: Tag;
-    tag_embedded_pdv = 11_U8;
-
-    tag_utf8_string: Tag;
-    tag_utf8_string = 12_U8;
-
-    tag_relative_oid: Tag;
-    tag_relative_oid = 13_U8;
-
-    tag_time: Tag;
-    tag_time = 14_U8;
-
-    tag_sequence: Tag;
-    tag_sequence = 16_U8;
-
-    tag_set: Tag;
-    tag_set = 17_U8;
-
-    tag_numeric_string: Tag;
-    tag_numeric_string = 18_U8;
-
-    tag_printable_string: Tag;
-    tag_printable_string = 19_U8;
-
-    tag_t61_string: Tag;
-    tag_t61_string = 20_U8;
-
-    tag_videotex_string: Tag;
-    tag_videotex_string = 21_U8;
-
-    tag_ia5_string: Tag;
-    tag_ia5_string = 22_U8;
-
-    tag_utc_time: Tag;
-    tag_utc_time = 23_U8;
-
-    tag_generalized_time: Tag;
-    tag_generalized_time = 24_U8;
-
-    tag_graphic_string: Tag;
-    tag_graphic_string = 25_U8;
-
-    tag_visible_string: Tag;
-    tag_visible_string = 26_U8;
-
-    tag_general_string: Tag;
-    tag_general_string = 27_U8;
-
-    tag_universal_string: Tag;
-    tag_universal_string = 28_U8;
-
-    tag_character_string: Tag;
-    tag_character_string = 29_U8;
-
-    tag_bmp_string: Tag;
-    tag_bmp_string = 30_U8;
-
-    tag_date: Tag;
-    tag_date = 31_U8;
-
-    tag_time_of_day: Tag;
-    tag_time_of_day = 32_U8;
-
-    tag_date_time: Tag;
-    tag_date_time = 33_U8;
-
-    tag_duration: Tag;
-    tag_duration = 34_U8;
-
-    tag_oid_iri: Tag;
-    tag_oid_iri = 35_U8;
-
-    tag_relative_oid_iri: Tag;
-    tag_relative_oid_iri = 36_U8;
+trait a: DecodeDer {
+    decode_der: [m: MonadReadByte] m a;
 }
 
 
+impl Asn1::Integer: DecodeDer {
+    decode_der = (
+        let (identifier, contents) = *decode_primitive;
+        eval *assert_tag(tag_integer, identifier);
+        if contents.get_size > 8 {
+            error $ "too large integer"
+        };
+        let u64 = contents.to_iter.fold(
+            0_U64, |u64, u8|
+            u64.shift_left(8_U64).bit_or(u8.to_U64)
+        );
+        pure $ u64.to_I64
+    );
+}
+
+// ITU-T Rec. X.680 (02/2021)
+// p.63 38	The time type
+decode_time: [m: MonadReadByte] m String;
+decode_time = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_time, identifier);
+    // contents = hh:mm:ss
+    pure $ contents._unsafe_to_string
+);
+
+decode_generalized_time: [m: MonadReadByte] m String;
+decode_generalized_time = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_generalized_time, identifier);
+    // contents = ????
+    pure $ contents._unsafe_to_string
+);
+
+decode_utc_time: [m: MonadReadByte] m String;
+decode_utc_time = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_utc_time, identifier);
+    // contents = YYMMDDhhmm(ss)?(z|[+-]hhmm)
+    pure $ contents._unsafe_to_string
+);
+
+impl Time::Time: DecodeDer {
+    decode_der = (
+        let (identifier, contents) = *decode_primitive;
+        eval *choice([
+            assert_tag(tag_time, identifier),
+            assert_tag(tag_time, identifier),
+            assert_tag(tag_time, identifier),
+
+        ]);
+        if contents.get_size > 8 {
+            error $ "too large integer"
+        };
+        let u64 = contents.to_iter.fold(
+            0_U64, |u64, u8|
+            u64.shift_left(8_U64).bit_or(u8.to_U64)
+        );
+        pure $ u64.to_I64
+    );
+}

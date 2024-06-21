@@ -7,10 +7,12 @@ import Minilib.App.Clap;
 import Minilib.Crypto.Tls13.TLSSession;
 import Minilib.Net.Tcp;
 import Minilib.Net.URL;
+import Minilib.Net.Https.ResponseParser;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
 
 fflush : IOHandle -> IOFail ();
 fflush = |handle| (
@@ -32,18 +34,31 @@ http_fetch = |url| (
     //let _ = *println("host_port = " + host_port).lift;
     //let _ = *println("path = " + path).lift;
     let socket = *connect_to_tcp_server(host_port);
-    let bufsock = BufferedSocket::make(socket);
-    let bufsock = *bufsock.write_str("GET " + path + " HTTP/1.0\n\n");
-    let bufsock = *bufsock.flush;
-    loop_m(
-        bufsock, |bufsock|
-        let (line, bufsock) = *(bufsock.read_line);
-        if line == "" {
-            break_m $ ()
+    let request = "GET " + path + " HTTP/1.0\n\n";
+    let request = request.get_bytes.pop_back;
+    let (start, end) = (0, request.get_size);
+    eval *loop_m(
+        start, |start|
+        if start >= end  { break_m $ () };
+        let len = *socket.send(request.subarray(start, end));
+        continue_m $ start + len
+    );
+    let parser = *loop_m(
+        ResponseParser::empty, |parser|
+        let recv_bytes = *socket.recv(4096);
+        eval debug_eprintln("received " + recv_bytes.get_size.to_string + " bytes");
+        if recv_bytes.get_size == 0 {
+            let parser = *parser.end_data.from_result;
+            break_m $ parser
         };
-        eval *(lift $ eprint(line));
-        continue_m $ bufsock
-    )
+        let parser = *parser.add_data(recv_bytes).from_result;
+        if parser.@state.is_completed {
+            break_m $ parser
+        };
+        continue_m $ parser
+    );
+    eval *print(parser.@body._unsafe_to_string).lift;
+    pure()
 );
 
 
@@ -64,17 +79,22 @@ https_fetch = |url| (
         eval *recv_server_params;
         let request = "GET " + path + " HTTP/1.1\nHost: " + host + "\nUser-Agent: fixlang_minilib\n\n";
         eval *send_appdata(request.get_bytes.pop_back);
-        loop_m (
-            (), |_|
-            let appdata = *recv_appdata;
-            //eval debug_eprintln("appdata=" + appdata.to_string_hex);
-            eval *println(appdata.push_back(0_U8)._unsafe_from_c_str).lift.lift_t;
-            eval *fflush(IO::stdout).lift_t;
-            // NOTE: should exit when the body specified by Content-Length has been read
-            continue_m $ ()
-        ).catch(|err|
-            if err == "EOF" { pure () } else { error $ err }
-        )
+        let parser = *loop_m(
+            ResponseParser::empty, |parser|
+            let recv_bytes = *recv_appdata;
+            eval debug_eprintln("received " + recv_bytes.get_size.to_string + " bytes");
+            if recv_bytes.get_size == 0 {
+                let parser = *parser.end_data.from_result.lift_t;
+                break_m $ parser
+            };
+            let parser = *parser.add_data(recv_bytes).from_result.lift_t;
+            if parser.@state.is_completed {
+                break_m $ parser
+            };
+            continue_m $ parser
+        );
+        eval *print(parser.@body._unsafe_to_string).lift.lift_t;
+        pure()
     };
     sm.run_state_t(session).map(@0)
 );

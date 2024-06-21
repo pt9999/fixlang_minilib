@@ -7,6 +7,13 @@ import Minilib.Monad.Error;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
+run_decoder: Array U8 -> StateT ByteBuffer IOFail a -> IOFail (Result ErrMsg a);
+run_decoder = |arr, decoder| (
+    let buf = ByteBuffer::make(arr, big_endian());
+    let res = *decoder.run_state_t(buf).to_result.lift;
+    pure $ res.map(@0)
+);
+
 test_decode_identifier: TestCase;
 test_decode_identifier = (
     make_table_test("test_decode_identifier",
@@ -19,12 +26,34 @@ test_decode_identifier = (
             ([0x1F_U8, 0x21_U8], ok $ Identifier::make(tc_universal, false, tag_date_time)),
         ],
         |(arr, expected)|
-        let buf = ByteBuffer::make(arr, big_endian());
-        let sm: StateT ByteBuffer IOFail Identifier = do {
-            decode_identifier 
-        };
-        let res = *sm.run_state_t(buf).to_result.lift;
-        let actual = res.map(@0);
+        let actual = *decode_identifier.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_length: TestCase;
+test_decode_length = (
+    make_table_test("test_decode_length",
+        [
+            ([0x01_U8], ok $ 1),
+            ([0x7F_U8], ok $ 127),
+            ([0x81_U8, 0xAB_U8], ok $ 0xAB),
+            ([0x82_U8, 0xAB_U8, 0xCD_U8], ok $ 0xABCD),
+        ],
+        |(arr, expected)|
+        let actual = *decode_length.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_n_bytes: TestCase;
+test_decode_n_bytes = (
+    make_table_test("test_decode_n_bytes",
+        [
+            ([0x01_U8, 0x02_U8, 0x03_U8], 2, ok $ [0x01_U8, 0x02_U8]),
+        ],
+        |(arr, length, expected)|
+        let actual = *decode_n_bytes(length).run_decoder(arr);
         assert_equal("eq", expected, actual)
     )
 );
@@ -33,6 +62,8 @@ main: IO ();
 main = (
     [
         test_decode_identifier,
+        test_decode_length,
+        test_decode_n_bytes,
     ]
     .run_test_driver
 );

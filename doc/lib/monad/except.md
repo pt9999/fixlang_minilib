@@ -38,5 +38,5 @@ Lifts an underlying monad to an Except monad.
 
 #### `impl ExceptT e: MonadTrans`
 
-#### `impl [m: Monad] ExceptT e m: MonadErrorIF`
+#### `impl [m: Monad] ExceptT ErrMsg m: MonadErrorIF`
 

@@ -4,7 +4,9 @@ import Minilib.Crypto.Asn1.Der;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
 import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
 import Minilib.Testing.UnitTest;
 
 run_decoder: Array U8 -> StateT ByteBuffer IOFail a -> IOFail (Result ErrMsg a);
@@ -58,8 +60,40 @@ test_decode_n_bytes = (
     )
 );
 
+decode_file: Path -> IOFail ();
+decode_file = |path| (
+    let bytes = *read_file_bytes(path);
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let sm: StateT ByteBuffer IOFail () = loop_m(
+        (), |_|
+        let buf = *get_state;
+        if buf.@position >= buf.get_size { break_m $ () };
+        let identifier = *decode_identifier;
+        let length = *decode_length;
+        if identifier.@constructed {
+            eval *println(
+                identifier.to_string +
+                " length=" + length.to_string
+            ).lift.lift_t;
+            continue_m $ ()
+        };
+        let contents = *decode_n_bytes(length);
+        eval *println(
+            identifier.to_string +
+            " length=" + length.to_string +
+            " contents=" + contents.to_string_hex +
+            if identifier.@tag == tag_printable_string {
+                " (" + contents._unsafe_to_string + ")"
+            } else { "" }
+        ).lift.lift_t;
+        continue_m $ ()
+    );
+    sm.run_state_t(buf).forget
+);
+
 main: IO ();
 main = (
+    //eval *decode_file(Path::parse("https/tmp.cert_0.cer").as_some).try(eprintln);
     [
         test_decode_identifier,
         test_decode_length,

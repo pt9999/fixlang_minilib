@@ -1,0 +1,39 @@
+module Main;
+
+import Minilib.Crypto.Asn1.Der;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_decode_identifier: TestCase;
+test_decode_identifier = (
+    make_table_test("test_decode_identifier",
+        [
+            ([0x01_U8], ok $ Identifier::make(tc_universal, false, tag_boolean)),
+            ([0x42_U8], ok $ Identifier::make(tc_application, false, tag_integer)),
+            ([0x62_U8], ok $ Identifier::make(tc_application, true, tag_integer)),
+            ([0x84_U8], ok $ Identifier::make(tc_context_specific, false, tag_octet_string)),
+            ([0xE9_U8], ok $ Identifier::make(tc_private, true, tag_real)),
+            ([0x1F_U8, 0x21_U8], ok $ Identifier::make(tc_universal, false, tag_date_time)),
+        ],
+        |(arr, expected)|
+        let buf = ByteBuffer::make(arr, big_endian());
+        let sm: StateT ByteBuffer IOFail Identifier = do {
+            decode_identifier 
+        };
+        let res = *sm.run_state_t(buf).to_result.lift;
+        let actual = res.map(@0);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_decode_identifier,
+    ]
+    .run_test_driver
+);
+

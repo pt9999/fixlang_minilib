@@ -1,0 +1,235 @@
+// https://en.wikipedia.org/wiki/ASN.1
+// https://en.wikipedia.org/wiki/X.690
+module Minilib.Crypto.Asn1.Der;
+
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+
+trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
+
+trait [m: * -> *] m: MonadReadByteIF {
+    read_byte: m U8;
+}
+
+impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
+    read_byte = do {
+        let buf = *get_state;
+        let res: Result ErrMsg (U8, ByteBuffer) = buf.unmarshal;
+        if res.is_err {
+            error $ res.as_err
+        };
+        let (u8, buf) = res.as_ok;
+        eval *put_state(buf);
+        pure $ u8
+    };
+}
+
+trait a: DecodeDer {
+    decode_der: [m: MonadReadByte] m a;
+}
+
+type Identifier = unbox struct {
+    tag_class: TagClass,
+    constructed: Bool,
+    tag: Tag
+}; 
+
+namespace Identifier {
+    make: TagClass -> Bool -> Tag -> Identifier;
+    make = |tag_class, constructed, tag| Identifier {
+        tag_class: tag_class,
+        constructed: constructed,
+        tag: tag
+    };
+}
+
+impl Identifier: Eq {
+    eq = |a, b| (
+        a.@tag_class == b.@tag_class &&
+        a.@constructed == b.@constructed &&
+        a.@tag == b.@tag
+    );
+}
+
+impl Identifier: ToString {
+    to_string = |obj| (
+        "Identifier {" +
+        " tag_class=" + obj.@tag_class.to_string +
+        " constructed=" + obj.@constructed.to_string +
+        " tag=" + obj.@tag.to_string +
+        " }"
+    );
+}
+
+decode_identifier: [m: MonadReadByte] m Identifier;
+decode_identifier = (
+    let u8 = *read_byte;
+    let tag_class = u8.shift_right(6_U8).bit_and(3_U8);
+    let constructed = (u8.bit_and(0x20_U8) != 0_U8);
+    let tag_type = u8.bit_and(31_U8);
+    let tag_type = *(
+        if tag_type < 31_U8 { pure $ tag_type };
+        loop_m(
+            0_U8, |tag_type|
+            let u8 = *read_byte;
+            let tag_type = tag_type.shift_left(7_U8).bit_or(u8.bit_and(0x3f_U8));
+            if u8.bit_and(0x80_U8) == 0_U8 { break_m $ tag_type };
+            continue_m $ tag_type
+        )
+    );
+    pure $ Identifier {
+        tag_class: tag_class,
+        constructed: constructed,
+        tag: tag_type
+    }
+);
+
+decode_length: [m: MonadReadByte] m I64;
+decode_length = (
+    let u8 = *read_byte;
+    if u8.bit_and(0x80_U8) == 0_U8 {
+        pure $ u8.to_I64
+    };
+    let n = u8.bit_and(0x3F_U8).to_I64;
+    if n == 0 {
+        error $ "der does not allow indefinite length"
+    };
+    if n == 127 {
+        error $ "der does not allow reserved length"
+    };
+    loop_m(
+        (0, 0), |(length, i)|
+        if i >= n { break_m $ length };
+        let u8 = *read_byte;
+        let length = length.shift_left(8).bit_or(u8.to_I64); 
+        continue_m $ (length, i + 1)
+    )
+);
+
+type TagClass = U8;
+
+namespace TagClass {
+    tc_universal: TagClass;
+    tc_universal = 0_U8;
+
+    tc_application: TagClass;
+    tc_application = 1_U8;
+
+    tc_context_specific: TagClass;
+    tc_context_specific = 2_U8;
+
+    tc_private: TagClass;
+    tc_private = 3_U8;
+}
+
+type Tag = U8;
+
+namespace Tag {
+    tag_boolean: Tag;
+    tag_boolean = 1_U8;
+
+    tag_integer: Tag;
+    tag_integer = 2_U8;
+
+    tag_bit_string: Tag;
+    tag_bit_string = 3_U8;
+
+    tag_octet_string: Tag;
+    tag_octet_string = 4_U8;
+
+    tag_null: Tag;
+    tag_null = 5_U8;
+
+    tag_object_identifier: Tag;
+    tag_object_identifier = 6_U8;
+
+    tag_object_descriptor: Tag;
+    tag_object_descriptor = 7_U8;
+
+    tag_external: Tag;
+    tag_external = 8_U8;
+
+    tag_real: Tag;
+    tag_real = 9_U8;
+
+    tag_enumerated: Tag;
+    tag_enumerated = 10_U8;
+
+    tag_embedded_pdv: Tag;
+    tag_embedded_pdv = 11_U8;
+
+    tag_utf8_string: Tag;
+    tag_utf8_string = 12_U8;
+
+    tag_relative_oid: Tag;
+    tag_relative_oid = 13_U8;
+
+    tag_time: Tag;
+    tag_time = 14_U8;
+
+    tag_sequence: Tag;
+    tag_sequence = 16_U8;
+
+    tag_set: Tag;
+    tag_set = 17_U8;
+
+    tag_numeric_string: Tag;
+    tag_numeric_string = 18_U8;
+
+    tag_printable_string: Tag;
+    tag_printable_string = 19_U8;
+
+    tag_t61_string: Tag;
+    tag_t61_string = 20_U8;
+
+    tag_videotex_string: Tag;
+    tag_videotex_string = 21_U8;
+
+    tag_ia5_string: Tag;
+    tag_ia5_string = 22_U8;
+
+    tag_utc_time: Tag;
+    tag_utc_time = 23_U8;
+
+    tag_generalized_time: Tag;
+    tag_generalized_time = 24_U8;
+
+    tag_graphic_string: Tag;
+    tag_graphic_string = 25_U8;
+
+    tag_visible_string: Tag;
+    tag_visible_string = 26_U8;
+
+    tag_general_string: Tag;
+    tag_general_string = 27_U8;
+
+    tag_universal_string: Tag;
+    tag_universal_string = 28_U8;
+
+    tag_character_string: Tag;
+    tag_character_string = 29_U8;
+
+    tag_bmp_string: Tag;
+    tag_bmp_string = 30_U8;
+
+    tag_date: Tag;
+    tag_date = 31_U8;
+
+    tag_time_of_day: Tag;
+    tag_time_of_day = 32_U8;
+
+    tag_date_time: Tag;
+    tag_date_time = 33_U8;
+
+    tag_duration: Tag;
+    tag_duration = 34_U8;
+
+    tag_oid_iri: Tag;
+    tag_oid_iri = 35_U8;
+
+    tag_relative_oid_iri: Tag;
+    tag_relative_oid_iri = 36_U8;
+}
+
+

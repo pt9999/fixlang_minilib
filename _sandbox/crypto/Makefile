@@ -3,6 +3,8 @@ LIBS = -L ../../lib -L .
 
 %.out: %.fix
 	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $<
+%.run: %.fix
+	$(FIXAUTOLINK) run -o $@ $(LIBS) -f $< -O separated
 
 all:
 

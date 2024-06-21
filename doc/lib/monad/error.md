@@ -14,17 +14,14 @@ A trait for monads which can report errors.
 
 ```
 trait [m: * -> *] m: MonadErrorIF {
-    // The type of error.
-    type ErrorType m;
-
     // `error(e)` throws an error.
-    error: ErrorType m -> m a;
+    error: ErrMsg -> m a;
 
     // `ma.catch(handler)` catches any error that is thrown during the computation of `ma`.
-    catch: (ErrorType m -> m a) -> m a -> m a;
+    catch: (ErrMsg -> m a) -> m a -> m a;
 }
 ```
-#### `impl Result e: MonadErrorIF`
+#### `impl Result ErrMsg: MonadErrorIF`
 
 #### `impl IOFail: MonadErrorIF`
 

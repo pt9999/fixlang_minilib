@@ -54,6 +54,7 @@ test_decode_n_bytes = (
     make_table_test("test_decode_n_bytes",
         [
             ([0x01_U8, 0x02_U8, 0x03_U8], 2, ok $ [0x01_U8, 0x02_U8]),
+            ([0x01_U8], 2, err $ "EOF"),
         ],
         |(arr, length, expected)|
         let actual = *decode_n_bytes(length).run_decoder(arr);
@@ -61,44 +62,31 @@ test_decode_n_bytes = (
     )
 );
 
-decode_file: Path -> IOFail ();
-decode_file = |path| (
-    let bytes = *read_file_bytes(path);
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let sm: StateT ByteBuffer IOFail () = loop_m(
-        (), |_|
-        let buf = *get_state;
-        if buf.@position >= buf.get_size { break_m $ () };
-        let identifier = *decode_identifier;
-        let length = *decode_length;
-        if identifier.@constructed {
-            eval *println(
-                identifier.to_string +
-                " length=" + length.to_string
-            ).lift.lift_t;
-            continue_m $ ()
-        };
-        let contents = *decode_n_bytes(length);
-        eval *println(
-            identifier.to_string +
-            " length=" + length.to_string +
-            " contents=" + contents.to_string_hex +
-            if identifier.@tag == tag_printable_string {
-                " (" + contents._unsafe_to_string + ")"
-            } else { "" }
-        ).lift.lift_t;
-        continue_m $ ()
-    );
-    sm.run_state_t(buf).forget
+test_decode_integer: TestCase;
+test_decode_integer = (
+    make_table_test("test_decode_integer",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], ok $ 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], ok $ 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], ok $ 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], ok $ 0x0123456789ABCDEF),
+            ([0x02_U8, 0x09_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8, 0x01_U8], err $ "OutOfRange"),
+        ],
+        |(arr, expected)|
+        let actual = *decode_integer.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
 );
 
 main: IO ();
 main = (
-    eval *decode_file(Path::parse("https/tmp.cert_0.cer").as_some).try(eprintln);
     [
         test_decode_identifier,
         test_decode_length,
         test_decode_n_bytes,
+        test_decode_integer,
     ]
     .run_test_driver
 );

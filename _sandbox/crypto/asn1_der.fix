@@ -4,9 +4,11 @@ module Minilib.Crypto.Asn1.Der;
 
 import Minilib.Crypto.Asn1;
 import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
 
 trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
 
@@ -21,15 +23,15 @@ trait [m: * -> *] m: MonadReadByteIF {
 }
 
 impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
-    read_byte = (
-        let buf = *get_state;
+    read_byte = make_state_t_monad $ |buf| (
+        if buf.get_position >= buf.get_size {
+            error $ "EOF"
+        };
         let res: Result ErrMsg (U8, ByteBuffer) = buf.unmarshal;
         if res.is_err {
             error $ res.as_err
         };
-        let (u8, buf) = res.as_ok;
-        eval *put_state(buf);
-        pure $ u8
+        pure $ res.as_ok
     );
     is_eof = (
         let buf = *get_state;
@@ -148,20 +150,21 @@ decode_primitive = (
     pure $ (identifier, contents)
 );
 
+// `decode_constructed(tag, inner_monad)` reads the identifier and the length,
+// then checks whether the identifier matches the `tag`,
+// then runs `inner_monad` in the inner contents.
 decode_constructed: [m: MonadReadByte] Tag -> m a -> m a;
 decode_constructed = |tag, inner_monad| (
     let identifier = *decode_identifier;
     if identifier.@constructed {
         error $ "not a primitive"
     };
+    eval *assert_tag(tag_integer, identifier);
     let length = *decode_length;
-
-
-    decode_sequence $ do {
-
-    };
+    run_inner(length, inner_monad)
 );
 
+// `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end of the file.
 repeat: [m: MonadReadByte] m a -> m (Array a);
 repeat = |inner_monad| (
     loop_m(
@@ -172,6 +175,15 @@ repeat = |inner_monad| (
     )
 );
 
+// `inner_monad.if_exists` is a monad that runs `inner_monad` as an optional value.
+if_exists: [m: MonadReadByte] m a -> m (Option a);
+if_exists = |inner_monad| (
+    inner_monad.map(some).catch(|errmsg| pure $ none())
+);
+
+// `decode_sequence(inner_monad)` reads the identifier and the length,
+// then checks whether the identifier matches `tag_sequence`,
+// runs `inner_monad` in the inner contents for the .
 decode_sequence: [m: MonadReadByte] m a -> m a;
 decode_sequence = |inner_monad| (
     decode_constructed(tag_sequence, inner_monad)
@@ -197,27 +209,70 @@ choice = |monads| (
 );
 
 trait a: DecodeDer {
-    decode_der: [m: MonadReadByte] m a;
+    decode_obj: [m: MonadReadByte] m a;
 }
 
+decode_integer: [m: MonadReadByte] m I64;
+decode_integer = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_integer, identifier);
+    if contents.get_size == 0 {
+        pure $ 0
+    };
+    if contents.get_size > 8 {
+        error $ "OutOfRange"
+    };
+    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+    let bytes = if sign >= 0 { contents }
+    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+    let u64: U64 = bytes.to_iter.fold(
+        0_U64, |u64, u8|
+        u64.shift_left(8_U64).bit_or(u8.to_U64)
+    );
+    if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
+    let i64: I64 = if sign >= 0 {
+        u64.to_I64
+    } else {
+        -((u64 + 1_U64).to_I64)
+    };
+    pure $ i64
+);
 
 impl Asn1::Integer: DecodeDer {
-    decode_der = (
-        let (identifier, contents) = *decode_primitive;
-        eval *assert_tag(tag_integer, identifier);
-        if contents.get_size > 8 {
-            error $ "too large integer"
-        };
-        let u64 = contents.to_iter.fold(
-            0_U64, |u64, u8|
-            u64.shift_left(8_U64).bit_or(u8.to_U64)
-        );
-        pure $ u64.to_I64
-    );
+    decode_obj = decode_integer;
 }
 
+decode_bigint: [m: MonadReadByte] m BigInt;
+decode_bigint = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_integer, identifier);
+    if contents.get_size == 0 {
+        pure $ Zero::zero
+    };
+    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+    let bytes = if sign >= 0 { contents }
+    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+
+    let nat = (
+        let u8_len = bytes.get_size;
+        let u32_len = (u8_len + 3) / 4;
+        if u32_len == 0 { ok $ zero };
+        let bytes = if 4 * u32_len == u8_len { bytes }
+        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+        let nat = Array::from_map(u32_len, |i|
+            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+        );
+        if sign >= 0 {
+            nat
+        } else {    // if negative, add one (because of two's complement)
+            nat._add(BigNat::one)
+        }
+    );
+    pure $ BigInt::make(sign, nat)
+);
+
 impl Asn1::ObjectIdentifier: DecodeDer {
-    decode_der = (
+    decode_obj = (
         let (identifier, contents) = *decode_primitive;
         eval *assert_tag(tag_object_identifier, identifier);
         if contents.get_size <= 0 { error $ "invalid object identifier" };
@@ -254,23 +309,3 @@ decode_utc_time = (
     // contents = YYMMDDhhmm(ss)?(z|[+-]hhmm)
     pure $ contents._unsafe_to_string
 );
-
-impl Time::Time: DecodeDer {
-    decode_der = (
-        let (identifier, contents) = *decode_primitive;
-        eval *choice([
-            assert_tag(tag_time, identifier),
-            assert_tag(tag_time, identifier),
-            assert_tag(tag_time, identifier),
-
-        ]);
-        if contents.get_size > 8 {
-            error $ "too large integer"
-        };
-        let u64 = contents.to_iter.fold(
-            0_U64, |u64, u8|
-            u64.shift_left(8_U64).bit_or(u8.to_U64)
-        );
-        pure $ u64.to_I64
-    );
-}

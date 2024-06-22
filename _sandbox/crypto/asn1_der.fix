@@ -4,6 +4,8 @@ module Minilib.Crypto.Asn1.Der;
 
 import Minilib.Crypto.Asn1;
 import Minilib.Encoding.Binary;
+import Minilib.Math.Types;
+import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -253,22 +255,23 @@ decode_bigint = (
     let bytes = if sign >= 0 { contents }
     else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
 
-    let nat = (
+    let bigint_positive: BigInt = (
         let u8_len = bytes.get_size;
+        if u8_len == 0 { zero };
         let u32_len = (u8_len + 3) / 4;
-        if u32_len == 0 { ok $ zero };
         let bytes = if 4 * u32_len == u8_len { bytes }
         else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
         let nat = Array::from_map(u32_len, |i|
             bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
         );
-        if sign >= 0 {
-            nat
-        } else {    // if negative, add one (because of two's complement)
-            nat._add(BigNat::one)
-        }
+        BigInt::make(1, nat)
     );
-    pure $ BigInt::make(sign, nat)
+
+    if sign >= 0 {
+        pure $ bigint_positive
+    } else {    // if negative, add one and negate the result (because of two's complement)
+        pure $ -(bigint_positive + one)
+    }
 );
 
 impl Asn1::ObjectIdentifier: DecodeDer {

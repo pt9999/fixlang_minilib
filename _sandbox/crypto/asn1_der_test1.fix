@@ -3,6 +3,7 @@ module Main;
 import Minilib.Crypto.Asn1;
 import Minilib.Crypto.Asn1.Der;
 import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
@@ -80,6 +81,28 @@ test_decode_integer = (
     )
 );
 
+test_decode_bigint: TestCase;
+test_decode_bigint = (
+    make_table_test("test_decode_bigint",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], ok $ BigInt::from_I64 $ 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], ok $ BigInt::from_I64 $ 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], ok $ BigInt::from_I64 $ 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], ok $ BigInt::from_I64 $ 0x0123456789ABCDEF),
+            ([0x02_U8, 0x09_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8, 0x01_U8],
+                                let a = BigInt::from_I64 $ 0x0123456789ABCDEF;
+                                let b = BigInt::from_I64 $ 0x01;
+                                ok $ a.shift_left(8_U64) + b
+                                ),
+        ],
+        |(arr, expected)|
+        let actual = *decode_bigint.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
 main: IO ();
 main = (
     [
@@ -87,6 +110,7 @@ main = (
         test_decode_length,
         test_decode_n_bytes,
         test_decode_integer,
+        test_decode_bigint,
     ]
     .run_test_driver
 );

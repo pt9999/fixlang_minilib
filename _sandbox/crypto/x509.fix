@@ -4,8 +4,10 @@
 // https://tex2e.github.io/rfc-translater/html/rfc5280.html
 module Minilib.Crypto.X509;
 
+import Minilib.Crypto.Asn1;
 import Minilib.Crypto.Asn1.Der;
 import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
@@ -35,7 +37,7 @@ impl Certificate: DecodeDer {
         decode_sequence $ do {
             let tbs_certificate = *decode_obj;
             let signature_algorithm = *decode_obj;
-            let signature_value = *decode_bit_string;
+            let signature_value = *decode_obj;
             pure $ Certificate {
                 tbs_certificate: tbs_certificate,
                 signature_algorithm: signature_algorithm,
@@ -88,7 +90,7 @@ impl TBSCertificate: DecodeDer {
             let issuer_unique_id = *decode_obj.if_exists;
             let subject_unique_id = *decode_obj.if_exists;
             //let extensions = *decode_obj.if_exists;
-            let extensions = [];    // TODO
+            let extensions = none();    // TODO
             pure $ TBSCertificate {
                 version: version,
                 serial_number: serial_number,
@@ -139,6 +141,34 @@ impl Validity: DecodeDer {
 type Time = String;
 
 type UniqueIdentifier = Asn1::BitString;
+
+type SubjectPublicKeyInfo = unbox struct {
+    algorithm: AlgorithmIdentifier,
+    subject_public_key: Asn1::BitString,
+};
+
+impl SubjectPublicKeyInfo: ToString {
+    to_string = |obj| (
+        "SubjectPublicKeyInfo {" +
+        " algorithm=" + obj.@algorithm.to_string +
+        " subject_public_key=" + obj.@subject_public_key.to_string +
+        " }"
+    );
+}
+
+impl SubjectPublicKeyInfo: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let algorithm = *decode_obj;
+            let subject_public_key = *decode_obj;
+            pure $ SubjectPublicKeyInfo {
+                algorithm: algorithm,
+                subject_public_key: subject_public_key
+            }
+        }
+    );
+}
+
 
 // 4.1.2.4. Issuer
 
@@ -202,3 +232,5 @@ impl AlgorithmIdentifier: DecodeDer {
         }
     );
 }
+
+type Extensions = Array ();    // TODO

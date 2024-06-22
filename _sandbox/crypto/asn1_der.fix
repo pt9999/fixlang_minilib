@@ -2,6 +2,8 @@
 // https://en.wikipedia.org/wiki/X.690
 module Minilib.Crypto.Asn1.Der;
 
+import Debug;
+
 import Minilib.Crypto.Asn1;
 import Minilib.Encoding.Binary;
 import Minilib.Math.Types;
@@ -9,25 +11,28 @@ import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 
 trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
 
 trait [m: * -> *] m: MonadReadByteIF {
-    // Reads a byte. If the end-of-file is reached, it reports an error.
+    // Reads a byte. If the end-of-stream is reached, it reports an error.
     read_byte: m U8;
-    // Checks whether the end-of-file is reached.
-    is_eof: m Bool;
+    // Checks whether the end-of-stream is reached.
+    is_eos: m Bool;
     // Runs the inner monad with the inner contents.
     // The inner contents is created from current position to the position advanced by the specified length,
     run_inner: I64 -> m a -> m a;
+
+    get_pos: m I64;
 }
 
 impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
     read_byte = make_state_t_monad $ |buf| (
         if buf.get_position >= buf.get_size {
-            error $ "EOF"
+            error $ "EOS"
         };
         let res: Result ErrMsg (U8, ByteBuffer) = buf.unmarshal;
         if res.is_err {
@@ -35,18 +40,25 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         };
         pure $ res.as_ok
     );
-    is_eof = (
+    is_eos = (
         let buf = *get_state;
         pure $ buf.get_position >= buf.get_size
     );
     run_inner = |length, inner_monad| (
         let buf = *get_state;
         let inner_array = buf.@array.subarray(
-            buf.@position,
+            0,
             min(buf.@position + length, buf.get_size)
         );
         let inner_buf = ByteBuffer::make(inner_array, big_endian());
-        inner_monad.run_state_t(inner_buf).map(@0)
+        let inner_buf = inner_buf.set_position(buf.@position);
+        let (a, inner_buf) = *inner_monad.run_state_t(inner_buf).lift_t;
+        pure $ a
+    );
+
+    get_pos = (
+        let buf = *get_state;
+        pure $ buf.get_position
     );
 }
 
@@ -93,6 +105,7 @@ impl Identifier: ToString {
 
 decode_identifier: [m: MonadReadByte] m Identifier;
 decode_identifier = (
+    let pos = *get_pos;
     let u8 = *read_byte;
     let tag_class = u8.shift_right(6_U8).bit_and(3_U8);
     let constructed = (u8.bit_and(0x20_U8) != 0_U8);
@@ -107,11 +120,13 @@ decode_identifier = (
             continue_m $ tag_type
         )
     );
-    pure $ Identifier {
+    let identifier = Identifier {
         tag_class: tag_class,
         constructed: constructed,
         tag: tag_type
-    }
+    };
+    eval debug_eprintln((pos, identifier).format("pos={} identifier={}"));
+    pure $ identifier
 );
 
 decode_length: [m: MonadReadByte] m I64;
@@ -158,20 +173,20 @@ decode_primitive = (
 decode_constructed: [m: MonadReadByte] Tag -> m a -> m a;
 decode_constructed = |tag, inner_monad| (
     let identifier = *decode_identifier;
-    if identifier.@constructed {
-        error $ "not a primitive"
+    if !identifier.@constructed {
+        error $ "not a constructed"
     };
-    eval *assert_tag(tag_integer, identifier);
+    eval *assert_tag(tag, identifier);
     let length = *decode_length;
     run_inner(length, inner_monad)
 );
 
-// `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end of the file.
+// `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end-of-stream.
 repeat: [m: MonadReadByte] m a -> m (Array a);
 repeat = |inner_monad| (
     loop_m(
         [], |arr|
-        if *is_eof { break_m $ arr };
+        if *is_eos { break_m $ arr };
         let a = *inner_monad;
         continue_m $ arr.push_back(a)
     )
@@ -296,6 +311,26 @@ decode_string = (
     };
     pure $ contents._unsafe_to_string // OK?
 );
+
+impl String: DecodeDer {
+    decode_obj = decode_string;
+}
+
+impl Asn1::BitString: DecodeDer {
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        // TODO: support constructed
+        eval *assert_tag(tag_bit_string, identifier);
+        if contents.get_size <= 0 { error $ "invalid bitstring" };
+        let number_of_unused_bits = contents.@(0);
+        let data = contents.subarray(1, contents.get_size);
+        pure $ BitString {
+            number_of_unused_bits: number_of_unused_bits,
+            data: data
+        }
+    );
+}
+
 
 impl Asn1::ObjectIdentifier: DecodeDer {
     decode_obj = (

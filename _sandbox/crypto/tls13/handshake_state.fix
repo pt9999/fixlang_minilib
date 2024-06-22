@@ -1,3 +1,4 @@
+// Handshake state management for TLS 1.3
 module Minilib.Crypto.Tls13.HandshakeState;
 
 import AsyncTask;
@@ -20,18 +21,19 @@ import Minilib.Text.StringEx;
 
 
 namespace TLSRecordHelper {
+    // Splits the contents of inner_plaintext to Array of (handshake, handshake_bytes).
     split_handshakes: TLSInnerPlaintext -> Result ErrMsg (Array (Handshake, Array U8));
     split_handshakes = |inner_plaintext| (
         let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
         loop_m(
-            ([], buf), |(output, buf)|
-            if buf.get_position >= buf.get_size { break_m $ output };
+            ([], buf), |(handshakes, buf)|
+            if buf.get_position >= buf.get_size { break_m $ handshakes };
             let start = buf.get_position;
             let (handshake: Handshake, buf) = *buf.unmarshal;
             let end = buf.get_position;
             let handshake_bytes = buf.@array.subarray(start, end);
-            let output = output.push_back((handshake, handshake_bytes));
-            continue_m $ (output, buf)
+            let handshakes = handshakes.push_back((handshake, handshake_bytes));
+            continue_m $ (handshakes, buf)
         )
     );
 }
@@ -63,6 +65,7 @@ namespace HandshakeState {
         error $ "start_handshake: wrong hstate"
     );
 
+    // Pops records to send from the queue, then send the records via TLSConnection.
     send_records: [m: TLSConnection] HandshakeState -> m HandshakeState;
     send_records = |hstate| (
         let (records, hstate) = *hstate.pop_records_to_send;
@@ -70,6 +73,7 @@ namespace HandshakeState {
         pure $ hstate
     );
 
+    // Pops records to send from the queue.
     pop_records_to_send: [m: MonadError] HandshakeState -> m (Array TLSRecord, HandshakeState);
     pop_records_to_send = |hstate| (
         if hstate.is_after_client_hello {

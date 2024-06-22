@@ -4,6 +4,8 @@
 // https://tex2e.github.io/rfc-translater/html/rfc5280.html
 module Minilib.Crypto.X509;
 
+import Debug;
+
 import Minilib.Crypto.Asn1;
 import Minilib.Crypto.Asn1.Der;
 import Minilib.Encoding.Binary;
@@ -80,19 +82,24 @@ impl TBSCertificate: ToString {
 impl TBSCertificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
-            let version = *decode_integer;
+            //let version = *with_context(0, decode_integer);
+            let version = *with_context(0, decode_integer).if_exists;
             let serial_number = *decode_bigint;
+            eval debug_eprintln("signature");
             let signature = *decode_obj;
+            eval debug_eprintln("issuer");
             let issuer = *decode_name;
+            eval debug_eprintln("validity");
             let validity = *decode_obj;
             let subject = *decode_name;
             let subject_public_key_info = *decode_obj;
-            let issuer_unique_id = *decode_obj.if_exists;
-            let subject_unique_id = *decode_obj.if_exists;
-            //let extensions = *decode_obj.if_exists;
+            let issuer_unique_id = *with_context(1, decode_obj).if_exists;
+            let subject_unique_id = *with_context(2, decode_obj).if_exists;
+            //let extensions = *with_context(3, decode_obj).if_exists;
             let extensions = none();    // TODO
             pure $ TBSCertificate {
-                version: version,
+                //version: version,
+                version: version.as_some_or(0),
                 serial_number: serial_number,
                 signature: signature,
                 issuer: issuer,
@@ -188,7 +195,7 @@ type RelativeDistinguishedName = Array AttributeTypeAndValue;
 
 decode_RelativeDistinguishedName: [m: MonadReadByte] m RelativeDistinguishedName;
 decode_RelativeDistinguishedName = (
-    decode_sequence_of(decode_AttributeTypeAndValue)
+    decode_set_of(decode_AttributeTypeAndValue)
 );
 
 type AttributeTypeAndValue = (AttributeType, AttributeValue);

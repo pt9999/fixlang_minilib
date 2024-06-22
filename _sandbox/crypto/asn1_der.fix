@@ -53,6 +53,7 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         let inner_buf = ByteBuffer::make(inner_array, big_endian());
         let inner_buf = inner_buf.set_position(buf.@position);
         let (a, inner_buf) = *inner_monad.run_state_t(inner_buf).lift_t;
+        eval *put_state(buf.set_position(buf.@position + length));
         pure $ a
     );
 
@@ -159,6 +160,9 @@ decode_n_bytes = |length| (
 decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
 decode_primitive = (
     let identifier = *decode_identifier;
+    if identifier.@tag_class != tc_universal {
+        error $ "not a universal class"
+    };
     if identifier.@constructed {
         error $ "not a primitive"
     };
@@ -170,9 +174,12 @@ decode_primitive = (
 // `decode_constructed(tag, inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches the `tag`,
 // then runs `inner_monad` in the inner contents.
-decode_constructed: [m: MonadReadByte] Tag -> m a -> m a;
-decode_constructed = |tag, inner_monad| (
+decode_constructed: [m: MonadReadByte] TagClass -> Tag -> m a -> m a;
+decode_constructed = |tag_class, tag, inner_monad| (
     let identifier = *decode_identifier;
+    if identifier.@tag_class != tag_class {
+        error $ (tag_class, identifier.@tag_class).format("tag_class mismatch: expected={} actual={}")
+    };
     if !identifier.@constructed {
         error $ "not a constructed"
     };
@@ -199,21 +206,29 @@ if_exists = |inner_monad| (
 );
 
 // `decode_sequence(inner_monad)` reads the identifier and the length,
-// then checks whether the identifier matches `tag_sequence`,
-// runs `inner_monad` in the inner contents for the .
+// then checks whether the identifier matches `tag_sequence` and the tag class is `tc_universal`,
+// then runs `inner_monad` in the inner contents.
 decode_sequence: [m: MonadReadByte] m a -> m a;
 decode_sequence = |inner_monad| (
-    decode_constructed(tag_sequence, inner_monad)
+    decode_constructed(tc_universal, tag_sequence, inner_monad)
 );
 
 decode_sequence_of: [m: MonadReadByte] m a -> m (Array a);
 decode_sequence_of = |inner_monad| (
-    decode_constructed(tag_sequence, repeat $ inner_monad)
+    decode_constructed(tc_universal, tag_sequence, repeat $ inner_monad)
 );
 
 decode_set_of: [m: MonadReadByte] m a -> m (Array a);
 decode_set_of = |inner_monad| (
-    decode_constructed(tag_set, repeat $ inner_monad)
+    decode_constructed(tc_universal, tag_set, repeat $ inner_monad)
+);
+
+// `with_context(tag, inner_monad)`reads the identifier and the length,
+// then checks whether the identifier matches `tag` and the tag class is `tc_context_specific`,
+// then runs `inner_monad` in the inner contents.
+with_context: [m: MonadReadByte] I64 -> m a -> m a;
+with_context = |tag, inner_monad| (
+    decode_constructed(tc_context_specific, tag.to_U8, inner_monad)
 );
 
 choice: [m: MonadError] Array (m a) -> m a;
@@ -243,6 +258,8 @@ impl Asn1::Boolean: DecodeDer {
 
 decode_integer: [m: MonadReadByte] m Asn1::Integer;
 decode_integer = (
+    //eval *pure();
+    //eval debug_eprintln("decode_integer");
     let (identifier, contents) = *decode_primitive;
     eval *assert_tag(tag_integer, identifier);
     if contents.get_size == 0 {
@@ -273,6 +290,8 @@ impl Asn1::Integer: DecodeDer {
 
 decode_bigint: [m: MonadReadByte] m BigInt;
 decode_bigint = (
+    //eval *pure();
+    //eval debug_eprintln("decode_bigint");
     let (identifier, contents) = *decode_primitive;
     eval *assert_tag(tag_integer, identifier);
     if contents.get_size == 0 {

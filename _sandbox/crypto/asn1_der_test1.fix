@@ -39,8 +39,11 @@ test_decode_length: TestCase;
 test_decode_length = (
     make_table_test("test_decode_length",
         [
+            ([0x00_U8], ok $ 0),
             ([0x01_U8], ok $ 1),
             ([0x7F_U8], ok $ 127),
+            ([0x80_U8], err $ "der does not allow indefinite length"),
+            ([0xFF_U8], err $ "der does not allow reserved length"),
             ([0x81_U8, 0xAB_U8], ok $ 0xAB),
             ([0x82_U8, 0xAB_U8, 0xCD_U8], ok $ 0xABCD),
         ],
@@ -50,15 +53,16 @@ test_decode_length = (
     )
 );
 
-test_decode_n_bytes: TestCase;
-test_decode_n_bytes = (
-    make_table_test("test_decode_n_bytes",
+test_decode_contents: TestCase;
+test_decode_contents = (
+    make_table_test("test_decode_contents",
         [
             ([0x01_U8, 0x02_U8, 0x03_U8], 2, ok $ [0x01_U8, 0x02_U8]),
+            ([0x01_U8, 0x02_U8, 0x03_U8], 0, ok $ []),
             ([0x01_U8], 2, err $ "EOS"),
         ],
         |(arr, length, expected)|
-        let actual = *decode_n_bytes(length).run_decoder(arr);
+        let actual = *decode_contents(length).run_decoder(arr);
         assert_equal("eq", expected, actual)
     )
 );
@@ -108,7 +112,7 @@ main = (
     [
         test_decode_identifier,
         test_decode_length,
-        test_decode_n_bytes,
+        test_decode_contents,
         test_decode_integer,
         test_decode_bigint,
     ]

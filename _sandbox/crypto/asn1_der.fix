@@ -63,13 +63,15 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
     );
 }
 
+// A type that represents the ASN.1 Identifier octets.
 type Identifier = unbox struct {
-    tag_class: TagClass,
-    constructed: Bool,
-    tag: Tag
+    tag_class: TagClass,    // tag class
+    constructed: Bool,      // true: constructed, false: primitive
+    tag: Tag                // tag number
 }; 
 
 namespace Identifier {
+    // `Identifier::make(tag_class, constructed, tag)` creates an identifier.
     make: TagClass -> Bool -> Tag -> Identifier;
     make = |tag_class, constructed, tag| Identifier {
         tag_class: tag_class,
@@ -77,6 +79,34 @@ namespace Identifier {
         tag: tag
     };
 
+    // `identifier.assert_tag_class(tag_class)` checks whether the tag class is correct.
+    assert_tag_class: [m: MonadError] TagClass -> Identifier -> m ();
+    assert_tag_class = |tag_class, identifier| (
+        if identifier.@tag_class != tag_class {
+            error $ (tag_class, identifier.@tag_class).format("tag_class mismatch: expected={} actual={}")
+        };
+        pure $ ()
+    );
+
+    // `identifier.assert_primitive` checks whether the encoding is primitive.
+    assert_primitive: [m: MonadError] Identifier -> m ();
+    assert_primitive = |identifier| (
+        if identifier.@constructed {
+            error $ "not a primitive"
+        };
+        pure $ ()
+    );
+
+    // `identifier.assert_primitive` checks whether the encoding is constructed.
+    assert_constructed: [m: MonadError] Identifier -> m ();
+    assert_constructed = |identifier| (
+        if !identifier.@constructed {
+            error $ "not a constructed"
+        };
+        pure $ ()
+    );
+
+    // `identifier.assert_tag(tag)` checks whether the tag is correct.
     assert_tag: [m: MonadError] Tag -> Identifier -> m ();
     assert_tag = |tag, identifier| (
         if identifier.@tag != tag {
@@ -104,6 +134,7 @@ impl Identifier: ToString {
     );
 }
 
+// A monad that decodes the ASN.1 identifier octets.
 decode_identifier: [m: MonadReadByte] m Identifier;
 decode_identifier = (
     let pos = *get_pos;
@@ -130,6 +161,7 @@ decode_identifier = (
     pure $ identifier
 );
 
+// A monad that decodes the ASN.1 length octets.
 decode_length: [m: MonadReadByte] m I64;
 decode_length = (
     let u8 = *read_byte;
@@ -152,22 +184,19 @@ decode_length = (
     )
 );
 
-decode_n_bytes: [m: MonadReadByte] I64 -> m (Array U8);
-decode_n_bytes = |length| (
+// A monad that decodes the ASN.1 contents octets.
+decode_contents: [m: MonadReadByte] I64 -> m (Array U8);
+decode_contents = |length| (
     Array::fill(length, read_byte).map_m(|x| x)
 );
 
 decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
 decode_primitive = (
     let identifier = *decode_identifier;
-    if identifier.@tag_class != tc_universal {
-        error $ "not a universal class"
-    };
-    if identifier.@constructed {
-        error $ "not a primitive"
-    };
+    eval *identifier.assert_tag_class(tc_universal);
+    eval *identifier.assert_primitive;
     let length = *decode_length;
-    let contents = *decode_n_bytes(length);
+    let contents = *decode_contents(length);
     pure $ (identifier, contents)
 );
 
@@ -177,12 +206,8 @@ decode_primitive = (
 decode_constructed: [m: MonadReadByte] TagClass -> Tag -> m a -> m a;
 decode_constructed = |tag_class, tag, inner_monad| (
     let identifier = *decode_identifier;
-    if identifier.@tag_class != tag_class {
-        error $ (tag_class, identifier.@tag_class).format("tag_class mismatch: expected={} actual={}")
-    };
-    if !identifier.@constructed {
-        error $ "not a constructed"
-    };
+    eval *identifier.assert_tag_class(tag_class);
+    eval *identifier.assert_constructed;
     eval *assert_tag(tag, identifier);
     let length = *decode_length;
     run_inner(length, inner_monad)

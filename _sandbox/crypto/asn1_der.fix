@@ -351,19 +351,32 @@ impl Asn1::BitString: DecodeDer {
 }
 
 
+// T-REC-X.690-202102
+// 8.19 Encoding of an object identifier value
 impl Asn1::ObjectIdentifier: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
         eval *assert_tag(tag_object_identifier, identifier);
         if contents.get_size <= 0 { error $ "invalid object identifier" };
-        let first = contents.@(0) / 20_U8;
-        let second = contents.@(0) % 20_U8;
-        let numbers = [first, second].append(contents.subarray(1, contents.get_size));
-
-        pure $ ObjectIdentifier { numbers: numbers }
+        let n = contents.get_size;
+        let subidentifiers: Array I64 = loop(
+            ([], 0, 0), |(subidentifiers, value, i)|
+            if i >= n { break $ subidentifiers };
+            let u8: U8 = contents.@(i);
+            let value: I64 = value.shift_left(7).bit_or(u8.bit_and(0x7F_U8).to_I64);
+            if u8.bit_and(0x80_U8) == 0_U8 {
+                continue $ (subidentifiers.push_back(value), 0, i + 1)
+            };
+            continue $ (subidentifiers, value, i + 1)
+        );
+        let first = max(0, min(2, subidentifiers.@(0) / 40));
+        let second = subidentifiers.@(0) - first * 40;
+        let components = [first, second].append(subidentifiers.subarray(1, subidentifiers.get_size));
+        pure $ ObjectIdentifier { components: components }
     );
 }
 
+/*
 // ITU-T Rec. X.680 (02/2021)
 // p.63 38	The time type
 decode_time: [m: MonadReadByte] m String;
@@ -373,12 +386,13 @@ decode_time = (
     // contents = hh:mm:ss
     pure $ contents._unsafe_to_string
 );
+*/
 
 decode_generalized_time: [m: MonadReadByte] m String;
 decode_generalized_time = (
     let (identifier, contents) = *decode_primitive;
     eval *assert_tag(tag_generalized_time, identifier);
-    // contents = ????
+    // contents = YYYYMMDDHHMMSSZ
     pure $ contents._unsafe_to_string
 );
 
@@ -386,6 +400,6 @@ decode_utc_time: [m: MonadReadByte] m String;
 decode_utc_time = (
     let (identifier, contents) = *decode_primitive;
     eval *assert_tag(tag_utc_time, identifier);
-    // contents = YYMMDDhhmm(ss)?(z|[+-]hhmm)
+    // contents = YYMMDDHHMMSSZ
     pure $ contents._unsafe_to_string
 );

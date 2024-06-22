@@ -20,6 +20,16 @@ type Certificate = unbox struct {
     signature_value: BitString,
 };
 
+impl Certificate: ToString {
+    to_string = |obj| (
+        "Certificate {" +
+        " tbs_certificate=" + obj.@tbs_certificate.to_string +
+        " signature_algorithm=" + obj.@signature_algorithm.to_string +
+        " signature_value=" + obj.@signature_value.to_string +
+        " }"
+    );
+}
+
 impl Certificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
@@ -48,15 +58,37 @@ type TBSCertificate = unbox struct {
     extensions: Option Extensions,
 };
 
+impl TBSCertificate: ToString {
+    to_string = |obj| (
+        "TBSCertificate {" +
+        " version=" + obj.@version.to_string +
+        " serial_number=" + obj.@serial_number.to_string +
+        " signature=" + obj.@signature.to_string +
+        " issuer=" + obj.@issuer.to_string +
+        " validity=" + obj.@validity.to_string +
+        " subject=" + obj.@subject.to_string +
+        " subject_public_key_info=" + obj.@subject_public_key_info.to_string +
+        " issuer_unique_id=" + obj.@issuer_unique_id.to_string +
+        " subject_unique_id=" + obj.@subject_unique_id.to_string +
+        " extensions=" + obj.@extensions.to_string +
+        " }"
+    );
+}
+
 impl TBSCertificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
             let version = *decode_integer;
             let serial_number = *decode_bigint;
             let signature = *decode_obj;
-            let issuer = *decode_obj;
+            let issuer = *decode_name;
             let validity = *decode_obj;
-            let subject = *decode_obj;
+            let subject = *decode_name;
+            let subject_public_key_info = *decode_obj;
+            let issuer_unique_id = *decode_obj.if_exists;
+            let subject_unique_id = *decode_obj.if_exists;
+            //let extensions = *decode_obj.if_exists;
+            let extensions = [];    // TODO
             pure $ TBSCertificate {
                 version: version,
                 serial_number: serial_number,
@@ -78,37 +110,95 @@ type Version = Asn1::Integer; // v1(0), v2(1), v3(2)
 type CertificateSerialNumber = BigInt;
 
 type Validity = unbox struct {
-    notBefore: Time,
-    notAfter: Time,
+    not_before: Time,
+    not_after: Time,
 };
+
+impl Validity: ToString {
+    to_string = |obj| (
+        "Validity {" +
+        " not_before=" + obj.@not_before.to_string +
+        " not_after=" + obj.@not_after.to_string +
+        " }"
+    );
+}
+
+impl Validity: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let not_before = *decode_obj;
+            let not_after = *decode_obj;
+            pure $ Validity {
+                not_before: not_before,
+                not_after: not_after
+            }
+        }
+    );
+}
 
 type Time = String;
 
-type UniqueIdentifier = BitString;
+type UniqueIdentifier = Asn1::BitString;
 
 // 4.1.2.4. Issuer
 
 type Name = RDNSequence;
 
+decode_name: [m: MonadReadByte] m Name;
+decode_name = decode_RDNSequence;
+
 type RDNSequence = Array RelativeDistinguishedName;
 
-impl RDNSequence: DecodeDer {
-    decode_obj = (
-        decode_sequence_of(decode_obj)
-    );
-}
+decode_RDNSequence: [m: MonadReadByte] m RDNSequence;
+decode_RDNSequence = (
+    decode_sequence_of(decode_RelativeDistinguishedName)
+);
 
 type RelativeDistinguishedName = Array AttributeTypeAndValue;
 
-impl RelativeDistinguishedName: DecodeDer {
-    decode_obj = (
-        decode_sequence_of(decode_obj)
+decode_RelativeDistinguishedName: [m: MonadReadByte] m RelativeDistinguishedName;
+decode_RelativeDistinguishedName = (
+    decode_sequence_of(decode_AttributeTypeAndValue)
+);
+
+type AttributeTypeAndValue = (AttributeType, AttributeValue);
+
+decode_AttributeTypeAndValue: [m: MonadReadByte] m AttributeTypeAndValue;
+decode_AttributeTypeAndValue = (
+    decode_sequence $ do {
+        let type_ = *decode_obj;
+        let value = *decode_obj;
+        pure $ (type_, value)
+    }
+);
+
+type AttributeType = Asn1::ObjectIdentifier;
+
+type AttributeValue = String;
+
+type AlgorithmIdentifier = unbox struct {
+    algorithm: Asn1::ObjectIdentifier,
+    parameters: Array U8,
+};
+
+impl AlgorithmIdentifier: ToString {
+    to_string = |obj| (
+        "AlgorithmIdentifier {" +
+        " algorithm=" + obj.@algorithm.to_string +
+        " parameters=" + obj.@parameters.to_string_hex +
+        " }"
     );
 }
 
-type AttributeTypeAndValue = unbox struct {
-    type_: AttributeType,
-    value: AttributeValue,
-};
-
-
+impl AlgorithmIdentifier: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let algorithm = *decode_obj;
+            let parameters = [];    // TODO
+            pure $ AlgorithmIdentifier {
+                algorithm: algorithm,
+                parameters: parameters,
+            }
+        }
+    );
+}

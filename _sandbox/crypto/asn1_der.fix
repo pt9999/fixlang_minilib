@@ -214,7 +214,19 @@ trait a: DecodeDer {
     decode_obj: [m: MonadReadByte] m a;
 }
 
-decode_integer: [m: MonadReadByte] m I64;
+decode_boolean: [m: MonadReadByte] m Asn1::Boolean;
+decode_boolean = (
+    let (identifier, contents) = *decode_primitive;
+    eval *assert_tag(tag_boolean, identifier);
+    if contents.get_size != 1 { error $ "InvalidLength" };
+    pure $ contents.@(0) != 0_U8
+);
+
+impl Asn1::Boolean: DecodeDer {
+    decode_obj = decode_boolean;
+}
+
+decode_integer: [m: MonadReadByte] m Asn1::Integer;
 decode_integer = (
     let (identifier, contents) = *decode_primitive;
     eval *assert_tag(tag_integer, identifier);
@@ -272,6 +284,17 @@ decode_bigint = (
     } else {    // if negative, add one and negate the result (because of two's complement)
         pure $ -(bigint_positive + one)
     }
+);
+
+decode_string: [m: MonadReadByte] m String;
+decode_string = (
+    let (identifier, contents) = *decode_primitive;
+    let tag = identifier.@tag;
+    if tag != tag_printable_string &&
+       tag != tag_utf8_string {
+        error $ [tag].format("tag mismatch: expected=(string) actual={}")
+    };
+    pure $ contents._unsafe_to_string // OK?
 );
 
 impl Asn1::ObjectIdentifier: DecodeDer {

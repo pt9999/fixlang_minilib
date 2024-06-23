@@ -151,10 +151,6 @@ impl BitString: ToString {
     );
 }
 
-impl BitString: ToBytes {
-    to_bytes = @data;       // OK?
-}
-
 type OctetString = unbox struct {
     data: Array U8,
 };
@@ -165,10 +161,6 @@ impl OctetString: ToString {
         " data=" + obj.@data.to_string_hex +
         " }"
     );
-}
-
-impl OctetString: ToBytes {
-    to_bytes = @data;
 }
 
 type PrintableString = String;
@@ -183,72 +175,3 @@ type ObjectIdentifier = unbox struct {
 impl ObjectIdentifier: ToString {
     to_string = |obj| obj.@components.to_iter.map(to_string).join(".");
 }
-
-// Same as Time::Time
-type Asn1Time = unbox struct { sec : I64, nanosec : U32 };
-
-namespace Asn1Time {
-    make: I64 -> U32 -> Asn1Time;
-    make = |sec, nanosec| Asn1Time {
-        sec: sec,
-        nanosec: nanosec
-    };
-
-    to_time: Asn1Time -> Time::Time;
-    to_time = |asn1_time| Time::Time {
-        sec: asn1_time.@sec,
-        nanosec: asn1_time.@nanosec
-    };
-
-    from_time: Time::Time -> Asn1Time;
-    from_time = |time| Asn1Time {
-        sec: time.@sec,
-        nanosec: time.@nanosec
-    };
-
-    from_utc: Time::DateTime -> Result ErrMsg Asn1Time;
-    from_utc = Time::from_utc >> map(from_time);
-
-    to_utc: Asn1Time -> Result ErrMsg Time::DateTime;
-    to_utc = to_time >> Time::to_utc;
-}
-
-namespace DateTimeFormat {
-    // (year, month, day, hour, minute, second, nanosec) -> String
-    type FormatFunc = (String, String, String, String, String, String, String) -> String;
-
-    format: Time::DateTime -> FormatFunc -> String;
-    format = |datetime, formatter| (
-        let zero_padding = |i64, prec| (
-            let str = Array::fill(prec - 1, '0')._unsafe_to_string + i64.to_string;
-            str.substring(str.get_size - prec, str.get_size)
-        );
-        let year = zero_padding(datetime.@year.to_I64, 4);
-        let month = zero_padding(datetime.@month.to_I64, 2);
-        let day = zero_padding(datetime.@day_in_month.to_I64, 2);
-        let hour = zero_padding(datetime.@hour.to_I64, 2);
-        let minute = zero_padding(datetime.@min.to_I64, 2);
-        let second = zero_padding(datetime.@sec.to_I64, 2);
-        let nanosec = zero_padding(datetime.@nanosec.to_I64, 9);
-        formatter $ (year, month, day, hour, minute, second, nanosec)
-    );
-}
-
-
-impl Asn1Time: ToString {
-    to_string = |asn1_time| (
-        let res = asn1_time.to_utc;
-        if res.is_err { "err:" + res.as_err };
-        let datetime = res.as_ok;
-        DateTimeFormat::format(
-            datetime,
-            |(year, month, day, hour, minute, second, nanosec)|
-            year + "-" + month + "-" + day + "T" + hour + ":" + minute  + ":" + second + "." + nanosec + "Z"
-        )
-    );
-}
-
-type GeneralizedTime = Asn1Time; // YYYYMMDDHHMMSSZ for RFC5280
-type UTCTime = Asn1Time; // YYMMDDHHMMSSZ for RFC5280
-
-

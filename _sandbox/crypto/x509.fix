@@ -96,8 +96,7 @@ impl TBSCertificate: DecodeDer {
             let subject_public_key_info = *decode_obj;
             let issuer_unique_id = *with_context(1, decode_obj).if_exists;
             let subject_unique_id = *with_context(2, decode_obj).if_exists;
-            //let extensions = *with_context(3, decode_obj).if_exists;
-            let extensions = none();    // TODO
+            let extensions = *with_context(3, decode_extensions).if_exists;
             pure $ TBSCertificate {
                 //version: version,
                 version: version.as_some_or(0),
@@ -312,4 +311,40 @@ impl AlgorithmIdentifier: DecodeDer {
     );
 }
 
-type Extensions = Array ();    // TODO
+type Extensions = Array Extension;
+
+decode_extensions:  [m: MonadReadByte] m Extensions;
+decode_extensions = (
+    decode_sequence_of(decode_obj)
+);
+
+type Extension = unbox struct {
+    extn_id: Asn1::ObjectIdentifier,
+    critical: Asn1::Boolean,
+    extn_value: Asn1::OctetString,
+};
+
+impl Extension: ToString {
+    to_string = |obj| (
+        "Extension {" +
+        " extn_id=" + obj.@extn_id.to_string +
+        " critical=" + obj.@critical.to_string +
+        " extn_value=" + obj.@extn_value.to_string +
+        " }"
+    );
+}
+
+impl Extension: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let extn_id = *decode_obj;
+            let critical = (*decode_obj.if_exists).as_some_or(false);
+            let extn_value = *decode_obj;
+            pure $ Extension {
+                extn_id: extn_id,
+                critical: critical,
+                extn_value: extn_value
+            }
+        }
+    );
+}

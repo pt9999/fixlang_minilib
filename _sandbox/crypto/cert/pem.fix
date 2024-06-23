@@ -1,0 +1,38 @@
+//module Minilib.Crypto.Cert.Pem;
+module Main;
+
+import Debug;
+
+import Minilib.Encoding.Base64;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+pem_to_bytes: String -> Result ErrMsg (Array U8);
+pem_to_bytes = |contents| (
+    let (base64_lines, state) = contents.split_ex("\n").fold(
+        ([], 0), |(base64_lines, state), line|
+        if line.starts_with("---") {
+            if line.find("BEGIN", 3).is_some {
+                (base64_lines, 1)
+            } else {
+                (base64_lines, 2)
+            }
+        };
+        let base64_lines = if state == 1 {
+            base64_lines.push_back(line)
+        } else { base64_lines };
+        (base64_lines, state)
+    );
+    if state != 2 {
+        err $ "PEM file format error"
+    };
+    base64_decode(base64_lines.to_iter.join("\n"))
+);
+
+main: IO ();
+main = do {
+    let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_CA.pem").as_some;
+    let contents = *read_file_string(path);
+    let bytes = *pem_to_bytes(contents).from_result;
+    println(bytes.to_string_hex).lift
+}.try(eprintln);

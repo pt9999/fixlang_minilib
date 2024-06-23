@@ -1,0 +1,49 @@
+module Minilib.Encoding.Base64;
+
+import Debug;
+import Minilib.Text.Hex;
+
+base64_decode: String -> Result ErrMsg (Array U8);
+base64_decode = |str| (
+    let src = str.get_bytes.map(|u8| _u8_to_b64_table.@(u8.to_I64))
+                .to_iter.filter(|b64| b64 != 0xFF_U8).to_array;
+    let src_size = src.get_size;
+    let dest_size = src_size * 3 / 4;
+    let dest = loop(
+        (Array::empty(dest_size), 0), |(dest, isrc)|
+        if isrc + 1 >= src_size { break $ dest };
+        let b0 = src.@(isrc);
+        let b1 = src.@(isrc + 1);
+        let dest = dest.push_back(b0.shift_left(2_U8).bit_or(b1.shift_right(4_U8)));
+        if isrc + 2 >= src_size { break $ dest };
+        let b2 = src.@(isrc + 2);
+        let dest = dest.push_back(b1.bit_and(0x0F_U8).shift_left(4_U8).bit_or(b2.shift_right(2_U8)));
+        if isrc + 3 >= src_size { break $ dest };
+        let b3 = src.@(isrc + 3);
+        let dest = dest.push_back(b2.bit_and(0x03_U8).shift_left(6_U8).bit_or(b3));
+        continue $ (dest, isrc + 4)
+    );
+    eval assert_eq(|_| "dest_size mismatch", dest_size, dest.get_size);
+    ok $ dest
+);
+
+// [0..63] -> [0..255]
+_b64_to_u8_table: Array U8;
+_b64_to_u8_table = (
+    Array::from_map(64, |i|
+        if i < 26 { 'A' + i.to_U8 };
+        if i < 52 { 'a' + (i - 26).to_U8 };
+        if i < 62 { '0' + (i - 52).to_U8 };
+        if i == 62 { '+' } else { '/' }
+    )
+);
+
+// [0..255] -> [0..63], or 0xFF if not a BASE64 char
+_u8_to_b64_table: Array U8;
+_u8_to_b64_table = (
+    Iterator::range(0, 64).fold(
+        Array::fill(256, 0xFF_U8), |arr, b64|
+        let u8 = _b64_to_u8_table.@(b64);
+        arr.set(u8.to_I64, b64.to_U8)
+    )
+);

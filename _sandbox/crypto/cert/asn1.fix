@@ -2,7 +2,10 @@
 // https://en.wikipedia.org/wiki/X.690
 module Minilib.Crypto.Cert.Asn1;
 
+import HashMap;
 import Time;
+
+import Minilib.Crypto.Cert.OID;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -172,6 +175,36 @@ type ObjectIdentifier = unbox struct {
     components: Array I64,
 };
 
-impl ObjectIdentifier: ToString {
-    to_string = |obj| obj.@components.to_iter.map(to_string).join(".");
+impl ObjectIdentifier: Eq {
+    eq = |a, b| a.@components == b.@components;
 }
+
+impl ObjectIdentifier: ToString {
+    to_string = |obj| (
+        let oid_str = obj.@components.to_iter.map(to_string).join(".");
+        let opt_name = OID::oid_to_name.find(oid_str);
+        oid_str + opt_name.map_or("", |name| "(" + name + ")")
+    );
+}
+
+/*
+impl ObjectIdentifier: FromString {
+    from_string = |str| (
+        let components: Array I64 = *str.split_ex(".").to_array.map_m(|s| from_string(s));
+        pure $ ObjectIdentifier::make
+    );
+}
+*/
+
+namespace ObjectIdentifier {
+    make: Array I64 -> ObjectIdentifier;
+    make = |components| ObjectIdentifier {
+        components: components
+    };
+
+    append: Array I64 -> ObjectIdentifier -> ObjectIdentifier;
+    append = |tail, oid| ObjectIdentifier {
+        components: oid.@components.append(tail)
+    };
+}
+

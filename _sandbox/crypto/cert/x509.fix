@@ -10,6 +10,7 @@ import Time;
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1.Der;
 import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.OID;
 import Minilib.Encoding.Binary;
 import Minilib.Math.BigInt;
 import Minilib.Monad.State;
@@ -38,13 +39,7 @@ impl Certificate: ToString {
 }
 
 impl Certificate: FromBytes {
-    from_bytes = |bytes| (
-        let buf = ByteBuffer::make(bytes, big_endian());
-        let decode_certificate: StateT ByteBuffer (Result ErrMsg) Certificate = do {
-            decode_obj
-        };
-        decode_certificate.run_state_t(buf).map(@0)
-    );
+    from_bytes = decode_der_from_bytes;
 }
 
 impl Certificate: DecodeDer {
@@ -265,10 +260,17 @@ type AlgorithmIdentifier = unbox struct {
     parameters: Array U8,
 };
 
+namespace AlgorithmIdentifier {
+    match_name: String -> AlgorithmIdentifier -> Bool;
+    match_name = |name, algorithm_identifier| (
+        algorithm_identifier.@algorithm.match_name(name)
+    );
+}
+
 impl AlgorithmIdentifier: ToString {
     to_string = |obj| (
         "AlgorithmIdentifier {" +
-        " algorithm=" + obj.@algorithm.to_string +
+        " algorithm=" + obj.@algorithm.to_string_with_name +
         " parameters=" + obj.@parameters.to_string_hex +
         " }"
     );
@@ -303,7 +305,7 @@ type Extension = unbox struct {
 impl Extension: ToString {
     to_string = |obj| (
         "Extension {" +
-        " extn_id=" + obj.@extn_id.to_string +
+        " extn_id=" + obj.@extn_id.to_string_with_name +
         " critical=" + obj.@critical.to_string +
         " extn_value=" + obj.@extn_value.to_string +
         " }"

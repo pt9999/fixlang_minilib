@@ -5,74 +5,83 @@ import Random;
 import HashMap;
 
 import Minilib.Crypto.Tls13.ECDSA;
-import Minilib.Crypto.SecureRandom;
+//import Minilib.Crypto.SecureRandom;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
-test_generate_keypair: IO ();
+test_generate_keypair: TestCase;
 test_generate_keypair = (
-    do {
-        let ec = secp256r1;
-        let _ = *println("ec="+ec.to_string).lift;
-        let random = Random::init_by_seed(123_U64);
-        let var_random = *Var::make(random).lift;
-        let (key_pair, _) = *generate_keypair(ec).run_state_t(var_random);
-        let _ = *println("key_pair=" + key_pair.to_string).lift;
+    make_test("test_generate_keypair") $ |_|
+    //let log = println >> lift;
+    let log = |s| pure();
+    let ec = secp256r1;
+    let _ = *log("ec="+ec.to_string);
+    let random = Random::init_by_seed(123_U64);
+    let var_random = *Var::make(random).lift;
+    let (key_pair, _) = *generate_keypair(ec).run_state_t(var_random);
+    let _ = *log("key_pair=" + key_pair.to_string);
 
-        let _ = *println("validating public key q").lift;
-        let _ = *key_pair.@q.validate_pubkey.from_result;
+    let _ = *log("validating public key q");
+    let _ = *key_pair.@q.validate_pubkey.from_result;
 
-        let _ = *println("convert q to bytes (uncompressed)").lift;
-        let q_bytes = key_pair.@q.to_bytes_uncompressed;
-        let _ = *println("q_bytes=" + q_bytes.to_string_hex).lift;
+    let _ = *log("convert q to bytes (uncompressed)");
+    let q_bytes = key_pair.@q.to_bytes_uncompressed;
+    let _ = *log("q_bytes=" + q_bytes.to_string_hex);
+    eval *assert_equal("q_bytes",
+                        "04de7addffeffffc5fbcb398dc3413b177ee1e55a5838ca8c96f8b6a1006c8ff712d7e12b608e414139a9782a94a2853c9b4bf1f0f83c9b9228d66aeede6190c65",
+                        q_bytes.to_string_hex);
 
-        let _ = *println("convert bytes to q").lift;
-        let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
-        let _ = *println("q=" + q.to_string).lift;
+    let _ = *log("convert bytes to q");
+    let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+    let _ = *log("q=" + q.to_string);
+    eval *assert_equal("q", key_pair.@q, q);
 
-        let _ = *println("convert q to byte (compressed)").lift;
-        let q_bytes = key_pair.@q.to_bytes_compressed;
-        let _ = *println("q_bytes=" + q_bytes.to_string_hex).lift;
+    let _ = *log("convert q to bytes (compressed)");
+    let q_bytes = key_pair.@q.to_bytes_compressed;
+    let _ = *log("q_bytes=" + q_bytes.to_string_hex);
+    eval *assert_equal("compressed q_bytes",
+                        "03de7addffeffffc5fbcb398dc3413b177ee1e55a5838ca8c96f8b6a1006c8ff71",
+                        q_bytes.to_string_hex);
 
-        let _ = *println("convert bytes to q").lift;
-        let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
-        let _ = *println("q=" + q.to_string).lift;
-        pure()
-    }.try(eprintln)
+    let _ = *log("convert bytes to q");
+    let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+    let _ = *log("q=" + q.to_string);
+    eval *assert_equal("compressed q", key_pair.@q, q);
+    pure()
 );
 
-test_sign: IO ();
+test_sign: TestCase;
 test_sign = (
-    do {
-        let sm: StateT (Var SecureRandom) IOFail () = do {
-            let log = println >> lift >> lift_t;
-            let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
-            let ec = scheme.@ec;
+    make_test("test_sign") $ |_|
+    let sm: StateT (Var Random) IOFail () = do {
+        //let log = println >> lift >> lift_t;
+        let log = |s| pure();
+        let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
+        let ec = scheme.@ec;
 
-            let key_pair = *generate_keypair(ec);
-            eval *log("key_pair=" + key_pair.to_string);
+        let key_pair = *generate_keypair(ec);
+        eval *log("key_pair=" + key_pair.to_string);
 
-            let message: Array U8 = "Hello world".get_bytes;
+        let message: Array U8 = "Hello world".get_bytes;
 
-            // Signing
-            eval *log("signing");
-            let signature = *scheme.sign(key_pair, message);
-            eval *log(signature.to_string);
-            eval *log("signature=" + signature.to_string);
+        // Signing
+        eval *log("signing");
+        let signature = *scheme.sign(key_pair, message);
+        eval *log(signature.to_string);
+        eval *log("signature=" + signature.to_string);
 
-            // Verifying
-            eval *log("verifying");
-            eval *scheme.verify(key_pair.@q, signature, message).from_result.lift_t;
-            eval *log("ok");
-            pure()
-        };
-        let secure_random = *SecureRandom::make;
-        let var_secure_random = *Var::make(secure_random).lift;
-        sm.run_state_t(var_secure_random).forget
-    }.try(eprintln)
+        // Verifying
+        eval *log("verifying");
+        eval *scheme.verify(key_pair.@q, signature, message).from_result.lift_t;
+        eval *log("ok");
+        pure()
+    };
+    let random = Random::init_by_seed(123_U64);
+    let var_random = *Var::make(random).lift;
+    sm.run_state_t(var_random).forget
 );
 
 // These test vectors were obtained using the steps below:
@@ -86,9 +95,9 @@ test_sign = (
 //
 // 4. Open `SigGen.txt` and find `[P-256,SHA-256]` on line 620.
 
-test2: IO ();
-test2 = (
-    do {
+test_cavp_1: TestCase;
+test_cavp_1 = (
+    make_test("test_cavp_1") $ |_| (
         let testvec = "
 Msg = 5905238877c77421f73e43ee3da6f2d9e2ccad5fc942dcec0cbd25482935faaf416983fe165b1a045ee2bcd2e6dca3bdf46c4310a7461f9a37960ca672d3feb5473e253605fb1ddfd28065b53cb5858a8ad28175bf9bd386a5e471ea7a65c17cc934a9d791e91491eb3754d03799790fe2d308d16146d5c9b0d0debd97d79ce8
 d = 519b423d715f8b581f4fa8ee59f4771a5b44c8130b4e3eacca54a56dda72b464
@@ -118,7 +127,7 @@ S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
 
         // Signing
         let res = scheme._sign_with_k(key_pair, message, k);
-        eval *println(res.to_string).lift;
+        //eval *println(res.to_string).lift;
         eval *assert_equal("signing", ok $ sigature, res);
 
         // Verifying
@@ -126,12 +135,15 @@ S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
         eval *assert_equal("verifying", ok $ (), res);
 
         pure()
-    }.try(eprintln)
+    )
 );
-
-
 
 main: IO ();
 main = (
-    test_generate_keypair
+    [
+        test_generate_keypair,
+        test_sign,
+        test_cavp_1,
+    ]
+    .run_test_driver
 );

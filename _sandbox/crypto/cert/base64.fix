@@ -5,8 +5,10 @@ import Minilib.Text.Hex;
 
 base64_decode: String -> Result ErrMsg (Array U8);
 base64_decode = |str| (
+//    let src = str.get_bytes.map(|u8| _u8_to_b64_table.@(u8.to_I64))
+//                .to_iter.filter(|b64| b64 != 0xFF_U8).to_array;
     let src = str.get_bytes.map(|u8| _u8_to_b64_table.@(u8.to_I64))
-                .to_iter.filter(|b64| b64 != 0xFF_U8).to_array;
+                ._filter_array(|b64| b64 != 0xFF_U8);
     let src_size = src.get_size;
     let dest_size = src_size * 3 / 4;
     let dest = loop(
@@ -25,6 +27,20 @@ base64_decode = |str| (
     );
     eval assert_eq(|_| "dest_size mismatch", dest_size, dest.get_size);
     ok $ dest
+);
+
+// Same as `to_iter >> filter(f) >> to_array`, but faster.
+_filter_array: (a -> Bool) -> Array a -> Array a;
+_filter_array = |f, arr| (
+    let n = arr.get_size;
+    let output = Array::empty(n);
+    loop(
+        (output, 0), |(output, i)|
+        if i >= n { break $ output };
+        let x = arr.@(i);
+        let output = if f(x) { output.push_back(x) } else { output };
+        continue $ (output, i + 1)
+    )
 );
 
 // [0..63] -> [0..255]

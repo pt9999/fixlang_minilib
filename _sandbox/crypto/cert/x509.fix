@@ -24,6 +24,7 @@ type Certificate = unbox struct {
     tbs_certificate: TBSCertificate,
     signature_algorithm:   AlgorithmIdentifier,
     signature_value: BitString,
+    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
 };
 
 impl Certificate: ToString {
@@ -49,13 +50,23 @@ impl Certificate: FromBytes {
 impl Certificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
+
+            let start_pos = *get_pos;
             let tbs_certificate = *decode_obj;
+            let end_pos = *get_pos;
+
+            // save DER encoding of tbs_certificate for signature validation
+            eval *set_pos(start_pos);
+            let tbs_certificate_bytes = *decode_contents(end_pos - start_pos);
+            eval *set_pos(end_pos);
+
             let signature_algorithm = *decode_obj;
             let signature_value = *decode_obj;
             pure $ Certificate {
                 tbs_certificate: tbs_certificate,
                 signature_algorithm: signature_algorithm,
-                signature_value: signature_value
+                signature_value: signature_value,
+                tbs_certificate_bytes: tbs_certificate_bytes,
             }
         }
     );

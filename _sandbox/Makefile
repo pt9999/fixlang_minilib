@@ -1,6 +1,9 @@
 %.out: %.fix
 	../bin/fixautolink build -o $@ -L ../lib -f $<
 
+%.run: %.fix
+	../bin/fixautolink run -o $@ -L ../lib -f $< -O separated
+
 all:
 
 channel_test1: 

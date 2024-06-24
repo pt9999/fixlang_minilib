@@ -1,5 +1,8 @@
 module Main;
 
+import Minilib.Monad.Reader;
+import Minilib.Monad.Identity;
+
 // Free Monad
 // https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
 // https://eed3si9n.com/herding-cats/ja/Free-monads.html
@@ -13,6 +16,16 @@ namespace Free {
     liftF = |command| free $ command.map(fpure);
 }
 
+impl [f: Functor] Free f: Functor {
+    map = |g, ma| (
+        if ma.is_fpure {
+            fpure $ g(ma.as_fpure)
+        };
+        let m = ma.as_free;
+        free $ m.map(map(g))
+    );
+}
+
 impl [f: Functor] Free f: Monad {
     pure = fpure;
     bind = |g, ma| (
@@ -23,6 +36,8 @@ impl [f: Functor] Free f: Monad {
         free $ m.map(bind(g))
     );
 }
+
+//-------------------------------------------
 
 type Toy next = box union {
     output: (String, next),
@@ -106,5 +121,50 @@ test_toy_free2 = (
     pure()
 );
 
+//-------------------------------------------
+// Free monad as a coroutine
+
+type StrParser = Free (ReaderT String Identity);
+
+parse_text1: StrParser (Array String);
+parse_text1 = (
+    free $ reader $ |line| (
+        let lines = [line];
+        parse_text2 $ lines
+    )
+);
+
+parse_text2: Array String -> StrParser (Array String);
+parse_text2 = |lines| (
+    free $ reader $ |line| (
+        let lines = lines.push_back(line);
+        parse_text3 $ lines
+    )
+);
+
+parse_text3: Array String -> StrParser (Array String);
+parse_text3 = |lines| (
+    free $ reader $ |line| (
+        let lines = lines.push_back(line);
+        fpure $ lines
+    )
+);
+
+test_str_parser: IO ();
+test_str_parser = (
+    let parser = parse_text1;
+    loop_m(
+        (parser, 0), |(parser, i)|
+        if parser.is_fpure {
+            eval *println(parser.as_fpure.to_string);
+            break_m $ ()
+        };
+        let parser = parser.as_free.run_reader(i.to_string);
+        continue_m $ (parser, i + 1)
+    )
+);
+
 main: IO ();
-main = test_toy_free2;
+//main = test_toy_free2;
+main = test_str_parser;
+

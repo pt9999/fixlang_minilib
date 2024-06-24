@@ -7,6 +7,7 @@ import Math;
 import Minilib.Math.BigNat;
 import Minilib.Math.Types;
 import Minilib.Text.StringEx;
+import Minilib.Encoding.Binary;
 
 // Arbitrary-precision integer.
 type BigInt = unbox struct {
@@ -238,5 +239,34 @@ impl BigInt: Rem {
     rem = |a, b| (
         let (quo, rem) = BigInt::divmod(a, b);
         rem
+    );
+}
+
+impl BigInt: FromBytes {
+    from_bytes = |bytes| (
+        let u8_len = bytes.get_size;
+        if u8_len == 0 { ok $ zero };
+        let u32_len = (u8_len + 3) / 4;
+        let bytes = if 4 * u32_len == u8_len { bytes }
+        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+        let nat = Array::from_map(u32_len, |i|
+            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+        );
+        ok $ BigInt::make(1, nat)
+    );
+}
+
+// NOTE: Unneeded zeros might be placed at the beginning
+impl BigInt: ToBytes {
+    to_bytes = |a| (
+        eval assert(|_| "invalid sign", a.@sign >= 0);
+        let u32_len = a.@nat.get_size;
+        let u8_len = u32_len * 4;
+        let bytes = Array::fill(u8_len, 0_U8);
+        let bytes = Iterator::range(0, u32_len).fold(
+            bytes, |bytes, i|
+            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))    // big endian
+        );
+        bytes
     );
 }

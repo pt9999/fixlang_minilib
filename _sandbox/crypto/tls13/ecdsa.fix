@@ -33,6 +33,8 @@ namespace ECInt {
 
     // Converts a byte array to an ECInt.
     // SEC1: 2.3.8 Octet-String-to-Integer Conversion
+    // moved to FromBytes::from_bytes
+    /*
     from_bytes: Array U8 -> Result ErrMsg ECInt;
     from_bytes = |bytes| (
         let u8_len = bytes.get_size;
@@ -45,6 +47,7 @@ namespace ECInt {
         );
         ok $ BigInt::make(1, nat)
     );
+    */
 
     // Converts a hex string to an ECInt.
     from_string_hex: String -> Result ErrMsg ECInt;
@@ -55,8 +58,22 @@ namespace ECInt {
 
     // Converts an ECInt to a byte array with specified length.
     // SEC1: 2.3.7 Integer-to-Octet-String Conversion
+    // moved to ToBytes::to_bytes
     to_n_bytes: I64 -> ECInt -> Array U8;
     to_n_bytes = |mlen, a| (
+        let bytes = a.to_bytes;
+        let n = bytes.get_size;
+        if n < mlen {
+            Array::fill(mlen - n, 0_U8).append(bytes)
+        } else if n > mlen {
+            bytes.get_sub(n - mlen, n)
+        } else {
+            bytes
+        }
+    );
+
+    to_n_bytes_v1: I64 -> ECInt -> Array U8;
+    to_n_bytes_v1 = |mlen, a| (
         eval assert(|_| "invalid sign", a.@sign >= 0);
         let u32_len = (mlen + 3) / 4;
         let u8_len = u32_len * 4;
@@ -68,11 +85,11 @@ namespace ECInt {
         if u8_len != mlen { bytes.get_sub(u8_len - mlen, u8_len) } else { bytes }
     );
 
-    to_bytes: ECInt -> Array U8;
-    to_bytes = |a| (
+    to_bytes_v1: ECInt -> Array U8;
+    to_bytes_v1 = |a| (
         let u32_len = a.@nat.get_size;
         let u8_len = u32_len * 4;
-        a.to_n_bytes(u8_len)
+        a.to_n_bytes_v1(u8_len)
     );
 
     // Converts an ECInt to a hex string.
@@ -118,7 +135,7 @@ namespace ECInt {
         eval assert(|_| "invalid range", n > zero);
         let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
         let bytes = *randgen_bytes(num_bits / 8);
-        let r = ECInt::from_bytes(bytes).as_ok;
+        let r = from_bytes(bytes).as_ok;
         if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
             generate_ECInt_range(begin, end)      // try again
         };
@@ -260,7 +277,7 @@ namespace ECPoint {
         if bytes.get_size == mlen + 1 {     // compressed
             let y_bytes = bytes.get_sub(0, 1);
             let x_bytes = bytes.get_sub(1, mlen + 1);
-            let x = ECField::make(*ECInt::from_bytes(x_bytes), ec.@p);
+            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
             let y_even = (y_bytes.@(0) == 2_U8);
             let y_odd = (y_bytes.@(0) == 3_U8);
             if !y_even && !y_odd {
@@ -283,8 +300,8 @@ namespace ECPoint {
             if w.@(0) != 4_U8 {
                 err $ "from_bytes_ec: invalid uncompressed marker"
             };
-            let x = ECField::make(*ECInt::from_bytes(x_bytes), ec.@p);
-            let y = ECField::make(*ECInt::from_bytes(y_bytes), ec.@p);
+            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
+            let y = ECField::make(*from_bytes(y_bytes), ec.@p);
             let p = ECPoint::make(ec, x, y);
             let _ = *p.check_on_curve;
             ok $ p
@@ -583,7 +600,7 @@ namespace ECDSAScheme {
         // 5.3. Convert the bit string E to an octet string E using the conversion routine specified in Section 2.3.1.
         // ...does nothing
         // 5.4. Convert the octet string E to an integer e using the conversion routine specified in Section 2.3.8.
-        let e: ECInt = *ECInt::from_bytes(_E);
+        let e: ECInt = *from_bytes(_E);
         pure $ e
     );
 

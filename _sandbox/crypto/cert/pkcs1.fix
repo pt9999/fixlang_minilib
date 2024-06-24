@@ -7,6 +7,8 @@ import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigNat;
+import Minilib.Text.Hex;
+import Minilib.Crypto.SHA256;
 
 // 4. Data Conversion Primitives
 
@@ -33,7 +35,106 @@ i2osp = |x, xlen| (
 );
 
 // OS2IP - Octet-String-to-Integer primitive
-os2ip: Array U8 -> BigInt;
-os2ip = |bytes| (
+os2ip: Array U8 -> Result ErrMsg BigInt;
+os2ip = FromBytes::from_bytes;
 
+// 5. Cryptographic Primitives
+
+// 5.2.2. RSAVP1
+// Input: (n, e) RSA public key
+//        s signature representative, an integer between 0 and n - 1
+// Output: m message representative, an integer between 0 and n - 1
+// Error: "signature representative out of range"
+
+rsavp1: (BigInt, BigInt) -> BigInt -> Result ErrMsg BigInt;
+rsavp1 = |(n, e), s| (
+    if s.is_negative || s >= n {
+        err $ "signature representative out of range"
+    };
+    // Let m = s^e mod n.
+    let m: Modular BigInt = repeat_by_BigInt(mul, one, Modular::make(s, n), e);
+    let m: BigInt = m.@value;
+    pure $ m
 );
+
+// 8. Signature Scheme with Appendix
+
+// 8.2. RSASSA-PKCS1-v1_5
+// RSASSA-PKCS1-V1_5-VERIFY ((n, e), M, S)
+// Input: (n, e) signer's RSA public key
+//        M message whose signature is to be verified, an octet string
+//        S signature to be verified, an octet string of length k, where k is the length in octets of the RSA modulus n
+// Output: "valid signature" or "invalid signature"
+// Errors: "message too long"; "RSA modulus too short"
+rsassa_pkcs1_v1_5_verify: (BigInt, BigInt) -> Array U8 -> Array U8 -> HashSpec -> Result ErrMsg ();
+rsassa_pkcs1_v1_5_verify = |(n, e), _M, _S, hashspec| (
+    // 1. Length checking: If the length of the signature S is not k octets, output "invalid signature" and stop.
+    let n_bytes = n.to_bytes;
+    let k = n_bytes.get_size;
+    if _S.get_size != k { err $ "invalid signature" };
+    // 2. RSA verification:
+    //    a. Convert the signature S to an integer signature representative s (see Section 4.2):
+    let s: BigInt = *os2ip(_S);
+    //    b. Apply the RSAVP1 verification primitive (Section 5.2.2) to the RSA public key (n, e)
+    //       and the signature representative s to produce an integer message representative m:
+    let m = *rsavp1((n, e), s);
+    //    c. Convert the message representative m to an encoded message EM of length k octets (see Section 4.1):
+    let _EM = *i2osp(m, k);
+    // 3. EMSA-PKCS1-v1_5 encoding:
+    //    Apply the EMSA-PKCS1-v1_5 encoding operation (Section 9.2)
+    //    to the message M to produce a second encoded message EM' of length k octets:
+    let _EM_dash = *emsa_pkcs1_v1_5_encode(_M, k, hashspec);
+    // 4. Compare the encoded message EM and the second encoded message EM'.
+    //    If they are the same, output "valid signature"; otherwise, output "invalid signature".
+    if _EM != _EM_dash { err $ "invalid signature" };
+    ok()
+);
+
+// 9. Encoding Methods for Signatures with Appendix
+
+// 9.2. EMSA-PKCS1-v1_5
+// EMSA-PKCS1-v1_5-ENCODE (M, emLen)
+// Option: Hash hash function (hLen denotes the length in octets of the hash function output)
+// Input:  M        message to be encoded
+//           emLen    intended length in octets of the encoded message, at
+//               least tLen + 11, where tLen is the octet length of the
+//               Distinguished Encoding Rules (DER) encoding T of
+//               a certain value computed during the encoding operation
+// Output: EM       encoded message, an octet string of length emLen
+// Errors:  "message too long"; "intended encoded message length too short"
+emsa_pkcs1_v1_5_encode: Array U8 -> I64 -> HashSpec -> Result ErrMsg (Array U8);
+emsa_pkcs1_v1_5_encode = |_M, emlen, hashspec| (
+    // 1.  Apply the hash function to the message M to produce a hash value H:
+    let _H: Array U8 = (hashspec.@hash)(_M);
+    // 2.  Encode the algorithm ID for the hash function and the hash
+    // value into an ASN.1 value of type DigestInfo (see
+    // Appendix A.2.4) with the DER
+    let _T: Array U8 = hashspec.@der_encoding.append(_H);
+    let tlen = _T.get_size;
+    // 3.  If emLen < tLen + 11, output "intended encoded message length too short" and stop.
+    if emlen < tlen + 11 {
+        err $ "intended encoded message length too short"
+    };
+    // 4.  Generate an octet string PS consisting of emLen - tLen - 3
+    //     octets with hexadecimal value 0xff.  The length of PS will be
+    //     at least 8 octets.
+    let _PS = Array::fill(emlen - tlen - 3, 0xFF_U8);
+    // 5.  Concatenate PS, the DER encoding T, and other padding to form
+    //     the encoded message EM as
+    let _EM = [0x00_U8, 0x01_U8].append(_PS).append([0x00_U8]).append(_T);
+    pure $ _EM
+);
+
+
+// B.1.  Hash Functions
+
+type HashSpec = unbox struct {
+    hash: Array U8 -> Array U8,
+    der_encoding: Array U8,         // see "Notes 1" of "9.2. EMSA-PKCS1-v1_5"
+}
+
+hashspec_sha256: HashSpec
+hashspec_sha256 = HashSpec {
+    hash: SHA256::digest,
+    der_encoding: "30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20".from_string_hex.as_ok,
+}

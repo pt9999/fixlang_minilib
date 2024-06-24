@@ -2,6 +2,9 @@ module Main;
 
 import Debug;
 
+import Minilib.Testing.UnitTest;
+
+
 // Function monad. same as Reader monad
 type Function a b = unbox struct {
     data: a -> b
@@ -27,92 +30,6 @@ impl Function a: Monad {
     );
 }
 
-// A continuation monad.
-type Cont r a = unbox struct {
-    data: (a -> r) -> r
-};
-
-namespace Cont {
-    make: ((a -> r) -> r) -> Cont r a;
-    make = |g| Cont { data: g };
-
-    run: (a -> r) -> Cont r a -> r;
-    run = |f, ma| (
-        (ma.@data)(f)
-    );
-
-    call_cc: ((a -> Cont r b) -> Cont r a) -> Cont r a;
-    call_cc = |fambma| (
-        Cont::make $ |far|
-        let famb = |a| (
-            Cont::make $ |fbr|
-            far(a)
-        );
-        let ma = fambma(famb);
-        let r = ma.run(far);
-        r
-    );
-}
-
-impl Cont r: Functor {
-    map = |fab, ma| (       // fab: a -> b
-        Cont::make $ |fbr|  // fbr: b -> r
-        ma.run(fab >> fbr)
-    );
-}
-
-impl Cont r: Monad {
-    pure = |a| Cont::make $ |far| far(a);
-    bind = |famb, ma| (     // famb: a -> m b
-        Cont::make $ |fbr|  // fbr: b -> r
-        ma.run(|a|
-            famb(a).run(fbr)
-        )
-    );
-}
-
-test_functor_cont: IO ();
-test_functor_cont = (
-    let ma: Cont (Array String) I64 = Cont::make $ |far| far(3);
-    let mb = ma.map(to_string);
-    let c = mb.run(|b| [b, b]);
-    println(c.to_string)
-);
-
-test_monad_cont: IO ();
-test_monad_cont = (
-    let mc: Cont (Array String) (Array I64)  = do {
-        let a = *pure(3);
-        let b = *pure(4);
-        pure $ [a, b]
-    };
-    let md: Cont (Array String) (Array String) = do {
-        let ab = *mc;
-        if ab.@(0) % 2 == 0 {
-            pure $ ab.map(to_string)
-        } else {
-            pure $ ab.append(ab).map(to_string)
-        }
-    };
-    let ans = md.run(|x| x);
-    println (ans.to_string)
-);
-
-test_call_cc: IO ();
-test_call_cc = (
-    let cont: Cont String I64 = call_cc(|exit|
-        loop_m(
-            (0, 0), |(sum, i)|
-            if i >= 10 { break_m $ sum };
-            if i >= 5 { exit(sum) };
-            let sum = sum + i;
-            eval debug_eprintln("i="+i.to_string+" sum="+sum.to_string);
-            continue_m $ (sum, i + 1)
-        )
-    );
-    let ans = cont.run(|sum| sum.to_string);
-    println(ans)
-);
-
+//------------------------------------------------------------------------
 main: IO ();
-main = test_call_cc;
+main = pure();

@@ -181,8 +181,17 @@ PNG image I/O.
 
 Scalable Vector Graphics (SVG) 1.1
 
+### [module Minilib.Monad.Cont (lib/monad/cont.fix)](lib/monad/cont.md)
+
+Continuation Monad.
+
 ### [module Minilib.Monad.Error (lib/monad/error.fix)](lib/monad/error.md)
 
+Definition of `MonadErrorIF` trait which can report errors.
+
+### [module Minilib.Monad.Except (lib/monad/except.fix)](lib/monad/except.md)
+
+Except monad transformer that implements `MonadErrorIF`.
 
 ### [module Minilib.Monad.FunctorM (lib/monad/functor_m.fix)](lib/monad/functor_m.md)
 

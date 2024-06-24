@@ -2,6 +2,8 @@
 
 ## module Minilib.Monad.Error
 
+Definition of `MonadErrorIF` trait which can report errors.
+
 ### trait MonadError = Monad + MonadErrorIF;
 
 A trait for the interface of monads which can report errors.

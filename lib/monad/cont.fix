@@ -1,0 +1,91 @@
+// Continuation Monad.
+module Minilib.Monad.Cont;
+
+import Minilib.Monad.Identity;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+
+
+// A trait for the interface of generic continuation  monads.
+trait MonadCont = Monad + MonadContIF;
+
+// A trait for generic continuation  monads.
+trait [cm: * -> *] cm: MonadContIF {
+    // `call_cc(f)` calls `f` with the current continuation, and returns a continuation monad.
+    // `f` takes the current continuation (the exit function) and should return a continuation monad.
+    // For example, `call_cc(|exit| ... if condition { exit(false) }; ... pure(true))`.
+    // The exit function can be passed to another function.
+    call_cc: ((a -> cm b) -> cm a) -> cm a;
+}
+
+// A continuation monad transformer.
+// `r` is a type of the result of the continuation function.
+// `m` is a type of an underlyind monad.
+// `a` is a type of a value.
+type [m: * -> *] ContT r m a = unbox struct {
+    data: (a -> m r) -> m r
+};
+
+// A continuation monad whose undelying monad is Identity.
+type Cont r a = ContT r Identity a;
+
+// Creates a ContT monad from a function which receives a continuation function and returns the monadic value of the result.
+cont_t: [m: Monad] ((a -> m r) -> m r) -> ContT r m a;
+cont_t = |f| ContT { data: f };
+
+// Creates a Cont monad from a function which receives a continuation function and returns the result value.
+cont: ((a -> r) -> r) -> Cont r a;
+cont = |farr| cont_t $ |famr| (
+    Identity::make $ farr $ famr >> Identity::get
+);
+
+// Runs a ContT monad with the supplied continuation function.
+run_cont_t: [m: Monad] (a -> m r) -> ContT r m a -> m r;
+run_cont_t = |fa_mr, cma| (
+    (cma.@data)(fa_mr)
+);
+
+// Runs a Cont monad with the supplied continuation function.
+run_cont: (a -> r) -> Cont r a -> r;
+run_cont = |fa_r, cma| (
+    cma.run_cont_t(fa_r >> Identity::make).Identity::get
+);
+
+// Lifts an underlying monad to a continuation monad.
+lift_cont: [m: Monad] m a -> ContT r m a;
+lift_cont = |ma| cont_t $ |fa_mr| ma.bind(fa_mr);
+
+impl [m: Monad] ContT r m: Functor {
+    map = |fab, cma| (          // fab: a -> b, cma: ContT r m a
+        cont_t $ |fbmr|         // fbmr: b -> m r
+        cma.run_cont_t(fab >> fbmr)
+    );
+}
+
+impl [m: Monad] ContT r m: Monad {
+    pure = |a| cont_t $ |famr| famr(a);
+    bind = |facmb, cma| (           // facmb: a -> ContT r m b, cma: ContT r m a
+        cont_t $ |fbmr|             // fbmr: b -> m r
+        cma.run_cont_t(|a|
+            let cmb = facmb(a);     // cmb: ContT r m b
+            cmb.run_cont_t(fbmr)
+        )
+    );
+}
+
+impl ContT r: MonadTrans {
+    lift_t = lift_cont;
+}
+
+impl [m: Monad] ContT r m: MonadContIF {
+    //call_cc: ((a -> cm b) -> cm a) -> cm a;
+    call_cc = |fa_cmb_cma| (            // fa_cmb_cma: (a -> ContT r m b) -> ContT r m a
+        cont_t $ |fa_mr|                // fa_mr: a -> m r
+        let fa_cmb = |a| (              // fa_cmb: a -> ContT r m b  (exit function)
+            cont_t $ |fb_mr|            // fb_mr: b -> m r (ignored)
+            fa_mr(a)                    // ignores fb_mr and calls the final continuation function
+        );
+        let cma = fa_cmb_cma(fa_cmb);
+        cma.run_cont_t(fa_mr)
+    );
+}

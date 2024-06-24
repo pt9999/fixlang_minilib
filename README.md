@@ -44,6 +44,7 @@ This library is still in alpha stage.
   - SVG
 - Monad
   - State / Reader / Writer Monad
+  - Error / Except / Continuation Monad
   - Functor for Monad (map_m, foreach_m)
 - Networking
   - TCP/IP Socket (IPv4 only)

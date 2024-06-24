@@ -11,19 +11,20 @@ base64_decode = |str| (
                 ._filter_array(|b64| b64 != 0xFF_U8);
     let src_size = src.get_size;
     let dest_size = src_size * 3 / 4;
+    let dest = Array::fill(dest_size, 0_U8);
     let dest = loop(
-        (Array::empty(dest_size), 0), |(dest, isrc)|
-        if isrc + 1 >= src_size { break $ dest };
-        let b0 = src.@(isrc);
-        let b1 = src.@(isrc + 1);
-        let dest = dest.push_back(b0.shift_left(2_U8).bit_or(b1.shift_right(4_U8)));
-        if isrc + 2 >= src_size { break $ dest };
-        let b2 = src.@(isrc + 2);
-        let dest = dest.push_back(b1.bit_and(0x0F_U8).shift_left(4_U8).bit_or(b2.shift_right(2_U8)));
-        if isrc + 3 >= src_size { break $ dest };
-        let b3 = src.@(isrc + 3);
-        let dest = dest.push_back(b2.bit_and(0x03_U8).shift_left(6_U8).bit_or(b3));
-        continue $ (dest, isrc + 4)
+        (dest, 0, 0), |(dest, src_idx, dest_idx)|
+        if src_idx + 1 >= src_size { break $ dest };
+        let b0 = src.@(src_idx);
+        let b1 = src.@(src_idx + 1);
+        let dest = dest.set(dest_idx, b0.shift_left(2_U8).bit_or(b1.shift_right(4_U8)));
+        if src_idx + 2 >= src_size { break $ dest };
+        let b2 = src.@(src_idx + 2);
+        let dest = dest.set(dest_idx + 1, b1.bit_and(0x0F_U8).shift_left(4_U8).bit_or(b2.shift_right(2_U8)));
+        if src_idx + 3 >= src_size { break $ dest };
+        let b3 = src.@(src_idx + 3);
+        let dest = dest.set(dest_idx + 2, b2.bit_and(0x03_U8).shift_left(6_U8).bit_or(b3));
+        continue $ (dest, src_idx + 4, dest_idx + 3)
     );
     eval assert_eq(|_| "dest_size mismatch", dest_size, dest.get_size);
     ok $ dest

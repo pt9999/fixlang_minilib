@@ -109,6 +109,10 @@ Simple XML Model.
 
 A Channel that can be used for the communication of threads.
 
+### [module Minilib.IO.Errno (lib/io/errno.fix)](lib/io/errno.md)
+
+Functions for `errno` which is set by system calls and some library functions.
+
 ### [module Minilib.IO.FileSystem (lib/io/file_system.fix)](lib/io/file_system.md)
 
 File system module. For example, finding files, checks if file or directory exists,

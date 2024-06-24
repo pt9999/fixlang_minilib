@@ -14,6 +14,8 @@ import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Text.Unicode;
 
 trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
 
@@ -342,11 +344,46 @@ decode_string: [m: MonadReadByte] m String;
 decode_string = (
     let (identifier, contents) = *decode_primitive;
     let tag = identifier.@tag;
-    if tag != tag_printable_string &&
-       tag != tag_utf8_string {
-        error $ [tag].format("tag mismatch: expected=(string) actual={}")
+    if tag == tag_utf8_string
+    {
+        pure $ contents._unsafe_to_string
     };
-    pure $ contents._unsafe_to_string // OK?
+    if tag == tag_ia5_string
+    {
+        // ISO 646 (IA5) characters are almost identical to ASCII character set.
+        pure $ contents._unsafe_to_string
+    };
+    if tag == tag_printable_string
+    {
+        // PrintableString is restricted subset of ASCII character set.
+        pure $ contents._unsafe_to_string
+    };
+    if tag == tag_t61_string
+    {
+        let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
+        eval if _8bit_chars.get_size > 0 {
+            debug_eprintln("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
+        } else { () };
+        pure $ contents._unsafe_to_string // OK?
+    };
+    if tag == tag_universal_string
+    {
+        eval debug_eprintln("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
+        // implemented but not tested
+        let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
+        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+        pure $ u8array._unsafe_to_string
+    };
+    if tag == tag_bmp_string
+    {
+        eval debug_eprintln("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
+        // implemented but not tested
+        let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
+        let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
+        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+        pure $ u8array._unsafe_to_string
+    };
+    error $ [tag].format("tag mismatch: expected=(string) actual={}")
 );
 
 impl String: DecodeDer {

@@ -3,12 +3,15 @@ module Main;
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1.Der;
 import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.Pem;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
+import Minilib.Thread.Time;
 import Minilib.Testing.UnitTest;
 
 dump_triplets: Path -> IOFail ();
@@ -43,22 +46,66 @@ dump_triplets = |path| (
 );
 
 
-dump_certificate: Path -> IOFail Certificate;
-dump_certificate = |path| (
+read_certificate_der: Path -> IOFail Certificate;
+read_certificate_der = |path| (
     let bytes = *read_file_bytes(path);
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let decode_certificate: StateT ByteBuffer IOFail Certificate = do {
-        decode_obj
-    };
-    decode_certificate.run_state_t(buf).map(@0)
+    from_bytes(bytes).from_result
+);
+
+read_certificates_pem: Path -> IOFail (Array Certificate);
+read_certificates_pem = |path| (
+    let contents = *read_file_string(path);
+    let entries = *parse_pem_entries(contents).from_result;
+    let certificates = *entries.map_m(|entry|
+        from_bytes(entry.@bytes)
+    ).from_result;
+    pure $ certificates
+);
+
+perf_certificates_pem: Path -> IOFail (Array Certificate);
+perf_certificates_pem = |path| (
+    let contents = *read_file_string(path);
+    let _ = *timeit(
+        "parse", |_|
+        let _: Result ErrMsg () = do {
+            let entries = *parse_pem_entries(contents);
+            let certificates: Array Certificate = *entries.map_m(|entry|
+                from_bytes(entry.@bytes)
+            );
+            pure()
+        };
+        ()
+    ).lift;
+    pure $ []
+);
+
+
+test_dump_triplets: IOFail ();
+test_dump_triplets = (
+    let path = Path::parse(".local/tmp.cert_0.cer").as_some;
+    dump_triplets(path)
+);
+
+test_read_certificate_der: IOFail ();
+test_read_certificate_der = (
+    let path = Path::parse(".local/tmp.cert_0.cer").as_some;
+    let certificate = *read_certificate_der(path);
+    println(certificate.to_string).lift
+);
+
+test_read_certificates_pem: IOFail ();
+test_read_certificates_pem = (
+    let path = Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some;
+    let certificates = *read_certificates_pem(path);
+    println(certificates.to_string).lift
 );
 
 main: IO ();
 main = (
     do {
-        let path = Path::parse(".local/tmp.cert_0.cer").as_some;
-        if false { dump_triplets(path) };
-        let certificate = *dump_certificate(path);
-        println(certificate.to_string).lift
+        //eval *test_dump_triplets;
+        //eval *test_read_certificate_der;
+        eval *test_read_certificates_pem;
+        pure()
     }.try(eprintln)
 );

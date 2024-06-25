@@ -325,7 +325,18 @@ impl AlgorithmIdentifier: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
             let algorithm = *decode_obj;
-            let parameters = [];    // TODO
+            let parameters = *do { // ANY DEFINED BY algorithm OPTIONAL
+                let start_pos = *get_pos;
+                let identifier = *decode_identifier;
+                let length = *decode_length;
+                let contents = *decode_contents(length);
+                let end_pos = *get_pos;
+                eval *set_pos(start_pos);
+                decode_contents(end_pos - start_pos)
+            }.catch(|errmes|
+                if errmes == _Err_EndOfStream { pure $ [] };
+                error $ errmes
+            );
             pure $ AlgorithmIdentifier {
                 algorithm: algorithm,
                 parameters: parameters,

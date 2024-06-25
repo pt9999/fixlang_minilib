@@ -1,4 +1,4 @@
-module Main;
+module Minilib.Crypto.Cert.X509Signature;
 
 import Debug;
 import HashMap;
@@ -56,29 +56,3 @@ validate_signature_pkcs1_v1_5 = |hashspec, public_key, certificate| (
     Pkcs1::rsassa_pkcs1_v1_5_verify((n, e), message, signature, hashspec)
 );
 
-read_certificates_pem: Path -> IOFail (Array Certificate);
-read_certificates_pem = |path| (
-    let contents = *read_file_string(path);
-    let entries = *parse_pem_entries(contents).from_result;
-    let certificates = *entries.map_m(|entry|
-        from_bytes(entry.@bytes)
-    ).from_result;
-    pure $ certificates
-);
-
-test1: IOFail ();
-test1 = (
-    let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_CA.pem").as_some;   // sha-1WithRSAEncryption
-    //let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_G2.pem").as_some;   // sha256WithRSAEncryption
-    let certificates = *read_certificates_pem(path);
-    if certificates.get_size != 1 { error $ "read_certificates_pem failed" };
-    let certificate = certificates.@(0);
-    let public_key = certificate.@tbs_certificate.@subject_public_key_info;
-    eval *certificate.validate_signature(public_key).from_result;
-    println("validation ok").lift
-);
-
-main: IO ();
-main = do {
-    test1
-}.try(eprintln);

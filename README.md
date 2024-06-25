@@ -24,6 +24,7 @@ This library is still in alpha stage.
   - Secure hash function (MD5/SHA-1/SHA-256/SHA-512)
   - Message authentication code (HMAC)
 - Encoding
+  - BASE64
   - Binary
   - JSON
   - XML

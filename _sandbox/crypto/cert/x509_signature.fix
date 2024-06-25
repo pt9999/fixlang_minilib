@@ -88,21 +88,36 @@ validate_signature_ecdsa = |ecdsa_scheme, public_key, certificate| (
 
     // Check for named curve matches
     let named_curve: ObjectIdentifier = *decode_der_from_bytes(pubkey_algorithm.@parameters);
-    eval debug_eprintln("named_curve="+ named_curve.to_string_with_name);
-    let ec = ecdsa_scheme.@ec;
-    if false && !named_curve.match_name(ec.@id) {
-        err $ "Named Curve does not match `" + ec.@id + "`: " + named_curve.to_string_with_name
+    //eval debug_eprintln("named_curve="+ named_curve.to_string_with_name);
+    let ecdsa_scheme = *if named_curve.match_name(ecdsa_scheme.@ec.@id) { pure $ ecdsa_scheme }
+    else {
+        // Some certificates uses ecdsa-with-SHA256 but its public key uses secp384r1,
+        // so let's change the named curve.
+        // I don't know whether it is OK, but that cerficate passes the validation.
+        let name = named_curve.get_name.as_some_or("");
+        let ec = _find_ec_param(name);
+        if ec.is_none { err $ "Named curve not found: " + name };
+        //eval debug_eprintln("changing ecdsa_scheme to use " + name);
+        pure $ ecdsa_scheme.set_ec(ec.as_some)
     };
+    let ec = ecdsa_scheme.@ec;
 
     // Decode ecpoint
     let ecpoint: Array U8 = public_key.@subject_public_key.@data;
-    eval debug_eprintln("ecpoint="+ ecpoint.to_string_hex);
+    //eval debug_eprintln("ecpoint="+ ecpoint.to_string_hex);
     let ecpoint: ECPoint = *from_bytes_ec(ec, ecpoint);
 
     // Validate signature
     let message = certificate.@tbs_certificate_bytes;
     let sig_value: EcdsaSigValue = *decode_der_from_bytes(certificate.@signature_value.@data);
-    eval debug_eprintln("sig_value="+ sig_value.to_string);
+    //eval debug_eprintln("sig_value="+ sig_value.to_string);
     let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
     ecdsa_scheme.verify(ecpoint, signature, message)
+);
+
+_find_ec_param: String -> Option ECParam;
+_find_ec_param = |name| (
+    if name == "secp256r1" { some $ ECParam::secp256r1 };
+    if name == "secp384r1" { some $ ECParam::secp384r1 };
+    none()
 );

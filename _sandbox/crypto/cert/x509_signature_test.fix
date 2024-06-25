@@ -1,10 +1,13 @@
 module Main;
 
 import Debug;
+import AsyncTask;
 
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Signature;
 import Minilib.Monad.FunctorM;
+import Minilib.Thread.TaskPool;
+import Minilib.Thread.Future;
 import Minilib.Testing.UnitTest;
 
 test_validate_self_signed_certificate: TestCase;
@@ -43,11 +46,41 @@ test_validate_ca_certificates = (
     assert_equal("error_count", 0, error_count)
 );
 
+test_validate_ca_certificates_mt: TestCase;
+test_validate_ca_certificates_mt = (
+    make_test("test_validate_ca_certificates_mt") $ |_|
+    let path = Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some;
+    let certificates = *read_certificates_from_pem_file(path);
+    let task_count = number_of_processors;
+    //eval debug_eprintln("task_count=" + task_count.to_string);
+    let task_pool = *TaskPool::make(task_count).lift;
+    let validate: Certificate -> IO (Result ErrMsg (), String) = |certificate| (
+        eval *pure(); // make it lazy
+        let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+        let res = certificate.validate_signature(public_key);
+        let subject = certificate.@tbs_certificate.@subject;
+        pure $ (res, subject.to_string)
+    );
+    //eval debug_eprintln("creating futures start");
+    let futures = *certificates.to_iter.map_m(|certificate|
+        Future::make(task_pool, validate(certificate))
+    );
+    //eval debug_eprintln("creating futures end");
+    let results = *futures.map_m(|future|
+        let (res, subject) = *future.get;
+        eval *println(res.to_string + ": " + subject.to_string).lift;
+        pure $ res
+    );
+    let error_count = results.map(|res| if res.is_err { 1 } else { 0 }).sum;
+    assert_equal("error_count", 0, error_count)
+);
+
 main: IO ();
 main = (
     [
-        test_validate_self_signed_certificate,
+        //test_validate_self_signed_certificate,
         //test_validate_ca_certificates,
+        test_validate_ca_certificates_mt,
     ]
     .run_test_driver
 );

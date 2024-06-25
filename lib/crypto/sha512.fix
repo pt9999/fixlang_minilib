@@ -1,0 +1,295 @@
+// SHA-512 secure hash function.
+//
+// Implemented from specification of FIPS PUB 180-4:
+// https://csrc.nist.gov/files/pubs/fips/180-4/final/docs/fips180-4.pdf
+//
+// NOTE: FIPS 180-4 (2012) is superseded by FIPS 180-4 (2015), with the only change being
+// made in the Applicability Clause. There are no changes to the technical specifications.
+// FIPS 180-4 (2015):
+// http://dx.doi.org/10.6028/NIST.FIPS.180-4
+//
+module Minilib.Crypto.SHA512;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+
+// `SHA512::digest(bytes)` computes SHA-512 secure hash function of `bytes`.
+digest: Array U8 -> Array U8;
+digest = |bytes| (
+    SHA512::empty
+    .set_hash(_init_hash_sha512)
+    .update(bytes)
+    .finalize
+);
+
+namespace SHA384 {
+    // `SHA384::digest(bytes)` computes SHA-384 secure hash function of `bytes`.
+    digest: Array U8 -> Array U8;
+    digest = |bytes| (
+        SHA512::empty
+        .set_hash(_init_hash_sha384)
+        .update(bytes)
+        .finalize
+        .truncate(48)
+    );
+}
+
+// SHA-512 hasher.
+// Usually it is sufficient to simply call `SHA512:digest(bytes)` without using this structure.
+type SHA512 = unbox struct {
+    hash: Array U64,
+    msglen: U64,
+    msgbuf: Array U8
+};
+
+// An empty SHA-512 hasher.
+empty: SHA512;
+empty = SHA512 {
+    hash: [],
+    msglen: 0_U64,
+    msgbuf: Array::empty(128)
+};
+
+
+// `sha512.update(bytes)` processes `bytes`, and updates its internal state.
+update: Array U8 -> SHA512 -> SHA512;
+update = |bytes, sha512| (
+    sha512._update_inner(bytes, bytes.get_size.to_U64)
+);
+
+// `sha512._update_inner(input, msglen_inc)` updates the message buffer with input.
+// And it increments the message length by `msglen_inc`.
+// When the message buffer is full (128 bytes), it updates hash with the message
+// and clears the messsage buffer.
+_update_inner: Array U8 -> U64 -> SHA512 -> SHA512;
+_update_inner = |input, msglen_inc, sha512| (
+    let n_input = input.get_size;
+    let n_msgbuf = 128;
+    let sha512 = loop(
+        (sha512, 0), |(sha512, i_input)|
+        if i_input >= n_input {
+            break $ sha512
+        };
+        let sha512 = sha512.mod_msgbuf(push_back(input.@(i_input)));
+        let i_input = i_input + 1;
+        if sha512.@msgbuf.get_size < n_msgbuf {
+            continue $ (sha512, i_input)
+        };
+        //let message = ByteBuffer::make(sha512.@msgbuf, ByteOrder::big_endian()).to_u64_array;
+        //let message = U32_U8::convert(sha512.@msgbuf, ByteOrder::big_endian());
+        let message = Array::from_map(sha512.@msgbuf.get_size / 8, |i| sha512.@msgbuf.get_u64_be(i * 8));
+        let sha512 = sha512.mod_hash(_update_hash(message));
+        let sha512 = sha512.mod_msgbuf(truncate(0));
+        continue $ (sha512, i_input)
+    );
+    let sha512 = sha512.mod_msglen(|len| len + msglen_inc);
+    sha512
+);
+
+// `sha512.finalize` retrieves a final SHA-512 hash value.
+finalize: SHA512 -> Array U8;
+finalize = |sha512| (
+    // 5.1 Padding the Message 
+    let sha512 = sha512._update_inner([0x80_U8], 0_U64);
+    let sha512 = loop(
+        sha512, |sha512|
+        if sha512.@msgbuf.get_size == 896/8 {
+            break $ sha512
+        };
+        continue $ sha512._update_inner([0x00_U8], 0_U64)
+    );
+    let msglen_bits: U64 = sha512.@msglen * 8_U64;
+    let buf = ByteBuffer::fill(16, 0_U8, ByteOrder::big_endian());
+    let buf = buf.set_u64(8, msglen_bits);
+    let sha512 = sha512._update_inner(buf.to_u8_array, 0_U64);
+
+    eval assert(|_| "padding failed", sha512.@msgbuf.get_size == 0);
+
+    //let digest = ByteBuffer::from_u64_array(sha512.@hash, ByteOrder::big_endian()).to_u8_array;
+    //let digest = U8_U32::convert(sha512.@hash, ByteOrder::big_endian());
+    let hash = sha512.@hash;
+    let digest = Iterator::range(0, hash.get_size).fold(
+        Array::fill(hash.get_size * 8, 0_U8), |bytes, i|
+        bytes.set_u64_be(i * 8, hash.@(i))
+    );
+    digest
+);
+
+//---------------------------------------------------------------
+// implementation details
+//---------------------------------------------------------------
+
+// 2.2.2 Symbols and Operations 
+// bitwise complement
+_bit_not: U64 -> U64;
+_bit_not = |x| x.bit_xor(0xFFFFFFFFFFFFFFFF_U64);
+
+// rotate left
+_rotl: U64 -> U64 -> U64;
+_rotl = |n, x| (
+    x.shift_left(n).bit_or(x.shift_right(64_U64 - n))
+);
+
+// rotate right
+_rotr: U64 -> U64 -> U64;
+_rotr = |n, x| (
+    x.shift_right(n).bit_or(x.shift_left(64_U64 - n))
+);
+
+// shift right
+_shr: U64 -> U64 -> U64;
+_shr = |n, x| (
+    x.shift_right(n)
+);
+
+// 4.1.3 SHA-384, SHA-512, SHA-512/224 and SHA-512/256 Functions
+_ch: U64 -> U64 -> U64 -> U64;
+_ch = |x, y, z| (
+    x.bit_and(y).bit_xor(x._bit_not.bit_and(z)) 
+);
+
+_maj: U64 -> U64 -> U64 -> U64;
+_maj = |x, y, z| (
+    x.bit_and(y).bit_xor(x.bit_and(z)).bit_xor(y.bit_and(z))
+);
+
+_large_sigma_0: U64 -> U64;
+_large_sigma_0 = |x| (
+    x._rotr(28_U64).bit_xor(x._rotr(34_U64)).bit_xor(x._rotr(39_U64))
+);
+
+_large_sigma_1: U64 -> U64;
+_large_sigma_1 = |x| (
+    x._rotr(14_U64).bit_xor(x._rotr(18_U64)).bit_xor(x._rotr(41_U64))
+);
+
+_small_sigma_0: U64 -> U64;
+_small_sigma_0 = |x| (
+    x._rotr(1_U64).bit_xor(x._rotr(8_U64)).bit_xor(x._shr(7_U64))
+);
+
+_small_sigma_1: U64 -> U64;
+_small_sigma_1 = |x| (
+    x._rotr(19_U64).bit_xor(x._rotr(61_U64)).bit_xor(x._shr(6_U64))
+);
+
+
+// 4.2.3 SHA-384, SHA-512, SHA-512/224 and SHA-512/256 Constants
+
+_k: Array U64;
+_k = [
+    0x428a2f98d728ae22_U64, 0x7137449123ef65cd_U64, 0xb5c0fbcfec4d3b2f_U64, 0xe9b5dba58189dbbc_U64,
+    0x3956c25bf348b538_U64, 0x59f111f1b605d019_U64, 0x923f82a4af194f9b_U64, 0xab1c5ed5da6d8118_U64,
+    0xd807aa98a3030242_U64, 0x12835b0145706fbe_U64, 0x243185be4ee4b28c_U64, 0x550c7dc3d5ffb4e2_U64,
+    0x72be5d74f27b896f_U64, 0x80deb1fe3b1696b1_U64, 0x9bdc06a725c71235_U64, 0xc19bf174cf692694_U64,
+    0xe49b69c19ef14ad2_U64, 0xefbe4786384f25e3_U64, 0x0fc19dc68b8cd5b5_U64, 0x240ca1cc77ac9c65_U64,
+    0x2de92c6f592b0275_U64, 0x4a7484aa6ea6e483_U64, 0x5cb0a9dcbd41fbd4_U64, 0x76f988da831153b5_U64,
+    0x983e5152ee66dfab_U64, 0xa831c66d2db43210_U64, 0xb00327c898fb213f_U64, 0xbf597fc7beef0ee4_U64,
+    0xc6e00bf33da88fc2_U64, 0xd5a79147930aa725_U64, 0x06ca6351e003826f_U64, 0x142929670a0e6e70_U64,
+    0x27b70a8546d22ffc_U64, 0x2e1b21385c26c926_U64, 0x4d2c6dfc5ac42aed_U64, 0x53380d139d95b3df_U64,
+    0x650a73548baf63de_U64, 0x766a0abb3c77b2a8_U64, 0x81c2c92e47edaee6_U64, 0x92722c851482353b_U64,
+    0xa2bfe8a14cf10364_U64, 0xa81a664bbc423001_U64, 0xc24b8b70d0f89791_U64, 0xc76c51a30654be30_U64,
+    0xd192e819d6ef5218_U64, 0xd69906245565a910_U64, 0xf40e35855771202a_U64, 0x106aa07032bbd1b8_U64,
+    0x19a4c116b8d2d0c8_U64, 0x1e376c085141ab53_U64, 0x2748774cdf8eeb99_U64, 0x34b0bcb5e19b48a8_U64,
+    0x391c0cb3c5c95a63_U64, 0x4ed8aa4ae3418acb_U64, 0x5b9cca4f7763e373_U64, 0x682e6ff3d6b2b8a3_U64,
+    0x748f82ee5defb2fc_U64, 0x78a5636f43172f60_U64, 0x84c87814a1f0ab72_U64, 0x8cc702081a6439ec_U64,
+    0x90befffa23631e28_U64, 0xa4506cebde82bde9_U64, 0xbef9a3f7b2c67915_U64, 0xc67178f2e372532b_U64,
+    0xca273eceea26619c_U64, 0xd186b8c721c0c207_U64, 0xeada7dd6cde0eb1e_U64, 0xf57d4f7fee6ed178_U64,
+    0x06f067aa72176fba_U64, 0x0a637dc5a2c898a6_U64, 0x113f9804bef90dae_U64, 0x1b710b35131c471b_U64,
+    0x28db77f523047d84_U64, 0x32caab7b40c72493_U64, 0x3c9ebe0a15c9bebc_U64, 0x431d67c49c100d4c_U64,
+    0x4cc5d4becb3e42b6_U64, 0x597f299cfc657e2a_U64, 0x5fcb6fab3ad6faec_U64, 0x6c44198c4a475817_U64,
+];
+
+// 5.3 Setting the Initial Hash Value (H(0))
+// 5.3.4 SHA-384
+_init_hash_sha384: Array U64;
+_init_hash_sha384 = [
+    0xcbbb9d5dc1059ed8_U64,
+    0x629a292a367cd507_U64,
+    0x9159015a3070dd17_U64,
+    0x152fecd8f70e5939_U64,
+    0x67332667ffc00b31_U64,
+    0x8eb44a8768581511_U64,
+    0xdb0c2e0d64f98fa7_U64,
+    0x47b5481dbefa4fa4_U64,
+];
+
+// 5.3.5 SHA-512
+_init_hash_sha512: Array U64;
+_init_hash_sha512 = [
+    0x6a09e667f3bcc908_U64,
+    0xbb67ae8584caa73b_U64,
+    0x3c6ef372fe94f82b_U64,
+    0xa54ff53a5f1d36f1_U64,
+    0x510e527fade682d1_U64,
+    0x9b05688c2b3e6c1f_U64,
+    0x1f83d9abfb41bd6b_U64,
+    0x5be0cd19137e2179_U64,
+];
+
+// 6.2.2 SHA-512 Hash Computation
+_update_hash: Array U64 -> Array U64 -> Array U64;
+_update_hash = |message, hash| (
+    eval assert (|_| "invalid size: message", message.get_size == 16);
+    eval assert (|_| "invalid size: hash", hash.get_size == 8);
+    let old_hash = hash;
+
+    let w = Array::empty(80);
+    let w = loop(
+        (w, 0), |(w, t)|
+        if t >= 80 {
+            break $ w
+        };
+        if t < 16 { 
+            let w = w.push_back(message.@(t));
+            continue $ (w, t + 1)
+        };
+        let tmp = _small_sigma_1(w.@(t-2)) + w.@(t-7) + _small_sigma_0(w.@(t-15)) + w.@(t-16);
+        let w = w.push_back(tmp);
+        continue $ (w, t + 1)
+    );
+
+    let hash = loop(
+        (hash, 0), |(hash, t)|
+        if t >= 80 {
+            break $ hash
+        };
+        let a = hash.@(0);
+        let b = hash.@(1);
+        let c = hash.@(2);
+        let d = hash.@(3);
+        let e = hash.@(4);
+        let f = hash.@(5);
+        let g = hash.@(6);
+        let h = hash.@(7);
+
+        let tmp1 = h + _large_sigma_1(e) + _ch(e,f,g) + _k.@(t) + w.@(t);
+        let tmp2 = _large_sigma_0(a) + _maj(a,b,c);
+        let h = g;
+        let g = f;
+        let f = e;
+        let e = d + tmp1;
+        let d = c;
+        let c = b;
+        let b = a;
+        let a = tmp1 + tmp2;
+        let hash = hash
+            .set(0, a)
+            .set(1, b)
+            .set(2, c)
+            .set(3, d)
+            .set(4, e)
+            .set(5, f)
+            .set(6, g)
+            .set(7, h);
+        continue $ (hash, t + 1)
+    );
+    let hash = loop (
+        (hash, 0), |(hash, i)|
+        if i >= 8 { break $ hash };
+        let hash = hash.set(i, hash.@(i) + old_hash.@(i));
+        continue $ (hash, i + 1)
+    );
+    hash
+);

@@ -5,6 +5,7 @@ module Minilib.IO.FileSystem;
 import Debug;
 
 import Minilib.Encoding.Binary;
+import Minilib.IO.Errno;
 import Minilib.IO.Platform;
 import Minilib.IO.Path;
 import Minilib.Text.StringEx;
@@ -47,13 +48,14 @@ namespace FileStat {
     stat = |file_path| (
         let _ = *pure(); // make it lazy
         let statbuf = ByteBuffer::fill(_def_struct_stat.@sizeof_struct_stat, 0_U8, Platform::byte_order);
+        eval *clear_errno.lift;
         let res = statbuf.borrow_ptr(|p_stat|
             file_path.borrow_c_str(|p_filepath|
                     CALL_C[I32 stat(Ptr, Ptr), p_filepath, p_stat]
             )
         );
         if res != 0_I32 {
-            throw("stat failed!: some error occurred in stat.")
+            throw("stat failed!: " + *get_last_error.lift)
         };
         pure $ FileStat { data: statbuf }
     );
@@ -232,19 +234,21 @@ type DirHandle = unbox struct {
 
 _opendir: String -> IOFail DirHandle;
 _opendir = |dir_path| (
-    let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let dirp = dir_path.borrow_c_str(|p_path|
         CALL_C[Ptr opendir(Ptr), p_path]
     );
     if dirp == nullptr {
-        throw("opendir failed!: some error occurred in opendir. dir_path=" + dir_path)
+        throw("opendir failed!: " + *get_last_error.lift
+                + "\ndir_path=" + dir_path)
     };
     pure $ DirHandle {
         dtor: Destructor::make(dirp, |dirp|
             //eval debug_eprintln ("closing dir handle");
+            eval clear_errno._unsafe_perform;
             let res = CALL_C[I32 closedir(Ptr), dirp];
             if res != 0_I32 {
-                debug_eprintln("closedir failed: res=" + res.to_string)
+                debug_eprintln("closedir failed!: " + get_last_error._unsafe_perform)
             } else {
                 ()
             }
@@ -307,13 +311,13 @@ make_dirs = |dir_path, mode| (
 // This mode is modified by the process's umask in the usual way.
 mkdir: String -> Option U32 -> IOFail ();
 mkdir = |path, mode| (
-    let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let mode = if mode.is_some { mode.as_some } else { /* 0777 = */ 511_U32 };
     let res = path.borrow_c_str(|p_path|
         CALL_C[I32 mkdir(Ptr, U32), p_path, mode]
     );
     if res != 0_I32 {
-        throw("mkdir failed!: some error occurred in mkdir.")
+        throw("mkdir failed!: " + *get_last_error.lift)
     };
     pure()
 );
@@ -321,12 +325,12 @@ mkdir = |path, mode| (
 // `rmdir(path)` deletes a directory, which must be empty.
 rmdir: String -> IOFail ();
 rmdir = |path| (
-    let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let res = path.borrow_c_str(|p_path|
         CALL_C[I32 rmdir(Ptr), p_path]
     );
     if res != 0_I32 {
-        throw("rmdir failed!: some error occurred in rmdir.")
+        throw("rmdir failed!: " + *get_last_error.lift)
     };
     pure()
 );
@@ -340,10 +344,10 @@ rmdir = |path| (
 // For details, see Linux manual page for [fflush()](https://man7.org/linux/man-pages/man3/fflush.3.html).
 fflush : IOHandle -> IOFail ();
 fflush = |handle| (
-    let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
     if res < 0_I32 {
-        throw("flush failed!: some error occurred in fflush.")
+        throw("fflush failed!: " + *get_last_error.lift)
     };
     pure()
 );
@@ -365,11 +369,12 @@ set_unbuffered_mode = |handle| (
 creat: String -> U32 -> IOFail I32;
 creat = |path, mode| (
     let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let fd = path.borrow_c_str(|p_path|
         CALL_C[I32 creat(Ptr, U32), p_path, mode]
     );
     if fd == -1_I32 {
-        throw("creat failed!: some error occurred in creat.")
+        throw("creat failed!: " + *get_last_error.lift)
     };
     pure $ fd
 );
@@ -379,11 +384,12 @@ creat = |path, mode| (
 unlink: String -> IOFail ();
 unlink = |path| (
     let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let res = path.borrow_c_str(|p_path|
         CALL_C[I32 unlink(Ptr), p_path]
     );
     if res == -1_I32 {
-        throw("unlink failed!: some error occurred in unlink.")
+        throw("unlink failed!: " + *get_last_error.lift)
     };
     pure()
 );
@@ -393,11 +399,12 @@ unlink = |path| (
 fdopen: I32 -> String -> IOFail IOHandle;
 fdopen = |fd, mode| (
     let _ = *pure();    // make it lazy
+    eval *clear_errno.lift;
     let file_ptr = mode.borrow_c_str(|p_mode|
         CALL_C[Ptr fdopen(I32, Ptr), fd, p_mode]
     );
     if file_ptr == nullptr {
-        throw("fdopen failed!: some error occurred in fdopen.")
+        throw("fdopen failed!: " + *get_last_error.lift)
     };
     pure $ IOHandle::from_file_ptr $ file_ptr
 );
@@ -410,11 +417,12 @@ pipe: IOFail (I32, I32);
 pipe = (
     let _ = *pure();    // make it lazy
     let pipefd: Array I32 = Array::fill(2, 0_I32);
+    eval *clear_errno.lift;
     let res = pipefd.borrow_ptr(|p_pipefd|
         CALL_C[I32 pipe(Ptr), p_pipefd]
     );
     if res == -1_I32 {
-        throw("pipe failed!: some error occurred in pipe.")
+        throw("pipe failed!: " + *get_last_error.lift)
     };
     let read_fd = pipefd.@(0);
     let write_fd = pipefd.@(1);

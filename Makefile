@@ -19,7 +19,7 @@ TOOLS = bin/fixautolink bin/fixautotest bin/fixdoc
 tools: $(TOOLS)
 
 bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/file_system.fix \
-				 lib/io/platform.fix lib/io/path.fix lib/text/simple_parser.fix lib/text/string_ex.fix
+				 lib/io/platform.fix lib/io/path.fix lib/io/errno.fix lib/text/simple_parser.fix lib/text/string_ex.fix
 	mkdir -p bin
 	fix build -o $@ -f $^ $(OPT_TOOLS)
 

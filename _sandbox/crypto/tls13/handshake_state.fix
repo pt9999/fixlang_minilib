@@ -5,7 +5,7 @@ import AsyncTask;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
-import Minilib.Crypto.Tls13.RandGen;
+import Minilib.Monad.Random;
 import Minilib.Crypto.Tls13.KeyAgreement;
 import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Crypto.Tls13.Extensions;
@@ -59,7 +59,7 @@ namespace HandshakeState {
     make: [m: Monad] m HandshakeState;
     make = pure $ before_client_hello $ BeforeClientHello { dummy: () };
 
-    start_handshake: [m: MonadRandGen, m: MonadError] String -> HandshakeState -> m HandshakeState;
+    start_handshake: [m: MonadRandom, m: MonadError] String -> HandshakeState -> m HandshakeState;
     start_handshake = |server_name, hstate| (
         if hstate.is_before_client_hello { hstate.as_before_client_hello.start_handshake(server_name) };
         error $ "start_handshake: wrong hstate"
@@ -154,10 +154,10 @@ impl BeforeClientHello: ToString {
 }
 
 namespace BeforeClientHello {
-    start_handshake: [m: MonadRandGen] String -> BeforeClientHello -> m HandshakeState;
+    start_handshake: [m: MonadRandom] String -> BeforeClientHello -> m HandshakeState;
     start_handshake = |server_name, _| (
         let hello = ClientHello::empty;
-        let hello = hello.init_random(*randgen_bytes(32));
+        let hello = hello.init_random(*generate_random_bytes(32));
         // init server_name
         let hello = hello.add_extension(Extension::server_name $
             ServerNameList::make([

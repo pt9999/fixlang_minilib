@@ -15,7 +15,7 @@ module Minilib.Crypto.Tls13.ECDSA;
 import Character;
 import Debug;
 
-import Minilib.Crypto.Tls13.RandGen;
+import Minilib.Monad.Random;
 import Minilib.Crypto.SHA256;
 import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
@@ -77,7 +77,7 @@ namespace ECInt {
     repeat_by_ECInt = repeat_by_BigInt;
 
     // Generates random ECInt `r` such that `begin <= r && r < end`.
-    generate_ECInt_range: [m: MonadRandGen] ECInt -> ECInt -> m ECInt;
+    generate_ECInt_range: [m: MonadRandom] ECInt -> ECInt -> m ECInt;
     generate_ECInt_range = |begin, end| (
         if begin > end {
             generate_ECInt_range(end, begin)      // swap range and retry
@@ -85,7 +85,7 @@ namespace ECInt {
         let n = end - begin;
         eval assert(|_| "invalid range", n > zero);
         let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
-        let bytes = *randgen_bytes(num_bits / 8);
+        let bytes = *generate_random_bytes(num_bits / 8);
         let r = from_bytes(bytes).as_ok;
         if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
             generate_ECInt_range(begin, end)      // try again
@@ -384,7 +384,7 @@ impl ECKeyPair: ToString {
 
 namespace ECKeyPair {
     // Generates a keypair from a RandGen and an ECParam.
-    generate_keypair: [m: MonadRandGen] ECParam -> m ECKeyPair;
+    generate_keypair: [m: MonadRandom] ECParam -> m ECKeyPair;
     generate_keypair = |ec| (
         let n = ec.@n;
         let d = *generate_ECInt_range(
@@ -476,7 +476,7 @@ namespace ECDSAScheme {
     );
 
     // 4.1.3 Signing Operation
-    sign: [m: MonadRandGen, m: MonadError] ECKeyPair -> Array U8 -> ECDSAScheme -> m ECDSASignature;
+    sign: [m: MonadRandom, m: MonadError] ECKeyPair -> Array U8 -> ECDSAScheme -> m ECDSASignature;
     sign = |key_pair, message, scheme| (
         // 1. Select an ephemeral elliptic curve key pair (k, R)
         let ec = scheme.@ec;

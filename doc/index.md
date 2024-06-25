@@ -87,6 +87,10 @@ SHA-256 secure hash function.
 
 SHA-512 secure hash function.
 
+### [module Minilib.Encoding.Base64 (lib/encoding/base64.fix)](lib/encoding/base64.md)
+
+BASE64 encoding and decoding
+
 ### [module Minilib.Encoding.Binary (lib/encoding/binary.fix)](lib/encoding/binary.md)
 
 Binary utility, such as:

@@ -21,6 +21,38 @@ import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
+read_certificate_from_file: Path -> IOFail Certificate;
+read_certificate_from_file = |path| (
+    let certificates = *read_certificates_from_file(path);
+    if certificates.get_size == 0 {
+        throw $ "No certificates found: " + path.to_string
+    };
+    if certificates.get_size >= 2 {
+        throw $ "two or more certificates found: " + path.to_string
+    };
+    pure $ certificates.@(0)
+);
+
+read_certificates_from_file: Path -> IOFail (Array Certificate);
+read_certificates_from_file = |path| (
+    let filepath = path.to_string.to_lower;
+    if filepath.ends_with(".pem") ||
+       filepath.ends_with(".crt") {
+        read_certificates_from_pem_file(path)
+    };
+    if filepath.ends_with(".cer") ||
+       filepath.ends_with(".der") {
+        read_certificate_from_der_file(path).map(|x|[x])
+    };
+    throw $ "read_certificates_from_file: unsupported extension: " + filepath
+);
+
+read_certificate_from_der_file: Path -> IOFail Certificate;
+read_certificate_from_der_file = |path| (
+    let bytes = *read_file_bytes(path);
+    from_bytes(bytes).from_result
+);
+
 read_certificates_from_pem_file: Path -> IOFail (Array Certificate);
 read_certificates_from_pem_file = |path| (
     let contents = *read_file_string(path);

@@ -9,6 +9,7 @@ import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.Pem;
 import Minilib.Crypto.Cert.OID;
 import Minilib.Crypto.Cert.Pkcs1;
+import Minilib.Crypto.ECDSA;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -21,12 +22,15 @@ import Minilib.Testing.UnitTest;
 
 validate_signature: SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
 validate_signature = |public_key, certificate| (
-    //eval debug_eprintln("validate_signature");
     let hashspec = _find_pkcs1_v1_5_hashspec(certificate);
-    //eval debug_eprintln("hashspec=" + hashspec.is_some.to_string);
     if hashspec.is_some {
         validate_signature_pkcs1_v1_5(hashspec.as_some, public_key, certificate)
     };
+    let ecdsa_scheme = _find_ecdsa_scheme(certificate);
+    if ecdsa_scheme.is_some {
+        validate_signature_ecdsa(ecdsa_scheme.as_some, public_key, certificate)
+    };
+
     err $ "Not supported signature algorithm: " + certificate.@signature_algorithm.to_string
 );
 
@@ -48,6 +52,15 @@ _find_pkcs1_v1_5_hashspec = |certificate| (
     none()
 );
 
+_find_ecdsa_scheme: Certificate -> Option ECDSAScheme;
+_find_ecdsa_scheme = |certificate| (
+    let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
+    if signature_algorithm.match_name("ecdsa-with-SHA256") {
+        some $ ECDSAScheme::ecdsa_secp256r1_sha256
+    };
+    none()
+);
+
 validate_signature_pkcs1_v1_5: Pkcs1::HashSpec -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
 validate_signature_pkcs1_v1_5 = |hashspec, public_key, certificate| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
@@ -62,3 +75,31 @@ validate_signature_pkcs1_v1_5 = |hashspec, public_key, certificate| (
     Pkcs1::rsassa_pkcs1_v1_5_verify((n, e), message, signature, hashspec)
 );
 
+
+validate_signature_ecdsa: ECDSAScheme -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_signature_ecdsa = |ecdsa_scheme, public_key, certificate| (
+    let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+    if !pubkey_algorithm.match_name("id-ecPublicKey") {
+        err $ "Public_key algorithm does not match `id-ecPublicKey`: " + pubkey_algorithm.to_string
+    };
+
+    // Check for named curve matches
+    let named_curve: ObjectIdentifier = *decode_der_from_bytes(pubkey_algorithm.@parameters);
+    //eval debug_eprintln("named_curve="+ named_curve.to_string_with_name);
+    let ec = ecdsa_scheme.@ec;
+    if !named_curve.match_name(ec.@id) {
+        err $ "Named Curve does not match `" + ec.@id + "`: " + named_curve.to_string_with_name
+    };
+
+    // Decode ecpoint
+    let ecpoint: Array U8 = public_key.@subject_public_key.@data;
+    //eval debug_eprintln("ecpoint="+ ecpoint.to_string_hex);
+    let ecpoint: ECPoint = *from_bytes_ec(ec, ecpoint);
+
+    // Validate signature
+    let message = certificate.@tbs_certificate_bytes;
+    let sig_value: EcdsaSigValue = *decode_der_from_bytes(certificate.@signature_value.@data);
+    //eval debug_eprintln("sig_value="+ sig_value.to_string);
+    let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
+    ecdsa_scheme.verify(ecpoint, signature, message)
+);

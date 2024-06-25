@@ -1,6 +1,6 @@
 FIXAUTOLINK = ../../../bin/fixautolink
 FIXAUTOTEST = ../../../bin/fixautotest
-LIBS = -L ../../../lib -L .
+LIBS = -L ../../../lib -L . -L ../tls13
 
 OPT_BUILD = -O separated
 OPT_RUN = -O separated

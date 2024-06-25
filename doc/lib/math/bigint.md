@@ -119,3 +119,14 @@ NOTE: -8 / 3 == -2, as with the Fix language.
 
 NOTE: -8 % 3 == -2, as with the Fix language.
 
+#### `impl BigInt: FromBytes`
+
+#### `impl BigInt: ToBytes`
+
+NOTE: Unneeded zeros might be placed at the beginning
+
+#### repeat_by_BigInt: (a -> a -> a) -> a -> a -> BigInt -> a;
+
+`repeat_by_BigInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+`op` is an associative binary operation.
+

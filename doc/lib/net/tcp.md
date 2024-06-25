@@ -158,6 +158,8 @@ If no message are available at the socket, `recv()` waits for a message to arriv
 Returns the number of bytes received.
 When the socket has been shutdown, the return value will be 0.
 
+#### try_recv: I64 -> Socket -> IOFail (Option (Array U8));
+
 ### type BufferedSocket
 
 This type is a structure that wraps a `Socket` and maintains a write buffer, a read buffer and an EOF flag.

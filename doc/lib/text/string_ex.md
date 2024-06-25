@@ -65,6 +65,11 @@ The result will not contain any empty string.
 Returns a substring extracted from a specified range from a string.
 If the specified range exceeds the string, it will be truncated to fit within the string.
 
+#### subarray: I64 -> I64 -> Array a -> Array a;
+
+Returns a subarray extracted from a specified range from an array.
+If the specified range exceeds the array, it will be truncated to fit within the array.
+
 #### starts_with: String -> String -> Bool;
 
 Checks if a string starts with the specified prefix.

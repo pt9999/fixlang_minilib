@@ -1,0 +1,45 @@
+module Main;
+
+import Debug;
+
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Monad.FunctorM;
+import Minilib.Testing.UnitTest;
+
+test_validate_self_signed_certificate: TestCase;
+test_validate_self_signed_certificate = (
+    make_test("test_validate_self_signed_certificate") $ |_|
+    let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_CA.pem").as_some;   // sha-1WithRSAEncryption
+    let certificates = *read_certificates_from_pem_file(path);
+    if certificates.get_size != 1 { throw $ "read_certificates_pem failed" };
+    let certificate = certificates.@(0);
+    let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+    eval *certificate.validate_signature(public_key).from_result;
+    println("validation ok").lift
+);
+
+test_validate_ca_certificates: TestCase;
+test_validate_ca_certificates = (
+    make_test("test_validate_ca_certificates") $ |_|
+    let path = Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some;
+    let certificates = *read_certificates_from_pem_file(path);
+    let results = *certificates.map_m(|certificate|
+        let subject = certificate.@tbs_certificate.@subject;
+        let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+        let res = certificate.validate_signature(public_key);
+        eval *println(res.to_string + ": " + subject.to_string).lift;
+        pure $ res
+    );
+    let error_count = results.to_iter.map(|res| if res.is_err { 1 } else { 0 }).sum;
+    assert_equal("error_count", 0, error_count)
+);
+
+main: IO ();
+main = (
+    [
+        //test_validate_self_signed_certificate,
+        test_validate_ca_certificates,
+    ]
+    .run_test_driver
+);

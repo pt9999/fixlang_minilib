@@ -7,7 +7,7 @@ module Minilib.Crypto.Tls13.RecordProtocol;
 import Debug;
 
 import Minilib.Crypto.Tls13.Types;
-import Minilib.Crypto.Tls13.Connection;
+import Minilib.Monad.BytesIO;
 import Minilib.Crypto.Tls13.Alert;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.FunctorM;
@@ -129,7 +129,7 @@ impl TLSPlaintext: Unmarshal {
             content_type: content_type,
             legacy_record_version: legacy_record_version,
             //length: length,
-            fragment: fragment 
+            fragment: fragment
         };
         pure $ (obj, buf)
     );
@@ -293,18 +293,18 @@ namespace TLSRecord {
         pure $ records.map(@fragment).flatten
     );
 
-    send_record: [m: TLSConnection] TLSRecord -> m ();
+    send_record: [m: MonadBytesIO] TLSRecord -> m ();
     send_record = |record| (
         let bytes = marshal_to_bytes(record);
         send_bytes(bytes)
     );
 
-    send_records: [m: TLSConnection] Array TLSRecord -> m ();
+    send_records: [m: MonadBytesIO] Array TLSRecord -> m ();
     send_records = |records| (
         records.foreach_m(send_record)
     );
 
-    recv_record:  [m: TLSConnection] m TLSRecord;
+    recv_record:  [m: MonadBytesIO] m TLSRecord;
     recv_record = do {
         let header = *recv_n_bytes(5);
         if header.get_size < 5 { error $ _Err_EOF };
@@ -314,7 +314,7 @@ namespace TLSRecord {
         unmarshal_from_bytes(bytes).from_result_t
     };
 
-    try_recv_record:  [m: TLSConnection] m (Option TLSRecord);
+    try_recv_record:  [m: MonadBytesIO] m (Option TLSRecord);
     try_recv_record = do {
         let header = *try_recv_n_bytes(5);
         if header.is_none { pure $ none() };

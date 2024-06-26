@@ -9,7 +9,7 @@ import Minilib.Monad.Random;
 import Minilib.Crypto.Tls13.KeyAgreement;
 import Minilib.Crypto.Tls13.KeyShare;
 import Minilib.Crypto.Tls13.Extensions;
-import Minilib.Crypto.Tls13.Connection;
+import Minilib.Monad.BytesIO;
 import Minilib.Crypto.Tls13.Protection;
 import Minilib.Crypto.Tls13.HandshakeProtocol;
 import Minilib.Crypto.Tls13.RecordProtocol;
@@ -65,8 +65,8 @@ namespace HandshakeState {
         error $ "start_handshake: wrong hstate"
     );
 
-    // Pops records to send from the queue, then send the records via TLSConnection.
-    send_records: [m: TLSConnection] HandshakeState -> m HandshakeState;
+    // Pops records to send from the queue, then send the records via MonadBytesIO.
+    send_records: [m: MonadBytesIO] HandshakeState -> m HandshakeState;
     send_records = |hstate| (
         let (records, hstate) = *hstate.pop_records_to_send;
         eval *TLSRecord::send_records(records);
@@ -101,13 +101,13 @@ namespace HandshakeState {
         pure $ ([], hstate)
     );
 
-    recv_record: [m: TLSConnection] HandshakeState -> m HandshakeState;
+    recv_record: [m: MonadBytesIO] HandshakeState -> m HandshakeState;
     recv_record = |hstate| (
         let record: TLSRecord = *TLSRecord::recv_record;
         hstate.on_recv_record(record)
     );
 
-    try_recv_record: [m: TLSConnection] HandshakeState -> m (Option HandshakeState);
+    try_recv_record: [m: MonadBytesIO] HandshakeState -> m (Option HandshakeState);
     try_recv_record = |hstate| (
         let opt: Option TLSRecord = *TLSRecord::try_recv_record;
         if opt.is_none { pure $ none() };

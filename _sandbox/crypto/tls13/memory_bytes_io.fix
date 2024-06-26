@@ -1,44 +1,44 @@
-module Minilib.Crypto.Tls13.MemConnection;
+module Minilib.Crypto.Tls13.MemoryBytesIO;
 
 import Debug;
 
-import Minilib.Crypto.Tls13.Connection;
+import Minilib.Monad.BytesIO;
 import Minilib.IO.Channel;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
 
-type MemConnection = unbox struct {
+type MemoryBytesIO = unbox struct {
     input: Channel U8,
     output: Channel U8
 };
 
-namespace MemConnection {
-    make: IO MemConnection;
+namespace MemoryBytesIO {
+    make: IO MemoryBytesIO;
     make = (
         let input = *Channel::make;
         let output = *Channel::make;
-        pure $ MemConnection {
+        pure $ MemoryBytesIO {
             input: input,
             output: output
         }
     );
 
-    swap: MemConnection -> MemConnection;
-    swap = |conn| MemConnection {
+    swap: MemoryBytesIO -> MemoryBytesIO;
+    swap = |conn| MemoryBytesIO {
         input: conn.@output,
         output: conn.@input
     };
 
-    pipe: IO (MemConnection, MemConnection);
+    pipe: IO (MemoryBytesIO, MemoryBytesIO);
     pipe = (
-        let local_conn = *MemConnection::make;
+        let local_conn = *MemoryBytesIO::make;
         let remote_conn = local_conn.swap;
         pure $ (local_conn, remote_conn)
     );
 }
 
-impl MemConnection: ByteIO {
+impl MemoryBytesIO: BytesIO {
     send = |bytes, conn| (
         let output = conn.@output;
         bytes.foreach_m(|b| output.send(b))
@@ -55,7 +55,7 @@ impl MemConnection: ByteIO {
     );
 }
 
-impl MemConnection: GetByteIO {
-    type ByteIOType MemConnection = MemConnection;
-    get_byte_io = |a| a;
+impl MemoryBytesIO: GetByteIO {
+    type BytesIOType MemoryBytesIO = MemoryBytesIO;
+    get_bytes_io = |a| a;
 }

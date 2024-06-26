@@ -1,5 +1,5 @@
-// A ByteIO Connection for TLS 1.3
-module Minilib.Crypto.Tls13.Connection;
+// A monad that performs bytes I/O operations.
+module Minilib.Monad.BytesIO;
 
 import Debug;
 
@@ -13,22 +13,22 @@ import Minilib.Text.StringEx;
 _Err_EOF: ErrMsg;
 _Err_EOF = "EOF";
 
-trait TLSConnection = Functor + Monad + MonadErrorIF + TLSConnectionIF;
+trait MonadBytesIO = Functor + Monad + MonadErrorIF + MonadBytesIOIF;
 
-trait [m: * -> *] m: TLSConnectionIF {
+trait [m: * -> *] m: MonadBytesIOIF {
     send_bytes: Array U8 -> m ();
     recv_n_bytes: I64 -> m (Array U8);
     try_recv_n_bytes: I64 -> m (Option (Array U8));
 }
 
-trait a: ByteIO {
+trait a: BytesIO {
     // type IOType a: * -> *;
     send: Array U8 -> a -> IOFail ();
     recv: I64 -> a -> IOFail (Array U8);
     try_recv: I64 -> a -> IOFail (Option (Array U8));
 }
 
-impl Socket: ByteIO {
+impl Socket: BytesIO {
     // type IOType Socket = IOFail;
     send = |bytes, sock| (
         let expected_length = bytes.get_size;
@@ -67,24 +67,24 @@ impl Socket: ByteIO {
 }
 
 trait a: GetByteIO {
-    type ByteIOType a;
-    get_byte_io: a -> ByteIOType a;
+    type BytesIOType a;
+    get_bytes_io: a -> BytesIOType a;
 }
 
-impl [s: GetByteIO, bio: ByteIO, ByteIOType s = bio]
-    StateT s IOFail: TLSConnectionIF {
+impl [s: GetByteIO, bio: BytesIO, BytesIOType s = bio]
+    StateT s IOFail: MonadBytesIOIF {
     send_bytes = |bytes| (
-        let byte_io = (*get_state).get_byte_io;
-        byte_io.ByteIO::send(bytes).lift_t
+        let bytes_io = (*get_state).get_bytes_io;
+        bytes_io.BytesIO::send(bytes).lift_t
     );
 
     recv_n_bytes = |length| (
-        let byte_io = (*get_state).get_byte_io;
-        byte_io.ByteIO::recv(length).lift_t
+        let bytes_io = (*get_state).get_bytes_io;
+        bytes_io.BytesIO::recv(length).lift_t
     );
 
     try_recv_n_bytes = |length| (
-        let byte_io = (*get_state).get_byte_io;
-        byte_io.ByteIO::try_recv(length).lift_t
+        let bytes_io = (*get_state).get_bytes_io;
+        bytes_io.BytesIO::try_recv(length).lift_t
     );
 }

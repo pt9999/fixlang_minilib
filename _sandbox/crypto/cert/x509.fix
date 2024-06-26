@@ -4,8 +4,9 @@
 // https://tex2e.github.io/rfc-translater/html/rfc5280.html
 module Minilib.Crypto.Cert.X509;
 
+import Hash;
 import Debug;
-import Time;
+//import Time;
 
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1.Der;
@@ -265,10 +266,36 @@ impl RSAPublicKey: DecodeDer {
 
 // 4.1.2.4. Issuer
 
-type Name = RDNSequence;
+type Name = unbox struct {
+    data: RDNSequence
+};
+
+impl Name: Eq {
+    eq = |a, b| a.@data == b.@data;
+}
+
+impl Name: Hash {
+    hash = |obj| obj.@data.hash;
+}
+
+impl Name: ToString {
+    to_string = |obj| (
+        "Name { " +
+        obj.@data.map(|rdn|
+            rdn.map(|(type_, value)|
+                type_.to_string_ldap + "=" + value.to_string
+            )
+        ).to_string +
+        " }"
+    );
+}
 
 decode_name: [m: MonadReadByte] m Name;
-decode_name = decode_RDNSequence;
+decode_name = (
+    pure $ Name {
+        data: *decode_RDNSequence
+    }
+);
 
 type RDNSequence = Array RelativeDistinguishedName;
 

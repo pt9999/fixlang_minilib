@@ -35,16 +35,10 @@ impl TLSSession: GetByteIO {
     get_byte_io = TLSSession::@socket;
 }
 
-/*
-trait [m: * -> *] GetSetHandshakeStateIF {
-    get_hstate: m HandshakeState;
-    set_hstate: HandshakeState -> m ();
-}
-*/
-
 type StateTLSSession = StateT TLSSession IOFail;
 
 namespace TLSSession {
+    // Creates a TLSSession object.
     make: Socket -> IOFail TLSSession;
     make = |socket| (
         let secure_random = *SecureRandom::make;
@@ -57,9 +51,11 @@ namespace TLSSession {
         }
     );
 
+    // Gets the current handshake state.
     get_hstate: StateTLSSession HandshakeState;
     get_hstate = get_state.map(@handshake_state);
 
+    // Sets the current handshake state.
     set_hstate: HandshakeState -> StateTLSSession ();
     set_hstate = |hstate| mod_state(set_handshake_state(hstate));
 
@@ -78,29 +74,42 @@ namespace TLSSession {
         pure $ a
     );
 
-    send_client_hello: String -> StateTLSSession ();
-    send_client_hello = |server_name| (
+    // Establishes a handshake.
+    // Specifically, it sends a ClientHello message, and receives ServerHello,
+    // EncryptedExtensions, Certificate, CertificateVerify, Finished messages.
+    // Then it sends a Finished message.
+    establish_handshake: String -> StateTLSSession ();
+    establish_handshake = |server_name| (
+        eval *_send_client_hello(server_name);
+        eval *_recv_server_hello;
+        eval *_recv_server_params;
+        pure()
+    );
+
+    _send_client_hello: String -> StateTLSSession ();
+    _send_client_hello = |server_name| (
         eval *HandshakeState::start_handshake(server_name).lift_hstate;
         eval *HandshakeState::send_records.lift_hstate;
         pure()
     );
 
-    recv_server_hello: StateTLSSession ();
-    recv_server_hello = (
+    _recv_server_hello: StateTLSSession ();
+    _recv_server_hello = (
         eval *HandshakeState::recv_record.lift_hstate;
         pure()
     );
 
-    recv_server_params: StateTLSSession ();
-    recv_server_params = (
+    _recv_server_params: StateTLSSession ();
+    _recv_server_params = (
         eval *HandshakeState::recv_record.lift_hstate;
         if !(*get_hstate).is_after_finished {
-            recv_server_params  // try again
+            _recv_server_params  // try again
         };
         eval *HandshakeState::send_records.lift_hstate;
         pure()
     );
 
+    // Sends an application data.
     send_appdata: Array U8 -> StateTLSSession ();
     send_appdata = |appdata| (
         eval *HandshakeState::send_appdata(appdata).lift_hstate;
@@ -108,6 +117,7 @@ namespace TLSSession {
         pure()
     );
 
+    // Receives an application data.
     recv_appdata: StateTLSSession (Array U8);
     recv_appdata = (
         eval *HandshakeState::send_records.lift_hstate;
@@ -119,5 +129,4 @@ namespace TLSSession {
         };
         pure $ appdata
     );
-
 }

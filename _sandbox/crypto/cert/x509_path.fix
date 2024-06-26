@@ -1,0 +1,92 @@
+module Minilib.Crypto.Cert.X509Path;
+
+import Debug;
+import HashMap;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+/*
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1.Der;
+import Minilib.Crypto.Cert.Pem;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+*/
+
+type CACertificates = unbox struct {
+    map: HashMap X509::Name Certificate,
+};
+
+namespace CACertificates {
+    make: IOFail CACertificates;
+    make = (
+        eval *pure();
+        let path = Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some;
+        let certificates = *read_certificates_from_pem_file(path);
+        let map = certificates.to_iter.fold(
+            HashMap::empty(certificates.get_size), |map, certificate|
+            map.insert(certificate.@tbs_certificate.@subject, certificate)
+        );
+        pure $ CACertificates {
+            map: map
+        }
+    );
+
+    find: X509::Name -> CACertificates -> Option Certificate;
+    find = |name, ca_certs| ca_certs.@map.find(name);
+}
+
+type CertificatePath = unbox struct {
+    data: Array Certificate,
+};
+
+namespace CertificatePath {
+    make: [m: MonadError] Array Certificate -> CACertificates -> m CertificatePath;
+    make = |certs, ca_certs| (
+        if certs.get_size == 0 { error $ "certificate list is empty" };
+        eval *_check_certs_order(certs);
+        let ca = *_find_ca_cert(certs, ca_certs);
+        pure $ CertificatePath {
+            data: certs.push_back(ca)
+        }
+    );
+
+    _check_certs_order: [m: MonadError] Array Certificate -> m ();
+    _check_certs_order = |certs| (
+        Iterator::range(0, certs.get_size - 1).foreach_m(|i|
+            let prev_issuer = certs.@(i).@tbs_certificate.@issuer;
+            let next_subject = certs.@(i + 1).@tbs_certificate.@subject;
+            if prev_issuer != next_subject {
+                error $ "issuer and subject unmatch:" +
+                        (i, prev_issuer).format("\n  certs[{}].issuer={}") +
+                        (i + 1, next_subject).format("\n  certs[{}].subject={}")
+            };
+            pure()
+        )
+    );
+
+    _find_ca_cert: [m: MonadError] Array Certificate -> CACertificates -> m Certificate;
+    _find_ca_cert = |certs, ca_certs| (
+        let last_cert_issuer = certs.get_last.as_some.@tbs_certificate.@issuer;
+        let ca = ca_certs.find(last_cert_issuer);
+        if ca.is_none {
+            error $ "ca certificate not found: " + last_cert_issuer.to_string
+        };
+        pure $ ca.as_some
+    );
+}
+
+impl CertificatePath: ToString {
+    to_string = |obj| (
+        "CertificatePath {" +
+        " data=" + obj.@data.map(|cert| cert.@tbs_certificate.@subject).to_string +
+        " }"
+    );
+}

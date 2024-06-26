@@ -1,0 +1,63 @@
+module Minilib.Crypto.Tls13.TLSSocket;
+
+import Debug;
+
+import Minilib.Monad.BytesIO;
+import Minilib.Net.Tcp;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type TLSSocket = unbox struct {
+    socket: Socket,
+    debug: Bool,
+};
+
+make: Socket -> TLSSocket;
+make = |socket| TLSSocket {
+    socket: socket,
+    debug: false
+};
+
+_debug_lazy: Lazy String -> TLSSocket -> ();
+_debug_lazy = |message, sock| (
+    if !sock.@debug { () };
+    debug_eprintln(message())
+);
+
+impl TLSSocket: BytesIO {
+    // type IOType Socket = IOFail;
+    send = |bytes, sock| (
+        let expected_length = bytes.get_size;
+        let actual_length = *sock.@socket.Socket::send(bytes);
+        eval sock._debug_lazy(|_| "sent:" + actual_length.to_string + " bytes: " + bytes.to_string_hex);
+        if actual_length < expected_length {
+            throw $ "send error: expected=" + expected_length.to_string
+                    + " actual=" + actual_length.to_string
+        };
+        pure()
+    );
+    recv = |length, sock| (
+        eval sock._debug_lazy(|_| "receiving " + length.to_string + " bytes");
+        let bytes = *sock.@socket.Socket::recv(length);
+        eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes: " +
+            (
+                let max_size = 100;
+                if bytes.get_size > max_size { bytes.subarray(0, max_size).to_string_hex + "..." }
+                else { bytes.to_string_hex }
+            )
+        );
+        pure $ bytes
+    );
+
+    try_recv = |length, sock| (
+        eval sock._debug_lazy(|_| "try receiving " + length.to_string + " bytes");
+        let opt_bytes = *sock.@socket.Socket::try_recv(length);
+        eval sock._debug_lazy(|_|
+            opt_bytes.map_or(
+                "data not available",
+                |bytes| "received " + bytes.get_size.to_string + " bytes: " + bytes.to_string_hex
+            )
+        );
+        pure $ opt_bytes
+    );
+}

@@ -1,6 +1,9 @@
-all: libtest.a
+all: run
 
-main: all
+run: libtest.a
+	LIBRARY_PATH="." fix run -d test -f main.fix
+
+build: libtest.a
 	LIBRARY_PATH="." fix build -d test -f main.fix
 
 libtest.a: libtest.o

@@ -11,7 +11,7 @@ boxedvalue_register_func = |f| (
     let boxed_f = boxed $ |_: ()| boxed(f());
     let _ = *pure();
     let ptr = *boxedvalue_register(boxed_f);
-    eval boxed_f;
+    let _ = boxed_f;
     pure $ ptr
 );
 
@@ -25,9 +25,9 @@ boxedvalue_register = |boxed| (
         Ptr boxedvalue_register(Ptr, Ptr, Ptr),
         p_value, p_retain, p_release
     ];
-    eval p_value;
-    eval p_retain;
-    eval p_release;
+    let _ = p_value;
+    let _ = p_retain;
+    let _ = p_release;
     pure $ ptr
 );
 
@@ -41,27 +41,31 @@ boxedvalue_unregister = |ptr| (
     pure $ ()
 );
 
-type Callback a = unbox struct {
-    f: () -> a,
-    args: Array U8,
-    result: a
+type Vec = box struct {
+    x: CInt,
+    y: CInt,
+    z: CInt
 };
-
-mycallback: () -> IO ();
-mycallback = (
-
-);
-
 
 main: IO ();
 main = (
     let _ = *pure();
     let callback = |_| (
         eval debug_eprintln("callback is called");
-        ()
+        42.to_CInt
+        //Boxed { value: 42.to_CInt }
+        //nullptr
     );
     let ptr = *boxedvalue_register_func(callback);
     eval CALL_C[() set_callback(Ptr), ptr];
-    eval CALL_C[() test1(I32), 123_I32];
+
+    let vec = Vec { x: 1000.to_CInt, y: 2000.to_CInt, z: 3000.to_CInt };
+    eval vec.unsafe_borrow_boxed_data_ptr(|p| CALL_C[() access_vec(Ptr), p]);
+
+    eval debug_eprintln("calling c_function_1");
+    let ret = CALL_C[CInt c_function_1(CInt), 100_I32];
+    eval debug_eprintln("called c_function_1: ret=" + ret.to_string);
+
+    eval debug_eprintln("vec.@z=" + vec.@z.to_string);
     pure()
 );

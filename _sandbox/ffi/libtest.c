@@ -49,6 +49,7 @@ void boxedvalue_unregister (BoxedValue* b)
 //-------------------------------------------------------------
 // Fixの関数をCから呼ぶ仕組み
 
+/*
 typedef struct CallbackFunc {
     BoxedValue* func;
     void* args;
@@ -59,20 +60,41 @@ CallbackFunc* cb_create()
 {
 
 }
+*/
+
+typedef struct Vec {
+    int x;
+    int y;
+    int z;
+} Vec;
+
+Vec* g_vec = NULL;
+
+void access_vec(Vec* p)
+{
+    g_vec = p;
+}
 
 void boxedvalue_call(BoxedValue* b)
 {
+    fprintf(stderr, "boxedvalue_call start: b=%p\n", b);
     if (b == NULL) return;
 
     boxedvalue_retain(b);
-    void* ret = fixruntime_run_function(b->value);
-    // TODO: release ret
+    void* returned_value = fixruntime_run_function(b->value);
+    // NOTE: `returned_value` is a retained pointer.
+    //       It is released by Fix runtime. ?
+    fprintf(stderr, "returned_value=%p\n", returned_value);
+    fprintf(stderr, "0[(int*)returned_value]=%d\n", 0[(int*)returned_value]);
+    fprintf(stderr, "1[(int*)returned_value]=%d\n", 1[(int*)returned_value]);
+    fprintf(stderr, "2[(int*)returned_value]=%d\n", 2[(int*)returned_value]);
+    fprintf(stderr, "3[(int*)returned_value]=%d\n", 3[(int*)returned_value]);
+    g_vec->z = 3001;
+    fprintf(stderr, "boxedvalue_call end\n");
 }
 
 //----------------------------
 // use case
-//
-
 //----------------------------
 
 BoxedValue* g_callback = NULL;
@@ -82,10 +104,10 @@ void set_callback(BoxedValue* b)
     g_callback = b;
 }
 
-int test1(int a)
+int c_function_1(int arg)
 {
-    printf("hello world %d\n", a);
+    fprintf(stderr, "c_function_1 start: arg=%d\n", arg);
     boxedvalue_call(g_callback);
-    printf("hoge hoge hoge\n");
-    return a + 34;
+    fprintf(stderr, "c_function_1 end\n");
+    return arg + 23;
 }

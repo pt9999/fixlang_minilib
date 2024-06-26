@@ -177,6 +177,10 @@ Type definitions for mathematical concepts, for example AdditiveGroup, Ring, Fie
 ### [module Minilib.Media.Image (lib/media/image.fix)](lib/media/image.md)
 
 
+### [module Minilib.Media.Jpeg (lib/media/jpeg.fix)](lib/media/jpeg.md)
+
+JPEG image I/O.
+
 ### [module Minilib.Media.Png (lib/media/png.fix)](lib/media/png.md)
 
 PNG image I/O.

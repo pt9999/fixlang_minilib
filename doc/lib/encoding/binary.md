@@ -96,6 +96,11 @@ Sets U32 into the byte buffer at position `i`.
 
 Sets U64 into the byte buffer at position `i`.
 
+#### set_ptr: I64 -> Ptr -> ByteBuffer -> ByteBuffer;
+
+Sets Ptr into the byte buffer at position `i`.
+Note: This function assumes that `sizeof(Ptr) == 8`.
+
 #### to_u8_array: ByteBuffer -> Array U8;
 
 #### to_u32_array: ByteBuffer -> Array U32;

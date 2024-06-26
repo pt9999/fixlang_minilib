@@ -18,10 +18,16 @@ ndarray_calc:
 ndarray_calc.out:
 	../bin/fixautolink build -o $@ -L ../lib -f ndarray_calc.fix ndarray.fix -d readline
 
-png: 
+jpeg_test:
+	../bin/fixautolink run -L ../lib -L . -f jpeg_test.fix -d jpeg
+
+jpeg_test.out:
+	../bin/fixautolink build -o $@ -L ../lib -L . -f jpeg_test.fix -d jpeg
+
+png_test:
 	../bin/fixautolink run -L ../lib -L . -f png_test.fix -d png -d z
 
-png.out: 
+png_test.out:
 	../bin/fixautolink build -o $@ -L ../lib -L . -f png_test.fix -d png -d z
 
 obj_test:

@@ -1,0 +1,176 @@
+//  JPEG image I/O.
+//
+//  How to use:
+//  1. Install libjpeg8 library. For example, run the command below.
+//     `$ sudo apt install libjpeg8-dev`
+//  2. Add `-d jpeg` option to `fix run` and `fix build` arguments.
+//
+module Minilib.Media.Jpeg;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+import Minilib.IO.Platform;
+import Minilib.Media.Image;
+
+write_jpeg_file: String -> Image -> IOFail ();
+write_jpeg_file = |filepath, image| (
+    IO::with_file(filepath.parse.as_some, "w", |fh|
+        let compress = JpegCompress::make();
+        let compress = compress._set_studio_dest(fh);
+        let compress = compress._set_width(image.@width);
+        let compress = compress._set_height(image.@height);
+        let (channels, color_space) = JpegCompress::_parse_format(image.@format);
+        let compress = compress._set_format((channels, color_space));
+        let compress = compress._set_defaults;
+        let _ = *compress._do_compress(image.@data, image.@width, image.@height, channels);
+        pure()
+    )
+);
+
+//----------------------------------------------------
+
+type JpegCompress = unbox struct {
+    cinfo: ByteBuffer,
+    err_mgr: ByteBuffer
+};
+
+namespace JpegCompress {
+
+    _JPEG_LIB_VERSION: I64;
+    _JPEG_LIB_VERSION = (
+        // TODO: how to get the libjpeg version from the linked library?
+        // TODO: how to get linux distribution or installed package?
+        if Platform::uname.@sysname == "Linux" &&
+            Platform::uname.@machine == "aarch64" {
+            62      // libjpeg62-turbo
+        };
+        if Platform::uname.@sysname == "Linux" &&
+            Platform::uname.@machine == "x86_64" {
+            80          // lijpeg8-turbo
+        };
+        eval assert(|_| "unknown libjpeg version", false);
+        0
+    );
+
+    make: () -> JpegCompress;
+    make = |_|(
+        let compress = JpegCompress {
+            cinfo: ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_compress_struct, 0_U8, Platform::byte_order),
+            err_mgr: ByteBuffer::fill(_def_jpeg_compress.@sizeof_jpeg_error_mgr, 0_U8, Platform::byte_order)
+        };
+        let compress = compress._set_std_error;
+        let compress = compress._create_compress;
+        compress
+    );
+
+    _set_std_error: JpegCompress -> JpegCompress;
+    _set_std_error = |compress| (
+        let compress = compress.@err_mgr.borrow_ptr(|p_err_mgr|
+            let p_err_mgr = CALL_C[Ptr jpeg_std_error(Ptr), p_err_mgr];
+            compress.mod_cinfo(set_ptr(_def_jpeg_compress.@offsetof_err, p_err_mgr))
+        );
+        compress
+    );
+
+    _create_compress: JpegCompress -> JpegCompress;
+    _create_compress = |compress| (
+        let _ = compress.@cinfo.borrow_ptr(|p_cinfo|
+            // jpeg_create_compress() is actually a macro which calls jpeg_CreateCompress()
+            CALL_C[() jpeg_CreateCompress(Ptr, I32, I64),
+                p_cinfo, _JPEG_LIB_VERSION.to_I32, _def_jpeg_compress.@sizeof_jpeg_compress_struct]
+        );
+        compress
+    );
+
+    _set_studio_dest: IOHandle -> JpegCompress -> JpegCompress;
+    _set_studio_dest = |fh, compress| (
+        eval compress.@cinfo.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_stdio_dest(Ptr, Ptr), p_cinfo, fh._file_ptr]
+        );
+        compress
+    );
+
+    _set_width: I64 -> JpegCompress -> JpegCompress;
+    _set_width = |n, compress| compress.mod_cinfo(set_u32(_def_jpeg_compress.@offsetof_image_width, n.to_U32));
+
+    _set_height: I64 -> JpegCompress -> JpegCompress;
+    _set_height = |n, compress| compress.mod_cinfo(set_u32(_def_jpeg_compress.@offsetof_image_height, n.to_U32));
+
+    _set_format: (I64, I64) -> JpegCompress -> JpegCompress;
+    _set_format = |(channels, color_space), compress| (
+        compress.mod_cinfo(set_u32(_def_jpeg_compress.@offsetof_input_components, channels.to_U32))
+           .mod_cinfo(set_u32(_def_jpeg_compress.@offsetof_in_color_space, color_space.to_U32))
+    );
+
+    // returns (channels, color_space)
+    _parse_format: String -> (I64, I64);
+    _parse_format = |str| (
+        if str == "GRAY" { (1, /*JCS_GRAYSCALE*/ 1) };
+        if str == "RGB" { (3, /*JCS_RGB*/ 2) };
+        eval assert (|_| "invalid format: " + str, false);
+        (0, 0)
+    );
+
+    _set_defaults: JpegCompress -> JpegCompress;
+    _set_defaults = |compress| (
+        eval compress.@cinfo.borrow_ptr(|p_cinfo|
+            CALL_C[() jpeg_set_defaults(Ptr), p_cinfo]
+        );
+        compress
+    );
+
+    _do_compress: Array U8 -> I64 -> I64 -> I64 -> JpegCompress -> IOFail ();
+    _do_compress = |buffer, width, height, channels, compress| (
+        compress.@cinfo.borrow_ptr(|p_cinfo|
+            let _ = CALL_C[() jpeg_start_compress(Ptr, I32),
+                        p_cinfo, /* write_all_tables = */ 1_I32];
+            let _ = *buffer.borrow_ptr(|p_buffer|
+                let scanlines: Array Ptr = Array::from_map(height, |y|
+                    p_buffer.add_offset(width * channels * y)
+                );
+                let res = scanlines.borrow_ptr(|p_scanlines|
+                    CALL_C[I32 jpeg_write_scanlines(Ptr, Ptr, I32),
+                                p_cinfo, p_scanlines, height.to_I32]
+                );
+                if res != height.to_I32 {
+                    throw $ "jpeg_write_scanlines() failed: height="+height.to_string + " res="+res.to_string
+                };
+                pure()
+            );
+            let _ = CALL_C[() jpeg_finish_compress(Ptr), p_cinfo];
+            pure()
+        )
+    );
+
+    // [nofixdoc]
+    // `jpeg_compress` structure layout
+    type DefJpegCompress = unbox struct {
+        offsetof_err: I64,
+        offsetof_image_width: I64,
+        offsetof_image_height: I64,
+        offsetof_input_components: I64,
+        offsetof_in_color_space: I64,
+        sizeof_jpeg_compress_struct: I64,
+        sizeof_jpeg_error_mgr: I64
+    };
+
+    // TODO: automate configuration
+    // such as `make configure` after git clone
+    // then check for libraries and retrieve sizeof & offsetof information
+    _def_jpeg_compress: DefJpegCompress;
+    _def_jpeg_compress = DefJpegCompress {
+        offsetof_err: 0,
+        offsetof_image_width: 48,
+        offsetof_image_height: 52,
+        offsetof_input_components: 56,
+        offsetof_in_color_space: 60,
+        sizeof_jpeg_compress_struct: (
+            if _JPEG_LIB_VERSION == 62 { 520 };
+            if _JPEG_LIB_VERSION == 80 { 584 };
+            eval assert(|_| "unknown libjpeg version", false);
+            0
+        ),
+        sizeof_jpeg_error_mgr: 168
+    };
+}

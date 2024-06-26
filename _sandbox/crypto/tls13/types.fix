@@ -147,14 +147,19 @@ namespace Vector {
 
     unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
     unmarshal_fixed = |byte_size, buf| (
+        //eval if byte_size >= 4096 { debug_eprintln("unmarshal_fixed: byte_size=" + byte_size.to_string) } else { () };
         let begin_pos = buf.get_position;
-        loop_m(
+        loop(
             (buf, []), |(buf, vector)|
             let pos = buf.get_position;
-            if pos - begin_pos >= byte_size { break_m $ (vector, buf) };
-            let (val, buf) = *buf.unmarshal;
+            if pos - begin_pos >= byte_size { break $ ok $ (vector, buf) };
+            //let (val, buf) = *buf.unmarshal;
+            // workaround for a stack overflow, since `loop_m` and `bind()` prevents the tail recursion
+            let res = buf.unmarshal;
+            if res.is_err { break $ err $ res.as_err };
+            let (val, buf) = res.as_ok;
             let vector = vector.push_back(val);
-            continue_m $ (buf, vector)
+            continue $ (buf, vector)
         )
     );
 

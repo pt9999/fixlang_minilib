@@ -4,8 +4,9 @@ import Debug;
 import HashMap;
 
 import Minilib.Crypto.Cert.Asn1;
-import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Signature;
 import Minilib.Monad.Error;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
@@ -47,6 +48,23 @@ namespace CertificatePath {
             error $ "ca certificate not found: " + last_cert_issuer.to_string
         };
         pure $ ca.as_some
+    );
+
+    validate_signatures: [m: MonadError] CertificatePath -> m ();
+    validate_signatures = |cert_path| (
+        let certs = cert_path.@data;
+        eval assert(|_| "empty cert path", certs.get_size > 0);
+        eval *Iterator::range(0, certs.get_size - 1).foreach_m(|i|
+            let prev_cert = certs.@(i);
+            let next_cert = certs.@(i + 1);
+            eval debug_eprintln([prev_cert.get_subject, next_cert.get_subject].format("validate {} using public key of {}"));
+            let public_key = next_cert.@tbs_certificate.@subject_public_key_info;
+            validate_signature(public_key, prev_cert).from_result_t
+        );
+        let ca_cert = certs.get_last.as_some;
+        eval debug_eprintln([ca_cert.get_subject].format("validate {} using own public key"));
+        let public_key = ca_cert.@tbs_certificate.@subject_public_key_info;
+        validate_signature(public_key, ca_cert).from_result_t
     );
 }
 

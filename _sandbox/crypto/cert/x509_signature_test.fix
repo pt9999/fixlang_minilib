@@ -3,12 +3,14 @@ module Main;
 import Debug;
 import AsyncTask;
 
+import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Signature;
-import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509Path;
 import Minilib.Monad.FunctorM;
 import Minilib.Thread.TaskPool;
 import Minilib.Thread.Future;
+import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
 test_validate_self_signed_certificate: TestCase;
@@ -74,12 +76,26 @@ test_validate_ca_certificates_mt = (
     assert_equal("error_count", 0, error_count)
 );
 
+test_validate_cert_path: TestCase;
+test_validate_cert_path = (
+    make_test("test_validate_cert_path") $ |_|
+    let certs = *Iterator::range(0, 3).to_array.map_m(|i|
+        let path = Path::parse((i,).format(".local/tmp.cert_{}.cer")).as_some;
+        read_certificate_from_file(path)
+    );
+    let ca_certs = *CACertificates::make;
+    let path = *CertificatePath::make(certs, ca_certs);
+    eval *path.validate_signatures;
+    println("validation ok").lift
+);
+
 main: IO ();
 main = (
     [
         //test_validate_self_signed_certificate,
         //test_validate_ca_certificates,
-        test_validate_ca_certificates_mt,
+        //test_validate_ca_certificates_mt,
+        test_validate_cert_path,
     ]
     .run_test_driver
 );

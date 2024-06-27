@@ -19,6 +19,7 @@ namespace ArgAction {
         append: (),     // Appends next input to the array of argument values.
         set_true: (),   // Sets "true" as the single argument value.
         set_false: (),  // Sets "false" as the single argument value.
+        increment: (),  // Increment the argument value as an integer.
         help: (),       // Displays help for the command.
         version: ()     // Displays the version of the command.
     };
@@ -384,7 +385,7 @@ namespace ArgParser
         };
         let arg = matched_args.get_first.as_some;
         let parser = *parser._perform_action(arg);
-        let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
+        let parser = if arg.@multiple_values || arg.@action.is_increment { parser } else { parser._remove_arg(arg) };
         ok $ parser 
     );
 
@@ -426,6 +427,9 @@ namespace ArgParser
         if action.is_set || action.is_append {
             parser._set_or_append_value(arg)
         };
+        if action.is_increment {
+            parser._increment_value(arg)
+        };
         eval assert(|_| "unknown action: arg="+arg.to_string, false);
         err $ "error"
     );
@@ -461,6 +465,21 @@ namespace ArgParser
         parser.mod_matches(|matches|
             matches._mod_values(arg.@id, |values|
                 values.push_back(value)
+            )
+        )
+    );
+
+    // Increments the value as an integer.
+    _increment_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _increment_value = |arg, parser| (
+        ok $ parser.mod_matches(|matches|
+            matches._mod_values(arg.@id, |values|
+                if values.get_size != 1 { ["1"] };
+                values.mod(0, |value|
+                    let res: Result ErrMsg I64 = value.from_string;
+                    if res.is_err { "1" };
+                    (res.as_ok + 1).to_string
+                )
             )
         )
     );

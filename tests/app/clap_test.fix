@@ -40,6 +40,7 @@ rich_command = (
         .display_name("rich run")
         .about("Run a program")
         .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+        .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
     )
     .subcommand(
         Command::new("build")
@@ -47,6 +48,7 @@ rich_command = (
         .about("Build an executable")
         .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
         .arg(Arg::new("dynamic_lib").short('d').help("Dynamic library").takes_value.value_name("LIB"))
+        .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
     )
 );
 
@@ -140,7 +142,8 @@ test_help_rich_run = make_test("test_help_rich_run") $ |_| (
         "\n" +
         "OPTIONS:\n" +
         "    -h, --help                  Print help information\n" +
-        "    -V, --version               Print version information\n"
+        "    -V, --version               Print version information\n" +
+        "    -v                          Increment verbose level\n"
     );
     let res = command.get_matches_from(["rich", "run", "--help"]);
     let _ = *(assert_true("err", res.is_err));
@@ -166,7 +169,8 @@ test_help_rich_build = make_test("test_help_rich_build") $ |_| (
         "OPTIONS:\n" +
         "    -h, --help                  Print help information\n" +
         "    -V, --version               Print version information\n" +
-        "    -d   <LIB>                  Dynamic library\n"
+        "    -d   <LIB>                  Dynamic library\n" +
+        "    -v                          Increment verbose level\n"
     );
     let res = command.get_matches_from(["rich", "build", "--help"]);
     let _ = *(assert_true("err", res.is_err));
@@ -218,10 +222,24 @@ test_matches_typical2 = make_test("test_matches_typical2") $ |_| (
     pure()
 );
 
+test_matches_rich_run: TestCase;
+test_matches_rich_run = make_test("test_matches_rich_run") $ |_| (
+    let command = rich_command;
+    let inputs = "rich run in1.txt".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let opt = matches.subcommand;
+    let _ = *(assert_true("subcommand", opt.is_some));
+    let (name, submatches) = opt.as_some;
+    let _ = *(assert_equal("name", "run", name));
+    let _ = *(assert_equal("FILE", some(["in1.txt"]), submatches.get_many("FILE")));
+    let _ = *(assert_equal("verbose", none(), submatches.get_one("verbose")));
+    pure()
+);
+
 test_matches_rich_build: TestCase;
 test_matches_rich_build = make_test("test_matches_rich_build") $ |_| (
     let command = rich_command;
-    let inputs = "rich build in1.txt in2.txt -d mylib".split(" ").to_array;
+    let inputs = "rich build in1.txt in2.txt -v -d mylib -v".split(" ").to_array;
     let matches = *command.get_matches_from(inputs).from_result;
     let opt = matches.subcommand;
     let _ = *(assert_true("subcommand", opt.is_some));
@@ -229,6 +247,7 @@ test_matches_rich_build = make_test("test_matches_rich_build") $ |_| (
     let _ = *(assert_equal("name", "build", name));
     let _ = *(assert_equal("FILE", some(["in1.txt", "in2.txt"]), submatches.get_many("FILE")));
     let _ = *(assert_equal("dynamic_lib", some("mylib"), submatches.get_one("dynamic_lib")));
+    let _ = *(assert_equal("verbose", some("2"), submatches.get_one("verbose")));
     pure()
 );
 
@@ -267,6 +286,7 @@ main = (
         test_version_typical,
         test_matches_typical,
         test_matches_typical2,
+        test_matches_rich_run,
         test_matches_rich_build,
         test_errors,
         TestCase::empty

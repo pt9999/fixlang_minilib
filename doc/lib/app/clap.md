@@ -17,6 +17,7 @@ The action taken when the argument is parsed.
         append: (),     // Appends next input to the array of argument values.
         set_true: (),   // Sets "true" as the single argument value.
         set_false: (),  // Sets "false" as the single argument value.
+        increment: (),  // Increment the argument value as an integer.
         help: (),       // Displays help for the command.
         version: ()     // Displays the version of the command.
     };

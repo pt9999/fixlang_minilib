@@ -2,6 +2,7 @@ module Minilib.Crypto.Tls13.TLSSocket;
 
 import Debug;
 
+import Minilib.Crypto.Tls13.Types;
 import Minilib.Monad.BytesIO;
 import Minilib.Net.Tcp;
 import Minilib.Text.Hex;
@@ -27,26 +28,39 @@ _debug_lazy = |message, sock| (
 impl TLSSocket: BytesIO {
     // type IOType Socket = IOFail;
     send = |bytes, sock| (
-        let expected_length = bytes.get_size;
-        let actual_length = *sock.@socket.Socket::send(bytes);
-        eval sock._debug_lazy(|_| "sent:" + actual_length.to_string + " bytes: " + bytes.to_string_hex);
-        if actual_length < expected_length {
-            throw $ "send error: expected=" + expected_length.to_string
-                    + " actual=" + actual_length.to_string
-        };
-        pure()
+        loop_m(
+            bytes, |bytes|
+            let expected_length = bytes.get_size;
+            let actual_length = *sock.@socket.Socket::send(bytes);
+            eval sock._debug_lazy(|_| "sent:" + actual_length.to_string + " bytes: " + bytes.to_string_hex);
+            if actual_length > expected_length {
+                throw $ "sent bytes more than specified"
+            };
+            if actual_length == expected_length {
+                break_m $ ()
+            };
+            let bytes = bytes.subarray(actual_length, bytes.get_size);
+            continue_m $ bytes
+        )
     );
     recv = |length, sock| (
         eval sock._debug_lazy(|_| "receiving " + length.to_string + " bytes");
-        let bytes = *sock.@socket.Socket::recv(length);
-        eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes: " +
-            (
-                let max_size = 100;
-                if bytes.get_size > max_size { bytes.subarray(0, max_size).to_string_hex + "..." }
-                else { bytes.to_string_hex }
-            )
-        );
-        pure $ bytes
+        loop_m(
+            (Array::empty(length), length), |(result, length)|
+            if length <= 0 {
+                eval sock._debug_lazy(|_| " ==> " + result.to_string_hex_limit(100));
+                break_m $ result
+            };
+            let bytes = *sock.@socket.Socket::recv(length);
+            eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes" +
+                                      " (remaining: " + (length - bytes.get_size).to_string +")");
+            if bytes.get_size > length {
+                throw $ "received bytes more than specified"
+            };
+            let result = result.append(bytes);
+            let length = length - bytes.get_size;
+            continue_m $ (result, length)
+        )
     );
 
     try_recv = |length, sock| (

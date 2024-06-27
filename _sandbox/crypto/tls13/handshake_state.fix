@@ -215,6 +215,7 @@ namespace AfterClientHello {
 
     on_recv_record: [m: MonadError] TLSRecord -> AfterClientHello -> m HandshakeState;
     on_recv_record = |record, after_client_hello| (
+        eval debug_eprintln("AfterClientHello::on_recv_record");
         if !record.@content_type.is_handshake {
             error $ "after_client_hello: unexpected content type"
         };
@@ -271,6 +272,7 @@ impl AfterServerHello: ToString {
 namespace AfterServerHello {
     on_recv_record: [m: MonadError] TLSRecord -> AfterServerHello -> m HandshakeState;
     on_recv_record = |record, after_server_hello| (
+        eval debug_eprintln("AfterServerHello::on_recv_record");
         let protection = after_server_hello.@protection;
         let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
         let after_server_hello = after_server_hello.set_protection(protection);
@@ -455,6 +457,7 @@ namespace AfterFinished {
 
     on_recv_record: [m: MonadError] TLSRecord -> AfterFinished -> m HandshakeState;
     on_recv_record = |record, after_finished| (
+        eval debug_eprintln("AfterFinished::on_recv_record");
         let protection = after_finished.@protection;
         let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
         let after_finished = after_finished.set_protection(protection);
@@ -465,6 +468,7 @@ namespace AfterFinished {
                 |after_finished, (handshake, handshake_bytes)| after_finished._handle_handshake(handshake)
             );
             // TODO: support KeyUpdate
+            eval debug_eprintln("AfterFinished::on_recv_record end");
             pure $ HandshakeState::after_finished $ after_finished
         };
         if inner_plaintext.@content_type.is_application_data {
@@ -472,6 +476,7 @@ namespace AfterFinished {
             let after_finished = after_finished.mod_appdata_received(
                 append(inner_plaintext.@content)
             );
+            eval debug_eprintln("AfterFinished::on_recv_record end");
             pure $ HandshakeState::after_finished $ after_finished
         };
 
@@ -481,6 +486,7 @@ namespace AfterFinished {
 
     _handle_handshake: [m: MonadError] Handshake -> AfterFinished ->  m AfterFinished;
     _handle_handshake = |handshake, after_finished| (
+        eval debug_eprintln("AfterFinished::_handle_handshake");
         if handshake.is_new_session_ticket {
             after_finished._handle_new_session_ticket(handshake.as_new_session_ticket)
         };
@@ -495,6 +501,7 @@ namespace AfterFinished {
 
     _handle_new_session_ticket: [m: MonadError] NewSessionTicket -> AfterFinished -> m AfterFinished;
     _handle_new_session_ticket = |new_session_ticket, after_finished| (
+        eval debug_eprintln("AfterFinished::_handle_new_session_ticket");
         pure $ after_finished
     );
 

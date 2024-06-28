@@ -1,4 +1,8 @@
 // A monad that performs bytes I/O operations.
+//
+// NOTE:
+// - If the data cannot be sent/received immediately, the send/recv functions may be blocked.
+// - If an error occured during operation (such as the connection is lost), the send/recv functions reports the error.
 module Minilib.Monad.BytesIO;
 
 import Debug;
@@ -6,6 +10,7 @@ import Debug;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
 
 __Err_EOF: ErrMsg;
 __Err_EOF = "EOF";
@@ -13,28 +18,59 @@ __Err_EOF = "EOF";
 trait MonadBytesIO = Functor + Monad + MonadErrorIF + MonadBytesIOIF;
 
 trait [m: * -> *] m: MonadBytesIOIF {
-    // `send_bytes(bytes)` sends exactly `bytes.get_size` bytes. If the data cannot be sent immediately, this function may be blocked.
-    // If an error occured (such as the connection is down or the storage is full), that error will be reported.
-    send_bytes: Array U8 -> m ();
-    // `recv_n_bytes(n)` receives exactly `n` bytes. If the data is not available yet, this function may be blocked.
-    // If an error occured (such as the connection is down or the end of stream is reached), that error will be reported.
+    // `send_bytes(bytes)` sends at most `bytes.get_size` bytes.
+    // The byte size actually sent is returned.
+    send_bytes: Array U8 -> m I64;
+    // `recv_n_bytes(n)` receives at most `n` bytes.
     recv_n_bytes: I64 -> m (Array U8);
-    // `try_recv_n_bytes(n)` receives upto `n` bytes. If the data is not available yet, this function will return immediately.
-    // If an error occured (such as the connection is down or the end of stream is reached), that error will be reported.
+    // `try_recv_n_bytes(n)` receives at most `n` bytes.
     try_recv_n_bytes: I64 -> m (Option (Array U8));
+}
+
+namespace MonadBytesIO {
+    // `send_bytes_full(bytes)` sends exactly `bytes.get_size` bytes.
+    send_bytes_full: [m: MonadBytesIO] Array U8 -> m ();
+    send_bytes_full = |bytes| (
+        let byte_size = bytes.get_size;
+        if byte_size == 0 {
+            pure $ ()
+        };
+        let sent_size = *send_bytes(bytes);
+        eval assert(|_| "send_bytes_full: sent bytes more than specified", sent_size <= byte_size);
+        if sent_size == byte_size {
+            pure $ ()
+        };
+        let bytes = bytes.subarray(sent_size, byte_size);
+        send_bytes_full(bytes) // tail recursion
+    );
+
+    // `recv_n_bytes_full(n)` receives exactly `n` bytes.
+    recv_n_bytes_full: [m: MonadBytesIO] I64 -> m (Array U8);
+    recv_n_bytes_full = |byte_size| (
+        loop_m(
+            (Array::empty(byte_size), byte_size), |(bytes, byte_size)|
+            if byte_size <= 0 {
+                break_m $ bytes
+            };
+            let received_bytes = *recv_n_bytes(byte_size);
+            let received_size = received_bytes.get_size;
+            eval assert(|_| "recv_n_bytes_full: received bytes more than specified", received_bytes.get_size <= byte_size);
+            let bytes = bytes.append(received_bytes);
+            let byte_size = byte_size - received_size;
+            continue_m $ (bytes, byte_size)
+        )
+    );
 }
 
 trait a: BytesIO {
     // type IOType a: * -> *;
 
-    // `send(bytes)` sends exactly `bytes.get_size` bytes. If the data cannot be sent immediately, this function will be blocked.
-    // If an error occured (such as the connection is down or the storage is full), that error will be reported.
-    send: Array U8 -> a -> IOFail ();
-    // `recv(n)` receives exactly `n` bytes. If the data is not available yet, this function will be blocked.
-    // If an error occured (such as the connection is down or the end of stream is reached), that error will be reported.
+    // `send(bytes)` sends at most `bytes.get_size` bytes.
+    // The byte size actually sent is returned.
+    send: Array U8 -> a -> IOFail I64;
+    // `recv(n)` receives at most `n` bytes.
     recv: I64 -> a -> IOFail (Array U8);
-    // `try_recv(n)` receives upto `n` bytes. If the data is not available yet, this function will return immediately.
-    // If an error occured (such as the connection is down or the end of stream is reached), that error will be reported.
+    // `try_recv(n)` receives at most `n` bytes.
     try_recv: I64 -> a -> IOFail (Option (Array U8));
 }
 

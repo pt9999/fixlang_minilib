@@ -28,39 +28,17 @@ _debug_lazy = |message, sock| (
 impl TLSSocket: BytesIO {
     // type IOType Socket = IOFail;
     send = |bytes, sock| (
-        loop_m(
-            bytes, |bytes|
-            let expected_length = bytes.get_size;
-            let actual_length = *sock.@socket.Socket::send(bytes);
-            eval sock._debug_lazy(|_| "sent:" + actual_length.to_string + " bytes: " + bytes.to_string_hex);
-            if actual_length > expected_length {
-                throw $ "sent bytes more than specified"
-            };
-            if actual_length == expected_length {
-                break_m $ ()
-            };
-            let bytes = bytes.subarray(actual_length, bytes.get_size);
-            continue_m $ bytes
-        )
+        let sent_size = *sock.@socket.Socket::send(bytes);
+        eval sock._debug_lazy(|_| "sent:" + sent_size.to_string + " bytes: " +
+                        bytes.subarray(0, sent_size).to_string_hex_limit(100));
+        pure $ sent_size
     );
     recv = |length, sock| (
         eval sock._debug_lazy(|_| "receiving " + length.to_string + " bytes");
-        loop_m(
-            (Array::empty(length), length), |(result, length)|
-            if length <= 0 {
-                eval sock._debug_lazy(|_| " ==> " + result.to_string_hex_limit(100));
-                break_m $ result
-            };
-            let bytes = *sock.@socket.Socket::recv(length);
-            eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes" +
-                                      " (remaining: " + (length - bytes.get_size).to_string +")");
-            if bytes.get_size > length {
-                throw $ "received bytes more than specified"
-            };
-            let result = result.append(bytes);
-            let length = length - bytes.get_size;
-            continue_m $ (result, length)
-        )
+        let bytes = *sock.@socket.Socket::recv(length);
+        eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes: " +
+                        bytes.to_string_hex_limit(100));
+        pure $ bytes
     );
 
     try_recv = |length, sock| (

@@ -22,9 +22,9 @@ import Minilib.Text.Hex;
 
 validate_signature: SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
 validate_signature = |public_key, certificate| (
-    let hashspec = _find_pkcs1_v1_5_hashspec(certificate);
-    if hashspec.is_some {
-        validate_signature_pkcs1_v1_5(hashspec.as_some, public_key, certificate)
+    let options = _find_emsa_pkcs1_options(certificate);
+    if options.is_some {
+        validate_signature_pkcs1_v1_5(options.as_some, public_key, certificate)
     };
     let ecdsa_scheme = _find_ecdsa_scheme(certificate);
     if ecdsa_scheme.is_some {
@@ -34,20 +34,20 @@ validate_signature = |public_key, certificate| (
     err $ "Not supported signature algorithm: " + certificate.@signature_algorithm.to_string
 );
 
-_find_pkcs1_v1_5_hashspec: Certificate -> Option Pkcs1::HashSpec;
-_find_pkcs1_v1_5_hashspec = |certificate| (
+_find_emsa_pkcs1_options: Certificate -> Option EmsaPkcs1Options;
+_find_emsa_pkcs1_options = |certificate| (
     let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
     if signature_algorithm.match_name("sha-1WithRSAEncryption") {
-        some $ Pkcs1::hashspec_sha1
+        some $ Pkcs1::emsa_pkcs1_options_sha1
     };
     if signature_algorithm.match_name("sha256WithRSAEncryption") {
-        some $ Pkcs1::hashspec_sha256
+        some $ Pkcs1::emsa_pkcs1_options_sha256
     };
     if signature_algorithm.match_name("sha384WithRSAEncryption") {
-        some $ Pkcs1::hashspec_sha384
+        some $ Pkcs1::emsa_pkcs1_options_sha384
     };
     if signature_algorithm.match_name("sha512WithRSAEncryption") {
-        some $ Pkcs1::hashspec_sha512
+        some $ Pkcs1::emsa_pkcs1_options_sha512
     };
     none()
 );
@@ -64,8 +64,8 @@ _find_ecdsa_scheme = |certificate| (
     none()
 );
 
-validate_signature_pkcs1_v1_5: Pkcs1::HashSpec -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
-validate_signature_pkcs1_v1_5 = |hashspec, public_key, certificate| (
+validate_signature_pkcs1_v1_5: EmsaPkcs1Options -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_signature_pkcs1_v1_5 = |options, public_key, certificate| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
     if !pubkey_algorithm.match_name("rsaEncryption") {
         err $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
@@ -75,7 +75,7 @@ validate_signature_pkcs1_v1_5 = |hashspec, public_key, certificate| (
     let e = rsa_pubkey.@public_exponent;
     let message = certificate.@tbs_certificate_bytes;
     let signature = certificate.@signature_value.@data;
-    Pkcs1::rsassa_pkcs1_v1_5_verify((n, e), message, signature, hashspec)
+    Pkcs1::rsassa_pkcs1_v1_5_verify((n, e), message, signature, options)
 );
 
 

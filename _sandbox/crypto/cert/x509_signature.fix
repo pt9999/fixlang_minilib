@@ -22,11 +22,12 @@ import Minilib.Text.Hex;
 
 validate_signature: SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
 validate_signature = |public_key, certificate| (
-    let options = _find_emsa_pkcs1_options(certificate);
+    let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
+    let options = signature_algorithm._find_emsa_pkcs1_options;
     if options.is_some {
         validate_signature_pkcs1_v1_5(options.as_some, public_key, certificate)
     };
-    let ecdsa_scheme = _find_ecdsa_scheme(certificate);
+    let ecdsa_scheme = signature_algorithm._find_ecdsa_scheme;
     if ecdsa_scheme.is_some {
         validate_signature_ecdsa(ecdsa_scheme.as_some, public_key, certificate)
     };
@@ -34,9 +35,8 @@ validate_signature = |public_key, certificate| (
     err $ "Not supported signature algorithm: " + certificate.@signature_algorithm.to_string
 );
 
-_find_emsa_pkcs1_options: Certificate -> Option EmsaPkcs1Options;
-_find_emsa_pkcs1_options = |certificate| (
-    let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
+_find_emsa_pkcs1_options: AlgorithmIdentifier -> Option EmsaPkcs1Options;
+_find_emsa_pkcs1_options = |signature_algorithm| (
     if signature_algorithm.match_name("sha-1WithRSAEncryption") {
         some $ Pkcs1::emsa_pkcs1_options_sha1
     };
@@ -52,9 +52,8 @@ _find_emsa_pkcs1_options = |certificate| (
     none()
 );
 
-_find_ecdsa_scheme: Certificate -> Option ECDSAScheme;
-_find_ecdsa_scheme = |certificate| (
-    let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
+_find_ecdsa_scheme: AlgorithmIdentifier -> Option ECDSAScheme;
+_find_ecdsa_scheme = |signature_algorithm| (
     if signature_algorithm.match_name("ecdsa-with-SHA256") {
         some $ ECDSAScheme::ecdsa_secp256r1_sha256
     };
@@ -75,6 +74,17 @@ validate_signature_pkcs1_v1_5 = |options, public_key, certificate| (
 
 validate_signature_ecdsa: ECDSAScheme -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
 validate_signature_ecdsa = |ecdsa_scheme, public_key, certificate| (
+    let (ecdsa_scheme, ec_point) = *get_ec_point_from_public_key(ecdsa_scheme, public_key);
+    // Validate signature
+    let message = certificate.@tbs_certificate_bytes;
+    let sig_value: EcdsaSigValue = *decode_der_from_bytes(certificate.@signature_value.@data);
+    //eval debug_eprintln("sig_value="+ sig_value.to_string);
+    let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
+    ecdsa_scheme.verify(ec_point, signature, message)
+);
+
+get_ec_point_from_public_key: ECDSAScheme -> SubjectPublicKeyInfo -> Result ErrMsg (ECDSAScheme, ECPoint);
+get_ec_point_from_public_key = |ecdsa_scheme, public_key| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
     if !pubkey_algorithm.match_name("id-ecPublicKey") {
         err $ "Public_key algorithm does not match `id-ecPublicKey`: " + pubkey_algorithm.to_string
@@ -96,17 +106,12 @@ validate_signature_ecdsa = |ecdsa_scheme, public_key, certificate| (
     };
     let ec = ecdsa_scheme.@ec;
 
-    // Decode ecpoint
-    let ecpoint: Array U8 = public_key.@subject_public_key.@data;
-    //eval debug_eprintln("ecpoint="+ ecpoint.to_string_hex);
-    let ecpoint: ECPoint = *from_bytes_ec(ec, ecpoint);
+    // Decode ec_point
+    let ec_point: Array U8 = public_key.@subject_public_key.@data;
+    //eval debug_eprintln("ec_point="+ ec_point.to_string_hex);
+    let ec_point: ECPoint = *from_bytes_ec(ec, ec_point);
 
-    // Validate signature
-    let message = certificate.@tbs_certificate_bytes;
-    let sig_value: EcdsaSigValue = *decode_der_from_bytes(certificate.@signature_value.@data);
-    //eval debug_eprintln("sig_value="+ sig_value.to_string);
-    let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
-    ecdsa_scheme.verify(ecpoint, signature, message)
+    pure $ (ecdsa_scheme, ec_point)
 );
 
 _find_ec_param: String -> Option ECParam;
@@ -115,3 +120,4 @@ _find_ec_param = |name| (
     if name == "secp384r1" { some $ ECParam::secp384r1 };
     none()
 );
+

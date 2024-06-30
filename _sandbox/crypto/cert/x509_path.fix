@@ -7,6 +7,7 @@ import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Crypto.Cert.X509Time;
 import Minilib.Monad.Error;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
@@ -67,11 +68,19 @@ namespace CertificatePath {
         validate_signature(public_key, ca_cert).from_result_t
     );
 
-    validate_date: [m: MonadError] CertificatePath -> m ();
-    validate_date = |cert_path| (
+    validate_date: [m: MonadError] Option X509Time -> CertificatePath -> m ();
+    validate_date = |time, cert_path| (
+        if time.is_none { pure () };
+        let time = time.as_some;
+        eval debug_eprintln("validate_date: time=" + time.to_string);
         let certs = cert_path.@data;
-        // TODO check valid date
-        pure()
+        certs.to_iter.foreach_m(|cert|
+            let validity = cert.@tbs_certificate.@validity;
+            if !validity.is_valid_at(time) {
+                error $ (validity, cert.get_subject).format("certificate is out of date: validity={} subject={}")
+            };
+            pure()
+        )
     );
 }
 

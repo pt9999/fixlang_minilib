@@ -3,7 +3,6 @@ module Minilib.Crypto.Tls13.HandshakeState;
 
 import AsyncTask;
 import Debug;
-import Time;
 
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.CertValidation;
@@ -14,6 +13,7 @@ import Minilib.Crypto.Tls13.Protection;
 import Minilib.Crypto.Tls13.HandshakeProtocol;
 import Minilib.Crypto.Tls13.RecordProtocol;
 import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509Time;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -43,8 +43,8 @@ namespace TLSRecordHelper {
 
 type HandshakeInitParam = box struct {
     server_name: String,
-//    start_time: Time::Time,
     ca_certs: Option CACertificates,
+    validate_cert_date: Option X509Time,
 };
 
 type HandshakeState = unbox union {
@@ -360,7 +360,7 @@ namespace AfterServerHello {
         let certs = *decode_certificates(cert_data_array);
 
         eval debug_eprintln("validating certificate signatures");
-        eval *validate_certificate_signatures(certs, ca_certs.as_some);
+        eval *validate_certificate_signatures(certs, ca_certs.as_some, init_param.@validate_cert_date);
 
         eval debug_eprintln("checking certificate_verify");
         let CertificateVerify {
@@ -372,13 +372,7 @@ namespace AfterServerHello {
         eval *check_certificate_verify(certs.@(0), content, algorithm, signature);
 
         eval debug_eprintln("checking server_name");
-        let common_name = certs.@(0).get_subject.find_common_name;
-        if common_name.is_none {
-            error $ "cerfiticate common name is not found"
-        };
-        eval debug_eprintln("common_name=" + common_name.to_string);
-        // TODO: glob match such as common_name="*.example.com", server_name="www.example.com"
-
+        eval *check_certificate_common_name(certs.@(0), init_param.@server_name);
         pure()
     );
 

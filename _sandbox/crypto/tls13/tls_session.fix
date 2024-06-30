@@ -7,11 +7,11 @@ module Minilib.Crypto.Tls13.TLSSession;
 import AsyncTask;
 import Debug;
 
+import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.HandshakeState;
 import Minilib.Crypto.Tls13.TLSSocket;
 import Minilib.Crypto.SecureRandom;
-import Minilib.Crypto.X509.CACertificates;
 import Minilib.Monad.BytesIO;
 import Minilib.Monad.Random;
 import Minilib.Monad.State;
@@ -46,11 +46,12 @@ namespace TLSSession {
     make = |socket| (
         let secure_random = *SecureRandom::make;
         let var_secure_random = *Var::make(secure_random).lift;
-        let ca_certs: *CACertificates::make;
+        let ca_certs = *CACertificates::make;
         let handshake_state = *HandshakeState::make;
         pure $ TLSSession {
             socket: socket,
             var_secure_random: var_secure_random,
+            ca_certs: ca_certs,
             handshake_state: handshake_state,
         }
     );
@@ -92,7 +93,12 @@ namespace TLSSession {
 
     _send_client_hello: String -> StateTLSSession ();
     _send_client_hello = |server_name| (
-        eval *HandshakeState::start_handshake(server_name).lift_hstate;
+        let session = *get_state;
+        let init_param = HandshakeInitParam {
+            server_name: server_name,
+            ca_certs: some $ session.@ca_certs
+        };
+        eval *HandshakeState::start_handshake(init_param).lift_hstate;
         eval *HandshakeState::send_records.lift_hstate;
         pure()
     );

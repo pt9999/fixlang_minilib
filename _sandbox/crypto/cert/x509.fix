@@ -6,7 +6,6 @@ module Minilib.Crypto.Cert.X509;
 
 import Hash;
 import Debug;
-//import Time;
 
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1Der;
@@ -22,6 +21,13 @@ import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+// Reads a certificate from a certificate file.
+// If the file does not contain exactly one certificate, an error will be reported.
+// Supported filename extensions: ".pem", ".crt", ".cer", ".der".
 read_certificate_from_file: Path -> IOFail Certificate;
 read_certificate_from_file = |path| (
     let certificates = *read_certificates_from_file(path);
@@ -34,6 +40,8 @@ read_certificate_from_file = |path| (
     pure $ certificates.@(0)
 );
 
+// Reads all certificates from a certificate file.
+// Supported filename extensions: ".pem", ".crt", ".cer", ".der".
 read_certificates_from_file: Path -> IOFail (Array Certificate);
 read_certificates_from_file = |path| (
     let filepath = path.to_string.to_lower;
@@ -48,26 +56,31 @@ read_certificates_from_file = |path| (
     throw $ "read_certificates_from_file: unsupported extension: " + filepath
 );
 
+// Reads a certificate from a certificate file in DER encoding (".cer", ".der").
 read_certificate_from_der_file: Path -> IOFail Certificate;
 read_certificate_from_der_file = |path| (
     let bytes = *read_file_bytes(path);
     from_bytes(bytes).from_result
 );
 
+// Reads all certificates from a certificate file in PEM encoding (".pem", ".crt").
 read_certificates_from_pem_file: Path -> IOFail (Array Certificate);
 read_certificates_from_pem_file = |path| (
     let contents = *read_file_string(path);
     let entries = *parse_pem_entries(contents).from_result;
-    //eval *write_file_bytes(Path::parse(".local/tmp.from_pem.cer").as_some, entries.@(0).@bytes);
     let certificates = *entries.map_m(|entry|
         from_bytes(entry.@bytes)
     ).from_result;
     pure $ certificates
 );
 
+// ---------------------------------------------------------------------------
+// X.509 Data Structures
+// ---------------------------------------------------------------------------
 
 // 4.1. Basic Certificate Fields
 
+// A X.509 certificate with signature
 type Certificate = unbox struct {
     tbs_certificate: TBSCertificate,
     signature_algorithm:   AlgorithmIdentifier,
@@ -76,9 +89,11 @@ type Certificate = unbox struct {
 };
 
 namespace Certificate {
+    // Gets the subject name.
     get_subject: Certificate -> Name;
     get_subject = |cert| cert.@tbs_certificate.@subject;
 
+    // Gets the subject public key.
     get_subject_public_key: Certificate -> SubjectPublicKeyInfo;
     get_subject_public_key = |cert| cert.@tbs_certificate.@subject_public_key_info;
 }
@@ -122,6 +137,7 @@ impl Certificate: DecodeDer {
     );
 }
 
+// Information associated with the subject of the certificate and the issuer.
 type TBSCertificate = unbox struct {
     version: Version,
     serial_number: CertificateSerialNumber,
@@ -290,6 +306,19 @@ impl RSAPublicKey: DecodeDer {
 type Name = unbox struct {
     data: RDNSequence
 };
+
+namespace Name {
+    find_common_name: Name -> Option String;
+    find_common_name = |name| (
+        name._find_attr_value(match_name("cn"))
+    );
+
+    _find_attr_value: (AttributeType -> Bool) -> Name -> Option AttributeValue;
+    _find_attr_value = |f, name| (
+        name.@data.flatten.filter(|(ty, val)| f(ty)).get_first.map(|(ty, val)| val)
+    );
+}
+
 
 impl Name: Eq {
     eq = |a, b| a.@data == b.@data;

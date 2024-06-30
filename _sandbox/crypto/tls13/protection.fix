@@ -306,6 +306,23 @@ namespace Protection {
         pure $ (ciphertext, protection)
     );
 
+    calc_certificate_verify_content: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
+    calc_certificate_verify_content = |traffic_key_type, protection| (
+        let Protection {
+            hkdf: hkdf,
+            handshake_context: handshake_context,   // ClientHello...Certificate
+            secrets: secrets
+        } = protection;
+        let context_string = if traffic_key_type.is_server_tk { "server CertificateVerify" } else { "client CertificateVerify" };
+        let concatenation = (
+            Array::fill(64, 0x20_U8)
+            .append(context_string.get_bytes.pop_back)
+            .append([0x00_U8])
+            .append(hkdf.transcript_hash(handshake_context))
+        );
+        pure $ concatenation
+    );
+
     calc_finished_verify_data: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_finished_verify_data = |traffic_key_type, protection| (
         let Protection {

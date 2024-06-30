@@ -78,6 +78,9 @@ type Certificate = unbox struct {
 namespace Certificate {
     get_subject: Certificate -> Name;
     get_subject = |cert| cert.@tbs_certificate.@subject;
+
+    get_subject_public_key: Certificate -> SubjectPublicKeyInfo;
+    get_subject_public_key = |cert| cert.@tbs_certificate.@subject_public_key_info;
 }
 
 impl Certificate: ToString {
@@ -217,6 +220,20 @@ type SubjectPublicKeyInfo = unbox struct {
     subject_public_key: Asn1::BitString,
 };
 
+namespace SubjectPublicKeyInfo {
+    get_rsa_public_key: [m: MonadError] SubjectPublicKeyInfo -> m (BigInt, BigInt);
+    get_rsa_public_key = |public_key| (
+        let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+        if !pubkey_algorithm.match_name("rsaEncryption") {
+            error $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
+        };
+        let rsa_pubkey: RSAPublicKey = *decode_der_from_bytes(public_key.@subject_public_key.@data).from_result_t;
+        let n = rsa_pubkey.@modulus;
+        let e = rsa_pubkey.@public_exponent;
+        pure $ (n, e)
+    );
+}
+
 impl SubjectPublicKeyInfo: ToString {
     to_string = |obj| (
         "SubjectPublicKeyInfo {" +
@@ -267,7 +284,6 @@ impl RSAPublicKey: DecodeDer {
         }
     );
 }
-
 
 // 4.1.2.4. Issuer
 

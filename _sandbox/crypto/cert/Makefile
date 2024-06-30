@@ -1,10 +1,11 @@
 FIXAUTOLINK = ../../../bin/fixautolink
 FIXAUTOTEST = ../../../bin/fixautotest
-LIBS = -L ../../../lib -L . -L ../tls13
+LIBS = -L ../../../lib -L . -L ../tls13 -L ../cert
 
-OPT_BUILD = -O separated
-OPT_RUN = -O separated
-OPT_TESTS = -O separated
+OPT = separated
+OPT_BUILD = -O $(OPT)
+OPT_RUN = -O $(OPT)
+OPT_TESTS = -O $(OPT)
 
 %.out: %.fix
 	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< $(OPT_BUILD)

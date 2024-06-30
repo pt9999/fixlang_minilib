@@ -6,15 +6,16 @@ module Minilib.Crypto.Cert.Pkcs1;
 
 import Debug;
 
+import Minilib.Crypto.SHA1;
+import Minilib.Crypto.SHA256;
+import Minilib.Crypto.SHA512;
 import Minilib.Encoding.Binary;
 import Minilib.Math.Modular;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigNat;
 import Minilib.Math.Types;
 import Minilib.Text.Hex;
-import Minilib.Crypto.SHA1;
-import Minilib.Crypto.SHA256;
-import Minilib.Crypto.SHA512;
+import Minilib.Text.StringEx;
 
 // 4. Data Conversion Primitives
 
@@ -92,7 +93,7 @@ rsassa_pss_verify = |(n, e), _M, _S, options| (
     let emLen = ((modBits - 1) + 7) / 8;
     let _EM = *i2osp(m, emLen);
     eval assert(|_| "unexpected: (emLen, k, modBits)=" + (emLen, k, modBits).to_string,
-            if (modbits - 1) % 8 == 0 { emLen == k - 1 } else { emLen == k });
+            if (modBits - 1) % 8 == 0 { emLen == k - 1 } else { emLen == k });
     // 3.  EMSA-PSS verification: Apply the EMSA-PSS verification operation (Section 9.1.2)
     //     to the message M and the encoded message EM to determine whether they are consistent:
     emsa_pss_verify(_M, _EM, modBits - 1, options)
@@ -170,7 +171,7 @@ emsa_pss_verify = |_M, _EM, em_bits, options| (
         eval debug_eprintln("_EM.@(0)=" + _EM.@(0).to_string_hex + " k=" + k.to_string);
         err $ "inconsistent"
     };
-    let dbMask = mgf(_H, em_len - h_len - 1, hash, hlen);
+    let dbMask = *mgf(_H, em_len - hlen - 1, hash, hlen);
     eval assert(|_| "maskedDB and dbMask size unmatch", maskedDB.get_size == dbMask.get_size);
     let _DB = Array::from_map(maskedDB.get_size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
     let _DB = _DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
@@ -298,10 +299,10 @@ mgf1 = |mgf_seed, mask_len, hash, hlen| (
     };
     let _T = Array::empty(0);
     let n = (mask_len + hlen - 1) / hlen;
-    let _T = Iterator::range(0, n).fold(_T, |_T, counter|
-        let _C = i2osp(BigInt::from_I64(counter), 4);
+    let _T = *Iterator::range(0, n).fold_m(_T, |_T, counter|
+        let _C = *i2osp(BigInt::from_I64(counter), 4);
         let _T = _T.append(hash(mgf_seed.append(_C)));
-        _T
+        pure $ _T
     );
     ok $ _T.subarray(0, mask_len)
 );

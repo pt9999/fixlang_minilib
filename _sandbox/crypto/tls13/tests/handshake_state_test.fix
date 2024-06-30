@@ -4,7 +4,6 @@ import AsyncTask;
 import Random;
 import Debug;
 
-//import Minilib.Crypto.Tls13.ECDHE;
 import Minilib.Crypto.Tls13.Types;
 import Minilib.Crypto.Tls13.HandshakeState;
 import Minilib.Crypto.Tls13.RecordProtocol;
@@ -14,7 +13,6 @@ import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Text.Hex;
-//import Minilib.Thread.Time;
 import Minilib.Testing.UnitTest;
 
 parse_hex: String -> Result ErrMsg (Array U8);
@@ -137,13 +135,22 @@ res_server_appdata_bytes = parse_hex("
 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f 30 31
 ");
 
+// -----------------------------------------------------------------
 
+make_init_param: [m: MonadError] m HandshakeInitParam;
+make_init_param = (
+    pure $ HandshakeInitParam {
+        server_name: "localhost",
+        ca_certs: none()
+    }
+);
 
 make_after_client_hello: [m: MonadError] m HandshakeState;
 make_after_client_hello = (
     let handshake_bytes = *res_client_hello_bytes.from_result_t;
     let client_hello_records: Array TLSRecord = TLSRecord::split_fragments(ContentType::handshake(), handshake_bytes);
     pure $ HandshakeState::after_client_hello $ AfterClientHello {
+        init_param: *make_init_param,
         client_hello_records: client_hello_records,
         key_agreements: [
             KeyAgreement::x25519 $ *X25519::make
@@ -212,7 +219,6 @@ test_x25519_handshake = (
     let record: TLSRecord = *make_server_encrypted_newsessionticket_record;
     let hstate = *hstate.on_recv_record(record);
 
-
     let appdata = *res_client_appdata_bytes.from_result_t;
     let hstate = *hstate.send_appdata(appdata);
     let (records, hstate) = *hstate.pop_records_to_send;
@@ -231,18 +237,17 @@ test_client_hello = (
     let var_random = *Var::make(random).lift;
     let (hstate, _) = *do {
         let hstate = *HandshakeState::make;
-        hstate.start_handshake("localhost")
+        let init_param = *make_init_param;
+        hstate.start_handshake(init_param)
     }.run_state_t(var_random);
     eval *println(hstate.to_string).lift;
     pure()
 );
 
-
-
 main: IO ();
 main = (
     [
-//        test_client_hello,
+        test_client_hello,
         test_x25519_handshake,
     ]
     .run_test_driver

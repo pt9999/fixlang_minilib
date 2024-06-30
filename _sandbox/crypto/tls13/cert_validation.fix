@@ -1,0 +1,65 @@
+module Minilib.Crypto.Tls13.CertValidation;
+
+import Debug;
+import HashMap;
+
+import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.Pkcs1;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Path;
+import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Crypto.Tls13.Extensions;
+import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.Hex;
+/*
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
+*/
+
+decode_certificates: [m: MonadError] Array (Array U8) -> m (Array Certificate);
+decode_certificates = |cert_data_array| (
+    cert_data_array.map_m(|cert_data| from_bytes(cert_data)).from_result_t
+);
+
+validate_certificate_signatures: [m: MonadError] Array Certificate -> CACertificates -> m ();
+validate_certificate_signatures = |certs, ca_certs| (
+    let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs);
+    cert_path.validate_signatures
+);
+
+check_certificate_verify: [m: MonadError] Certificate -> Array U8 -> SignatureScheme -> Array U8 -> m ();
+check_certificate_verify = |cert, content, algorithm, signature| (
+    let options = _find_emsa_pss_options(algorithm);
+    if options.is_some {
+        _check_certificate_verify_rsae(cert, content, signature, options.as_some)
+    };
+    error $ "check_certificate_verify: unsupported algorithm: " + algorithm.to_string_hex
+);
+
+_check_certificate_verify_rsae: [m: MonadError] Certificate -> Array U8 -> Array U8 -> EmsaPssOptions -> m ();
+_check_certificate_verify_rsae = |cert, content, signature, options| (
+    let public_key = cert.get_subject_public_key;
+    let (n, e) = *public_key.get_rsa_public_key;
+    rsassa_pss_verify((n, e), content, signature, options).from_result_t
+);
+
+_find_emsa_pss_options: SignatureScheme -> Option EmsaPssOptions;
+_find_emsa_pss_options = |algorithm| (
+    if algorithm == SignatureScheme::rsa_pss_rsae_sha256 {
+        some $ Pkcs1::emsa_pss_options_sha256
+    };
+    if algorithm == SignatureScheme::rsa_pss_rsae_sha384 {
+        some $ Pkcs1::emsa_pss_options_sha384
+    };
+    if algorithm == SignatureScheme::rsa_pss_rsae_sha512 {
+        some $ Pkcs1::emsa_pss_options_sha512
+    };
+    none()
+);
+

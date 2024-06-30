@@ -146,6 +146,7 @@ rsassa_pkcs1_v1_5_verify = |(n, e), _M, _S, options| (
 //  "consistent" or "inconsistent"
 emsa_pss_verify: Array U8 -> Array U8 -> I64 -> EmsaPssOptions -> Result ErrMsg ();
 emsa_pss_verify = |_M, _EM, em_bits, options| (
+    let inconsistent_error = "emsa_pss_verify: inconsistent: ";
     let EmsaPssOptions {
         hash: hash,
         hlen: hlen,
@@ -156,11 +157,16 @@ emsa_pss_verify = |_M, _EM, em_bits, options| (
     //if _M.get_size >= 1.shift_left(61) - 1 { err $ "inconsistent" };
     let mHash = hash(_M);
     let em_len = (em_bits + 7) / 8;
+    //eval debug_eprintln("(em_len, hlen, slen) ="  + (em_len, hlen, slen).to_string);
     if em_len < hlen + slen + 2 {
-        err $ "inconsistent"
+        err $ inconsistent_error + "em_len too small: " + (em_len, hlen + slen + 2).to_string
     };
-    if _EM.get_size == 0 || _EM.@(_EM.get_size - 1) != 0xbc_U8 {
-        err $ "inconsistent"
+    if _EM.get_size == 0 {
+        err $ inconsistent_error + "EM is empty"
+    };
+
+    if _EM.@(_EM.get_size - 1) != 0xbc_U8 {
+        err $ inconsistent_error + "the last byte of EM is not 0xbc: " + _EM.@(_EM.get_size - 1).to_string_hex
     };
     let maskedDB = _EM.subarray(0, em_len - hlen - 1);
     let _H = _EM.subarray(em_len - hlen - 1, em_len - 1);
@@ -168,27 +174,29 @@ emsa_pss_verify = |_M, _EM, em_bits, options| (
     eval assert(|_| "k out of range", 0 <= k && k < 8);
     let kmask = 0xFF_U8.shift_left((8-k).to_U8);
     if _EM.@(0).bit_and(kmask) != 0_U8 {
-        eval debug_eprintln("_EM.@(0)=" + _EM.@(0).to_string_hex + " k=" + k.to_string);
-        err $ "inconsistent"
+        err $ inconsistent_error + "the masked first byte is not zero: @(0)=" + _EM.@(0).to_string_hex + " k=" + k.to_string
     };
     let dbMask = *mgf(_H, em_len - hlen - 1, hash, hlen);
     eval assert(|_| "maskedDB and dbMask size unmatch", maskedDB.get_size == dbMask.get_size);
     let _DB = Array::from_map(maskedDB.get_size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
     let _DB = _DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
-    let is_all_zeros = Iterator::range(0, em_len - hlen - slen - 2)
-                    .filter(|i| _DB.@(i) != 0_U8).is_empty;
+
+    let _DB_left = _DB.subarray(0, em_len - hlen - slen - 2);
+    let is_all_zeros = _DB_left.find_by(|u8| u8 != 0_U8).is_none;
     if !is_all_zeros {
-        eval debug_eprintln("_DB=" + _DB.to_string_hex);
-        err $ "inconsistent"
+        err $ inconsistent_error + "DB_left is not all zero: " + _DB_left.to_string_hex
     };
-    if _DB.@(em_len - hlen - slen - 1) != 0x01_U8 {
-        err $ "inconsistent"
+    // NOTE: The leftmost position is "position 1",
+    //       so "position emLen - hLen - sLen - 1" is `@(em_len - hlen - slen - 2)`.
+    let _DB_middle = _DB.@(em_len - hlen - slen - 2);
+    if _DB_middle != 0x01_U8 {
+        err $ inconsistent_error + "DB_middle is not one: " + _DB_middle.to_string_hex + " DB=" + _DB.to_string_hex
     };
     let salt = _DB.subarray(_DB.get_size - slen, _DB.get_size);
     let _M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
     let _H_dash = hash(_M_dash);
     if _H != _H_dash {
-        err $ "inconsistent"
+        err $ inconsistent_error + "H and H_dash does not match: H=" + _H.to_string_hex + " H_dash=" + _H_dash.to_string_hex
     };
     ok()    // consistent
 );

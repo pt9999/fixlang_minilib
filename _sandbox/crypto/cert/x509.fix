@@ -96,6 +96,12 @@ namespace Certificate {
     // Gets the subject public key.
     get_subject_public_key: Certificate -> SubjectPublicKeyInfo;
     get_subject_public_key = |cert| cert.@tbs_certificate.@subject_public_key_info;
+
+    find_extension: (Asn1::ObjectIdentifier -> Bool) -> Certificate -> Option Extension;
+    find_extension = |f, cert| (
+        let extensions = *cert.@tbs_certificate.@extensions;
+        extensions.to_iter.filter(@extn_id >> f).get_first
+    );
 }
 
 impl Certificate: ToString {
@@ -317,13 +323,12 @@ type Name = unbox struct {
 namespace Name {
     find_common_name: Name -> Option String;
     find_common_name = |name| (
-        //name._find_attr_value(match_name("cn"))
-        name._find_attr_value(match_name("id-at-commonName"))   // NOTE: use oid name, not ldap
-    );
-
-    _find_attr_value: (AttributeType -> Bool) -> Name -> Option AttributeValue;
-    _find_attr_value = |f, name| (
-        name.@data.flatten.to_iter.filter(|(ty, val)| f(ty)).get_first.map(|(ty, val)| val)
+        name.@data.flatten.to_iter
+        .filter(|(ty, val)| ty.match_name("id-at-commonName"))
+        // RFC2818: 3.1.  Server Identity:
+        // ... the (most specific) Common Name field in the Subject field of the certificate MUST be used.
+        .get_last
+        .map(|(ty, val)| val)
     );
 }
 
@@ -410,13 +415,7 @@ impl AlgorithmIdentifier: DecodeDer {
         decode_sequence $ do {
             let algorithm = *decode_obj;
             let parameters = *do { // ANY DEFINED BY algorithm OPTIONAL
-                let start_pos = *get_pos;
-                let identifier = *decode_identifier;
-                let length = *decode_length;
-                let contents = *decode_contents(length);
-                let end_pos = *get_pos;
-                eval *set_pos(start_pos);
-                decode_contents(end_pos - start_pos)
+                decode_any
             }.catch(|errmes|
                 if errmes == Asn1Der::__Err_EndOfStream { pure $ [] };
                 error $ errmes
@@ -464,6 +463,75 @@ impl Extension: DecodeDer {
                 extn_value: extn_value
             }
         }
+    );
+}
+
+// 4.2.1. Standard Extensions
+
+// 4.2.1.6. Subject Alternative Name
+
+type SubjectAltName = unbox struct {
+    data: GeneralNames
+};
+
+impl SubjectAltName: ToString {
+    to_string = |obj| (
+        "SubjectAltName { " +
+        obj.@data.to_string +
+        " }"
+    );
+}
+
+impl SubjectAltName: DecodeDer {
+    decode_obj = (
+        pure $ SubjectAltName {
+            data: *decode_sequence_of(decode_obj)
+        }
+    );
+}
+
+type GeneralNames = Array GeneralName;
+
+type GeneralName = unbox union {
+    otherName: Array U8, // [0] TODO: OtherName
+    rfc822Name: Asn1::IA5String, // [1]
+    dNSName: Asn1::IA5String, // [2]
+    x400Address: Array U8, // [3] TODO: ORAddress
+    directoryName: X509::Name,  // [4]
+    ediPartyName: Array U8, // [5] TODO: EDIPartyName
+    uniformResourceIdentifier: Asn1::IA5String, // [6]
+    iPAddress: Asn1::OctetString,           // [7]
+    registeredID: Asn1::ObjectIdentifier,    // [8]
+};
+
+impl GeneralName: DecodeDer {
+    decode_obj = (
+        choice $ [
+            with_context(0, decode_any.map(GeneralName::otherName)),
+            with_context(1, decode_string.map(GeneralName::rfc822Name)),
+            with_context(2, decode_string.map(GeneralName::dNSName)),
+            with_context(3, decode_any.map(GeneralName::x400Address)),
+            with_context(4, decode_name.map(GeneralName::directoryName)),
+            with_context(5, decode_any.map(GeneralName::ediPartyName)),
+            with_context(6, decode_string.map(GeneralName::uniformResourceIdentifier)),
+            with_context(7, decode_obj.map(GeneralName::iPAddress)),
+            with_context(8, decode_obj.map(GeneralName::registeredID)),
+        ]
+    );
+}
+
+impl GeneralName: ToString {
+    to_string = |obj| (
+        if obj.is_otherName { "otherName(" + obj.as_otherName.to_string_hex + ")" };
+        if obj.is_rfc822Name { "rfc822Name(" + obj.as_rfc822Name.to_string + ")" };
+        if obj.is_dNSName { "dNSName(" + obj.as_dNSName.to_string + ")" };
+        if obj.is_x400Address { "x400Address(" + obj.as_x400Address.to_string_hex + ")" };
+        if obj.is_directoryName { "directoryName(" + obj.as_directoryName.to_string + ")" };
+        if obj.is_ediPartyName { "ediPartyName(" + obj.as_ediPartyName.to_string_hex + ")" };
+        if obj.is_uniformResourceIdentifier { "uniformResourceIdentifier(" + obj.as_uniformResourceIdentifier.to_string + ")" };
+        if obj.is_iPAddress { "iPAddress(" + obj.as_iPAddress.to_bytes.to_string_hex + ")" };
+        if obj.is_registeredID { "registeredID(" + obj.as_registeredID.to_string + ")" };
+        ""
     );
 }
 

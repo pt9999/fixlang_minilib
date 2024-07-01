@@ -16,9 +16,8 @@ import Minilib.Text.Hex;
 import Minilib.Thread.Time;
 import Minilib.Testing.UnitTest;
 
-dump_triplets: Path -> IOFail ();
-dump_triplets = |path| (
-    let bytes = *read_file_bytes(path);
+dump_triplets: Array U8 -> IOFail ();
+dump_triplets = |bytes| (
     let buf = ByteBuffer::make(bytes, big_endian());
     let sm: StateT ByteBuffer IOFail () = loop_m(
         (), |_|
@@ -69,7 +68,11 @@ perf_certificates_pem = |path| (
 test_dump_triplets: IOFail ();
 test_dump_triplets = (
     let path = Path::parse(".local/tmp.cert_0.cer").as_some;
-    dump_triplets(path)
+    let bytes = *read_file_bytes(path);
+    let bytes = *from_string_hex("
+    3010820e7777772e676f6f676c652e636f6d
+    ").from_result;
+    dump_triplets(bytes)
 );
 
 test_cert_path: IOFail ();
@@ -91,6 +94,15 @@ test_read_certificates_from_file = (
     let certificates = *read_certificates_from_file(path);
     certificates.foreach_m(|certificate|
         eval *println(certificate.to_string).lift;
+        let extn = certificate.find_extension(match_name("id-ce-subjectAltName"));
+        eval *if extn.is_none {
+            println("subjectAltName not found").lift
+        } else {
+            let bytes = extn.as_some.@extn_value.to_bytes;
+            eval *println("bytes="+bytes.to_string_hex).lift;
+            let subjectAltName: SubjectAltName = *decode_der_from_bytes(bytes).from_result;
+            println("subjectAltName=" + subjectAltName.to_string).lift
+        };
         println("").lift
     )
 );
@@ -98,8 +110,8 @@ test_read_certificates_from_file = (
 main: IO ();
 main = (
     do {
-        //eval *test_dump_triplets;
-        eval *test_cert_path;
+        eval *test_dump_triplets;
+        //eval *test_cert_path;
         //eval *test_read_certificates_from_file;
         pure()
     }.try(eprintln)

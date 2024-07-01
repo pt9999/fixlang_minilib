@@ -205,6 +205,10 @@ Except monad transformer that implements `MonadErrorIF`.
 
 Identity monad
 
+### [module Minilib.Monad.IO (lib/monad/io.fix)](lib/monad/io.md)
+
+Monadic traits which can lift IO and IOFail monad.
+
 ### [module Minilib.Monad.Reader (lib/monad/reader.fix)](lib/monad/reader.md)
 
 Reader monad.

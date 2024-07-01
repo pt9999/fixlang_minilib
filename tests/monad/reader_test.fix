@@ -6,6 +6,7 @@ import HashMap;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Trans;
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -110,6 +111,30 @@ test_with_reader_t = (
     assert_equal("eq", expected, actual)
 );
 
+test_lift_io: TestCase;
+test_lift_io = (
+    make_test("test_lift_io") $ |_|
+    let inner_io: IO I64 = do {
+        //eval *println("inner_io");
+        pure $ 42
+    };
+    let inner_iofail: IOFail I64 = do {
+        //eval *println("inner_iofail").lift;
+        pure $ 57
+    };
+    let r: ReaderT I64 IOFail (Array I64) = do {
+        pure $ [
+            *ask,
+            *inner_io.lift_io,
+            *inner_iofail.lift_iofail,
+        ]
+    };
+    let expected = [123, 42, 57];
+    let actual = *r.run_reader_t(123);
+    assert_equal("eq", expected, actual)
+);
+
+
 main: IO ();
 main = (
     [
@@ -120,6 +145,7 @@ main = (
         test_reader_iofail_error,
         test_map_reader_t,
         test_with_reader_t,
+        test_lift_io,
         TestCase::empty
     ]
     .run_test_driver

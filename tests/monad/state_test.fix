@@ -4,6 +4,7 @@ import Debug;
 
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -88,6 +89,38 @@ test_state_iofail_error = (
     pure()
 );
 
+test_state_io_lift_io: TestCase;
+test_state_io_lift_io = (
+    make_test("test_state_io_lift_io") $ |_|
+    let inner: IO I64 = pure $ 42;
+    let sm: StateT (Array I64) IO () = do {
+        mod_state(push_back(*inner.lift_io))
+    };
+    assert_equal("eq", ((), [1, 42]), *sm.run_state_t([1]).lift)
+);
+
+test_state_iofail_lift_io: TestCase;
+test_state_iofail_lift_io = (
+    make_test("test_state_iofail_lift_io") $ |_|
+    let inner_io: IO I64 = do {
+        //eval *println("inner_io");
+        pure $ 42
+    };
+    let inner_iofail: IOFail I64 = do {
+        //eval *println("inner_iofail").lift;
+        pure $ 57
+    };
+    let sm: StateT (Array I64) IOFail () = do {
+        mod_state(
+            // NOTE: `inner_io` is performed before `inner_iofail`.
+            // After that, function composition (`<<`) is calculated, so the result is 57 and 42.
+            push_back(*inner_io.lift_io) << push_back(*inner_iofail.lift_iofail)
+        )
+    };
+    assert_equal("eq", ok $ ((), [1, 57, 42]), *sm.run_state_t([1]).to_result.lift)
+);
+
+
 main: IO ();
 main = (
     [
@@ -95,6 +128,8 @@ main = (
         test_state_monad,
         test_state_result_error,
         test_state_iofail_error,
+        test_state_io_lift_io,
+        test_state_iofail_lift_io,
         TestCase::empty
     ]
     .run_test_driver

@@ -56,6 +56,14 @@ Runs a StateT monad with the supplied initial state.
 
 Runs a State monad with the supplied initial state.
 
+#### eval_state_t: [m: Monad] s -> StateT s m a -> m a;
+
+Runs a StateT monad with the supplied initial state and return the final value, discarding the final state.
+
+#### exec_state_t: [m: Monad] s -> StateT s m a -> m s;
+
+Runs a StateT monad with the supplied initial state and return the final state, discarding the final value.
+
 #### lift_state: [m: Monad] m a -> StateT s m a;
 
 Converts an underlying monad to a StateT monad.
@@ -73,4 +81,8 @@ Maps both the return value and final state.
 #### `impl StateT s: MonadTrans`
 
 #### `impl [m: MonadError] StateT s m: MonadErrorIF`
+
+#### `impl [m: MonadIO] StateT s m: MonadIOIF`
+
+#### `impl [m: MonadIOFail] StateT s m: MonadIOFailIF`
 

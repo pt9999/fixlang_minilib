@@ -4,6 +4,7 @@ module Minilib.Monad.State;
 import Minilib.Monad.Identity;
 import Minilib.Monad.Trans;
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 
 // A trait for the interface of generic state monads.
 trait MonadState = Monad + MonadStateIF;
@@ -46,6 +47,20 @@ run_state_t = |s, ma| (ma.@data)(s);
 // Runs a State monad with the supplied initial state.
 run_state: s -> State s a -> (a, s);
 run_state = |s, ma| ma.run_state_t(s).get;
+
+// Runs a StateT monad with the supplied initial state and return the final value, discarding the final state.
+eval_state_t: [m: Monad] s -> StateT s m a -> m a;
+eval_state_t = |s, ma| (
+    let (a, s) = *ma.run_state_t(s);
+    pure $ a
+);
+
+// Runs a StateT monad with the supplied initial state and return the final state, discarding the final value.
+exec_state_t: [m: Monad] s -> StateT s m a -> m s;
+exec_state_t = |s, ma| (
+    let (a, s) = *ma.run_state_t(s);
+    pure $ s
+);
 
 // Converts an underlying monad to a StateT monad.
 lift_state: [m: Monad] m a -> StateT s m a;
@@ -95,4 +110,12 @@ impl [m: MonadError] StateT s m: MonadErrorIF {
             handler >> run_state_t(s)
         )
     );
+}
+
+impl [m: MonadIO] StateT s m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] StateT s m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
 }

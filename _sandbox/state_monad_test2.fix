@@ -2,6 +2,9 @@
 module Main;
 
 import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
 
 type App = unbox struct {
     users: Array String,
@@ -39,29 +42,25 @@ namespace App {
     get_pages: [m: Monad] StateApp m (Array String);
     get_pages = get_state.map(@pages);
 
-    print_users: StateApp IO ();
+    print_users: [m: MonadIO] StateApp m ();
     print_users = do {
         let users = *get_users;
-        lift_state $ do {
-            let _ = *println("---users---");
-            users.to_iter.fold_m((), |_, u| println(u))
-        }
+        eval *println("---users---").lift_io;
+        users.foreach_m(println).lift_io
     };
 
-    print_pages: StateApp IO ();
+    print_pages: [m: MonadIO] StateApp m ();
     print_pages = do {
         let pages = *get_pages;
-        lift_state $ do {
-            let _ = *println("---pages---");
-            pages.to_iter.fold_m((), |_, p| println(p))
-        }
+        eval *println("---pages---").lift_io;
+        pages.foreach_m(println).lift_io
     };
 
     register_users: [m: Monad] StateApp m ();
     register_users = do {
-        let _ = *add_user("taro");
-        let _ = *add_user("jiro");
-        let _ = *add_user("saburo");
+        eval *add_user("taro");
+        eval *add_user("jiro");
+        eval *add_user("saburo");
         pure()
     };
 
@@ -74,74 +73,74 @@ namespace App {
         )
     };
 
-    save_file: String -> StateApp IOFail ();
+    save_file: [m: MonadIOFail, m: MonadError] String -> StateApp m ();
     save_file = |path| (
         let users = *get_users;
         let pages = *get_pages;
-        lift_state $ do {
-            if path == "" { throw $ "Empty path" };
-            let path = Path::parse(path);
-            if path.is_none { throw $ "Path::parse failed" };
-            let path = path.as_some;
-            let fh = *open_file(path, "w");
-            let _ = *users.to_iter.join(",").write_string(fh);
-            let _ = *pages.to_iter.join(",").write_string(fh);
-            let _ = *close_file(fh).lift;
-            pure()
-        }
+        if path == "" { error $ "Empty path" };
+        let path = Path::parse(path);
+        if path.is_none { error $ "Path::parse failed" };
+        let path = path.as_some;
+        write_file_string(path,
+            users.to_iter.join(",") + "\n" +
+            pages.to_iter.join(",")
+        ).lift_iofail
     );
 }
 
 test_state: IO ();
-test_state = do {
-    let _ = *println("=== test_state ===");
+test_state = (
+    eval *println("=== test_state ===");
     let m = do {
-        let _ = *register_users;
+        eval *register_users;
         get_users
     };
-    let (users,_) = *m.run_state_t(App::empty);  // App 以外を指定するとpanicする
-    let _ = *println(users.to_iter.join(","));
+    let (users,_) = *m.run_state_t(App::empty);
+    //let (users,_) = *m.run_state_t(123);  // App 以外を指定すると型エラーになる
+    eval *println(users.to_iter.join(","));
     pure()
-};
+);
 
-stateio_func: StateApp IO ();
-stateio_func = do {
-    let _ = *print_users;
-    let _ = *print_pages;
-    let _ = *register_users;
-    let _ = *create_user_pages;
-    let _ = *print_users;
-    let _ = *print_pages;
+stateio_func: [m: MonadIO] StateApp m ();
+stateio_func = (
+    eval *pure();
+    eval *print_users;
+    eval *print_pages;
+    eval *register_users;
+    eval *create_user_pages;
+    eval *print_users;
+    eval *print_pages;
     pure ()
-};
-
+);
 
 test_stateio: IO ();
-test_stateio = do {
-    let _ = *println("=== test_stateio ===");
+test_stateio = (
+    eval *println("=== test_stateio ===");
     let (_,s) = *stateio_func.run_state_t(App::empty);
     pure()
-};
+);
 
-stateiof_func: () -> StateApp IOFail ();
-stateiof_func = |_| do {
-    let _ = *stateio_func.map_state_t(lift);
-    let _ = *save_file("");
-    let _ = *println("completed.").lift.lift_state;
+stateiof_func: StateApp IOFail ();
+stateiof_func = (
+    eval *pure();
+    eval *stateio_func;
+    //eval *save_file("tmp.state_monad_test2.txt");
+    eval *save_file("");    // "ERROR: Empty path" となる
+    eval *println("completed.").lift_io;
     pure()
-};
+);
 
 test_stateiof: IO ();
 test_stateiof = do {
-    let _ = *println("=== test_stateiof ===").lift;
-    let (_,s) = *stateiof_func().run_state_t(App::empty);
+    eval *println("=== test_stateiof ===").lift;
+    let (_,s) = *stateiof_func.run_state_t(App::empty);
     pure()
 }.try(|err| println("ERROR: " + err));
 
 main: IO ();
 main = (
-    let _ = *test_state;
-    let _ = *test_stateio;
-    let _ = *test_stateiof;
+    eval *test_state;
+    eval *test_stateio;
+    eval *test_stateiof;
     pure()
 );

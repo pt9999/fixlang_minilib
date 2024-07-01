@@ -97,3 +97,7 @@ Lifts an underlyind monad to a writer monad.
 
 #### `impl [e: Monoid, m: MonadError] WriterT e m: MonadErrorIF`
 
+#### `impl [m: MonadIO, e: Monoid] WriterT e m: MonadIOIF`
+
+#### `impl [m: MonadIOFail, e: Monoid] WriterT e m: MonadIOFailIF`
+

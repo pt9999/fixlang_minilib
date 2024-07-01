@@ -5,6 +5,7 @@ import Debug;
 import Minilib.Monad.Writer;
 import Minilib.Monad.Trans;
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 import Minilib.Trait.Monoid;
 import Minilib.Trait.Semigroup;
 import Minilib.Text.StringEx;
@@ -132,6 +133,27 @@ test_writer_iofail_error = (
     pure()
 );
 
+test_lift_io: TestCase;
+test_lift_io = (
+    make_test("test_lift_io") $ |_|
+    let inner_io: IO I64 = do {
+        //eval *println("inner_io");
+        pure $ 42
+    };
+    let inner_iofail: IOFail I64 = do {
+        //eval *println("inner_iofail").lift;
+        pure $ 57
+    };
+    let w: WriterT (Array I64) IOFail () = do {
+        eval *tell([*inner_io.lift_io]);
+        eval *tell([*inner_iofail.lift_iofail]);
+        pure()
+    };
+    let expected = ok $ ([42, 57], ());
+    let actual = *w.run_writer_t.to_result.lift;
+    assert_equal("eq", expected, actual)
+);
+
 main: IO ();
 main = (
     [
@@ -142,6 +164,7 @@ main = (
         test_map_writer_t,
         test_writer_trans,
         test_writer_iofail_error,
+        test_lift_io,
     ]
     .run_test_driver
 );

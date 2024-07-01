@@ -497,26 +497,50 @@ type GeneralName = unbox union {
     rfc822Name: Asn1::IA5String, // [1]
     dNSName: Asn1::IA5String, // [2]
     x400Address: Array U8, // [3] TODO: ORAddress
-    directoryName: X509::Name,  // [4]
+    directoryName: Array U8,  // [4] TODO: X509::Name
     ediPartyName: Array U8, // [5] TODO: EDIPartyName
     uniformResourceIdentifier: Asn1::IA5String, // [6]
     iPAddress: Asn1::OctetString,           // [7]
-    registeredID: Asn1::ObjectIdentifier,    // [8]
+    registeredID: Array U8,    // [8] TODO: ObjectIdentifier
 };
 
 impl GeneralName: DecodeDer {
     decode_obj = (
-        choice $ [
-            with_context(0, decode_any.map(GeneralName::otherName)),
-            with_context(1, decode_string.map(GeneralName::rfc822Name)),
-            with_context(2, decode_string.map(GeneralName::dNSName)),
-            with_context(3, decode_any.map(GeneralName::x400Address)),
-            with_context(4, decode_name.map(GeneralName::directoryName)),
-            with_context(5, decode_any.map(GeneralName::ediPartyName)),
-            with_context(6, decode_string.map(GeneralName::uniformResourceIdentifier)),
-            with_context(7, decode_obj.map(GeneralName::iPAddress)),
-            with_context(8, decode_obj.map(GeneralName::registeredID)),
-        ]
+        // make choice with context_specific tag
+        let identifier = *decode_identifier;
+        eval *identifier.assert_tag_class(tc_context_specific);
+        eval *identifier.assert_primitive;
+        let tag = identifier.@tag;
+        let length = *decode_length;
+        let contents = *decode_contents(length);
+        if tag == 0_U8 {
+            pure $ GeneralName::otherName $ contents
+        };
+        if tag == 1_U8 {
+            pure $ GeneralName::rfc822Name $ contents._unsafe_to_string
+        };
+        if tag == 2_U8 {
+            pure $ GeneralName::dNSName $ contents._unsafe_to_string
+        };
+        if tag == 3_U8 {
+            pure $ GeneralName::x400Address $ contents
+        };
+        if tag == 4_U8 {
+            pure $ GeneralName::directoryName $ contents
+        };
+        if tag == 5_U8 {
+            pure $ GeneralName::ediPartyName $ contents
+        };
+        if tag == 6_U8 {
+            pure $ GeneralName::uniformResourceIdentifier $ contents._unsafe_to_string
+        };
+        if tag == 7_U8 {
+            pure $ GeneralName::iPAddress $ Asn1::OctetString { data: contents }
+        };
+        if tag == 8_U8 {
+            pure $ GeneralName::registeredID $ contents
+        };
+        error $ "GeneralName: invalid tag: " + tag.to_string
     );
 }
 
@@ -526,11 +550,11 @@ impl GeneralName: ToString {
         if obj.is_rfc822Name { "rfc822Name(" + obj.as_rfc822Name.to_string + ")" };
         if obj.is_dNSName { "dNSName(" + obj.as_dNSName.to_string + ")" };
         if obj.is_x400Address { "x400Address(" + obj.as_x400Address.to_string_hex + ")" };
-        if obj.is_directoryName { "directoryName(" + obj.as_directoryName.to_string + ")" };
+        if obj.is_directoryName { "directoryName(" + obj.as_directoryName.to_string_hex + ")" };
         if obj.is_ediPartyName { "ediPartyName(" + obj.as_ediPartyName.to_string_hex + ")" };
         if obj.is_uniformResourceIdentifier { "uniformResourceIdentifier(" + obj.as_uniformResourceIdentifier.to_string + ")" };
         if obj.is_iPAddress { "iPAddress(" + obj.as_iPAddress.to_bytes.to_string_hex + ")" };
-        if obj.is_registeredID { "registeredID(" + obj.as_registeredID.to_string + ")" };
+        if obj.is_registeredID { "registeredID(" + obj.as_registeredID.to_string_hex + ")" };
         ""
     );
 }

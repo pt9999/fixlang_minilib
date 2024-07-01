@@ -214,24 +214,24 @@ impl MockEcdsaImpl: EcdsaApi {
 // Alternative: record-of-functions pattern
 // NOTE: In FixLang, a field type of a structure can not have `forall`.
 
-// cipher_api.fix
-module Minilib.Crypto.Cipher.CipherApi;
+// cipher/api.fix
+module Minilib.Crypto.Cipher.Api;
 
 type [m: * -> *] CipherApi m = box struct {
-    rsa_api: RsaApi m,
-    ec_api: EcApi m,
+    rsa_api: Option RsaApi m,
+    ec_api: Option EcApi m,
     //x25519_api: Option X25519Api m,
     //chacha_api: Option ChaChaApi m,
 };
 
-// mock_cipher_impl.fix
-module Minilib.Crypto.Cipher.MockCipherImpl;
+// cipher_api_mock.fix
+module Minilib.Crypto.Cipher.CipherApiMock;
 
 namespace MockCipherImpl {
     make: [m: MonadError] CipherApi m;
     make = pure $ CipherApi {
-        rsa_api: *MockRsaImpl::make,
-        ec_api: *MockEcImpl::make,
+        rsa_api: some $ *MockRsaImpl::make,  // or none()
+        ec_api: some $ *MockEcImpl::make,    // or none()
     };
 }
 
@@ -240,9 +240,15 @@ module Minilib.Crypto.Tls.TlsApi;
 
 type [m: * -> *] TlsApi m = unbox struct {
     cert_api: CertApi m,
-    asn1_api: Asn1Api m,
     cipher_api: CipherApi m,
     tls_session_api: TlsSessionApi m,
+};
+
+// log_api.fix
+module Minilib.Common.LogApi;
+
+type [m: * -> *] LogApi m = unbox struct {
+    debug: Lazy String -> m (),
 };
 
 // cert_api.fix
@@ -251,15 +257,17 @@ module Minilib.Crypto.Cert.CertApi;
 type CerSignature = Array U8;
 type CerSigMessage = Array U8;
 type CerSigScheme = String;      // "rsa_pss_rsae_sha256", "ecdsa_secp256r1_sha256" etc.
+type CerTime = String;           // GeneralizedTime
 
 type [m: * -> *, iof: * -> *] CertApi m iof = unbox struct {
     load_ca_certificates: iof (CertApi m),  // requires MonadIOFail
+    get_now: iof CerTime,
     build_cert_path: Array (Array U8) -> m (CertPathApi m),
 };
 
 type [m: * -> *] CertPathApi m = unbox struct {
     get_first: m CertificateApi,
-    validate_date: Time::Time -> m (),
+    validate_date: CerTime -> m (),
     validate_signatures: m (),
 };
 
@@ -339,16 +347,17 @@ namespace DefaultCertPathImpl {
         DefaultCertificateImpl::make(impl.@cipher_api, impl.@cert_path.@data.@(0)).bind(to_api)
     );
 
-    _validate_date: [m: MonadError] DefaultCertPathImpl m -> Time::Time -> m ();
+    _validate_date: [m: MonadError] DefaultCertPathImpl m -> CerTime -> m ();
     _validate_date = |impl, time| (
         eval *pure();
-        impl.@cert_path.validate_date(time, impl.@rsa_api, impl.@ec_api)
+        let time: X509Time = *X509Time::from_generalized_time_string(time);
+        impl.@cert_path.validate_date(time, impl.@cipher_api)
     );
 
     _validate_signatures: [m: MonadError] DefaultCertImpl m -> m ();
     _validate_signatures = |impl| (
         eval *pure();
-        impl.@cert_path.validate_signatures(cert_impl.@rsa_api, cert_impl.@ec_api)
+        impl.@cert_path.validate_signatures(impl.@cipher_api)
     );
 }
 

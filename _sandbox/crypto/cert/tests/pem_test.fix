@@ -1,0 +1,43 @@
+module Main;
+
+import Minilib.Crypto.Cert.Pem;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_parse_pem_entries: TestCase;
+test_parse_pem_entries = (
+    make_test("test_parse_pem_entries") $ |_|
+    let contents = "
+this is noise
+-----BEGIN CERTIFICATE-----
+YWJjZGU=
+-----END CERTIFICATE-----
+this is noise
+-----BEGIN CERTIFICATE-----
+ZmdoaWo=
+-----END CERTIFICATE-----
+below block is not parsed
+----BEGIN CERTIFICATE----
+a2xtbm8=
+----END CERTIFICATE----
+";
+    let entries = *parse_pem_entries(contents).from_result;
+    let entries = entries.map(|entry|
+        (entry.@label, entry.@bytes._unsafe_to_string)
+    );
+    let expected = [
+        ("CERTIFICATE", "abcde"),
+        ("CERTIFICATE", "fghij"),
+    ];
+    eval *assert_equal("eq", expected, entries);
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_parse_pem_entries,
+    ]
+    .run_test_driver
+);

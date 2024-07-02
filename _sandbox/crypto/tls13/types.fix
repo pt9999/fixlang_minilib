@@ -1,8 +1,11 @@
+// Type definitions and common functions for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
 module Minilib.Crypto.Tls13.Types;
 
 import Debug;
 
-import Minilib.Crypto.SecureRandom;
 import Minilib.Encoding.Binary;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
@@ -11,6 +14,9 @@ namespace Tuple2 {
     // `tuple2.map_0(f)` maps 0-th element of `tuple2` using `f`.
     map_0: (a -> b) -> (a, c) -> (b, c);
     map_0 = |f, (a, c)| (f(a), c);
+
+    map_1: (b -> c) -> (a, b) -> (a, c);
+    map_1 = |f, (a, b)| (a, f(b));
 }
 
 namespace Result {
@@ -18,6 +24,30 @@ namespace Result {
     map_res_0: (a -> b) -> Result e (a, c) -> Result e (b, c);
     map_res_0 = map_0 >> map;
 }
+
+marshal_to_bytes: [a: Marshal] a -> Array U8;
+marshal_to_bytes = |obj| (
+    let buf = ByteBuffer::empty(0, big_endian());
+    let buf = buf.marshal(obj);
+    buf.@array
+);
+
+unmarshal_from_bytes: [a: Unmarshal] Array U8 -> Result ErrMsg a;
+unmarshal_from_bytes = |bytes| (
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let (a, buf) = *buf.unmarshal;
+    if buf.get_position != buf.get_size {
+        eval debug_eprintln $ [buf.get_position, buf.get_size].format("unmarshal_from_bytes: position mismatch: {}, {}");
+        ok $ a
+    };
+    ok $ a
+);
+
+to_string_hex_limit: I64 -> Array U8 -> String;
+to_string_hex_limit = |max_size, bytes| (
+    if bytes.get_size > max_size { bytes.subarray(0, max_size).to_string_hex + "..." }
+    else { bytes.to_string_hex }
+);
 
 // 3. Presentation Language
 
@@ -33,6 +63,9 @@ namespace U24 {
 
     to_U32: U24 -> U32;
     to_U32 = |u24| u24.@v.bit_and(0xFFFFFF_U32);
+
+    to_I64: U24 -> I64;
+    to_I64 = |u24| u24.to_U32.to_I64;
 
     // Gets U24 from the byte buffer at position `i`.
     get_u24: I64 -> ByteBuffer -> U24;
@@ -120,14 +153,19 @@ namespace Vector {
 
     unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
     unmarshal_fixed = |byte_size, buf| (
+        //eval if byte_size >= 4096 { debug_eprintln("unmarshal_fixed: byte_size=" + byte_size.to_string) } else { () };
         let begin_pos = buf.get_position;
-        loop_m(
+        loop(
             (buf, []), |(buf, vector)|
             let pos = buf.get_position;
-            if pos - begin_pos >= byte_size { break_m $ (vector, buf) };
-            let (val, buf) = *buf.unmarshal;
+            if pos - begin_pos >= byte_size { break $ ok $ (vector, buf) };
+            //let (val, buf) = *buf.unmarshal;
+            // workaround for a stack overflow, since `loop_m` and `bind()` prevents the tail recursion
+            let res = buf.unmarshal;
+            if res.is_err { break $ err $ res.as_err };
+            let (val, buf) = res.as_ok;
             let vector = vector.push_back(val);
-            continue_m $ (buf, vector)
+            continue $ (buf, vector)
         )
     );
 
@@ -140,6 +178,13 @@ namespace Vector {
 }
 
 // 4.1.2 ClientHello
-
 type ProtocolVersion = U16;
 
+// 4.2.7 Supported Groups
+type NamedGroup = U16;
+
+// 4.2.8.2. ECDHE Parameters
+type UncompressedPointRepresentation = Array U8;
+
+// 7.4. (EC)DHE Shared Secret Calculation
+type SharedSecret = Array U8;

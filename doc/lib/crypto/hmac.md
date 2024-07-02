@@ -21,14 +21,6 @@ type HMAC = unbox struct {
 ```
 ### namespace HMAC
 
-#### hmac_md5: HMAC;
-
-An HMAC instance that uses MD5 as a hash function.
-
-#### hmac_sha1: HMAC;
-
-An HMAC instance that uses SHA1 as a hash function.
-
 #### make: (Array U8 -> Array U8) -> I64 -> I64 -> HMAC;
 
 `HMAC::make(h,b,l)` creates an HMAC instance.

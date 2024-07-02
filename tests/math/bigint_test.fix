@@ -304,6 +304,38 @@ test_perf = (
     pure()
 );
 
+test_from_bytes: TestCase;
+test_from_bytes = (
+    make_table_test("test_from_bytes",
+        [
+            ([0x0], ok $ from_I64(0)),
+            ([0xFF], ok $ BigInt::from_I64(255)),
+            ([0xFE,0xDC,0xBA,0x98], ok $ BigInt::from_I64(4275878552)),
+            ([0xFE,0xDC,0xBA,0x98,0x00,0x00,0x00,0x00,0x00,0x00], ok $ BigInt::from_I64(4275878552).shift_left(48_U64)),
+        ],
+        |(arr,expect)|
+        let bytes = arr.map(to_U8);
+        let actual: Result ErrMsg BigInt = from_bytes(bytes);
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_to_bytes: TestCase;
+test_to_bytes = (
+    make_table_test("test_to_bytes",
+        [
+            (BigInt::from_I64(0), [0x0, 0x0, 0x0, 0x0]),
+            (BigInt::from_I64(255), [0x0, 0x0, 0x0, 0xff]),
+            (BigInt::from_I64(4275878552), [0xFE,0xDC,0xBA,0x98]),
+            (BigInt::from_I64(4275878552).shift_left(48_U64), [0x0, 0x0, 0xFE,0xDC,0xBA,0x98,0x00,0x00,0x00,0x00,0x00,0x00]),
+        ],
+        |(a,expect)|
+        let expect = expect.map(to_U8);
+        let actual = a.to_bytes;
+        assert_equal("eq", expect, actual)
+    )
+);
+
 main: IO ();
 main = (
     //if true { test_perf };
@@ -322,6 +354,8 @@ main = (
         test_div_rem,
         test_shift_left,
         test_shift_right,
+        test_from_bytes,
+        test_to_bytes,
         TestCase::empty
     ]
     .run_test_driver

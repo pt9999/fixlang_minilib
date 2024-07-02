@@ -1,5 +1,4 @@
-CRYPTO_DIR = .
-SUBDIRS = cipher cert tls http
+CRYPTO_DIR = ../..
 
 include $(CRYPTO_DIR)/Makefile.inc
 -include .depend

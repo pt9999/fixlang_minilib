@@ -11,6 +11,7 @@ import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Path;
 import Minilib.Crypto.Cert.X509Signature;
 import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.X509DnsName;
 import Minilib.Crypto.Tls13.Extensions;
 import Minilib.Crypto.ECDSA;
 import Minilib.Monad.Error;
@@ -88,7 +89,9 @@ _find_ecdsa_scheme = |algorithm| (
 
 
 check_certificate_identity: [m: MonadError] Certificate -> String -> m ();
-check_certificate_identity = |cert, server_name| (
+check_certificate_identity = |cert, target_server_name| (
+    eval debug_eprintln("check_certificate_identity: target_server_name=" + target_server_name);
+
     // RFC2818 3.1.  Server Identity
     let subjectAltName: Option SubjectAltName = do {
         let extn = *cert.find_extension(match_name("id-ce-subjectAltName"));
@@ -98,45 +101,40 @@ check_certificate_identity = |cert, server_name| (
         some $ res.as_ok
     };
     eval debug_eprintln("subjectAltName=" + subjectAltName.to_string);
-    let dns_name: Option String = do {
-        (*subjectAltName).@data.to_iter
-        .filter(is_dNSName)
-        .get_first
-        .map(as_dNSName)
-        .map(to_string) // IA5String -> String
-    };
-    eval debug_eprintln("dns_name=" + dns_name.to_string);
-    let common_name: Option String = cert.get_subject.find_common_name;
-    eval debug_eprintln("common_name=" + common_name.to_string);
 
-    let server_identity: Option String = dns_name.map_or(common_name, some);
-    if server_identity.is_none {
-        error $ "server_identity not found"
-    };
-    let server_identity = server_identity.as_some;
+    let dns_names: Array String = (
+        if subjectAltName.is_none { [] };
+        subjectAltName.as_some.@data
+            .to_iter
+            .filter(is_dNSName)
+            .map(as_dNSName)
+            .map(to_string) // IA5String -> String
+            .to_array
+    );
 
-    eval debug_eprintln("server_identity=" + server_identity);
-    eval debug_eprintln("server_name=" + server_name);
-
-    // glob match such as server_identity="*.example.com", server_name="www.example.com"
-    let pattern = server_identity.split_ex(".").reverse.to_array;
-    let target = server_name.split_ex(".").reverse.to_array;
-    if pattern.get_size > target.get_size {
-        error $ "server_identity does not match: " + "pattern is longer"
-    };
-    Iterator::range(0, target.get_size).loop_iter_m(
-        (), |_, i|
-        if i >= pattern.get_size { error $ "pattern exhausted" };
-        let p = pattern.@(i);
-        let t = target.@(i);
-        eval debug_eprintln((i, p, i, t).format("pattern[{}]={} target[{}]={}"));
-        if p == "*" && i == pattern.get_size - 1 {
-            // wildcard
-            break_m $ ()
+    eval debug_eprintln("dns_names=" + dns_names.to_string);
+    let dns_names = *(
+        if dns_names.get_size > 0 {
+            pure $ dns_names
         };
-        if p != t { error $  "p != t" };
-        continue_m $ ()
-    )
-    .catch(|errmes| error $ "server_identity does not match: " + errmes)
+
+        let common_name: Option String = cert.get_subject.find_common_name;
+        if common_name.is_some {
+            eval debug_eprintln("Using the common name as a DNS name: common_name=" + common_name.to_string);
+            pure $ [ common_name.as_some ]
+        };
+        error $ "Neither the DNS name nor the common name are not found"
+    );
+
+    let accepted_dns_names = (
+        dns_names.to_iter
+        .filter(|dns_name| match_dns_name(dns_name, target_server_name))
+        .to_array
+    );
+
+    if accepted_dns_names.get_size == 0 {
+        error $ "DNS names did not match"
+    };
+    pure()
 );
 

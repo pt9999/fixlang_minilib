@@ -1,0 +1,105 @@
+module Main;
+
+import HashMap;
+
+import Minilib.Crypto.Cipher.Rsa.RsaApi;
+//import Minilib.Crypto.Cipher.Rsa.RsaApiDefault;
+import Minilib.Crypto.Cipher.Rsa.RsaApiMock;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+
+// These test vectors were obtained using the steps below:
+// 1. Visit the NIST website:
+//    [CAVP Testing: Digital Signatures](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/digital-signatures)
+//
+// 2. Download the test vector from "Test Vectors" section on the above page:
+//    [FIPS 186-4 RSA](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/dss/186-3rsatestvectors.zip)
+//
+// 3. Unzip the downloaded zip file (`186-3rsatestvectors.zip`).
+//
+// 4. Extract test vectors from `SigGenPSS_186-3.txt` and `SigGen15_186-3.txt`.
+
+test_cavp_rsassa_pss_verify: TestCase;
+test_cavp_rsassa_pss_verify = (
+    make_test("test_cavp_rsassa_pss_verify") $ |_| (
+        let testvec = "
+// SigGenPSS_186-3.txt line 8
+n = c5062b58d8539c765e1e5dbaf14cf75dd56c2e13105fecfd1a930bbb5948ff328f126abe779359ca59bca752c308d281573bc6178b6c0fef7dc445e4f826430437b9f9d790581de5749c2cb9cb26d42b2fee15b6b26f09c99670336423b86bc5bec71113157be2d944d7ff3eebffb28413143ea36755db0ae62ff5b724eecb3d316b6bac67e89cacd8171937e2ab19bd353a89acea8c36f81c89a620d5fd2effea896601c7f9daca7f033f635a3a943331d1b1b4f5288790b53af352f1121ca1bef205f40dc012c412b40bdd27585b946466d75f7ee0a7f9d549b4bece6f43ac3ee65fe7fd37123359d9f1a850ad450aaf5c94eb11dea3fc0fc6e9856b1805ef
+
+e = 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000086c94f
+d = 49e5786bb4d332f94586327bde088875379b75d128488f08e574ab4715302a87eea52d4c4a23d8b97af7944804337c5f55e16ba9ffafc0c9fd9b88eca443f39b7967170ddb8ce7ddb93c6087c8066c4a95538a441b9dc80dc9f7810054fd1e5c9d0250c978bb2d748abe1e9465d71a8165d3126dce5db2adacc003e9062ba37a54b63e5f49a4eafebd7e4bf5b0a796c2b3a950fa09c798d3fa3e86c4b62c33ba9365eda054e5fe74a41f21b595026acf1093c90a8c71722f91af1ed29a41a2449a320fc7ba3120e3e8c3e4240c04925cc698ecd66c7c906bdf240adad972b4dff4869d400b5d13e33eeba38e075e872b0ed3e91cc9c283867a4ffc3901d2069f
+
+// SigGenPSS_186-3.txt line 64
+SHAAlg = SHA256
+Msg = dfc22604b95d15328059745c6c98eb9dfb347cf9f170aff19deeec555f22285a6706c4ecbf0fb1458c60d9bf913fbae6f4c554d245d946b4bc5f34aec2ac6be8b33dc8e0e3a9d601dfd53678f5674443f67df78a3a9e0933e5f158b169ac8d1c4cd0fb872c14ca8e001e542ea0f9cfda88c42dcad8a74097a00c22055b0bd41f
+S = 8b46f2c889d819f860af0a6c4c889e4d1436c6ca174464d22ae11b9ccc265d743c67e569accbc5a80d4dd5f1bf4039e23de52aece40291c75f8936c58c9a2f77a780bbe7ad31eb76742f7b2b8b14ca1a7196af7e673a3cfc237d50f615b75cf4a7ea78a948bedaf9242494b41e1db51f437f15fd2551bb5d24eefb1c3e60f03694d0033a1e0a9b9f5e4ab97d457dff9b9da516dc226d6d6529500308ed74a2e6d9f3c10595788a52a1bc0664aedf33efc8badd037eb7b880772bdb04a6046e9edeee4197c25507fb0f11ab1c9f63f53c8820ea8405cfd7721692475b4d72355fa9a3804f29e6b6a7b059c4441d54b28e4eed2529c6103b5432c71332ce742bcc
+SaltVal = e1256fc1eeef81773fdd54657e4007fde6bcb9b1
+";
+        let hmap = testvec.split("\n").map(split_first("=")).filter(|(k,v)| v != "")
+        .fold(HashMap::empty(10), |hmap, (k, v)| hmap.insert(k.strip_spaces, v.strip_spaces));
+        let n: Array U8 = *hmap.find("n").as_some.from_string_hex.from_result;
+        let e: Array U8 = *hmap.find("e").as_some.from_string_hex.from_result;
+        let d: Array U8 = *hmap.find("d").as_some.from_string_hex.from_result;
+        let _M: Array U8 = *hmap.find("Msg").as_some.from_string_hex.from_result;
+        let _S: Array U8 = *hmap.find("S").as_some.from_string_hex.from_result;
+        let _SaltVal: Array U8 = *hmap.find("SaltVal").as_some.from_string_hex.from_result;
+        let hash_name = "sha256";
+
+        let pubkey = "
+3082010a0282010100e7254648c1d669aae15c5881ca05e0a79bebe7939c942671a3a66126bf6df46c0d0687af1b1ccc49fa29c2f1bc5c8c91f8c2874e7611c1ec6918b97b8dc9f8e2809f71b48ad7ecf2a33c5766e33f29a2b75bf285a2f74d19c6ca23c2eca11857f1d4dd29879dea85dcd68f82faed5119705ece23d2cc4ba1da616a6a43f6b1e147d67792576d2ba59525cedacf718a1ee7f0aeb5bd5bfd1d5d472bf011360c559c440ede425337041d0cad818e3b3be488e726e2907f963c6be2b88084815a8a69e76820379c8a04ea41bc13971afb78a47b39ab4003a1d7bcee2a00d960c8a5939db95186009e148af06ccc0f5fdda48c8c258f61ffc5ecdcd1a23392a863e90203010001
+";
+        let pubkey: Array U8 = *pubkey.from_string_hex.from_result;
+
+        //let api = *RsaApiDefault::make;
+        let api = *RsaApiMock::make;
+
+        // Verifying
+        let res = *(api.@rsassa_pss_verify)(hash_name, pubkey, _M, _S).to_result.lift;
+        eval *assert_equal("verifying", err $ "emsa_pss_verify: inconsistent: the last byte of EM is not 0xbc: bf", res);
+        pure()
+    )
+);
+
+/*
+test_cavp_rsassa_pkcs1_v1_5_verify: TestCase;
+test_cavp_rsassa_pkcs1_v1_5_verify = (
+    make_test("test_cavp_rsassa_pkcs1_v1_5_verify") $ |_| (
+        let testvec = "
+// SigGen15_186-3.txt line 8
+n = cea80475324c1dc8347827818da58bac069d3419c614a6ea1ac6a3b510dcd72cc516954905e9fef908d45e13006adf27d467a7d83c111d1a5df15ef293771aefb920032a5bb989f8e4f5e1b05093d3f130f984c07a772a3683f4dc6fb28a96815b32123ccdd13954f19d5b8b24a103e771a34c328755c65ed64e1924ffd04d30b2142cc262f6e0048fef6dbc652f21479ea1c4b1d66d28f4d46ef7185e390cbfa2e02380582f3188bb94ebbf05d31487a09aff01fcbb4cd4bfd1f0a833b38c11813c84360bb53c7d4481031c40bad8713bb6b835cb08098ed15ba31ee4ba728a8c8e10f7294e1b4163b7aee57277bfd881a6f9d43e02c6925aa3a043fb7fb78d
+
+e = 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000260445
+d = 0997634c477c1a039d44c810b2aaa3c7862b0b88d3708272e1e15f66fc9389709f8a11f3ea6a5af7effa2d01c189c50f0d5bcbe3fa272e56cfc4a4e1d388a9dcd65df8628902556c8b6bb6a641709b5a35dd2622c73d4640bfa1359d0e76e1f219f8e33eb9bd0b59ec198eb2fccaae0346bd8b401e12e3c67cb629569c185a2e0f35a2f741644c1cca5ebb139d77a89a2953fc5e30048c0e619f07c8d21d1e56b8af07193d0fdf3f49cd49f2ef3138b5138862f1470bd2d16e34a2b9e7777a6c8c8d4cb94b4e8b5d616cd5393753e7b0f31cc7da559ba8e98d888914e334773baf498ad88d9631eb5fe32e53a4145bf0ba548bf2b0a50c63f67b14e398a34b0d
+
+// SigGen15_186-3.txt line 54
+SHAAlg = SHA256
+Msg = 5af283b1b76ab2a695d794c23b35ca7371fc779e92ebf589e304c7f923d8cf976304c19818fcd89d6f07c8d8e08bf371068bdf28ae6ee83b2e02328af8c0e2f96e528e16f852f1fc5455e4772e288a68f159ca6bdcf902b858a1f94789b3163823e2d0717ff56689eec7d0e54d93f520d96e1eb04515abc70ae90578ff38d31b
+S = 6b8be97d9e518a2ede746ff4a7d91a84a1fc665b52f154a927650db6e7348c69f8c8881f7bcf9b1a6d3366eed30c3aed4e93c203c43f5528a45de791895747ade9c5fa5eee81427edee02082147aa311712a6ad5fb1732e93b3d6cd23ffd46a0b3caf62a8b69957cc68ae39f9993c1a779599cdda949bdaababb77f248fcfeaa44059be5459fb9b899278e929528ee130facd53372ecbc42f3e8de2998425860406440f248d817432de687112e504d734028e6c5620fa282ca07647006cf0a2ff83e19a916554cc61810c2e855305db4e5cf893a6a96767365794556ff033359084d7e38a8456e68e21155b76151314a29875feee09557161cbc654541e89e42
+";
+        let hmap = testvec.split("\n").map(split_first("=")).filter(|(k,v)| v != "")
+        .fold(HashMap::empty(10), |hmap, (k, v)| hmap.insert(k.strip_spaces, v.strip_spaces));
+        let n: BigInt = *hmap.find("n").as_some.from_string_hex.bind(from_bytes).from_result;
+        let e: BigInt = *hmap.find("e").as_some.from_string_hex.bind(from_bytes).from_result;
+        let d: BigInt = *hmap.find("d").as_some.from_string_hex.bind(from_bytes).from_result;
+        let _M: Array U8 = *hmap.find("Msg").as_some.from_string_hex.from_result;
+        let _S: Array U8 = *hmap.find("S").as_some.from_string_hex.from_result;
+        let options = emsa_pkcs1_options_sha256;
+
+        // Verifying
+        let res = rsassa_pkcs1_v1_5_verify((n, e), _M, _S, options);
+        eval *assert_equal("verifying", ok $ (), res);
+        pure()
+    )
+);
+*/
+
+main: IO ();
+main = (
+    [
+        test_cavp_rsassa_pss_verify,
+        //test_cavp_rsassa_pkcs1_v1_5_verify,
+    ]
+    .run_test_driver
+);

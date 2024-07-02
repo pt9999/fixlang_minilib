@@ -42,6 +42,14 @@ namespace X509Time {
     to_utc: X509Time -> Result ErrMsg Time::DateTime;
     to_utc = to_time >> Time::to_utc;
 
+    format: DateTimeFormat::FormatFunc -> X509Time -> String;
+    format = |format_func, time| (
+        time.to_utc
+        .map(|datetime| DateTimeFormat::format(datetime, format_func))
+        .catch(|errmes| pure $ "err:" + errmes)
+        .as_ok
+    );
+
     // Converts a X.509 GeneralizedTime string (YYYYMMDDHHMMSSZ) to a X509Time.
     from_generalized_time_string: String -> Result ErrMsg X509Time;
     from_generalized_time_string = |str| (
@@ -64,6 +72,15 @@ namespace X509Time {
             is_dst: none()
         };
         X509Time::from_utc(datetime)
+    );
+
+    // Converts a X509Time to a X.509 GeneralizedTime string (YYYYMMDDHHMMSSZ).
+    to_generalized_time_string: X509Time -> String;
+    to_generalized_time_string = |time| (
+        time.format(
+            |(year, month, day, hour, minute, second, nanosec)|
+            year + month + day + hour + minute + second + "Z"
+        )
     );
 
     // Converts a X.509 UTCTime string (YYMMDDHHMMSSZ) to a X509Time.

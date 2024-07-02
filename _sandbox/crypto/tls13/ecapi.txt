@@ -296,8 +296,18 @@ namespace DefaultCertImpl {
     to_api = |cert_impl| (
         pure $ CertApi {
             load_ca_certificates: _load_ca_certificates(cert_impl),
+            get_now: _get_now,
+            build_cert_path: _build_cert_path(cert_impl),
         };
     );
+
+    _get_now: [iof: MonadIOFail] iof CerTime;
+    _get_now = (
+        eval *pure();
+        let now = *Time::get_now().lift_io;
+        let now = X509Time::from_time(now);
+        pure $ now.to_generalized_time_string
+    )
 
     _load_ca_certificates: [m: MonadError, iof: MonadIOFail] DefaultCertImpl -> iof (CertApi m);
     _load_ca_certificates = |cert_impl| (
@@ -314,7 +324,7 @@ namespace DefaultCertImpl {
             error $ "CACertificates not loaded"
         };
         let cert_path = *CertificatePath::make(certs, cert_impl.@ca_certificates.as_some);
-        DefaultCertPathImpl::make(cert_impl.@cipher_api, cert_path)
+        DefaultCertPathImpl::make(cert_impl.@cipher_api, cert_path).bind(to_api)
     );
 }
 

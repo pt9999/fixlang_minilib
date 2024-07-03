@@ -61,3 +61,41 @@ impl [s: GetRandomSource, rg: RandomGenerator, RandomGeneratorType s = rg]
     );
 }
 
+//--------------------
+//  Free Random Monad
+//--------------------
+type FreeRandom a = box union {
+    fr_free: (I64, Array U8 -> FreeRandom a),
+    fr_pure: a
+};
+
+impl FreeRandom: Monad {
+    pure = fr_pure;
+    bind = |f, ma| (
+        if ma.is_fr_pure { f(ma.as_fr_pure) };
+        let (size, next) = ma.as_fr_free;
+        let next2 = |bytes| next(bytes).bind(f);
+        fr_free $ (size, next2)
+    );
+}
+
+impl FreeRandom: Functor {
+    map = |f| bind(f >> pure);
+}
+
+impl FreeRandom: MonadRandomIF {
+    generate_random_bytes = |size| (
+        fr_free $ (size, fr_pure)
+    );
+}
+
+namespace FreeRandom {
+    interpret: [m: MonadRandom] FreeRandom a -> m a;
+    interpret = |eff| (
+        if eff.is_fr_pure { pure $ eff.as_fr_pure };
+        let (size, next) = eff.as_fr_free;
+        let bytes = *generate_random_bytes(size);
+        let eff = next(bytes);
+        eff.interpret
+    );
+}

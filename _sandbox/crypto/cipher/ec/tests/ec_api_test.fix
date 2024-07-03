@@ -1,9 +1,11 @@
 module Main;
 
+import Debug;
 import AsyncTask;
 import Random;
 
 import Minilib.Crypto.Cipher.Ec.EcApi;
+//import Minilib.Crypto.Cipher.Ec.EcApiMock;
 import Minilib.Crypto.Cipher.Ec.EcApiDefault;
 
 import Minilib.Monad.Random;
@@ -14,13 +16,30 @@ import Minilib.Monad.IO;
 import Minilib.Text.Hex;
 import Minilib.Testing.UnitTest;
 
-/*
-ecdsa_secp256r1_sha256
-_check_certificate_verify_ecdsa
-content=20202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020544c5320312e332c20736572766572204365727469666963617465566572696679002c880d54f48aa14ccae9a61266daa13eb5e02482aa9e2328ccc348b2ffbdb9e5
-signature=304402201914a5cd7522f5c16ae71f8bfd69a9643ca6e1fd19a18a439006ec75a99597ff022047f171f24d694c12c80516efd157831e6d76af5e2f80b3b1d8e708f8f2954e38
-ec_point=048df968a8d14aa3a9cc0b63d8030a5c680237003027f35a0e70e30ce79376b427b3521a66364ac79aaf8eff2f60ca70c59e62b38b5a163bef576a41017def38ef
-*/
+test_ecdhe: TestCase;
+test_ecdhe = (
+    make_test("test_ecdhe") $ |_|
+    let curve_name = "secp256r1";
+    let var_random1 = *Var::make(Random::init_by_seed(123_U64)).lift_io;
+    let var_random2 = *Var::make(Random::init_by_seed(234_U64)).lift_io;
+    let sm = do {
+        let ec_api = *make_ec_api;
+        let ecdhe_api = *@make_ecdhe(ec_api, curve_name);
+        pure $ ecdhe_api
+    };
+    let local_ecdhe = *sm.eval_state_t(var_random1);
+    let remote_ecdhe = *sm.eval_state_t(var_random2);
+    let local_key_ex = local_ecdhe.@key_exchange;
+    let remote_key_ex = remote_ecdhe.@key_exchange;
+    let sm = |ecdhe_api, peer_key_ex| do {
+        @accept_peer_key_exchange(ecdhe_api, peer_key_ex)
+    };
+    let local_share = *sm(local_ecdhe, remote_key_ex).eval_state_t(var_random1);
+    let remote_share = *sm(remote_ecdhe, local_key_ex).eval_state_t(var_random2);
+    //eval debug_eprintln("local_share =" + local_share.to_string_hex);
+    //eval debug_eprintln("remote_share=" + remote_share.to_string_hex);
+    assert_equal("eq", local_share, remote_share)
+);
 
 test_ecdsa_verify: TestCase;
 test_ecdsa_verify = (
@@ -36,7 +55,15 @@ test_ecdsa_verify = (
 
     let var_random = *Var::make(Random::init_by_seed(123_U64)).lift_io;
     let sm: StateT (Var Random) IOFail () = do {
-        let api = *EcApiDefault::make;
+        let ec_api = *make_ec_api;
+        let ecdsa_api = *@make_ecdsa(ec_api, curve_name, hash_name);
+
+        let res = *@verify(ecdsa_api, public_key, signature, message).to_result_t;
+        eval *assert_equal("verify1", ok(), res).lift_iofail;
+
+        let message = message.mod(0, add(1_U8));
+        let res = *@verify(ecdsa_api, public_key, signature, message).to_result_t;
+        eval *assert_equal("verify2", err("signature mismatch"), res).lift_iofail;
         pure()
     };
     sm.eval_state_t(var_random)
@@ -45,6 +72,7 @@ test_ecdsa_verify = (
 main: IO ();
 main = (
     [
+        test_ecdhe,
         test_ecdsa_verify,
     ]
     .run_test_driver

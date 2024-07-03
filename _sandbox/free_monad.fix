@@ -7,33 +7,33 @@ import Minilib.Monad.Identity;
 // https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
 // https://eed3si9n.com/herding-cats/ja/Free-monads.html
 type [f: *->*] Free f a = box union {
-    fpure: a,
-    free: f (Free f a)
+    pure_f: a,
+    free_f: f (Free f a)
 };
 
 namespace Free {
-    liftF: [f: Functor] f a -> Free f a;
-    liftF = |command| free $ command.map(fpure);
+    lift_f: [f: Functor] f a -> Free f a;
+    lift_f = |command| free_f $ command.map(pure_f);
 }
 
 impl [f: Functor] Free f: Functor {
     map = |g, ma| (
-        if ma.is_fpure {
-            fpure $ g(ma.as_fpure)
+        if ma.is_pure_f {
+            pure_f $ g(ma.as_pure_f)
         };
-        let m = ma.as_free;
-        free $ m.map(map(g))
+        let m = ma.as_free_f;
+        free_f $ m.map(map(g))
     );
 }
 
 impl [f: Functor] Free f: Monad {
-    pure = fpure;
+    pure = pure_f;
     bind = |g, ma| (
-        if ma.is_fpure {
-            g(ma.as_fpure)
+        if ma.is_pure_f {
+            g(ma.as_pure_f)
         };
-        let m = ma.as_free;
-        free $ m.map(bind(g))
+        let m = ma.as_free_f;
+        free_f $ m.map(bind(g))
     );
 }
 
@@ -67,8 +67,8 @@ test_toy_1 = (
 
 impl [a: ToString] Free Toy a: ToString {
     to_string = |ma| (
-        if ma.is_free {
-            let toy = ma.as_free;
+        if ma.is_free_f {
+            let toy = ma.as_free_f;
             if toy.is_output {
                 let (x, next) = toy.as_output;
                 "output " + x + "\n" + next.to_string
@@ -79,36 +79,36 @@ impl [a: ToString] Free Toy a: ToString {
             };
             "done\n"
         };
-        let r = ma.as_fpure;
+        let r = ma.as_pure_f;
         "pure " + r.to_string + "\n"
     );
 }
 
 foutput: String -> Free Toy ();
-foutput = |x| free $ output $ (x, pure());
+foutput = |x| free_f $ output $ (x, pure());
 
 fbell: Free Toy ();
-fbell = free $ bell $ pure();
+fbell = free_f $ bell $ pure();
 
 fdone: Free Toy r;
-fdone = free $ done();
+fdone = free_f $ done();
 
 output_: String -> next -> Toy next;
 output_ = |x, next| output $ (x, next);
 
-test_toy_free: IO ();
-test_toy_free = (
+test_toy_free_f: IO ();
+test_toy_free_f = (
     let toy = do {
-        eval *output_("A",()).liftF;
-        eval *bell().liftF;
-        eval *done().liftF;
+        eval *output_("A",()).lift_f;
+        eval *bell().lift_f;
+        eval *done().lift_f;
         pure()
     };
     print(toy.to_string)
 );
 
-test_toy_free2: IO ();
-test_toy_free2 = (
+test_toy_free_f2: IO ();
+test_toy_free_f2 = (
     let pretty = |x| (
         eval *println("------------");
         print << to_string $ x
@@ -128,7 +128,7 @@ type StrParser = Free (ReaderT String Identity);
 
 parse_text1: StrParser (Array String);
 parse_text1 = (
-    free $ reader $ |line| (
+    free_f $ reader $ |line| (
         let lines = [line];
         parse_text2 $ lines
     )
@@ -136,7 +136,7 @@ parse_text1 = (
 
 parse_text2: Array String -> StrParser (Array String);
 parse_text2 = |lines| (
-    free $ reader $ |line| (
+    free_f $ reader $ |line| (
         let lines = lines.push_back(line);
         parse_text3 $ lines
     )
@@ -144,9 +144,9 @@ parse_text2 = |lines| (
 
 parse_text3: Array String -> StrParser (Array String);
 parse_text3 = |lines| (
-    free $ reader $ |line| (
+    free_f $ reader $ |line| (
         let lines = lines.push_back(line);
-        fpure $ lines
+        pure_f $ lines
     )
 );
 
@@ -155,16 +155,16 @@ test_str_parser = (
     let parser = parse_text1;
     loop_m(
         (parser, 0), |(parser, i)|
-        if parser.is_fpure {
-            eval *println(parser.as_fpure.to_string);
+        if parser.is_pure_f {
+            eval *println(parser.as_pure_f.to_string);
             break_m $ ()
         };
-        let parser = parser.as_free.run_reader(i.to_string);
+        let parser = parser.as_free_f.run_reader(i.to_string);
         continue_m $ (parser, i + 1)
     )
 );
 
 main: IO ();
-//main = test_toy_free2;
+//main = test_toy_free_f2;
 main = test_str_parser;
 

@@ -389,6 +389,17 @@ B5F0B8C0 0A60B1CE 1D7E819D 7A431D7C 90EA0E5F").as_ok
 F4372DDF 581A0DB2 48B0A77A ECEC196A CCC52973").as_ok,
         h: ECInt::from_string_hex("01").as_ok
     };
+
+    find_curve: String -> Result ErrMsg ECParam;
+    find_curve = |curve_name| (
+        if curve_name == "secp256r1" {
+            pure $ secp256r1
+        };
+        if curve_name == "secp384r1" {
+            pure $ secp384r1
+        };
+        err $ "unsupported curve: " + curve_name
+    );
 }
 
 // Cryptographics key pair
@@ -472,35 +483,61 @@ impl ECDSASignature: ToString {
     to_string = |sig| (sig.@r.to_string_hex, sig.@s.to_string_hex).to_string;
 }
 
+type ECHashParam = unbox struct {
+    hash: Array U8 -> Array U8,
+    hashlen: I64      // hash length in octets
+};
+
+namespace ECHashParam {
+    sha256: ECHashParam;
+    sha256 = ECHashParam {
+        hash: SHA256::digest,
+        hashlen: 32
+    };
+
+    sha384: ECHashParam;
+    sha384 = ECHashParam {
+        hash: SHA384::digest,
+        hashlen: 48
+    };
+
+    find_hash: String -> Result ErrMsg ECHashParam;
+    find_hash = |hash_name| (
+        if hash_name == "sha256" {
+            pure $ ECHashParam::sha256
+        };
+        if hash_name == "sha384" {
+            pure $ ECHashParam::sha384
+        };
+        err $ "unsupported hash: " + hash_name
+    );
+}
+
 // ECDSA Scheme
 type ECDSAScheme = unbox struct {
     ec: ECParam,
-    hash: Array U8 -> Array U8,
-    hashlen: I64      // hash length in octets
+    hash: ECHashParam
 };
 
 namespace ECDSAScheme {
     ecdsa_secp256r1_sha256: ECDSAScheme;
     ecdsa_secp256r1_sha256 = ECDSAScheme {
         ec: ECParam::secp256r1,
-        hash: SHA256::digest,
-        hashlen: 32
+        hash: ECHashParam::sha256,
     };
 
     ecdsa_secp384r1_sha384: ECDSAScheme;
     ecdsa_secp384r1_sha384 = ECDSAScheme {
         ec: ECParam::secp384r1,
-        hash: SHA384::digest,
-        hashlen: 48
+        hash: ECHashParam::sha256,
     };
 
     // 4.1.1 Scheme Setup
-    make: ECParam -> (Array U8 -> Array U8) -> I64 -> ECDSAScheme;
-    make = |ec, hash, hashlen| (
+    make: ECParam -> ECHashParam -> ECDSAScheme;
+    make = |ec, hash| (
         ECDSAScheme {
             ec: ec,
             hash: hash,
-            hashlen: hashlen
         }
     );
 
@@ -547,7 +584,7 @@ namespace ECDSAScheme {
             err $ _Err_Retry
         };
         // 4. Use the hash function selected during the setup procedure to compute the hash value
-        let _H: Array U8 = (scheme.@hash)(message);
+        let _H: Array U8 = (scheme.@hash.@hash)(message);
         // 5. Derive an integer e from H
         let e: ECInt = *scheme._derive_e(_H);
         // 6. Compute:
@@ -567,8 +604,8 @@ namespace ECDSAScheme {
     _derive_e: Array U8 -> ECDSAScheme -> Result ErrMsg ECInt;
     _derive_e = |_H, scheme| (
         let ec = scheme.@ec;
-        let hashlen = scheme.@hashlen;
-        eval assert_eq(|_| "invalid hashlen: " + [_H.get_size, scheme.@hashlen].format("{}, {}"), _H.get_size, scheme.@hashlen);
+        let hashlen = scheme.@hash.@hashlen;
+        eval assert_eq(|_| "invalid hashlen: " + [_H.get_size, hashlen].format("{}, {}"), _H.get_size, hashlen);
         // 5. Derive an integer e from H as follows:
         // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
         // ...does nothing
@@ -607,7 +644,7 @@ namespace ECDSAScheme {
             err $ _Err_Signature_OutOfRange
         };
         // 2. Use the hash function established during the setup procedure to compute the hash value:
-        let _H: Array U8 = (scheme.@hash)(message);
+        let _H: Array U8 = (scheme.@hash.@hash)(message);
         // 3. Derive an integer e from H
         let e: ECInt = *scheme._derive_e(_H);
         // 4. Compute:

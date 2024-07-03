@@ -11,9 +11,7 @@ import Minilib.Monad.Random;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 
-// TODO: remove MonadRandom from `EcApiDefault::make`.
-
-make_ec_api: [m: MonadError, m: MonadRandom] m (EcApi m);
+make_ec_api: [m: MonadError] m (EcApi m);
 make_ec_api = (
     pure $ EcApi {
         make_ecdhe: _make_ecdhe,
@@ -21,15 +19,18 @@ make_ec_api = (
     }
 );
 
-_make_ecdhe: [m: MonadError, m: MonadRandom] EcCurveName -> m (EcdheApi m);
+_make_ecdhe: [m: MonadError] EcCurveName -> m (FreeRandom (EcdheApi m));
 _make_ecdhe = |curve_name| (
     let ec = *ECParam::find_curve(curve_name).lift_result;
-    let ecdhe = *ECDHE::make(ec);
-    pure $ EcdheApi {
-        curve_name: curve_name,
-        key_exchange: ecdhe.get_key_exchange,
-        accept_peer_key_exchange: |peer_key_exchange| ecdhe.accept_peer_key_exchange(peer_key_exchange).lift_result,
-    }
+    let free /*: FreeRandom (EcdheApi m) */ = do {
+        let ecdhe = *ECDHE::make(ec);
+        pure $ EcdheApi {
+            curve_name: curve_name,
+            key_exchange: ecdhe.get_key_exchange,
+            accept_peer_key_exchange: |peer_key_exchange| ecdhe.accept_peer_key_exchange(peer_key_exchange).lift_result,
+        }
+    };
+    pure $ free
 );
 
 _make_ecdsa: [m: MonadError] EcCurveName -> EcHashName -> m (EcdsaApi m);

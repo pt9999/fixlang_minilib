@@ -1,0 +1,117 @@
+module Main;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.Asn1DerEncode;
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Testing.UnitTest;
+
+run_encoder: StateT ByteBuffer IOFail () -> IOFail (Array U8);
+run_encoder = |encoder| (
+    let buf = ByteBuffer::make([], big_endian());
+    let buf = *encoder.exec_state_t(buf);
+    pure $ buf.@array
+);
+
+test_encode_identifier: TestCase;
+test_encode_identifier = (
+    make_table_test("test_encode_identifier",
+        [
+            ([0x01_U8], Identifier::make(tc_universal, false, tag_boolean)),
+            ([0x42_U8], Identifier::make(tc_application, false, tag_integer)),
+            ([0x62_U8], Identifier::make(tc_application, true, tag_integer)),
+            ([0x84_U8], Identifier::make(tc_context_specific, false, tag_octet_string)),
+            ([0xE9_U8], Identifier::make(tc_private, true, tag_real)),
+            ([0x1F_U8, 0x21_U8], Identifier::make(tc_universal, false, tag_date_time)),
+        ],
+        |(expected, identifier)|
+        let actual = *encode_identifier(identifier).run_encoder;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_encode_length: TestCase;
+test_encode_length = (
+    make_table_test("test_encode_length",
+        [
+            ([0x00_U8], 0),
+            ([0x01_U8], 1),
+            ([0x7F_U8], 127),
+            ([0x81_U8, 0xAB_U8], 0xAB),
+            ([0x82_U8, 0xAB_U8, 0xCD_U8], 0xABCD),
+        ],
+        |(expected, length)|
+        let actual = *encode_length(length).run_encoder;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_encode_contents: TestCase;
+test_encode_contents = (
+    make_table_test("test_encode_contents",
+        [
+            ([],),
+            ([0x01_U8, 0x02_U8, 0x03_U8],),
+        ],
+        |(contents,)|
+        let actual = *encode_contents(contents).run_encoder;
+        assert_equal("eq", contents, actual)
+    )
+);
+
+test_encode_integer: TestCase;
+test_encode_integer = (
+    make_table_test("test_encode_integer",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], 0x0123456789ABCDEF),
+        ],
+        |(expected, i64)|
+        let actual = *encode_integer(i64).run_encoder;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_encode_bigint: TestCase;
+test_encode_bigint = (
+    make_table_test("test_encode_bigint",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], BigInt::from_I64 $ 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], BigInt::from_I64 $ 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], BigInt::from_I64 $ 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], BigInt::from_I64 $ 0x0123456789ABCDEF),
+            ([0x02_U8, 0x09_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8, 0x01_U8],
+                                let a = BigInt::from_I64 $ 0x0123456789ABCDEF;
+                                let b = BigInt::from_I64 $ 0x01;
+                                a.shift_left(8_U64) + b
+                                ),
+        ],
+        |(expected, x)|
+        let actual = *encode_bigint(x).run_encoder;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_encode_identifier,
+        test_encode_length,
+        test_encode_contents,
+        test_encode_integer,
+        test_encode_bigint,
+    ]
+    .run_test_driver
+);
+

@@ -4,7 +4,6 @@ import Debug;
 import HashMap;
 
 import Minilib.Crypto.Cert.CACertificates;
-import Minilib.Crypto.Cipher.Rsa.Pkcs1;
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1Der;
 import Minilib.Crypto.Cert.X509;
@@ -13,7 +12,9 @@ import Minilib.Crypto.Cert.X509Signature;
 import Minilib.Crypto.Cert.X509Time;
 import Minilib.Crypto.Cert.X509DnsName;
 import Minilib.Crypto.Tls.Extensions;
-import Minilib.Crypto.Cipher.Ec.ECDSA;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Crypto.Cipher.Rsa.RsaApi;
+import Minilib.Crypto.Cipher.Ec.EcApi;
 import Minilib.Monad.Error;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.Hex;
@@ -24,69 +25,87 @@ decode_certificates = |cert_data_array| (
     cert_data_array.map_m(|cert_data| from_bytes(cert_data)).from_result_t
 );
 
-validate_certificate_signatures: [m: MonadError] Array Certificate -> CACertificates -> Option X509Time -> m ();
-validate_certificate_signatures = |certs, ca_certs, time| (
+validate_certificate_signatures: [m: MonadError] CipherApi -> Array Certificate -> CACertificates -> Option X509Time -> m ();
+validate_certificate_signatures = |cipher_api, certs, ca_certs, time| (
     let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs);
     eval debug_eprintln("cert_path=" + cert_path.@data.to_iter.map(|c| "\n  " + c.to_string).concat_iter);
     eval *cert_path.validate_date(time);
-    cert_path.validate_signatures
+    cert_path.validate_signatures(cipher_api)
 );
 
-check_certificate_verify: [m: MonadError] Certificate -> Array U8 -> SignatureScheme -> Array U8 -> m ();
-check_certificate_verify = |cert, content, algorithm, signature| (
-    let options = algorithm._find_emsa_pss_options;
-    if options.is_some {
-        _check_certificate_verify_rsae(cert, content, signature, options.as_some)
+check_certificate_verify: [m: MonadError] CipherApi -> Certificate -> Array U8 -> SignatureScheme -> Array U8 -> m ();
+check_certificate_verify = |cipher_api, cert, content, algorithm, signature| (
+    let hash_name = algorithm._find_rsa_hash_name;
+    if hash_name.is_some {
+        _check_certificate_verify_rsae(cipher_api, hash_name.as_some, cert, content, signature)
     };
     let ecdsa_scheme = algorithm._find_ecdsa_scheme;
     if ecdsa_scheme.is_some {
-        _check_certificate_verify_ecdsa(cert, content, signature, ecdsa_scheme.as_some)
+        _check_certificate_verify_ecdsa(cipher_api, ecdsa_scheme.as_some, cert, content, signature)
     };
     error $ "check_certificate_verify: unsupported algorithm: " + algorithm.to_string_hex
 );
 
-_check_certificate_verify_rsae: [m: MonadError] Certificate -> Array U8 -> Array U8 -> EmsaPssOptions -> m ();
-_check_certificate_verify_rsae = |cert, content, signature, options| (
-    let public_key = cert.get_subject_public_key;
-    let (n, e) = *public_key.get_rsa_public_key;
-    rsassa_pss_verify((n, e), content, signature, options).from_result_t
-);
+_check_certificate_verify_rsae: [m: MonadError] CipherApi -> RsaHashName -> Certificate -> Array U8 -> Array U8 -> m ();
+_check_certificate_verify_rsae = |cipher_api, hash_name, certificate, content, signature| (
+    let public_key = certificate.get_subject_public_key;
+    let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+    if !pubkey_algorithm.match_name("rsaEncryption") {
+        error $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
+    };
+    let rsa_pubkey: Array U8 = public_key.@subject_public_key.@data;
+    let message = certificate.@tbs_certificate_bytes;
+    let signature = certificate.@signature_value.@data;
+    let rsa_api = *@make_rsa_api(cipher_api);
+    @rsassa_pss_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
+).from_result_t;
 
-_check_certificate_verify_ecdsa: [m: MonadError] Certificate -> Array U8 -> Array U8 -> ECDSAScheme -> m ();
-_check_certificate_verify_ecdsa = |cert, content, signature, ecdsa_scheme| (
-    let public_key = cert.get_subject_public_key;
-    let (ecdsa_scheme, ec_point) = *get_ec_point_from_public_key(ecdsa_scheme, public_key).from_result_t;
-    let sig_value: EcdsaSigValue = *decode_der_from_bytes(signature).from_result_t;
-    //eval debug_eprintln("sig_value="+ sig_value.to_string);
-    let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
-    ecdsa_scheme.verify(ec_point, signature, content).from_result_t
-);
+_check_certificate_verify_ecdsa: [m: MonadError] CipherApi -> (EcCurveName, EcHashName) -> Certificate -> Array U8 -> Array U8 -> m ();
+_check_certificate_verify_ecdsa = |cipher_api, (curve_name, hash_name), certificate, content, signature| (
+    let public_key = certificate.get_subject_public_key;
+    let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+    if !pubkey_algorithm.match_name("id-ecPublicKey") {
+        error $ "Public_key algorithm does not match `id-ecPublicKey`: " + pubkey_algorithm.to_string
+    };
+    let named_curve: ObjectIdentifier = *decode_der_from_bytes(pubkey_algorithm.@parameters);
+    let curve_name1: EcCurveName = named_curve.get_name.as_some_or("");   // secp256r1, secp384r1 etc.
+    if curve_name != curve_name1 {
+        error $ "curve_name unmatch: " + (curve_name, curve_name1).to_string
+    };
+    let public_key: EcPublicKey = public_key.@subject_public_key.@data;
+    let message: EcSigMessage = certificate.@tbs_certificate_bytes;
+    let signature: EcSignature = certificate.@signature_value.@data;
 
-_find_emsa_pss_options: SignatureScheme -> Option EmsaPssOptions;
-_find_emsa_pss_options = |algorithm| (
+    let ec_api = *@make_ec_api(cipher_api);
+    let ecdsa_api = *@make_ecdsa(ec_api, curve_name, hash_name);
+    @verify(ecdsa_api, public_key, signature, message)
+).from_result_t;
+
+
+_find_rsa_hash_name: SignatureScheme -> Option RsaHashName;
+_find_rsa_hash_name = |algorithm| (
     if algorithm == SignatureScheme::rsa_pss_rsae_sha256 {
-        some $ Pkcs1::emsa_pss_options_sha256
+        some $ "sha256"
     };
     if algorithm == SignatureScheme::rsa_pss_rsae_sha384 {
-        some $ Pkcs1::emsa_pss_options_sha384
+        some $ "sha384"
     };
     if algorithm == SignatureScheme::rsa_pss_rsae_sha512 {
-        some $ Pkcs1::emsa_pss_options_sha512
+        some $ "sha512"
     };
     none()
 );
 
-_find_ecdsa_scheme: SignatureScheme -> Option ECDSAScheme;
+_find_ecdsa_scheme: SignatureScheme -> Option (EcCurveName, EcHashName);
 _find_ecdsa_scheme = |algorithm| (
     if algorithm == SignatureScheme::ecdsa_secp256r1_sha256 {
-        some $ ECDSAScheme::ecdsa_secp256r1_sha256
+        some $ ("secp256r1", "sha256")
     };
     if algorithm == SignatureScheme::ecdsa_secp384r1_sha384 {
-        some $ ECDSAScheme::ecdsa_secp384r1_sha384
+        some $ ("secp384r1", "sha384")
     };
     none()
 );
-
 
 check_certificate_identity: [m: MonadError] Certificate -> String -> m ();
 check_certificate_identity = |cert, target_server_name| (

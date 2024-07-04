@@ -5,9 +5,8 @@ import Debug;
 
 import Minilib.Crypto.Tls.Types;
 import Minilib.Crypto.Tls.KeyShare;
+import Minilib.Crypto.Tls.Extensions;
 import Minilib.Crypto.Cipher.CipherApi;
-//import Minilib.Crypto.Cipher.CipherApiDefault;
-import Minilib.Crypto.Cipher.CipherApiMock;
 import Minilib.Crypto.Cipher.Ec.EcApi;
 import Minilib.Monad.Error;
 import Minilib.Monad.Random;
@@ -29,11 +28,11 @@ impl KeyAgreement: ToString {
 }
 
 namespace KeyAgreement {
-    make_defaults: [m: MonadError, m: MonadRandom] m (Array KeyAgreement);
-    make_defaults = (
+    make_defaults: [m: MonadError, m: MonadRandom] CipherApi -> m (Array KeyAgreement);
+    make_defaults = |cipher_api| (
         eval *pure();
         pure $ [
-            KeyAgreement::ecdhe $ *KeyAgreementEcdhe::make(NamedGroup::secp256r1),
+            KeyAgreement::ecdhe $ *KeyAgreementEcdhe::make(cipher_api, NamedGroup::secp256r1),
             //KeyAgreement::x25519 $ *KeyAgreementX25519::make,
         ]
     );
@@ -63,15 +62,18 @@ namespace KeyAgreement {
 
 type KeyAgreementEcdhe = unbox struct {
     named_group: NamedGroup,
-    ecdhe_api: EcdheApi (Result ErrMsg)
+    ecdhe_api: EcdheApi,
 };
 
+impl KeyAgreementEcdhe: ToString {
+    to_string = |x| "KeyAgreementEcdhe {}";
+}
+
 namespace KeyAgreementEcdhe {
-    make: [m: MonadError, m: MonadRandom] NamedGroup -> m KeyAgreementEcdhe;
-    make = |named_group| (
+    make: [m: MonadError, m: MonadRandom] CipherApi -> NamedGroup -> m KeyAgreementEcdhe;
+    make = |cipher_api, named_group| (
         let curve_name = *_find_ec_curve_name(named_group);
         let free = *do {
-            let cipher_api = *make_cipher_api;
             let ec_api = *@make_ec_api(cipher_api);
             @make_ecdhe(ec_api, curve_name)
         }.from_result_t;
@@ -87,7 +89,7 @@ namespace KeyAgreementEcdhe {
         if named_group == NamedGroup::secp256r1 { pure $ "secp256r1" };
         if named_group == NamedGroup::secp384r1 { pure $ "secp384r1" };
         if named_group == NamedGroup::secp521r1 { pure $ "secp521r1" };
-        err $ "unsupported named_group"
+        error $ "unsupported named_group"
     );
 
     to_key_share_entry: KeyAgreementEcdhe -> KeyShareEntry;

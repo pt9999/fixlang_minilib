@@ -14,6 +14,7 @@ import Minilib.Crypto.Tls.HandshakeProtocol;
 import Minilib.Crypto.Tls.RecordProtocol;
 import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cipher.CipherApi;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
@@ -42,6 +43,7 @@ namespace TLSRecordHelper {
 }
 
 type HandshakeInitParam = box struct {
+    cipher_api: CipherApi,
     server_name: String,
     ca_certs: Option CACertificates,
     validate_cert_date: Option X509Time,
@@ -166,7 +168,7 @@ namespace BeforeClientHello {
             ])
         );
         // init key_share
-        let key_agreements = *KeyAgreement::make_defaults;
+        let key_agreements = *KeyAgreement::make_defaults(init_param.@cipher_api);
         let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make(
             key_agreements.map(to_key_share_entry)
         );
@@ -342,6 +344,7 @@ namespace AfterServerHello {
     _verify_certificate: [m: MonadError] Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> m ();
     _verify_certificate = |handshakes, protection, init_param| (
         eval debug_eprintln("_verify_certificate");
+        let cipher_api = init_param.@cipher_api;
         let ca_certs = init_param.@ca_certs;
         if ca_certs.is_none {
             eval debug_eprintln("WARNING: Verification of certificates are not performed, since CA Certificates is not set in HandshakeInitParam.");
@@ -360,7 +363,7 @@ namespace AfterServerHello {
         let certs = *decode_certificates(cert_data_array);
 
         eval debug_eprintln("validating certificate signatures");
-        eval *validate_certificate_signatures(certs, ca_certs.as_some, init_param.@validate_cert_date);
+        eval *validate_certificate_signatures(cipher_api, certs, ca_certs.as_some, init_param.@validate_cert_date);
 
         eval debug_eprintln("checking certificate_verify");
         let CertificateVerify {
@@ -369,7 +372,7 @@ namespace AfterServerHello {
         } = handshakes.@(opt_certificate_verify.as_some).@0.as_certificate_verify;
         let protection = _update_handshake_context(handshakes, (0, opt_certificate.as_some + 1), protection);
         let content = *protection.calc_certificate_verify_content(TrafficKeyType::server_tk()).from_result_t;
-        eval *check_certificate_verify(certs.@(0), content, algorithm, signature);
+        eval *check_certificate_verify(cipher_api, certs.@(0), content, algorithm, signature);
 
         eval debug_eprintln("checking certificate identity");
         eval *check_certificate_identity(certs.@(0), init_param.@server_name);

@@ -9,9 +9,8 @@ import Minilib.Encoding.Binary;
 import Minilib.Math.BigInt;
 import Minilib.Monad.Random;
 import Minilib.Monad.State;
-import Minilib.Monad.Error;
 
-make_ec_api: [m: MonadError] m (EcApi m);
+make_ec_api: Result ErrMsg EcApi;
 make_ec_api = (
     pure $ EcApi {
         make_ecdhe: _make_ecdhe,
@@ -19,24 +18,24 @@ make_ec_api = (
     }
 );
 
-_make_ecdhe: [m: MonadError] EcCurveName -> m (FreeRandom (EcdheApi m));
+_make_ecdhe: EcCurveName -> Result ErrMsg (FreeRandom EcdheApi);
 _make_ecdhe = |curve_name| (
-    let ec = *ECParam::find_curve(curve_name).lift_result;
+    let ec = *ECParam::find_curve(curve_name);
     let free /*: FreeRandom (EcdheApi m) */ = do {
         let ecdhe = *ECDHE::make(ec);
         pure $ EcdheApi {
             curve_name: curve_name,
             key_exchange: ecdhe.get_key_exchange,
-            accept_peer_key_exchange: |peer_key_exchange| ecdhe.accept_peer_key_exchange(peer_key_exchange).lift_result,
+            accept_peer_key_exchange: |peer_key_exchange| ecdhe.accept_peer_key_exchange(peer_key_exchange),
         }
     };
     pure $ free
 );
 
-_make_ecdsa: [m: MonadError] EcCurveName -> EcHashName -> m (EcdsaApi m);
+_make_ecdsa: EcCurveName -> EcHashName -> Result ErrMsg EcdsaApi;
 _make_ecdsa = |curve_name, hash_name| (
-    let ec = *ECParam::find_curve(curve_name).lift_result;
-    let hash = *ECHashParam::find_hash(hash_name).lift_result;
+    let ec = *ECParam::find_curve(curve_name);
+    let hash = *ECHashParam::find_hash(hash_name);
     let ecdsa_scheme = ECDSAScheme::make(ec, hash);
 
     pure $ EcdsaApi {
@@ -46,15 +45,15 @@ _make_ecdsa = |curve_name, hash_name| (
     }
 );
 
-_ecdsa_verify: [m: MonadError] ECDSAScheme -> EcPublicKey -> EcSignature -> EcSigMessage -> m ();
+_ecdsa_verify: ECDSAScheme -> EcPublicKey -> EcSignature -> EcSigMessage -> Result ErrMsg ();
 _ecdsa_verify = |ecdsa_scheme, public_key, signature, message| (
     let ec = ecdsa_scheme.@ec;
-    let ecpoint = *ECPoint::from_bytes_ec(ec, public_key).lift_result;
+    let ecpoint = *ECPoint::from_bytes_ec(ec, public_key);
     let signature = *_decode_ecdsa_signature(signature);
-    ecdsa_scheme.verify(ecpoint, signature, message).lift_result
+    ecdsa_scheme.verify(ecpoint, signature, message)
 );
 
-_decode_ecdsa_signature: [m: MonadError] EcSignature -> m ECDSASignature;
+_decode_ecdsa_signature: EcSignature -> Result ErrMsg ECDSASignature;
 _decode_ecdsa_signature = |signature| (
     let sm = do {
         decode_sequence $ do {
@@ -64,5 +63,5 @@ _decode_ecdsa_signature = |signature| (
         }
     };
     let buf = ByteBuffer::make(signature, big_endian());
-    sm.eval_state_t(buf).lift_result
+    sm.eval_state_t(buf)
 );

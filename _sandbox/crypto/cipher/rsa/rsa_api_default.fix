@@ -6,10 +6,9 @@ import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1Der;
 import Minilib.Encoding.Binary;
 import Minilib.Math.BigInt;
-import Minilib.Monad.Error;
 import Minilib.Monad.State;
 
-make_rsa_api: [m: MonadError] m (RsaApi m);
+make_rsa_api: Result ErrMsg RsaApi;
 make_rsa_api = (
     pure $ RsaApi {
         rsassa_pss_verify: _rsassa_pss_verify,
@@ -17,21 +16,21 @@ make_rsa_api = (
     }
 );
 
-_rsassa_pss_verify: [m: MonadError] RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> m ();
+_rsassa_pss_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
 _rsassa_pss_verify = |hash_name, public_key, sig_message, signature| (
     let (n, e) = *_decode_public_key(public_key);
     let options = *_find_emsa_pss_options(hash_name);
-    rsassa_pss_verify((n, e), sig_message, signature, options).from_result_t
+    rsassa_pss_verify((n, e), sig_message, signature, options)
 );
 
-_rsassa_pkcs1_v1_5_verify: [m: MonadError] RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> m ();
+_rsassa_pkcs1_v1_5_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
 _rsassa_pkcs1_v1_5_verify = |hash_name, public_key, sig_message, signature| (
     let (n, e) = *_decode_public_key(public_key);
     let options = *_find_emsa_pkcs1_options(hash_name);
-    rsassa_pkcs1_v1_5_verify((n, e), sig_message, signature, options).from_result_t
+    rsassa_pkcs1_v1_5_verify((n, e), sig_message, signature, options)
 );
 
-_decode_public_key: [m: MonadError] RsaPublicKey -> m (BigInt, BigInt);
+_decode_public_key: RsaPublicKey -> Result ErrMsg (BigInt, BigInt);
 _decode_public_key = |public_key| (
     let sm = do {
         decode_sequence $ do {
@@ -42,10 +41,9 @@ _decode_public_key = |public_key| (
     };
     let buf = ByteBuffer::make(public_key, big_endian());
     sm.eval_state_t(buf)
-    .from_result_t
 );
 
-_find_emsa_pss_options: [m: MonadError] RsaHashName -> m EmsaPssOptions;
+_find_emsa_pss_options: RsaHashName -> Result ErrMsg EmsaPssOptions;
 _find_emsa_pss_options = |hash_name| (
     if hash_name == "sha256" {
         pure $ Pkcs1::emsa_pss_options_sha256
@@ -56,10 +54,10 @@ _find_emsa_pss_options = |hash_name| (
     if hash_name == "sha512" {
         pure $ Pkcs1::emsa_pss_options_sha512
     };
-    error $ "unsupported hash: " + hash_name
+    err $ "unsupported hash: " + hash_name
 );
 
-_find_emsa_pkcs1_options: [m: MonadError] RsaHashName -> m EmsaPkcs1Options;
+_find_emsa_pkcs1_options: RsaHashName -> Result ErrMsg EmsaPkcs1Options;
 _find_emsa_pkcs1_options = |hash_name| (
     if hash_name == "sha1" {
         pure $ Pkcs1::emsa_pkcs1_options_sha1
@@ -73,5 +71,5 @@ _find_emsa_pkcs1_options = |hash_name| (
     if hash_name == "sha512" {
         pure $ Pkcs1::emsa_pkcs1_options_sha512
     };
-    error $ "unsupported hash: " + hash_name
+    err $ "unsupported hash: " + hash_name
 );

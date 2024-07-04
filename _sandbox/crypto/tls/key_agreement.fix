@@ -4,16 +4,20 @@ module Minilib.Crypto.Tls.KeyAgreement;
 import Debug;
 
 import Minilib.Crypto.Tls.Types;
-import Minilib.Monad.Random;
 import Minilib.Crypto.Tls.KeyShare;
-import Minilib.Crypto.Tls.ECDHE;
-import Minilib.Crypto.Cipher.Ec.ECDSA;
-//import Minilib.Encoding.Binary;
+import Minilib.Crypto.Cipher.CipherApi;
+//import Minilib.Crypto.Cipher.CipherApiDefault;
+import Minilib.Crypto.Cipher.CipherApiMock;
+import Minilib.Crypto.Cipher.Ec.EcApi;
+import Minilib.Monad.Error;
+import Minilib.Monad.Random;
 import Minilib.Text.Hex;
 
+// TODO: pass cipher_api as an argument
+
 type KeyAgreement = unbox union {
-    ecdhe: ECDHE,
-    x25519: X25519,
+    ecdhe: KeyAgreementEcdhe,
+    x25519: KeyAgreementX25519,
 };
 
 impl KeyAgreement: ToString {
@@ -25,12 +29,12 @@ impl KeyAgreement: ToString {
 }
 
 namespace KeyAgreement {
-    make_defaults: [m: MonadRandom] m (Array KeyAgreement);
+    make_defaults: [m: MonadError, m: MonadRandom] m (Array KeyAgreement);
     make_defaults = (
         eval *pure();
         pure $ [
-            KeyAgreement::ecdhe $ *ECDHE::make(ECParam::secp256r1),
-            //KeyAgreement::x25519 $ *X25519::make,
+            KeyAgreement::ecdhe $ *KeyAgreementEcdhe::make(NamedGroup::secp256r1),
+            //KeyAgreement::x25519 $ *KeyAgreementX25519::make,
         ]
     );
 
@@ -57,22 +61,72 @@ namespace KeyAgreement {
     );
 }
 
+type KeyAgreementEcdhe = unbox struct {
+    named_group: NamedGroup,
+    ecdhe_api: EcdheApi (Result ErrMsg)
+};
+
+namespace KeyAgreementEcdhe {
+    make: [m: MonadError, m: MonadRandom] NamedGroup -> m KeyAgreementEcdhe;
+    make = |named_group| (
+        let curve_name = *_find_ec_curve_name(named_group);
+        let free = *do {
+            let cipher_api = *make_cipher_api;
+            let ec_api = *@make_ec_api(cipher_api);
+            @make_ecdhe(ec_api, curve_name)
+        }.from_result_t;
+        let ecdhe_api = *free.interpret;
+        pure $ KeyAgreementEcdhe {
+            named_group: named_group,
+            ecdhe_api: ecdhe_api
+        }
+    );
+
+    _find_ec_curve_name: [m: MonadError] NamedGroup -> m EcCurveName;
+    _find_ec_curve_name = |named_group| (
+        if named_group == NamedGroup::secp256r1 { pure $ "secp256r1" };
+        if named_group == NamedGroup::secp384r1 { pure $ "secp384r1" };
+        if named_group == NamedGroup::secp521r1 { pure $ "secp521r1" };
+        err $ "unsupported named_group"
+    );
+
+    to_key_share_entry: KeyAgreementEcdhe -> KeyShareEntry;
+    to_key_share_entry = |ka| (
+        let ecdhe_api = ka.@ecdhe_api;
+        KeyShareEntry {
+            group: ka.@named_group,
+            key_exchange: ecdhe_api.@key_exchange
+        }
+    );
+
+    accept_server_share: KeyShareEntry -> KeyAgreementEcdhe -> Result ErrMsg SharedSecret;
+    accept_server_share = |server_share, ka| (
+        if server_share.@group != ka.@named_group {
+            err $ "accept_server_share: group not match"
+        };
+        let server_key_exchange = server_share.@key_exchange;
+        let ecdhe_api = ka.@ecdhe_api;
+        @accept_peer_key_exchange(ecdhe_api, server_key_exchange)
+    );
+}
+
+
 // Currently this is only mock-up for testing
-type X25519 = unbox struct {
+type KeyAgreementX25519 = unbox struct {
     dummy: ()
 };
 
-impl X25519: ToString {
-    to_string = |x| "X25519 {}";
+impl KeyAgreementX25519: ToString {
+    to_string = |x| "KeyAgreementX25519 {}";
 }
 
-namespace X25519 {
-    make: [m: Monad] m X25519;
+namespace KeyAgreementX25519 {
+    make: [m: Monad] m KeyAgreementX25519;
     make = (
-        pure $ X25519 { dummy: () }
+        pure $ KeyAgreementX25519 { dummy: () }
     );
 
-    to_key_share_entry: X25519 -> KeyShareEntry;
+    to_key_share_entry: KeyAgreementX25519 -> KeyShareEntry;
     to_key_share_entry = |x| (
         let key_exchange: Result ErrMsg (Array U8) = from_string_hex("99381de560e4bd43d23d8e435a7dbafeb3c06e51c13cae4d5413691e529aaf2c");
         KeyShareEntry {
@@ -81,7 +135,7 @@ namespace X25519 {
         }
     );
 
-    accept_server_share: KeyShareEntry -> X25519 -> Result ErrMsg SharedSecret;
+    accept_server_share: KeyShareEntry -> KeyAgreementX25519 -> Result ErrMsg SharedSecret;
     accept_server_share = |server_share, x| (
         "8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d".from_string_hex
     );

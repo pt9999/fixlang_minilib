@@ -8,24 +8,20 @@ import Minilib.Crypto.Cert.Asn1Der;
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.OID;
 import Minilib.Crypto.Cipher.CipherApi;
-import Minilib.Crypto.Cipher.CipherApiDefault;
-//import Minilib.Crypto.Cipher.CipherApiMock;
 import Minilib.Crypto.Cipher.Rsa.RsaApi;
 import Minilib.Crypto.Cipher.Ec.EcApi;
 import Minilib.Monad.Error;
 
-// TODO: pass cipher_api as an argument
-
-validate_signature: SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
-validate_signature = |public_key, certificate| (
+validate_signature: CipherApi -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_signature = |cipher_api, public_key, certificate| (
     let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
     let hash_name = signature_algorithm._find_rsa_hash_name;
     if hash_name.is_some {
-        validate_signature_pkcs1_v1_5(hash_name.as_some, public_key, certificate)
+        validate_signature_pkcs1_v1_5(cipher_api, hash_name.as_some, public_key, certificate)
     };
     let ec_hash_name = signature_algorithm._find_ec_hash_name;
     if ec_hash_name.is_some {
-        validate_signature_ecdsa(ec_hash_name.as_some, public_key, certificate)
+        validate_signature_ecdsa(cipher_api, ec_hash_name.as_some, public_key, certificate)
     };
 
     err $ "Not supported signature algorithm: " + certificate.@signature_algorithm.to_string
@@ -59,8 +55,8 @@ _find_ec_hash_name = |signature_algorithm| (
     none()
 );
 
-validate_signature_pkcs1_v1_5: RsaHashName -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
-validate_signature_pkcs1_v1_5 = |hash_name, public_key, certificate| (
+validate_signature_pkcs1_v1_5: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_signature_pkcs1_v1_5 = |cipher_api, hash_name, public_key, certificate| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
     if !pubkey_algorithm.match_name("rsaEncryption") {
         error $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
@@ -68,14 +64,13 @@ validate_signature_pkcs1_v1_5 = |hash_name, public_key, certificate| (
     let rsa_pubkey: Array U8 = public_key.@subject_public_key.@data;
     let message = certificate.@tbs_certificate_bytes;
     let signature = certificate.@signature_value.@data;
-    let cipher_api = *make_cipher_api;
     let rsa_api = *@make_rsa_api(cipher_api);
     @rsassa_pkcs1_v1_5_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
 );
 
 
-validate_signature_ecdsa: EcHashName -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
-validate_signature_ecdsa = |hash_name, public_key, certificate| (
+validate_signature_ecdsa: CipherApi -> EcHashName -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_signature_ecdsa = |cipher_api, hash_name, public_key, certificate| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
     if !pubkey_algorithm.match_name("id-ecPublicKey") {
         err $ "Public_key algorithm does not match `id-ecPublicKey`: " + pubkey_algorithm.to_string
@@ -86,7 +81,6 @@ validate_signature_ecdsa = |hash_name, public_key, certificate| (
     let message: EcSigMessage = certificate.@tbs_certificate_bytes;
     let signature: EcSignature = certificate.@signature_value.@data;
 
-    let cipher_api = *make_cipher_api;
     let ec_api = *@make_ec_api(cipher_api);
     let ecdsa_api = *@make_ecdsa(ec_api, curve_name, hash_name);
     @verify(ecdsa_api, public_key, signature, message)

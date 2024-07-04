@@ -60,14 +60,27 @@ _find_ec_hash_name = |signature_algorithm| (
     none()
 );
 
-// Verify the signature of a message using the specified public key, using `rsassa_pkcs1_v1_5_verify`.
-verify_signature_pkcs1_v1_5: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
-verify_signature_pkcs1_v1_5 = |cipher_api, hash_name, public_key, message, signature| (
+_get_rsa_public_key: SubjectPublicKeyInfo -> Result ErrMsg RsaPublicKey;
+_get_rsa_public_key = |public_key| (
     let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
     if !pubkey_algorithm.match_name("rsaEncryption") {
         error $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
     };
-    let rsa_pubkey: Array U8 = public_key.@subject_public_key.@data;
+    pure $ public_key.@subject_public_key.@data
+);
+
+// Verify the signature of a message using the specified public key, using `rsassa_pss_verify`.
+verify_signature_rsassa_pss: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+verify_signature_rsassa_pss = |cipher_api, hash_name, public_key, message, signature| (
+    let rsa_pubkey = *_get_rsa_public_key(public_key);
+    let rsa_api = *@make_rsa_api(cipher_api);
+    @rsassa_pss_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
+);
+
+// Verify the signature of a message using the specified public key, using `rsassa_pkcs1_v1_5_verify`.
+verify_signature_pkcs1_v1_5: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+verify_signature_pkcs1_v1_5 = |cipher_api, hash_name, public_key, message, signature| (
+    let rsa_pubkey = *_get_rsa_public_key(public_key);
     let rsa_api = *@make_rsa_api(cipher_api);
     @rsassa_pkcs1_v1_5_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
 );

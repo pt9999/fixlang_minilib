@@ -1,0 +1,143 @@
+// Default implementation of CertApi.
+module Minilib.Crypto.Cert.CertApiDefault;
+
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Crypto.Cert.CertApi;
+import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Path;
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Monad.FunctorM;
+
+make_cert_api: CipherApi -> Result ErrMsg CertApi;
+make_cert_api = |cipher_api| (
+    let cert_impl = DefaultCertApiImpl::make(cipher_api);
+    pure $ cert_impl.to_api
+);
+
+type DefaultCertApiImpl = unbox struct {
+    cipher_api: CipherApi,
+    ca_certificates: Option CACertificates,
+};
+
+namespace DefaultCertApiImpl {
+    make: CipherApi -> DefaultCertApiImpl;
+    make = |cipher_api| (
+        DefaultCertApiImpl {
+            cipher_api: cipher_api,
+            ca_certificates: none(),
+        }
+    );
+
+    to_api: DefaultCertApiImpl -> CertApi;
+    to_api = |cert_impl| (
+        CertApi {
+            load_ca_certificates: _load_ca_certificates(cert_impl),
+            get_now: _get_now,
+            build_cert_path: _build_cert_path(cert_impl),
+        }
+    );
+
+    _load_ca_certificates: DefaultCertApiImpl -> IOFail CertApi;
+    _load_ca_certificates = |cert_impl| (
+        let ca_certificates = *CACertificates::make;
+        let cert_impl = cert_impl.set_ca_certificates(some $ ca_certificates);
+        pure $ cert_impl.to_api
+    );
+
+    _get_now: IO CerTime;
+    _get_now = (
+        let now: X509Time = *X509Time::get_now;
+        pure $ now.to_generalized_time_string
+    );
+
+    _build_cert_path: DefaultCertApiImpl -> Array (Array U8) -> Result ErrMsg CertPathApi;
+    _build_cert_path = |cert_impl, cert_data_array| (
+        if cert_data_array.get_size == 0 { err $ "cert_data_array is empty" };
+        let ca_certs = cert_impl.@ca_certificates;
+        if ca_certs.is_none { err $ "The collection of CA certificates has not been loaded" };
+
+        let certs: Array Certificate = *cert_data_array.map_m(|cert_data| from_bytes(cert_data));
+        let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs.as_some);
+        pure $ DefaultCertPathApiImpl::make(cert_impl, cert_path).to_api
+    );
+}
+
+type DefaultCertPathApiImpl = unbox struct {
+    cert_impl: DefaultCertApiImpl,
+    cert_path: CertificatePath,
+};
+
+namespace DefaultCertPathApiImpl {
+    make: DefaultCertApiImpl -> CertificatePath -> DefaultCertPathApiImpl;
+    make = |cert_impl, cert_path| (
+        DefaultCertPathApiImpl {
+            cert_impl: cert_impl,
+            cert_path: cert_path
+        }
+    );
+
+    to_api: DefaultCertPathApiImpl -> CertPathApi;
+    to_api = |cert_path_impl| (
+        CertPathApi {
+            get_certificates: _get_certificates(cert_path_impl),
+            validate_date: _validate_date(cert_path_impl),
+            validate_certificate_signatures: _validate_certificate_signatures(cert_path_impl),
+        }
+    );
+
+    _get_certificates: DefaultCertPathApiImpl -> () -> Array CertificateApi;
+    _get_certificates = |cert_path_impl, _| (
+        let cert_impl = cert_path_impl.@cert_impl;
+        let cert_path = cert_path_impl.@cert_path;
+        cert_path.@data.map(|certificate|
+            DefaultCertificateApiImpl::make(cert_impl, certificate).to_api
+        )
+    );
+
+    _validate_date: DefaultCertPathApiImpl -> CerTime -> Result ErrMsg ();
+    _validate_date = |cert_path_impl, time| (
+        let time: X509Time = *from_generalized_time_string(time);
+        let cert_path = cert_path_impl.@cert_path;
+        cert_path.validate_date(some $ time)
+    );
+
+    _validate_certificate_signatures: DefaultCertPathApiImpl -> () -> Result ErrMsg ();
+    _validate_certificate_signatures = |cert_path_impl, _| (
+        let cert_impl = cert_path_impl.@cert_impl;
+        let cert_path = cert_path_impl.@cert_path;
+        cert_path.validate_certificate_signatures(cert_impl.@cipher_api)
+    );
+}
+
+type DefaultCertificateApiImpl = unbox struct {
+    cert_impl: DefaultCertApiImpl,
+    certificate: Certificate,
+};
+
+namespace DefaultCertificateApiImpl {
+    make: DefaultCertApiImpl -> Certificate -> DefaultCertificateApiImpl;
+    make = |cert_impl, certificate| (
+        DefaultCertificateApiImpl {
+            cert_impl: cert_impl,
+            certificate: certificate
+        }
+    );
+
+    to_api: DefaultCertificateApiImpl -> CertificateApi;
+    to_api = |certificate_impl| (
+        CertificateApi {
+            verify_signature_by_subject_public_key: _verify_signature_by_subject_public_key(certificate_impl)
+        }
+    );
+
+    _verify_signature_by_subject_public_key: DefaultCertificateApiImpl -> CerSigMessage -> CerSigScheme -> CerSignature -> Result ErrMsg ();
+    _verify_signature_by_subject_public_key = |certificate_impl, message, scheme, signature| (
+        let cert_impl = certificate_impl.@cert_impl;
+        let cipher_api = cert_impl.@cipher_api;
+        let certificate = certificate_impl.@certificate;
+        X509Signature::verify_signature_by_subject_public_key(cipher_api, certificate, message, scheme, signature)
+    );
+}
+

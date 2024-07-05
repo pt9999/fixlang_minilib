@@ -3,6 +3,7 @@ module Minilib.Crypto.Cert.X509Signature;
 import Debug;
 import HashMap;
 
+import Minilib.Crypto.Cert.CertApi;
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1Der;
 import Minilib.Crypto.Cert.X509;
@@ -59,6 +60,47 @@ _find_ec_hash_name = |signature_algorithm| (
     };
     none()
 );
+
+
+verify_signature_by_subject_public_key: [m: MonadError] CipherApi -> Certificate -> CerSigMessage -> CerSigScheme -> CerSignature -> m ();
+verify_signature_by_subject_public_key = |cipher_api, certificate, message, scheme, signature| (
+    let public_key = certificate.get_subject_public_key;
+    let hash_name = scheme._find_sig_rsa_hash_name;
+    if hash_name.is_some {
+        verify_signature_rsassa_pss(cipher_api, hash_name.as_some, public_key, message, signature).from_result_t
+    };
+    let hash_name = scheme._find_sig_ec_hash_name;
+    if hash_name.is_some {
+        verify_signature_ecdsa(cipher_api, hash_name.as_some, public_key, message, signature).from_result_t
+    };
+    error $ "verify_signature_by_subject_public_key: unsupported scheme: " + scheme
+);
+
+_find_sig_rsa_hash_name: CerSigScheme -> Option RsaHashName;
+_find_sig_rsa_hash_name = |scheme| (
+    if scheme == "rsa_pss_rsae_sha256" {
+        some $ "sha256"
+    };
+    if scheme == "rsa_pss_rsae_sha384" {
+        some $ "sha384"
+    };
+    if scheme == "rsa_pss_rsae_sha512" {
+        some $ "sha512"
+    };
+    none()
+);
+
+_find_sig_ec_hash_name: CerSigScheme -> Option EcHashName;
+_find_sig_ec_hash_name = |scheme| (
+    if scheme == "ecdsa_secp256r1_sha256" {
+        some $ "sha256"
+    };
+    if scheme == "ecdsa_secp384r1_sha384" {
+        some $ "sha384"
+    };
+    none()
+);
+
 
 _get_rsa_public_key: SubjectPublicKeyInfo -> Result ErrMsg RsaPublicKey;
 _get_rsa_public_key = |public_key| (

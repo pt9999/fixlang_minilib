@@ -6,6 +6,7 @@ module Minilib.Crypto.Tls.Protection;
 
 import Debug;
 
+import Minilib.Common.DebugLog;
 import Minilib.Crypto.Tls.Types;
 import Minilib.Crypto.Tls.CipherSuite;
 import Minilib.Crypto.Tls.RecordProtocol;
@@ -73,7 +74,7 @@ namespace Secrets {
     calc_resumption_master_secret: Array U8 -> HKDF -> Secrets -> Result ErrMsg Secrets;
     calc_resumption_master_secret = |handshake_context, hkdf, secrets| (
         let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
-        //eval debug_eprintln("resumption_master_secret=" + resumption_master_secret.to_string_hex);
+        //eval log_debug("resumption_master_secret=" + resumption_master_secret.to_string_hex);
         pure $ secrets.set_resumption_master_secret(resumption_master_secret)
     );
 }
@@ -287,7 +288,7 @@ namespace Protection {
         let traffic_key = protection.get_traffic_key(traffic_key_type);
         let inner_plaintext_bytes = *traffic_key.decrypt(ciphertext.@encrypted_record, additional_data, aead);
         let protection = protection.mod_traffic_key(traffic_key_type, increment_sequence_number);
-        eval debug_eprintln("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex_limit(200));
+        eval log_debug("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex_limit(200));
         let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes);
         pure $ (inner_plaintext, protection)
     );
@@ -320,7 +321,7 @@ namespace Protection {
             .append([0x00_U8])
             .append(hkdf.transcript_hash(handshake_context))
         );
-        eval debug_eprintln("calc_certificate_verify_content: " + concatenation.to_string_hex);
+        eval log_debug("calc_certificate_verify_content: " + concatenation.to_string_hex);
         pure $ concatenation
     );
 
@@ -334,7 +335,7 @@ namespace Protection {
         let traffic_key = protection.get_traffic_key(traffic_key_type);
         let base_key = traffic_key.@traffic_secret;
         let finished_key = *hkdf.expand_label(base_key, "finished", [], hkdf.hash_length);
-        eval debug_eprintln("finished_key=" + finished_key.to_string_hex);
+        eval log_debug("finished_key=" + finished_key.to_string_hex);
         let verify_data = hkdf.@hmac.digest(finished_key, hkdf.transcript_hash(handshake_context));
         pure $ verify_data
     );

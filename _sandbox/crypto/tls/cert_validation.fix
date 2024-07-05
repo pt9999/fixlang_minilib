@@ -3,6 +3,7 @@ module Minilib.Crypto.Tls.CertValidation;
 import Debug;
 import HashMap;
 
+import Minilib.Common.DebugLog;
 import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.Asn1;
 import Minilib.Crypto.Cert.Asn1Der;
@@ -28,7 +29,7 @@ decode_certificates = |cert_data_array| (
 validate_certificate_signatures: [m: MonadError] CipherApi -> Array Certificate -> CACertificates -> Option X509Time -> m ();
 validate_certificate_signatures = |cipher_api, certs, ca_certs, time| (
     let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs);
-    eval debug_eprintln("cert_path=" + cert_path.@data.to_iter.map(|c| "\n  " + c.to_string).concat_iter);
+    eval log_debug("cert_path=" + cert_path.@data.to_iter.map(|c| "\n  " + c.to_string).concat_iter);
     eval *cert_path.validate_date(time);
     cert_path.validate_certificate_signatures(cipher_api)
 );
@@ -74,7 +75,7 @@ _find_ec_hash_name = |algorithm| (
 
 check_certificate_identity: [m: MonadError] Certificate -> String -> m ();
 check_certificate_identity = |cert, target_server_name| (
-    eval debug_eprintln("check_certificate_identity: target_server_name=" + target_server_name);
+    eval log_debug("check_certificate_identity: target_server_name=" + target_server_name);
 
     // RFC2818 3.1.  Server Identity
     let subjectAltName: Option SubjectAltName = do {
@@ -84,7 +85,7 @@ check_certificate_identity = |cert, target_server_name| (
         if res.is_err { none () };
         some $ res.as_ok
     };
-    eval debug_eprintln("subjectAltName=" + subjectAltName.to_string);
+    eval log_debug("subjectAltName=" + subjectAltName.to_string);
 
     let dns_names: Array String = (
         if subjectAltName.is_none { [] };
@@ -96,7 +97,7 @@ check_certificate_identity = |cert, target_server_name| (
             .to_array
     );
 
-    eval debug_eprintln("dns_names=" + dns_names.to_string);
+    eval log_debug("dns_names=" + dns_names.to_string);
     let dns_names = *(
         if dns_names.get_size > 0 {
             pure $ dns_names
@@ -104,7 +105,7 @@ check_certificate_identity = |cert, target_server_name| (
 
         let common_name: Option String = cert.get_subject.find_common_name;
         if common_name.is_some {
-            eval debug_eprintln("Using the common name as a DNS name: common_name=" + common_name.to_string);
+            eval log_debug("Using the common name as a DNS name: common_name=" + common_name.to_string);
             pure $ [ common_name.as_some ]
         };
         error $ "Neither the DNS name nor the common name are not found"

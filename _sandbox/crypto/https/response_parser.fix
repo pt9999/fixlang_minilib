@@ -3,6 +3,7 @@ module Minilib.Net.Https.ResponseParser;
 
 import Debug;
 
+import Minilib.Common.DebugLog;
 import Minilib.Encoding.Binary;
 import Minilib.Net.Request;
 import Minilib.Text.StringEx;
@@ -65,15 +66,6 @@ impl ResponseParser: ToString {
 }
 
 namespace ResponseParser {
-    _debug_lazy: (() -> String) -> ();
-    _debug_lazy = |msg_func| (
-        if true {
-            debug_eprintln(msg_func())
-        } else {
-            ()
-        }
-    );
-
     empty: ResponseParser;
     empty = ResponseParser {
         state: parsing_status_line(),
@@ -108,7 +100,7 @@ namespace ResponseParser {
         };
         let end = min(end, array_size);
         let body = parser.@array.subarray(start, end);
-        eval _debug_lazy(|_| (array_size, end).format("end_data: completed: array_size={} end={}"));
+        eval log_debug((array_size, end).format("end_data: completed: array_size={} end={}"));
         pure $ parser
             .set_body(body)
             .set_position(end)
@@ -176,7 +168,7 @@ namespace ResponseParser {
     _before_body = |parser| (
         let transfer_encoding = parser.@headers.find("Transfer-Encoding");
         if transfer_encoding == some("chunked") {
-            eval _debug_lazy(|_| "Transfer-Encoding: chunked");
+            eval log_debug("Transfer-Encoding: chunked");
             let parser = parser.set_state(parsing_chunk_size());
             parser._parse_chunk_size     // run next state
         };
@@ -187,7 +179,7 @@ namespace ResponseParser {
             let content_length: I64 = *from_string(opt.as_some);
             ok $ some $ content_length
         );
-        eval _debug_lazy(|_| "content_length=" + content_length.to_string);
+        eval log_debug("content_length=" + content_length.to_string);
         let start = parser.@position;
         let end = if content_length.is_none { I64::maximum }
         else { start + content_length.as_some };
@@ -198,20 +190,20 @@ namespace ResponseParser {
 
     _parse_body: (I64, I64) -> ResponseParser -> Result ErrMsg ResponseParser;
     _parse_body = |(start, end), parser| (
-        eval _debug_lazy(|_| "_parse_body: " + (start, end).to_string);
+        eval log_debug("_parse_body: " + (start, end).to_string);
         if end > parser.@array.get_size {
             pure $ parser   // wait for data
         };
         let body = parser.@array.subarray(start, end);
         let parser = parser.set_body(body).set_position(end)
                         .set_state(completed());
-        eval _debug_lazy(|_| "_parse_body completed");
+        eval log_debug("_parse_body completed");
         pure $ parser       // mark completed and return
     );
 
     _parse_chunk_size: ResponseParser -> Result ErrMsg ResponseParser;
     _parse_chunk_size = |parser| (
-        eval _debug_lazy(|_| "_parse_chunk_size");
+        eval log_debug("_parse_chunk_size");
         let opt = parser._read_line;
         if opt.is_none {
             pure $ parser   // wait for data
@@ -219,7 +211,7 @@ namespace ResponseParser {
         let (line, parser) = opt.as_some;
         let (chunk_size_hex, chunk_ext) = line.split_first(";");
         let chunk_size: U64 = *from_string_hex(chunk_size_hex);
-        eval _debug_lazy(|_| (chunk_size, line).format("_parse_chunk_size: chunk_size={} line='{}'"));
+        eval log_debug((chunk_size, line).format("_parse_chunk_size: chunk_size={} line='{}'"));
         if chunk_size == 0_U64 {    // last_chunk
             let parser = parser.set_state(parsing_trailer_section());
             parser._parse_trailer_section   // run next state
@@ -236,7 +228,7 @@ namespace ResponseParser {
         if end > parser.@array.get_size {
             pure $ parser   // wait for data
         };
-        eval _debug_lazy(|_| "chunk_data: " + (start, end).to_string);
+        eval log_debug("chunk_data: " + (start, end).to_string);
         let chunk_data = parser.@array.subarray(start, end);
         let parser = parser
                 .mod_body(append(chunk_data))
@@ -268,7 +260,7 @@ namespace ResponseParser {
             pure $ parser   // wait for data
         };
         let (line, parser) = opt.as_some;
-        eval _debug_lazy(|_| "trailer_section: " + line);
+        eval log_debug("trailer_section: " + line);
         if line == "" {
             pure $ parser
                     .set_state(completed())     // mark completed and return

@@ -14,9 +14,13 @@ import Minilib.Crypto.Tls.Protection;
 import Minilib.Crypto.Cipher.CipherApi;
 //import Minilib.Crypto.Cipher.CipherApiDefault;
 import Minilib.Crypto.Cipher.CipherApiMock;
+import Minilib.Crypto.Cert.CertApi;
+//import Minilib.Crypto.Cert.CertApiDefault;
+import Minilib.Crypto.Cert.CertApiMock;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 import Minilib.Text.Hex;
 import Minilib.Testing.UnitTest;
 
@@ -142,17 +146,22 @@ res_server_appdata_bytes = parse_hex("
 
 // -----------------------------------------------------------------
 
-make_init_param: [m: MonadError] m HandshakeInitParam;
+make_init_param:  [m: MonadError, m: MonadIOFail] m HandshakeInitParam;
 make_init_param = (
+    eval *pure();
+    let cipher_api = *make_cipher_api.from_result_t;
+    let cert_api = *make_cert_api(cipher_api).from_result_t;
+    let cert_api = *@load_ca_certificates(cert_api).lift_iofail;
+    let now = *@get_now(cert_api).lift_io;
     pure $ HandshakeInitParam {
-        cipher_api: *make_cipher_api.from_result_t,
+        cipher_api: cipher_api,
+        cert_api: cert_api,
         server_name: "localhost",
-        ca_certs: none(),
-        validate_cert_date: some $ *from_generalized_time_string("20200101000000Z").from_result_t,
+        session_start_time: now,
     }
 );
 
-make_after_client_hello: [m: MonadError] m HandshakeState;
+make_after_client_hello: [m: MonadError, m: MonadIOFail] m HandshakeState;
 make_after_client_hello = (
     let handshake_bytes = *res_client_hello_bytes.from_result_t;
     let client_hello_records: Array TLSRecord = TLSRecord::split_fragments(ContentType::handshake(), handshake_bytes);

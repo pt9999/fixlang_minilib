@@ -6,15 +6,13 @@ import Debug;
 
 import Minilib.Common.DebugLog;
 import Minilib.Crypto.Tls.Types;
-import Minilib.Crypto.Tls.CertValidation;
 import Minilib.Crypto.Tls.KeyAgreement;
 import Minilib.Crypto.Tls.KeyShare;
 import Minilib.Crypto.Tls.Extensions;
 import Minilib.Crypto.Tls.Protection;
 import Minilib.Crypto.Tls.HandshakeProtocol;
 import Minilib.Crypto.Tls.RecordProtocol;
-import Minilib.Crypto.Cert.CACertificates;
-import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.CertApi;
 import Minilib.Crypto.Cipher.CipherApi;
 import Minilib.Encoding.Binary;
 import Minilib.Monad.State;
@@ -45,9 +43,9 @@ namespace TLSRecordHelper {
 
 type HandshakeInitParam = box struct {
     cipher_api: CipherApi,
+    cert_api: CertApi,
     server_name: String,
-    ca_certs: Option CACertificates,
-    validate_cert_date: Option X509Time,
+    session_start_time: CerTime,
 };
 
 type HandshakeState = unbox union {
@@ -345,12 +343,7 @@ namespace AfterServerHello {
     _verify_certificate: [m: MonadError] Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> m ();
     _verify_certificate = |handshakes, protection, init_param| (
         eval log_debug("_verify_certificate");
-        let cipher_api = init_param.@cipher_api;
-        let ca_certs = init_param.@ca_certs;
-        if ca_certs.is_none {
-            eval log_debug("WARNING: Verification of certificates are not performed, since CA Certificates is not set in HandshakeInitParam.");
-            pure()
-        };
+        // find Certificate and CertificateVerify Handshake record
         let opt_certificate = handshakes.find_by(|(h,_)| h.is_certificate);
         let opt_certificate_verify = handshakes.find_by(|(h,_)| h.is_certificate_verify);
         if opt_certificate.is_none || opt_certificate_verify.is_none {
@@ -361,24 +354,36 @@ namespace AfterServerHello {
         if cert_data_array.get_size == 0 {
             error $ "cert_data_array is empty"
         };
-        let certs = *decode_certificates(cert_data_array);
 
+        let cipher_api = init_param.@cipher_api;
+        let cert_api = init_param.@cert_api;
+
+        eval log_debug("building cert_path");
+        let cert_path_api = *@build_cert_path(cert_api, cert_data_array).from_result_t;
+
+        eval log_debug("validating date");
+        eval *@validate_date(cert_path_api, init_param.@session_start_time).from_result_t;
         eval log_debug("validating certificate signatures");
-        eval *validate_certificate_signatures(cipher_api, certs, ca_certs.as_some, init_param.@validate_cert_date);
+        eval *@validate_certificate_signatures(cert_path_api, ()).from_result_t;
 
-        eval log_debug("checking certificate_verify");
+        let cerficate_api_array = @get_certificates(cert_path_api, ());
+        if cerficate_api_array.get_size == 0 { error $ "cert_path is empty" };
+        let cerficate_api = cerficate_api_array.@(0);
+
+        eval log_debug("verifying signature of certificate_verify");
         let CertificateVerify {
-            algorithm: algorithm,
+            algorithm: sig_scheme,
             signature: signature
         } = handshakes.@(opt_certificate_verify.as_some).@0.as_certificate_verify;
         let protection = _update_handshake_context(handshakes, (0, opt_certificate.as_some + 1), protection);
         let content = *protection.calc_certificate_verify_content(TrafficKeyType::server_tk()).from_result_t;
-        eval *check_certificate_verify(cipher_api, certs.@(0), content, algorithm, signature);
+        let sig_scheme = SignatureScheme::_to_string(sig_scheme);
+        eval *@verify_signature_by_subject_public_key(cerficate_api, content, sig_scheme, signature).from_result_t;
 
-        eval log_debug("checking certificate identity");
-        eval *check_certificate_identity(certs.@(0), init_param.@server_name);
+        eval log_debug("verifying certificate identity");
+        eval *@verify_certificate_identity(cerficate_api, init_param.@server_name);
         pure()
-    );
+    ).from_result_t;
 
     _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
     _verify_server_finished = |handshakes, protection| (

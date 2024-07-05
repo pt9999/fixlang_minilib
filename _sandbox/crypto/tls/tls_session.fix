@@ -16,6 +16,9 @@ import Minilib.Crypto.SecureRandom;
 import Minilib.Crypto.Cipher.CipherApi;
 import Minilib.Crypto.Cipher.CipherApiDefault;
 //import Minilib.Crypto.Cipher.CipherApiMock;
+import Minilib.Crypto.Cert.CertApi;
+import Minilib.Crypto.Cert.CertApiDefault;
+//import Minilib.Crypto.Cert.CertApiMock;
 import Minilib.Monad.BytesIO;
 import Minilib.Monad.Random;
 import Minilib.Monad.State;
@@ -28,7 +31,7 @@ import Minilib.Text.StringEx;
 type TLSSession = unbox struct {
     socket: TLSSocket,
     var_secure_random: Var SecureRandom,
-    ca_certs: CACertificates,
+    init_param: HandshakeInitParam,
     handshake_state: HandshakeState,
 };
 
@@ -46,19 +49,34 @@ type StateTLSSession = StateT TLSSession IOFail;
 
 namespace TLSSession {
     // Creates a TLSSession object.
-    make: TLSSocket -> IOFail TLSSession;
-    make = |socket| (
+    make: TLSSocket -> String -> IOFail TLSSession;
+    make = |socket, server_name| (
         let secure_random = *SecureRandom::make;
         let var_secure_random = *Var::make(secure_random).lift;
-        let ca_certs = *CACertificates::make;
+        let init_param = *_make_init_param(server_name);
         let handshake_state = *HandshakeState::make;
         pure $ TLSSession {
             socket: socket,
             var_secure_random: var_secure_random,
-            ca_certs: ca_certs,
+            init_param: init_param,
             handshake_state: handshake_state,
         }
     );
+
+    _make_init_param: String -> IOFail HandshakeInitParam;
+    _make_init_param = |server_name| (
+        let cipher_api = *make_cipher_api.from_result_t;
+        let cert_api = *make_cert_api(cipher_api).from_result_t;
+        let cert_api = *@load_ca_certificates(cert_api);
+        let now = *@get_now(cert_api).lift;
+        pure $ HandshakeInitParam {
+            cipher_api: cipher_api,
+            cert_api: cert_api,
+            server_name: server_name,
+            session_start_time: now,
+        }
+    );
+
 
     // Gets the current handshake state.
     get_hstate: StateTLSSession HandshakeState;
@@ -87,26 +105,20 @@ namespace TLSSession {
     // Specifically, it sends a ClientHello message, and receives ServerHello,
     // EncryptedExtensions, Certificate, CertificateVerify, Finished messages.
     // Then it sends a Finished message.
-    establish_handshake: String -> StateTLSSession ();
-    establish_handshake = |server_name| (
-        eval *_send_client_hello(server_name);
+    establish_handshake: StateTLSSession ();
+    establish_handshake = (
+        eval *pure();
+        eval *_send_client_hello;
         eval *_recv_server_hello;
         eval *_recv_server_params;
         pure()
     );
 
-    _send_client_hello: String -> StateTLSSession ();
-    _send_client_hello = |server_name| (
+    _send_client_hello: StateTLSSession ();
+    _send_client_hello =  (
+        eval *pure();
         let session = *get_state;
-        let now = *X509Time::get_now.lift.lift_t;
-        //let now = *from_generalized_time_string("20991231000000Z").from_result_t;
-        let cipher_api = *make_cipher_api.from_result_t;
-        let init_param = HandshakeInitParam {
-            cipher_api: cipher_api,
-            server_name: server_name,
-            ca_certs: some $ session.@ca_certs,
-            validate_cert_date: some $ now,
-        };
+        let init_param = session.@init_param;
         eval *HandshakeState::start_handshake(init_param).lift_hstate;
         eval *HandshakeState::send_records.lift_hstate;
         pure()

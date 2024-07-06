@@ -32,7 +32,7 @@ State monad wraps a function from a initial state to a pair of a value and a fin
 
 ```
 type [m: *->*] StateT s m a = unbox struct {
-    data: s -> m (a, s)
+    data: s -> m (s, a)
 };
 ```
 ### type State
@@ -40,19 +40,19 @@ type [m: *->*] StateT s m a = unbox struct {
 ```
 type State s a = StateT s Identity a;
 ```
-#### make_state_t_monad: [m: Monad] (s -> m (a, s)) -> StateT s m a;
+#### make_state_t_monad: [m: Monad] (s -> m (s, a)) -> StateT s m a;
 
 Creates a StateT monad from a function.
 
-#### make_state_monad: (s -> (a, s)) -> State s a;
+#### make_state_monad: (s -> (s, a)) -> State s a;
 
 Creates a State monad from a function.
 
-#### run_state_t: [m: Monad] s -> StateT s m a -> m (a, s);
+#### run_state_t: [m: Monad] s -> StateT s m a -> m (s, a);
 
 Runs a StateT monad with the supplied initial state.
 
-#### run_state: s -> State s a -> (a, s);
+#### run_state: s -> State s a -> (s, a);
 
 Runs a State monad with the supplied initial state.
 
@@ -60,15 +60,23 @@ Runs a State monad with the supplied initial state.
 
 Runs a StateT monad with the supplied initial state and return the final value, discarding the final state.
 
+#### eval_state: s -> State s a -> a;
+
+Runs a State monad with the supplied initial state and return the final value, discarding the final state.
+
 #### exec_state_t: [m: Monad] s -> StateT s m a -> m s;
 
 Runs a StateT monad with the supplied initial state and return the final state, discarding the final value.
+
+#### exec_state: s -> State s a -> s;
+
+Runs a State monad with the supplied initial state and return the final state, discarding the final value.
 
 #### lift_state: [m: Monad] m a -> StateT s m a;
 
 Converts an underlying monad to a StateT monad.
 
-#### map_state_t: [m: Monad, n: Monad] (m (a, s) -> n (b, s)) -> StateT s m a -> StateT s n b;
+#### map_state_t: [m: Monad, n: Monad] (m (s, a) -> n (s, a)) -> StateT s m a -> StateT s n b;
 
 Maps both the return value and final state.
 

@@ -27,67 +27,75 @@ mod_state = |f| put_state $ f $ *get_state;
 
 // State monad wraps a function from a initial state to a pair of a value and a final state.
 type [m: *->*] StateT s m a = unbox struct {
-    data: s -> m (a, s)
+    data: s -> m (s, a)
 };
 
 type State s a = StateT s Identity a;
 
 // Creates a StateT monad from a function.
-make_state_t_monad: [m: Monad] (s -> m (a, s)) -> StateT s m a;
+make_state_t_monad: [m: Monad] (s -> m (s, a)) -> StateT s m a;
 make_state_t_monad = |f| StateT { data: f };
 
 // Creates a State monad from a function.
-make_state_monad: (s -> (a, s)) -> State s a;
+make_state_monad: (s -> (s, a)) -> State s a;
 make_state_monad = |f| make_state_t_monad(f >> pure);
 
 // Runs a StateT monad with the supplied initial state.
-run_state_t: [m: Monad] s -> StateT s m a -> m (a, s);
+run_state_t: [m: Monad] s -> StateT s m a -> m (s, a);
 run_state_t = |s, ma| (ma.@data)(s);
 
 // Runs a State monad with the supplied initial state.
-run_state: s -> State s a -> (a, s);
+run_state: s -> State s a -> (s, a);
 run_state = |s, ma| ma.run_state_t(s).get;
 
 // Runs a StateT monad with the supplied initial state and return the final value, discarding the final state.
 eval_state_t: [m: Monad] s -> StateT s m a -> m a;
 eval_state_t = |s, ma| (
-    let (a, s) = *ma.run_state_t(s);
+    let (s, a) = *ma.run_state_t(s);
     pure $ a
 );
+
+// Runs a State monad with the supplied initial state and return the final value, discarding the final state.
+eval_state: s -> State s a -> a;
+eval_state = |s, ma| ma.eval_state_t(s).get;
 
 // Runs a StateT monad with the supplied initial state and return the final state, discarding the final value.
 exec_state_t: [m: Monad] s -> StateT s m a -> m s;
 exec_state_t = |s, ma| (
-    let (a, s) = *ma.run_state_t(s);
+    let (s, a) = *ma.run_state_t(s);
     pure $ s
 );
+
+// Runs a State monad with the supplied initial state and return the final state, discarding the final value.
+exec_state: s -> State s a -> s;
+exec_state = |s, ma| ma.exec_state_t(s).get;
 
 // Converts an underlying monad to a StateT monad.
 lift_state: [m: Monad] m a -> StateT s m a;
 lift_state = |ma| (
     make_state_t_monad $ |s|
     let a = *ma;
-    pure $ (a, s)
+    pure $ (s, a)
 );
 
 // Maps both the return value and final state.
-map_state_t: [m: Monad, n: Monad] (m (a, s) -> n (b, s)) -> StateT s m a -> StateT s n b;
+map_state_t: [m: Monad, n: Monad] (m (s, a) -> n (s, a)) -> StateT s m a -> StateT s n b;
 map_state_t = |f, ma| (
     make_state_t_monad $ (ma.@data) >> f
 );
 
 impl [m: Monad] StateT s m: Functor {
     map = |f, ma| make_state_t_monad $ |s| (
-        let (a, ss) = *ma.run_state_t(s);
-        pure $ (f(a), ss)
+        let (ss, a) = *ma.run_state_t(s);
+        pure $ (ss, f(a))
     );
 }
 
 impl [m: Monad] StateT s m: Monad
 {
-    pure = |a| StateT { data: |s| pure((a, s)) };
+    pure = |a| StateT { data: |s| pure((s, a)) };
     bind = |f, ma| StateT { data: |s|
-        let (a,s) = *ma.run_state_t(s);
+        let (s, a) = *ma.run_state_t(s);
         f(a).run_state_t(s)
     };
 }
@@ -95,7 +103,7 @@ impl [m: Monad] StateT s m: Monad
 impl [m: Monad] StateT s m: MonadStateIF {
     type StateType (StateT s m) = s;
     get_state = make_state_t_monad $ |s| pure $ (s, s);
-    put_state = |s| make_state_t_monad $ |_| pure $ ((), s);
+    put_state = |s| make_state_t_monad $ |_| pure $ (s, ());
 }
 
 impl StateT s: MonadTrans {

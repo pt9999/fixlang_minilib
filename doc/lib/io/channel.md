@@ -52,18 +52,31 @@ After close, `send()` will fail.
 
 #### send: a -> Channel a -> IOFail ();
 
-`channel.send(a)` sends a data to the queue of the channel.
+`channel.send(x)` sends an element to the queue of the channel.
+If the channel is closed, it throws `closed_error`.
+
+#### send_many: Array a -> Channel a -> IOFail ();
+
+`channel.send_many(xs)` sends an array of elements to the queue of the channel.
 If the channel is closed, it throws `closed_error`.
 
 #### recv: Channel a -> IOFail a;
 
-`channel.recv` receives a data from the queue of the channel.
+`channel.recv` receives an element from the queue of the channel.
+If the queue is empty, it waits until any data is sent, or the channel is closed.
+If the channel is closed and the queue is empty, it throws `closed_error`.
+
+#### recv_many: I64 -> Channel a -> IOFail (Array a);
+
+`channel.recv_many(max_count)` receives an array of at most `max_count` elements from the queue of the channel.
+If `max_count` is zero or negative, an empty array is returned immediately.
+If there are fewer elements than `max_count` in the queue, only elements that are in the queue are returned.
 If the queue is empty, it waits until any data is sent, or the channel is closed.
 If the channel is closed and the queue is empty, it throws `closed_error`.
 
 #### try_recv: Channel a -> IOFail (Option a);
 
-`channel.recv` tries to receive a data from a channel.
+`channel.recv` tries to receive an element from a channel.
 If there is no data, `none` is returned.
 If the channel is closed and the queue is empty, it throws `closed_error`.
 

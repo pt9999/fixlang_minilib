@@ -68,40 +68,82 @@ is_empty = |chan| (
     pure $ data.@deque.is_empty
 );
 
-// `channel.send(a)` sends a data to the queue of the channel.
+// `channel._send_inner(f)` modifies the channel data with `f`.
 // If the channel is closed, it throws `closed_error`.
-send: a -> Channel a -> IOFail ();
-send = |a, chan| (
+_send_inner: (ChannelData a -> ChannelData a) -> Channel a -> IOFail ();
+_send_inner = |f, chan| (
     chan.@var.lock(
         |data|
         if data.@closed {
             pure $ err $ closed_error
         };
-        let data = data.mod_deque(push_back(a));
+        let data = f(data);
         let _ = *chan.@var.Var::set(data);
         pure $ ok $ ()
     ).lift.bind(from_result)
 );
 
-// `channel.recv` receives a data from the queue of the channel.
+// `channel.send(x)` sends an element to the queue of the channel.
+// If the channel is closed, it throws `closed_error`.
+send: a -> Channel a -> IOFail ();
+send = |x, chan| (
+    chan._send_inner(mod_deque(push_back(x)))
+);
+
+// `channel.send_many(xs)` sends an array of elements to the queue of the channel.
+// If the channel is closed, it throws `closed_error`.
+send_many: Array a -> Channel a -> IOFail ();
+send_many = |xs, chan| (
+    chan._send_inner(mod_deque(push_back_many(xs)))
+);
+
+// `channel._recv_inner(f)` modifies the channel data and returns the value, by calling `f`.
 // If the queue is empty, it waits until any data is sent, or the channel is closed.
 // If the channel is closed and the queue is empty, it throws `closed_error`.
-recv: Channel a -> IOFail a;
-recv = |chan| (
+_recv_inner: (ChannelData a -> (ChannelData a, r)) -> Channel a -> IOFail r;
+_recv_inner = |f, chan| (
     chan.@var.wait_and_lock(
         |data| data.@closed || !data.@deque.is_empty,
         |data|
         if data.@closed && data.@deque.is_empty {
             pure $ err $ closed_error
         };
-        let a = data.@deque.get_front.as_some;
-        let data = data.mod_deque(pop_front);
+        let (data, retval) = f(data);
         let _ = *chan.@var.Var::set(data);
-        pure $ ok $ a
+        pure $ ok $ retval
     ).lift.bind(from_result)
 );
 
-// `channel.recv` tries to receive a data from a channel.
+// `channel.recv` receives an element from the queue of the channel.
+// If the queue is empty, it waits until any data is sent, or the channel is closed.
+// If the channel is closed and the queue is empty, it throws `closed_error`.
+recv: Channel a -> IOFail a;
+recv = |chan| (
+    chan._recv_inner(|data|
+        let a = data.@deque.get_front.as_some;
+        let data = data.mod_deque(pop_front);
+        (data, a)
+    )
+);
+
+// `channel.recv_many(max_count)` receives an array of at most `max_count` elements from the queue of the channel.
+// If `max_count` is zero or negative, an empty array is returned immediately.
+// If there are fewer elements than `max_count` in the queue, only elements that are in the queue are returned.
+// If the queue is empty, it waits until any data is sent, or the channel is closed.
+// If the channel is closed and the queue is empty, it throws `closed_error`.
+recv_many: I64 -> Channel a -> IOFail (Array a);
+recv_many = |max_count, chan| (
+    if max_count <= 0 { pure $ [] };
+    chan._recv_inner(|data|
+        // TODO: use act_deque
+        let deque = data.@deque;
+        let (deque, xs) = deque.pop_front_many(max_count);
+        let data = data.set_deque(deque);
+        (data, xs)
+    )
+);
+
+// `channel.recv` tries to receive an element from a channel.
 // If there is no data, `none` is returned.
 // If the channel is closed and the queue is empty, it throws `closed_error`.
 try_recv: Channel a -> IOFail (Option a);

@@ -37,11 +37,11 @@ impl ByteBufferState: MonadUnmarshalIF {
 
 //------------------------------------------
 trait a: Pack {
-    pack: [m: MonadMarshal, ErrorType m = ErrMsg] a -> m ();
+    pack: [m: MonadMarshal] a -> m ();
 }
 
 trait a: Unpack {
-    unpack: [m: MonadUnmarshal, ErrorType m = ErrMsg] m a;
+    unpack: [m: MonadUnmarshal] m a;
 }
 
 _TypeErr: ErrMsg;
@@ -138,7 +138,7 @@ impl I64: Pack {
     );
 }
 
-_unpack_number: [m: MonadUnmarshal, ErrorType m = ErrMsg] m U64;
+_unpack_number: [m: MonadUnmarshal] m U64;
 _unpack_number = (
     let first: U8 = *read_unmarshal;
     if 0x00_U8 <= first && first <= 0x7f_U8 {
@@ -208,8 +208,9 @@ impl I64: Unpack {
     unpack =  _unpack_number.map(U64::to_I64);
 }
 
-test_pack: IO ();
+test_pack: TestCase;
 test_pack = (
+    make_test("test_pack") $ |_|
     let buf = ByteBuffer::empty(0, big_endian());
     let w: ByteBufferState () = do {
         eval *0x12_U8.pack;
@@ -222,10 +223,11 @@ test_pack = (
         eval *-0x123456789abcdef0.pack;
         pure()
     };     
-    let res = w.run_state_t(buf);
-    if res.is_err { println("err: " + res.as_err) };
-    let ((), buf) = res.as_ok;
-    println((buf.@array.to_string_hex, ).format("buf={}"))
+    let res = w.exec_state_t(buf);
+    let expected = ok $ "12cd1234ce12345678cf123456789abcdef0eed1edccd2edcba988d3edcba98765432110";
+    let actual = res.map(@array >> to_string_hex);
+    eval *println("buf.@array=" + actual.to_string).lift;
+    assert_equal("eq", expected, actual)
 );
 
 assert_unpack_array_equal: [a:Unpack, a:ToString, a:Eq] String -> Array U8 -> Array a -> IOFail ();
@@ -235,7 +237,7 @@ assert_unpack_array_equal = |label, bytes, expected| (
     let sm /* : ByteBufferState (Array a) */ = do {
         Array::fill(n, unpack).map_m(|x| x)
     };
-    let (actual, buf) = *sm.run_state_t(buf).from_result;
+    let actual = *sm.eval_state_t(buf).from_result;
     assert_equal(label, expected, actual)
 );
 
@@ -286,16 +288,16 @@ test_unpack = (
                 a3.to_string_hex)
                 .format("a1={} a2={} a3={}")
     };     
-    let (str, buf) = *r.run_state_t(buf).from_result;
+    let str = *r.eval_state_t(buf).from_result;
     eval *println(str).lift;
     pure()
 );
 
 main: IO ();
 main = (
-    eval *test_pack;
     [
-        test_unpack
+        test_pack,
+        test_unpack,
     ].run_test_driver
 );
 

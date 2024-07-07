@@ -48,9 +48,19 @@ namespace Deque {
     push_front: a -> Deque a -> Deque a;
     push_front = |x, q| q.mod_front(push_back(x));
 
+    // Pushes all elements of an array to the front of the queue.
+    // The order of elements are preserved, ie. the first element of the array becomes the front element of the queue.
+    push_front_many: Array a -> Deque a -> Deque a;
+    push_front_many = |xs, q| q.mod_front(append(xs._reverse_array));
+
     // Pushes an element to the back of the queue.
     push_back: a -> Deque a -> Deque a;
     push_back = |x, q| q.mod_back(push_back(x));
+
+    // Pushes all elements of an array to the back of the queue.
+    // The order of elements are preserved, ie. the last element of the array becomes the back element of the queue.
+    push_back_many: Array a -> Deque a -> Deque a;
+    push_back_many = |xs, q| q.mod_back(append(xs));
 
     // Pops an element from the front of the queue. If the queue is empty, it does nothing.
     pop_front: Deque a -> Deque a;
@@ -66,11 +76,29 @@ namespace Deque {
         q
     );
 
+    // `q.pop_front_many(max_count)` pops elements at most `max_count` times from the front of the queue.
+    // The order of returned elements are preserved, ie. the first element was at the front of the queue before this function is called.
+    pop_front_many: I64 -> Deque a -> (Deque a, Array a);
+    pop_front_many = |max_count, q| (
+        if max_count <= 0 { (q, []) };
+        let output = Array::empty(max_count);
+        let Deque { front: front, back: back } = q;
+        let count = max_count;
+        let (count, front, output) = _move_back_elements_reversed(count, front, output);
+        if count <= 0 {
+            (Deque { front: front, back: back }, output)
+        };
+        let front = back._reverse_array;
+        let back = back.truncate(0);
+        let (count, front, output) = _move_back_elements_reversed(count, front, output);
+        (Deque { front: front, back: back }, output)
+    );
+
     // Pops an element from the back of the queue. If the queue is empty, it does nothing.
     pop_back: Deque a -> Deque a;
     pop_back = |q| (
         if q.@back.get_size > 0 { q.mod_back(pop_back) };
-        if q.@front.get_size > 0 { 
+        if q.@front.get_size > 0 {
             Deque {
                 front: q.@front.truncate(0),
                 back: q.@front._reverse_array.pop_back
@@ -78,6 +106,24 @@ namespace Deque {
         };
         // if empty, does nothing.
         q
+    );
+
+    // `q.pop_back_many(max_count)` pops elements at most `max_count` times from the back of the queue.
+    // The order of returned elements are preserved, ie. the last element was at the back of the queue before this function is called.
+    pop_back_many: I64 -> Deque a -> (Deque a, Array a);
+    pop_back_many = |max_count, q| (
+        if max_count <= 0 { (q, []) };
+        let output = Array::empty(max_count);
+        let Deque { front: front, back: back } = q;
+        let count = max_count;
+        let (count, back, output) = _move_back_elements_reversed(count, back, output);
+        if count <= 0 {
+            (Deque { front: front, back: back }, output._reverse_array)
+        };
+        let back = front._reverse_array;
+        let front = front.truncate(0);
+        let (count, back, output) = _move_back_elements_reversed(count, back, output);
+        (Deque { front: front, back: back }, output._reverse_array)
     );
 
     // Returns an iterator of elements.
@@ -98,5 +144,16 @@ namespace Deque {
         )
     );
 
+    // `_move_back_elements_reversed(count, array, output)` pops elements at most `count` times from the back of `array`,
+    // and pushes them into the back of `output` in reverse order.
+    _move_back_elements_reversed: I64 -> Array a -> Array a -> (I64, Array a, Array a);
+    _move_back_elements_reversed = |count, array, output| (
+        if count <= 0 || array.is_empty {
+            (count, array, output)
+        };
+        let output = output.push_back(array.@(array.get_size - 1));
+        let array = array.pop_back;
+        _move_back_elements_reversed(count - 1, array, output)
+    );
 }
 

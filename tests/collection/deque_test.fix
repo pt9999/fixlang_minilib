@@ -5,6 +5,7 @@ import Debug;
 import Minilib.Collection.Deque;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
+import Minilib.Thread.Time;
 
 test_get_size_ok: (Array I64, Array I64, I64) -> TestCase;
 test_get_size_ok = |(front, back, expected)| (
@@ -98,6 +99,25 @@ test_push_front = (
     .run_tests
 );
 
+test_push_front_many: TestCase;
+test_push_front_many = (
+    make_table_test("test_push_front_many",
+        [
+            (([], []), [], ([], [])),
+            (([], []), [1, 2, 3], ([3, 2, 1], [])),
+            (([4], []), [1, 2, 3], ([4, 3, 2, 1], [])),
+            (([], [4]), [1, 2, 3], ([3, 2, 1], [4])),
+            (([5, 4, 3], [6, 7]), [1, 2], ([5, 4, 3, 2, 1], [6, 7])),
+        ],
+        |((front, back), value, (expected_front, expected_back))|
+        let q = Deque { front: front, back: back };
+        let q = q.push_front_many(value);
+        let _ = *assert_equal("front", expected_front, q.@front);
+        let _ = *assert_equal("back", expected_back, q.@back);
+        pure()
+    )
+);
+
 test_push_back_ok: ((Array I64, Array I64), I64, (Array I64, Array I64)) -> TestCase;
 test_push_back_ok = |((front, back), value, (expected_front, expected_back))| (
     let testname = "test_push_back_ok (" + front.to_string + "," + back.to_string + ")";
@@ -121,6 +141,26 @@ test_push_back = (
     ]
     .run_tests
 );
+
+test_push_back_many: TestCase;
+test_push_back_many = (
+    make_table_test("test_push_back_many",
+        [
+            (([], []), [], ([], [])),
+            (([], []), [1, 2, 3], ([], [1, 2, 3])),
+            (([2, 1], []), [3, 4, 5], ([2, 1], [3, 4, 5])),
+            (([], [1, 2]), [3, 4, 5], ([], [1, 2, 3, 4, 5])),
+            (([3, 2, 1], [4, 5]), [6, 7], ([3, 2, 1], [4, 5, 6, 7])),
+        ],
+        |((front, back), value, (expected_front, expected_back))|
+        let q = Deque { front: front, back: back };
+        let q = q.push_back_many(value);
+        let _ = *assert_equal("front", expected_front, q.@front);
+        let _ = *assert_equal("back", expected_back, q.@back);
+        pure()
+    )
+);
+
 
 test_pop_front_ok: ((Array I64, Array I64), (Array I64, Array I64)) -> TestCase;
 test_pop_front_ok = |((front, back), (expected_front, expected_back))| (
@@ -162,6 +202,46 @@ test_pop_back_ok = |((front, back), (expected_front, expected_back))| (
     pure()
 );
 
+test_pop_front_many: TestCase;
+test_pop_front_many = (
+    make_table_test("test_pop_front_many",
+        [
+            (0, ([], []), ([], [], [])),
+            (1, ([], []), ([], [], [])),
+            (0, ([1], []), ([1], [], [])),
+            (1, ([1], []), ([], [], [1])),
+            (2, ([1], []), ([], [], [1])),
+            (0, ([2, 1], []), ([2, 1], [], [])),
+            (1, ([2, 1], []), ([2], [], [1])),
+            (2, ([2, 1], []), ([], [], [1, 2])),
+            (0, ([], [1]), ([], [1], [])),
+            (1, ([], [1]), ([], [], [1])),
+            (2, ([], [1]), ([], [], [1])),
+            (0, ([], [1, 2]), ([], [1, 2], [])),
+            (1, ([], [1, 2]), ([2], [], [1])),
+            (2, ([], [1, 2]), ([], [], [1, 2])),
+            (0, ([2, 1], [3, 4]), ([2, 1], [3, 4], [])),
+            (1, ([2, 1], [3, 4]), ([2], [3, 4], [1])),
+            (2, ([2, 1], [3, 4]), ([], [3, 4], [1, 2])),
+            (3, ([2, 1], [3, 4]), ([4], [], [1, 2, 3])),
+            (1, ([3, 2, 1], [4, 5]), ([3, 2], [4, 5], [1])),
+            (2, ([3, 2, 1], [4, 5]), ([3], [4, 5], [1, 2])),
+            (3, ([3, 2, 1], [4, 5]), ([], [4, 5], [1, 2, 3])),
+            (4, ([3, 2, 1], [4, 5]), ([5], [], [1, 2, 3, 4])),
+            (5, ([3, 2, 1], [4, 5]), ([], [], [1, 2, 3, 4, 5])),
+            (6, ([3, 2, 1], [4, 5]), ([], [], [1, 2, 3, 4, 5])),
+        ],
+        |(max_count, (front, back), (expected_front, expected_back, expected_output))|
+        let q = Deque { front: front, back: back };
+        let (q, output) = q.pop_front_many(max_count);
+        eval *assert_equal("front", expected_front, q.@front);
+        eval *assert_equal("back", expected_back, q.@back);
+        eval *assert_equal("output", expected_output, output);
+        pure()
+    )
+);
+
+
 test_pop_back: TestCase;
 test_pop_back = (
     [
@@ -190,6 +270,45 @@ test_pop_back = (
     .run_tests
 );
 
+test_pop_back_many: TestCase;
+test_pop_back_many = (
+    make_table_test("test_pop_back_many",
+        [
+            (0, ([], []), ([], [], [])),
+            (1, ([], []), ([], [], [])),
+            (0, ([1], []), ([1], [], [])),
+            (1, ([1], []), ([], [], [1])),
+            (2, ([1], []), ([], [], [1])),
+            (0, ([2, 1], []), ([2, 1], [], [])),
+            (1, ([2, 1], []), ([], [1], [2])),
+            (2, ([2, 1], []), ([], [], [1, 2])),
+            (0, ([], [1]), ([], [1], [])),
+            (1, ([], [1]), ([], [], [1])),
+            (2, ([], [1]), ([], [], [1])),
+            (0, ([], [1, 2]), ([], [1, 2], [])),
+            (1, ([], [1, 2]), ([], [1], [2])),
+            (2, ([], [1, 2]), ([], [], [1, 2])),
+            (0, ([2, 1], [3, 4]), ([2, 1], [3, 4], [])),
+            (1, ([2, 1], [3, 4]), ([2, 1], [3], [4])),
+            (2, ([2, 1], [3, 4]), ([2, 1], [], [3, 4])),
+            (3, ([2, 1], [3, 4]), ([], [1], [2, 3, 4])),
+            (1, ([3, 2, 1], [4, 5]), ([3, 2, 1], [4], [5])),
+            (2, ([3, 2, 1], [4, 5]), ([3, 2, 1], [], [4, 5])),
+            (3, ([3, 2, 1], [4, 5]), ([], [1, 2], [3, 4, 5])),
+            (4, ([3, 2, 1], [4, 5]), ([], [1], [2, 3, 4, 5])),
+            (5, ([3, 2, 1], [4, 5]), ([], [], [1, 2, 3, 4, 5])),
+            (6, ([3, 2, 1], [4, 5]), ([], [], [1, 2, 3, 4, 5])),
+        ],
+        |(max_count, (front, back), (expected_front, expected_back, expected_output))|
+        let q = Deque { front: front, back: back };
+        let (q, output) = q.pop_back_many(max_count);
+        eval *assert_equal("front", expected_front, q.@front);
+        eval *assert_equal("back", expected_back, q.@back);
+        eval *assert_equal("output", expected_output, output);
+        pure()
+    )
+);
+
 test_reverse_array_ok: (Array I64, Array I64) -> TestCase;
 test_reverse_array_ok = |(arr, expected)| (
     let testname = "test_reverse_array_ok (" + arr.to_string + ")";
@@ -210,6 +329,23 @@ test_reverse_array = (
     .run_tests
 );
 
+test_perf_push_pop_many: TestCase;
+test_perf_push_pop_many = (
+    make_test("test_perf_push_pop_many") $ |_|
+    let n = 1024 * 1024;
+    let array = Array::from_map(n, |i| i.to_U8);
+    let res = *timeit_io(
+        "n=" + n.to_string,
+        do {
+            let q = Deque::empty(n);
+            let q = q.push_back_many(array);
+            let (q, output) = q.pop_back_many(n);
+            pure()
+        }.to_result
+    ).lift;
+    pure()
+);
+
 main: IO ();
 main = (
     [
@@ -217,10 +353,15 @@ main = (
         test_get_front,
         test_get_back,
         test_push_front,
+        test_push_front_many,
         test_push_back,
+        test_push_back_many,
         test_pop_front,
+        test_pop_front_many,
         test_pop_back,
+        test_pop_back_many,
         test_reverse_array,
+        test_perf_push_pop_many,
         TestCase::empty
     ]
     .run_test_driver

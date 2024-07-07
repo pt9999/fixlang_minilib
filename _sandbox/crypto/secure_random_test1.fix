@@ -5,6 +5,7 @@ import Debug;
 import Minilib.Crypto.SHA256;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Monad.State;
+import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
 
 type LessSecureRandom = unbox struct {
@@ -80,7 +81,9 @@ test2: IO ();
 test2 = do { 
     let sr = *SecureRandom::make;
     let print_line: StateT SecureRandom IOFail () = do {
-        let bytes = *make_state_t_monad(generate_bytes(40));
+        let secure_random = *get_state;
+        let (bytes, secure_random) = *secure_random.generate_bytes(40).lift_t;      // TODO swap
+        eval *put_state(secure_random);
         let _ = *println(bytes.to_string_hex).lift.lift_state;
         pure()
     };
@@ -88,7 +91,7 @@ test2 = do {
         (), |_, i|
         print_line
     );
-    print_lines.run_state_t(sr).map(|_| ())
+    print_lines.eval_state_t(sr)
 }.try(eprintln);
 
 main: IO ();

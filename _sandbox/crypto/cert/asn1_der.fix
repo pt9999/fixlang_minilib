@@ -48,7 +48,8 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         if res.is_err {
             error $ res.as_err
         };
-        pure $ res.as_ok
+        let (u8, buf) = res.as_ok;
+        pure $ (buf, u8)
     );
     is_eos = (
         let buf = *get_state;
@@ -62,7 +63,8 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         );
         let inner_buf = ByteBuffer::make(inner_array, big_endian());
         let inner_buf = inner_buf.set_position(buf.@position);
-        let (a, inner_buf) = *inner_monad.run_state_t(inner_buf).lift_t;
+        let (inner_buf, a) = *inner_monad.run_state_t(inner_buf).lift_t;
+        // TODO: should check whether inner_buf is at the end of stream?
         eval *put_state(buf.set_position(buf.@position + length));
         pure $ a
     );
@@ -294,7 +296,9 @@ choice = |monads| (
 decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
 decode_der_from_bytes = |bytes| (
     let buf = ByteBuffer::make(bytes, big_endian());
-    decode_obj.run_state_t(buf).map(@0)
+    let (buf, a) = *decode_obj.run_state_t(buf);
+    // TODO: should check whether buf is at the end of stream?
+    pure $ a
 );
 
 

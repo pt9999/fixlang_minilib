@@ -47,6 +47,24 @@ os2ip = FromBytes::from_bytes;
 
 // 5. Cryptographic Primitives
 
+// 5.2.1.  RSASP1
+// Input: K RSA private key, where K has one of the following forms:
+//          - a pair (n, d)  (NOTE: we use this form)
+//          - a quintuple (p, q, dP, dQ, qInv) and a (possibly empty) sequence of triplets (r_i, d_i, t_i), i = 3, ..., u
+//        m message representative, an integer between 0 and n - 1
+// Output: s signature representative, an integer between 0 and n - 1
+// Error: "message representative out of range"
+rsasp1: (BigInt, BigInt) -> BigInt -> Result ErrMsg BigInt;
+rsasp1 = |(n, d), m| (
+    if m.is_negative || m >= n {
+        err $ "message representative out of range"
+    };
+    // let s = m^d mod n.
+    let s: Modular BigInt = repeat_by_BigInt(mul, one, Modular::make(m, n), d);
+    let s: BigInt = s.@value;
+    pure $ s
+);
+
 // 5.2.2. RSAVP1
 // Input: (n, e) RSA public key
 //        s signature representative, an integer between 0 and n - 1
@@ -97,6 +115,30 @@ rsassa_pss_verify = |(n, e), _M, _S, options| (
     // 3.  EMSA-PSS verification: Apply the EMSA-PSS verification operation (Section 9.1.2)
     //     to the message M and the encoded message EM to determine whether they are consistent:
     emsa_pss_verify(_M, _EM, modBits - 1, options)
+);
+
+// 8.2.1. Signature Generation Operation
+// RSASSA-PKCS1-V1_5-SIGN (K, M)
+// Input: K signer's RSA private key  (NOTE: we use (n, d) form)
+//        M message to be signed, an octet string
+// Output: S signature, an octet string of length k, where k is the
+//           length in octets of the RSA modulus n
+// Errors:  "message too long"; "RSA modulus too short"
+rsassa_pkcs1_v1_5_sign: (BigInt, BigInt) -> Array U8 -> EmsaPkcs1Options -> Result ErrMsg (Array U8);
+rsassa_pkcs1_v1_5_sign = |(n, d), _M, options| (
+    // 1.  EMSA-PKCS1-v1_5 encoding
+    let k = (n.bit_length.to_I64 + 7) / 8;
+    let _EM = *emsa_pkcs1_v1_5_encode(_M, k, options);
+    // 2.  RSA signature:
+    // a.  Convert the encoded message EM to an integer message representative m (see Section 4.2):
+    let m: BigInt = *os2ip(_EM);
+    // b.  Apply the RSASP1 signature primitive (Section 5.2.1) to the RSA private key K and the message representative m to
+    //     produce an integer signature representative s:
+    let s = *rsasp1((n, d), m);
+    // c.  Convert the signature representative s to a signature S of length k octets (see Section 4.1):
+    let _S = *i2osp(s, k);
+    // 3.  Output the signature S.
+    ok $ _S
 );
 
 // 8.2. RSASSA-PKCS1-v1_5

@@ -7,6 +7,7 @@ module Minilib.Crypto.Tls.TLSSession;
 import AsyncTask;
 import Debug;
 
+import Minilib.Common.DebugLog;
 import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.X509Time;
 import Minilib.Crypto.Tls.Types;
@@ -24,6 +25,7 @@ import Minilib.Monad.Random;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
 import Minilib.Net.Tcp;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
@@ -108,9 +110,33 @@ namespace TLSSession {
     establish_handshake: StateTLSSession ();
     establish_handshake = (
         eval *pure();
+        let hstate = *get_hstate;
+        if hstate.is_after_finished {
+            pure () // already established
+        };
+        if !hstate.is_before_client_hello {
+            error $ "establish_handshake: wrong state"
+        };
         eval *_send_client_hello;
         eval *_recv_server_hello;
         eval *_recv_server_params;
+        pure()
+    );
+
+    save_certificates_to_files: (I64 -> Path) -> StateTLSSession ();
+    save_certificates_to_files = |make_filepath| (
+        let hstate = *get_hstate;
+        if !hstate.is_after_finished {
+            error $ "save_certificates_to_files: wrong state"
+        };
+        let certs = hstate.get_certificates;
+        eval *Iterator::range(0, certs.get_size).foreach_m(|i|
+            let cert_data = certs.@(i);
+            let filepath = make_filepath(i);
+            //let filename = (host, i).format("tmp.cert_{}.{}.cer");
+            eval log_info("writing " + filepath.to_string);
+            write_file_bytes(filepath, cert_data)
+        ).lift_t;
         pure()
     );
 

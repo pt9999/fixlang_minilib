@@ -1,7 +1,9 @@
 // A Channel that can be used for the communication of threads.
 module Minilib.IO.Channel;
 
+import Debug;
 import AsyncTask;
+import Time;
 
 import Minilib.Collection.Deque;
 
@@ -72,13 +74,17 @@ is_empty = |chan| (
 // If the channel is closed, it throws `closed_error`.
 _send_inner: (ChannelData a -> ChannelData a) -> Channel a -> IOFail ();
 _send_inner = |f, chan| (
+    eval debugp("_send_inner start");
     chan.@var.lock(
         |data|
+        eval debugp("_send_inner locked");
         if data.@closed {
             pure $ err $ closed_error
         };
         let data = f(data);
+        eval debugp("_send_inner after f(data)");
         let _ = *chan.@var.Var::set(data);
+        eval debugp("_send_inner after Var::set");
         pure $ ok $ ()
     ).lift.bind(from_result)
 );
@@ -94,7 +100,24 @@ send = |x, chan| (
 // If the channel is closed, it throws `closed_error`.
 send_many: Array a -> Channel a -> IOFail ();
 send_many = |xs, chan| (
-    chan._send_inner(mod_deque(push_back_many(xs)))
+    chan._send_inner(mod_deque(trace("push_back_many", push_back_many, xs)))
+);
+
+debugp: String -> ();
+debugp = |mesg| (
+    let time = Time::get_now._unsafe_perform;
+    let sec = time.@sec.to_F64 + time.@nanosec.to_F64 * 1.0e-9;
+    let sec = sec.to_string_precision(6_U8);
+    let mesg = sec.to_string + ": " + mesg;
+    debug_eprintln(mesg)
+);
+
+trace: String -> (a -> b) -> a -> b;
+trace = |label, f, a| (
+    eval debugp(label + " start");
+    let b = f(a);
+    eval debugp(label + " end");
+    b
 );
 
 // `channel._recv_inner(f)` modifies the channel data and returns the value, by calling `f`.
@@ -102,14 +125,21 @@ send_many = |xs, chan| (
 // If the channel is closed and the queue is empty, it throws `closed_error`.
 _recv_inner: (ChannelData a -> (ChannelData a, r)) -> Channel a -> IOFail r;
 _recv_inner = |f, chan| (
+    eval debugp("_recv_inner start");
     chan.@var.wait_and_lock(
-        |data| data.@closed || !data.@deque.is_empty,
         |data|
+        eval debugp("_recv_inner locking");
+        data.@closed || !data.@deque.is_empty,
+        |data|
+        eval debugp("_recv_inner locked");
         if data.@closed && data.@deque.is_empty {
             pure $ err $ closed_error
         };
+        eval debugp("_recv_inner before f(data)");
         let (data, retval) = f(data);
+        eval debugp("_recv_inner after f(data)");
         let _ = *chan.@var.Var::set(data);
+        eval debugp("_recv_inner end");
         pure $ ok $ retval
     ).lift.bind(from_result)
 );
@@ -133,11 +163,16 @@ recv = |chan| (
 // If the channel is closed and the queue is empty, it throws `closed_error`.
 recv_many: I64 -> Channel a -> IOFail (Array a);
 recv_many = |max_count, chan| (
+    eval debugp("recv_many start");
     if max_count <= 0 { pure $ [] };
     chan._recv_inner(|data|
         // TODO: use act_deque
         let deque = data.@deque;
+        eval debugp("recv_many pop_front_many start");
+        eval debugp("front=" + deque.@front.get_size.to_string + " back=" + deque.@back.get_size.to_string + " max_count=" + max_count.to_string);
         let (deque, xs) = deque.pop_front_many(max_count);
+        eval debugp("recv_many pop_front_many end");
+        eval debugp("front=" + deque.@front.get_size.to_string + " back=" + deque.@back.get_size.to_string + " xs=" + xs.get_size.to_string);
         let data = data.set_deque(deque);
         (data, xs)
     )

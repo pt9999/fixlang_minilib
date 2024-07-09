@@ -206,6 +206,36 @@ decode_contents = |length| (
     Array::fill(length, read_byte).map_m(|x| x)
 );
 
+dump_der_triplets: Array U8 -> IOFail ();
+dump_der_triplets = |bytes| (
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let sm: StateT ByteBuffer IOFail () = loop_m(
+        (), |_|
+        let buf = *get_state;
+        if buf.@position >= buf.get_size { break_m $ () };
+        let identifier = *decode_identifier;
+        let length = *decode_length;
+        if identifier.@constructed {
+            eval *println(
+                identifier.to_string +
+                " length=" + length.to_string
+            ).lift.lift_t;
+            continue_m $ ()
+        };
+        let contents = *decode_contents(length);
+        eval *println(
+            identifier.to_string +
+            " length=" + length.to_string +
+            " contents=" + contents.to_string_hex +
+            if identifier.@tag == tag_printable_string {
+                " (" + contents._unsafe_to_string + ")"
+            } else { "" }
+        ).lift.lift_t;
+        continue_m $ ()
+    );
+    sm.eval_state_t(buf)
+);
+
 // Extracts one triplet (identifier, length, contents) as a DER-encoded bytes.
 decode_any: [m: MonadReadByte] m (Array U8);
 decode_any = (

@@ -11,7 +11,6 @@ import Minilib.Math.Types;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Monad.State;
-import Minilib.Monad.Writer;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
@@ -237,35 +236,34 @@ decode_contents = |length| (
 dump_der_triplets: Array U8 -> Result ErrMsg String;
 dump_der_triplets = |bytes| (
     let buf = ByteBuffer::make(bytes, big_endian());
-    let sm: StateT ByteBuffer (WriterT String (Result ErrMsg)) () = loop_m(
-        (), |_|
+    let sm: StateT ByteBuffer (Result ErrMsg) String = loop_m(
+        "", |output|
         let buf = *get_state;
-        if buf.@position >= buf.get_size { break_m $ () };
+        if buf.@position >= buf.get_size { break_m $ output };
         let identifier = *decode_identifier;
         let length = *decode_length;
         if identifier.@constructed {
-            eval *tell(
+            let output = output + (
                 identifier.to_string +
                 " length=" + length.to_string +
                 "\n"
-            ).lift_t;
-            continue_m $ ()
-        };
-        let contents = *decode_contents(length);
-        eval *tell(
-            identifier.to_string +
-            " length=" + length.to_string +
-            " contents=" + contents.to_string_hex +
-            if identifier.@tag == tag_printable_string {
-                " (" + contents._unsafe_to_string + ")"
-            } else { "" } +
-            "\n"
-        ).lift_t;
-        continue_m $ ()
+            );
+            continue_m $ output
+        } else { // primitive
+            let contents = *decode_contents(length);
+            let output = output + (
+                identifier.to_string +
+                " length=" + length.to_string +
+                " contents=" + contents.to_string_hex +
+                if identifier.@tag == tag_printable_string {
+                    " (" + contents._unsafe_to_string + ")"
+                } else { "" } +
+                "\n"
+            );
+            continue_m $ output
+        }
     );
-    let wm: WriterT String (Result ErrMsg) () = sm.eval_state_t(buf);
-    let res: Result ErrMsg (String, ()) = wm.run_writer_t;
-    res.map(@0)
+    sm.eval_state_t(buf)
 );
 
 // Extracts one triplet (identifier, length, contents) as a DER-encoded bytes.

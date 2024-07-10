@@ -4,6 +4,7 @@ module Minilib.Crypto.Cert.CertApiDefault;
 import Minilib.Crypto.Cipher.CipherApi;
 import Minilib.Crypto.Cert.CertApi;
 import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.Pem;
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Path;
 import Minilib.Crypto.Cert.X509Time;
@@ -19,7 +20,7 @@ make_cert_api = |cipher_api| (
 
 type DefaultCertApiImpl = unbox struct {
     cipher_api: CipherApi,
-    ca_certificates: Option CACertificates,
+    ca_certificates: CACertificates,
 };
 
 namespace DefaultCertApiImpl {
@@ -27,14 +28,16 @@ namespace DefaultCertApiImpl {
     make = |cipher_api| (
         DefaultCertApiImpl {
             cipher_api: cipher_api,
-            ca_certificates: none(),
+            ca_certificates: CACertificates::empty,
         }
     );
 
     to_api: DefaultCertApiImpl -> CertApi;
     to_api = |cert_impl| (
         CertApi {
+            read_cert_data_array_from_pem_string: X509::read_cert_data_array_from_pem_string,
             load_ca_certificates: _load_ca_certificates(cert_impl),
+            add_to_ca_certificates: _add_to_ca_certificates(cert_impl),
             get_now: _get_now,
             build_cert_path: _build_cert_path(cert_impl),
         }
@@ -42,8 +45,14 @@ namespace DefaultCertApiImpl {
 
     _load_ca_certificates: DefaultCertApiImpl -> IOFail CertApi;
     _load_ca_certificates = |cert_impl| (
-        let ca_certificates = *CACertificates::make;
-        let cert_impl = cert_impl.set_ca_certificates(some $ ca_certificates);
+        let cert_impl = *cert_impl.act_ca_certificates(load_ca_certificates);
+        pure $ cert_impl.to_api
+    );
+
+    _add_to_ca_certificates: DefaultCertApiImpl -> CerCertificateData -> IOFail CertApi;
+    _add_to_ca_certificates = |cert_impl, cert_data| (
+        let cert: Certificate = *from_bytes(cert_data).from_result;
+        let cert_impl = cert_impl.mod_ca_certificates(add_certificate(cert));
         pure $ cert_impl.to_api
     );
 
@@ -53,14 +62,12 @@ namespace DefaultCertApiImpl {
         pure $ now.to_generalized_time_string
     );
 
-    _build_cert_path: DefaultCertApiImpl -> Array (Array U8) -> Result ErrMsg CertPathApi;
+    _build_cert_path: DefaultCertApiImpl -> Array (CerCertificateData) -> Result ErrMsg CertPathApi;
     _build_cert_path = |cert_impl, cert_data_array| (
         if cert_data_array.get_size == 0 { err $ "cert_data_array is empty" };
         let ca_certs = cert_impl.@ca_certificates;
-        if ca_certs.is_none { err $ "The collection of CA certificates has not been loaded" };
-
         let certs: Array Certificate = *cert_data_array.map_m(|cert_data| from_bytes(cert_data));
-        let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs.as_some);
+        let cert_path: CertificatePath = *CertificatePath::make(certs, ca_certs);
         pure $ DefaultCertPathApiImpl::make(cert_impl, cert_path).to_api
     );
 }

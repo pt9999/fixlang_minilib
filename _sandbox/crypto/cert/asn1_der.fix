@@ -11,12 +11,17 @@ import Minilib.Math.Types;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Monad.State;
+import Minilib.Monad.Writer;
 import Minilib.Monad.Error;
 import Minilib.Monad.Trans;
 import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 import Minilib.Text.Unicode;
+
+// -------------------
+// Input Byte Stream
+// -------------------
 
 trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
 
@@ -78,6 +83,28 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         mod_state(set_position(pos))
     );
 }
+
+// -----------------
+// Decode an object
+// -----------------
+
+// A trait for an object that can be decoded from DER-encoded bytes.
+trait a: DecodeDer {
+    decode_obj: [m: MonadReadByte] m a;
+}
+
+// Decodes an object from DER-encoded bytes.
+decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
+decode_der_from_bytes = |bytes| (
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let (buf, a) = *decode_obj.run_state_t(buf);
+    // TODO: should check whether buf is at the end of stream?
+    pure $ a
+);
+
+// -----------
+// Triplet
+// -----------
 
 // A type that represents the ASN.1 Identifier octets.
 type Identifier = unbox struct {
@@ -206,34 +233,39 @@ decode_contents = |length| (
     Array::fill(length, read_byte).map_m(|x| x)
 );
 
-dump_der_triplets: Array U8 -> IOFail ();
+// Dumps triplets to text from DER-encoded bytes.
+dump_der_triplets: Array U8 -> Result ErrMsg String;
 dump_der_triplets = |bytes| (
     let buf = ByteBuffer::make(bytes, big_endian());
-    let sm: StateT ByteBuffer IOFail () = loop_m(
+    let sm: StateT ByteBuffer (WriterT String (Result ErrMsg)) () = loop_m(
         (), |_|
         let buf = *get_state;
         if buf.@position >= buf.get_size { break_m $ () };
         let identifier = *decode_identifier;
         let length = *decode_length;
         if identifier.@constructed {
-            eval *println(
+            eval *tell(
                 identifier.to_string +
-                " length=" + length.to_string
-            ).lift.lift_t;
+                " length=" + length.to_string +
+                "\n"
+            ).lift_t;
             continue_m $ ()
         };
         let contents = *decode_contents(length);
-        eval *println(
+        eval *tell(
             identifier.to_string +
             " length=" + length.to_string +
             " contents=" + contents.to_string_hex +
             if identifier.@tag == tag_printable_string {
                 " (" + contents._unsafe_to_string + ")"
-            } else { "" }
-        ).lift.lift_t;
+            } else { "" } +
+            "\n"
+        ).lift_t;
         continue_m $ ()
     );
-    sm.eval_state_t(buf)
+    let wm: WriterT String (Result ErrMsg) () = sm.eval_state_t(buf);
+    let res: Result ErrMsg (String, ()) = wm.run_writer_t;
+    res.map(@0)
 );
 
 // Extracts one triplet (identifier, length, contents) as a DER-encoded bytes.
@@ -257,6 +289,10 @@ decode_primitive = (
     let contents = *decode_contents(length);
     pure $ (identifier, contents)
 );
+
+// ----------------------
+// Constructed Types
+// ----------------------
 
 // `decode_constructed(tag, inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches the `tag`,
@@ -323,18 +359,10 @@ choice = |monads| (
     inner(0)
 );
 
-decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
-decode_der_from_bytes = |bytes| (
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let (buf, a) = *decode_obj.run_state_t(buf);
-    // TODO: should check whether buf is at the end of stream?
-    pure $ a
-);
+// ----------------------
+// Primitive Types
+// ----------------------
 
-
-trait a: DecodeDer {
-    decode_obj: [m: MonadReadByte] m a;
-}
 
 impl Asn1::Boolean: DecodeDer {
     decode_obj = (

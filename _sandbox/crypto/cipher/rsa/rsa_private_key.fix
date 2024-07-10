@@ -13,13 +13,21 @@ import Minilib.Monad.FunctorM;
 
 read_rsa_private_key_from_pem_string: String -> Result ErrMsg RSAPrivateKey;
 read_rsa_private_key_from_pem_string = |contents| (
+    let private_key_info: PrivateKeyInfo = *read_private_key_info_from_pem_string(contents);
+    let algorithm: AlgorithmIdentifier = private_key_info.@privateKeyAlgorithm;
+    if !algorithm.match_name("rsaEncryption") {
+        err $ "invalid algorithm: " + algorithm.to_string
+    };
+    decode_der_from_bytes(private_key_info.@privateKey.to_bytes)
+);
+
+read_private_key_info_from_pem_string: String -> Result ErrMsg PrivateKeyInfo;
+read_private_key_info_from_pem_string = |contents| (
     let entries = *parse_pem_entries(contents);
     if entries.get_size != 1 { err $ "Not a single PEM entry" };
     let entry = entries.@(0);
     if entry.@label != "PRIVATE KEY" { err $ "Not a PRIVATE KEY" };
-    let private_key_info: PrivateKeyInfo = *decode_der_from_bytes(entries.@(0).@bytes);
-    let rsa_private_key: RSAPrivateKey = *decode_der_from_bytes(private_key_info.@privateKey.to_bytes);
-    pure $ rsa_private_key
+    decode_der_from_bytes(entries.@(0).@bytes)
 );
 
 // RFC5208 (PKCS#8) 5.  Private-Key Information Syntax

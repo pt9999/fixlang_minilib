@@ -21,11 +21,13 @@ import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
 
+// A structure that holds various secret values.
+// cf. RFC8446 "7.1. Key Schedule"
 type Secrets = unbox struct {
-    psk: Array U8,
-    early_secret: Array U8,
-    handshake_secret: Array U8,
-    master_secret: Array U8,
+    psk: Array U8,                  // Pre-Shared Key (PSK)
+    early_secret: Array U8,         // used for 0-RTT Application
+    handshake_secret: Array U8,     // used for handshake traffic
+    master_secret: Array U8,        // used for application traffic
     //exporter_master_secret: Array U8,
     resumption_master_secret: Array U8,
 };
@@ -79,6 +81,7 @@ namespace Secrets {
     );
 }
 
+// The traffic key for reading and writing records.
 type TrafficKey = unbox struct {
     traffic_secret: Array U8,
     write_key: Array U8,
@@ -106,6 +109,8 @@ namespace TrafficKey {
         sequence_number: 0_U64,
     };
 
+    // Calculates the traffic keying material for reading and writing records, and reset the sequence number.
+    // cf. RFC8446 "7.3. Traffic Key Calculation"
     update_keys: Array U8 -> AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
     update_keys = |secret, aead, hkdf, traffic_key| (
         let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
@@ -116,10 +121,13 @@ namespace TrafficKey {
             .set_sequence_number(0_U64)
     );
 
+    // Increments the sequence number for reading and writing records.
+    // cf. RFC8446 "5.3. Per-Record Nonce"
     increment_sequence_number: TrafficKey -> TrafficKey;
     increment_sequence_number = mod_sequence_number(add(1_U64));
 
-    // 7.2. Updating Traffic Secrets
+    // Calculates the next generation of traffic keys.
+    // cf. RFC8446 "7.2. Updating Traffic Secrets"
     increment_generation: AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
     increment_generation = |aead, hkdf, traffic_key| (
         let traffic_secret = traffic_key.@traffic_secret;
@@ -130,7 +138,8 @@ namespace TrafficKey {
         pure $ traffic_key
     );
 
-    // 5.3. Per-Record Nonce
+    // Calculates the per-record nonce for the AEAD construction.
+    // cf. RFC8446 "5.3. Per-Record Nonce"
     get_per_record_nonce: TrafficKey -> Array U8;
     get_per_record_nonce = |traffic_key| (
         let iv = traffic_key.@write_iv;
@@ -160,6 +169,7 @@ type TrafficKeyType = unbox union {
     client_tk: (),
 };
 
+// A structure that handles Record Payload Protection.
 type Protection = unbox struct {
     hkdf: HKDF,
     aead: AEAD,
@@ -180,6 +190,7 @@ impl Protection: ToString {
 }
 
 namespace Protection {
+    // Creates a Protection structure for the specified CipherSuite.
     make: CipherSuite -> Result ErrMsg Protection;
     make = |cipher_suite| (
         let hkdf = *HKDF::from_cipher_suite(cipher_suite);
@@ -197,6 +208,7 @@ namespace Protection {
         }
     );
 
+    // Gets the traffic key of the specified type.
     get_traffic_key: TrafficKeyType -> Protection -> TrafficKey;
     get_traffic_key = |typ| (
         if typ.is_server_tk { @server_tk };
@@ -205,6 +217,7 @@ namespace Protection {
         abort()
     );
 
+    // Modifies the traffic key of the specified type.
     mod_traffic_key: TrafficKeyType -> (TrafficKey -> TrafficKey) -> Protection -> Protection;
     mod_traffic_key = |typ| (
         if typ.is_server_tk { mod_server_tk };
@@ -213,11 +226,15 @@ namespace Protection {
         abort()
     );
 
+    // Appends handshake bytes to the handshake context.
     add_handshake_context: Array U8 -> Protection -> Protection;
     add_handshake_context = |handshake_bytes| (
         mod_handshake_context(append(handshake_bytes))
     );
 
+    // Initializes the handshake traffic using the Diffie-Hellman Ephemeral (dhe) shared secret.
+    // This function must be called after the ServerHello message is appended to the handshake context,
+    // and the shared secret is calculated.
     init_handshake: Array U8 -> Protection -> Result ErrMsg Protection;
     init_handshake = |dhe, protection| (
         let Protection {
@@ -237,6 +254,8 @@ namespace Protection {
         pure $ protection.set_secrets(secrets).set_server_tk(server_tk).set_client_tk(client_tk)
     );
 
+    // Initializes the application traffic.
+    // This function must be called after the server Finished message is appended to the handshake context.
     init_appdata: Protection -> Result ErrMsg Protection;
     init_appdata = |protection| (
         let Protection {
@@ -255,6 +274,8 @@ namespace Protection {
         pure $ protection.set_server_tk(server_tk).set_client_tk(client_tk)
     );
 
+    // Initializes the application traffic part two.
+    // This function must be called after the client Finished message is appended to the handshake context.
     init_after_client_finished: Protection -> Result ErrMsg Protection;
     init_after_client_finished = |protection| (
         let Protection {
@@ -266,6 +287,8 @@ namespace Protection {
         pure $ protection.set_secrets(secrets)
     );
 
+    // Handles a KeyUpdate message.
+    // cf. RFC8446 "4.6.3. Key and Initialization Vector Update", "7.2. Updating Traffic Secrets"
     handle_key_update: TrafficKeyType -> Protection -> Result ErrMsg Protection;
     handle_key_update = |traffic_key_type, protection| (
         let Protection {
@@ -278,6 +301,9 @@ namespace Protection {
         pure $ protection
     );
 
+    // Decrypts `TLSCiphertext` into `TLSInnerPlaintext` using the traffic key, then
+    // increments the sequence number.
+    // cf. RFC8446 "5.2. Record Payload Protection", "5.3. Per-Record Nonce"
     decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);
     decrypt_record = |ciphertext, traffic_key_type, protection| (
         if !ciphertext.@opaque_type.is_application_data {
@@ -293,6 +319,9 @@ namespace Protection {
         pure $ (inner_plaintext, protection)
     );
 
+    // Encrypts `TLSInnerPlaintext` into `TLSCiphertext` using the traffic key, then
+    // increments the sequence number.
+    // cf. RFC8446 "5.2. Record Payload Protection", "5.3. Per-Record Nonce"
     encrypt_record: TLSInnerPlaintext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSCiphertext, Protection);
     encrypt_record = |inner_plaintext, traffic_key_type, protection| (
         let inner_plaintext_bytes = marshal_to_bytes(inner_plaintext);
@@ -307,6 +336,8 @@ namespace Protection {
         pure $ (ciphertext, protection)
     );
 
+    // Calculates the content covered by the digital signature for the CertificateVerify message.
+    // cf. RFC8446 "4.4.3. Certificate Verify"
     calc_certificate_verify_content: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_certificate_verify_content = |traffic_key_type, protection| (
         let Protection {
@@ -325,6 +356,8 @@ namespace Protection {
         pure $ concatenation
     );
 
+    // Calculates the verify data for the Finished message.
+    // cf. RFC8446 "4.4.4. Finished"
     calc_finished_verify_data: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_finished_verify_data = |traffic_key_type, protection| (
         let Protection {

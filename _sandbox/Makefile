@@ -1,8 +1,8 @@
 %.out: %.fix
-	../bin/fixautolink build -o $@ -L ../lib -f $<
+	../bin/fixautolink build -o $@ -L ../lib -L . -f $<
 
 %.run: %.fix
-	../bin/fixautolink run -o $@ -L ../lib -f $< -O separated
+	../bin/fixautolink run -o $@ -L ../lib -L . -f $< -O separated
 
 all:
 

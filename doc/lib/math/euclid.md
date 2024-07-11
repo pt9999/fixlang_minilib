@@ -1,6 +1,4 @@
-# euclid.fix
-
-## module Minilib.Math.Euclid
+# Module Minilib.Math.Euclid (euclid.fix)
 
 Euclid algorithms, such as `gcd` (greatest common divisor).
 
@@ -11,11 +9,11 @@ forall a b, a = (a / b) * b + (a % b)
 
 For details, see [Wikipedia: Euclidean domain](https://en.wikipedia.org/wiki/Euclidean_domain).
 
-#### gcd: [a: Euclid] a -> a -> a;
+### `gcd: [a: Euclid] a -> a -> a;`
 
 `gcd(a,b)` calculates the greatest common divisor of `a` and `b`.
 
-#### extended_euclid: [a: Euclid] a -> a -> (a, a, a);
+### `extended_euclid: [a: Euclid] a -> a -> (a, a, a);`
 
 `extended_euclid(a,b)` performs
 [Extended Euclidean algorithm](https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm).

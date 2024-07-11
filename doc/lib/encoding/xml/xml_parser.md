@@ -1,6 +1,4 @@
-# xml_parser.fix
-
-## module Minilib.Encoding.Xml.XmlParser
+# Module Minilib.Encoding.Xml.XmlParser (xml_parser.fix)
 
 Simple XML 1.1 Parser.
 
@@ -11,11 +9,11 @@ Known Problems:
 - Currently only UTF-8 encoding is supported.
 - Currently Document Type Definition (DTD) is not supported.
 
-#### parse_document_from_string: String -> Result ErrMsg XmlDocument;
+### `parse_document_from_string: String -> Result ErrMsg XmlDocument;`
 
 Reads an XML document from a string.
 
-#### parse_element_from_string: String -> Result ErrMsg XmlElement;
+### `parse_element_from_string: String -> Result ErrMsg XmlElement;`
 
 Reads an XML element from a string.
 

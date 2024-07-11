@@ -1,13 +1,11 @@
-# clap.fix
-
-## module Minilib.App.Clap
+# Module Minilib.App.Clap (clap.fix)
 
 Command line argument parser.
 Inspired by [`clap` crate of Rust](https://docs.rs/clap/3.2.0/clap/index.html).
 
-### namespace ArgAction
+## `namespace ArgAction`
 
-### type ArgAction
+### `type ArgAction`
 
 The action taken when the argument is parsed.
 
@@ -22,7 +20,7 @@ The action taken when the argument is parsed.
         version: ()     // Displays the version of the command.
     };
 ```
-### type Arg
+### `type Arg`
 
 A structure that defines arguments.
 Arguments can be either optional or positional arguments.
@@ -43,47 +41,47 @@ type Arg = unbox struct {
     action: ArgAction       // The action taken when the argument is parsed.
 };
 ```
-### namespace Arg
+## `namespace Arg`
 
-#### new: String -> Arg;
+### `new: String -> Arg;`
 
 Creates new argument.
 
-#### short: U8 -> Arg -> Arg;
+### `short: U8 -> Arg -> Arg;`
 
 Sets `@short`.
 
-#### long: String -> Arg -> Arg;
+### `long: String -> Arg -> Arg;`
 
 Sets `@long`.
 
-#### required: Arg -> Arg;
+### `required: Arg -> Arg;`
 
 Sets `@required` to true.
 
-#### takes_value: Arg -> Arg;
+### `takes_value: Arg -> Arg;`
 
 Sets `@takes_value` to true, and `@action` to `set()`.
 
-#### takes_multiple_values: Arg -> Arg;
+### `takes_multiple_values: Arg -> Arg;`
 
 Sets `@takes_value` to true, `@multiple_values` to true, and `@action` to `append()`.
 
-#### default_value: String -> Arg -> Arg;
+### `default_value: String -> Arg -> Arg;`
 
 Sets `@default_value`.
 
-#### value_name: String -> Arg -> Arg;
+### `value_name: String -> Arg -> Arg;`
 
 Sets `@value_name`.
 
-#### help: String -> Arg -> Arg;
+### `help: String -> Arg -> Arg;`
 
 Sets `@help`.
 
-#### `impl Arg: ToString`
+### `impl Arg: ToString`
 
-### type Command
+### `type Command`
 
 A structure representing a command (ie. application).
 
@@ -102,69 +100,69 @@ type Command = box struct {
     version_template: HelpTemplate  // A version template of the command.
 };
 ```
-### namespace Command
+## `namespace Command`
 
-#### new: String -> Command;
+### `new: String -> Command;`
 
 Creates a command structure by specifying the command name.
 
-#### name: String -> Command -> Command;
+### `name: String -> Command -> Command;`
 
 Sets the name of the command.
 
-#### bin_name: String -> Command -> Command;
+### `bin_name: String -> Command -> Command;`
 
 Sets the name of the executable binary of the command.
 
-#### display_name: String -> Command -> Command;
+### `display_name: String -> Command -> Command;`
 
 Sets the display name of the command.
 
-#### version: String -> Command -> Command;
+### `version: String -> Command -> Command;`
 
 Sets the version of the command.
 
-#### author: String -> Command -> Command;
+### `author: String -> Command -> Command;`
 
 Sets the author of the command.
 
-#### about: String -> Command -> Command;
+### `about: String -> Command -> Command;`
 
 Sets the description about the command.
 
-#### arg: Arg -> Command -> Command;
+### `arg: Arg -> Command -> Command;`
 
 Add an argument definition to the command.
 
-#### subcommand: Command -> Command -> Command;
+### `subcommand: Command -> Command -> Command;`
 
 Add a subcommand to the command.
 
-#### render_help: Command -> String;
+### `render_help: Command -> String;`
 
 Generates a help string based on the help template.
 
-#### render_version: Command -> String;
+### `render_version: Command -> String;`
 
 Generates a version string based on the version template.
 
-#### get_matches: Command -> IOFail ArgMatches;
+### `get_matches: Command -> IOFail ArgMatches;`
 
 Parse command line arguments based on `IO::get_args`.
 If `--help` or `--version` is specified, the help string or version string will be returned as `throw`.
 
-#### get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
+### `get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;`
 
 Parses command line arguments based on the specified input array.
 If `--help` or `--version` is specified, the help string or version string will be returned as the error message.
 
-### namespace ArgParser
+## `namespace ArgParser`
 
 ---------------------------------
 ArgParser
 ---------------------------------
 
-### type ArgParser
+### `type ArgParser`
 
 ```
     type ArgParser = unbox struct {
@@ -175,43 +173,43 @@ ArgParser
         positional_only: Bool
     };
 ```
-#### make: Array String -> Command -> ArgParser;
+### `make: Array String -> Command -> ArgParser;`
 
 Creates an `ArgParser` based on the input array and command.
 
-#### no_inputs: ArgParser -> Bool;
+### `no_inputs: ArgParser -> Bool;`
 
 Returns True if there are no more inputs. Returns False if there is more input.
 
-#### advance: ArgParser -> Result ErrMsg (String, ArgParser);
+### `advance: ArgParser -> Result ErrMsg (String, ArgParser);`
 
 Proceed to next input.
 
-#### get_input: ArgParser -> Result ErrMsg String;
+### `get_input: ArgParser -> Result ErrMsg String;`
 
 Get the current input.
 
-#### parse_args : ArgParser -> Result ErrMsg ArgParser;
+### `parse_args : ArgParser -> Result ErrMsg ArgParser;`
 
 Parse the actual command line argument array and set the value of `Arg`.
 
-#### set_value: Arg -> String -> ArgParser -> ArgParser;
+### `set_value: Arg -> String -> ArgParser -> ArgParser;`
 
 Set the value to `arg`.
 
-#### append_value: Arg -> String -> ArgParser -> ArgParser;
+### `append_value: Arg -> String -> ArgParser -> ArgParser;`
 
 Adds a value to the array of values in `arg`.
 
-#### check_required_args_present: ArgParser -> Result ErrMsg ArgParser;
+### `check_required_args_present: ArgParser -> Result ErrMsg ArgParser;`
 
 Check whether the required argument values are set. Reports an error if the value is not set.
 
-#### set_default_if_not_present: ArgParser -> Result ErrMsg ArgParser;
+### `set_default_if_not_present: ArgParser -> Result ErrMsg ArgParser;`
 
 If no value is set for the argument, set the default value.
 
-### type ArgMatches
+### `type ArgMatches`
 
 A structure representing the result of parsing command line arguments.
 
@@ -221,32 +219,32 @@ type ArgMatches = box struct {
     map: HashMap String (Array String)
 };
 ```
-### namespace ArgMatches
+## `namespace ArgMatches`
 
-#### empty: ArgMatches;
+### `empty: ArgMatches;`
 
 An empty `ArgMatches` structure.
 
-#### subcommand: ArgMatches -> Option (String, ArgMatches);
+### `subcommand: ArgMatches -> Option (String, ArgMatches);`
 
-#### get_many: String -> ArgMatches -> Option (Array String);
+### `get_many: String -> ArgMatches -> Option (Array String);`
 
 Gets the array of argument values with the specified ID.
 
-#### get_one: String -> ArgMatches -> Option String;
+### `get_one: String -> ArgMatches -> Option String;`
 
 Gets the value of the argument with the specified ID.
 
-### type HelpTemplate
+### `type HelpTemplate`
 
 ```
 type HelpTemplate = unbox struct { 
     data: String 
 };
 ```
-### namespace HelpTemplate
+## `namespace HelpTemplate`
 
-#### new: String -> HelpTemplate;
+### `new: String -> HelpTemplate;`
 
-#### format: Command -> HelpTemplate -> String;
+### `format: Command -> HelpTemplate -> String;`
 

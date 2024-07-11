@@ -1,6 +1,4 @@
-# task_pool.fix
-
-## module Minilib.Thread.TaskPool
+# Module Minilib.Thread.TaskPool (task_pool.fix)
 
 A task pool that can be used parallel computation.
 
@@ -11,7 +9,7 @@ When the task pool is shutdown, all tasks are stopped.
 Computations are never performed after shutdown.
 
 
-### type TaskPool
+### `type TaskPool`
 
 A task pool that manages a collection of IOTasks.
 
@@ -21,24 +19,24 @@ type TaskPool = unbox struct {
     tasks: Array (IOTask ())
 };
 ```
-#### make: I64 -> IO TaskPool;
+### `make: I64 -> IO TaskPool;`
 
 `TaskPool::make(task_count)` creates a TaskPool.
 
-#### register_future: FutureToken -> TaskPool -> IOFail ();
+### `register_future: FutureToken -> TaskPool -> IOFail ();`
 
 Register a future.
 It sends a future token to the channel.
 
-#### cancel_all_pendings_futures: TaskPool -> IO ();
+### `cancel_all_pendings_futures: TaskPool -> IO ();`
 
 Cancel all pending futures and clears the queue.
 
-#### is_shutdown: TaskPool -> IO Bool;
+### `is_shutdown: TaskPool -> IO Bool;`
 
 Checks whether the taskpool has been shutdown.
 
-#### shutdown: TaskPool -> IO TaskPool;
+### `shutdown: TaskPool -> IO TaskPool;`
 
 Shutdowns a taskpool.
 

@@ -1,98 +1,96 @@
-# html.fix
-
-## module Minilib.Net.HTML
+# Module Minilib.Net.HTML (html.fix)
 
 HTML handling, such as:
 - Very simple DOM model (HTMLDocument, HTMLElement)
 - Escape/unescape HTML special characters
 
-### namespace HTML
+## `namespace HTML`
 
-#### html: HTMLDocument;
+### `html: HTMLDocument;`
 
 An empty HTML document.
 
-#### head: HTMLElement;
+### `head: HTMLElement;`
 
 An empty `<head>` element.
 
-#### meta: HTMLElement;
+### `meta: HTMLElement;`
 
 An empty `<meta>` element.
 
-#### title: HTMLElement;
+### `title: HTMLElement;`
 
 An empty `<title>` element.
 
-#### script: HTMLElement;
+### `script: HTMLElement;`
 
 An empty `<script>` element.
 
-#### body: HTMLElement;
+### `body: HTMLElement;`
 
 An empty `<body>` element.
 
-#### h1: HTMLElement;
+### `h1: HTMLElement;`
 
 An empty `<h1>` element.
 
-#### h2: HTMLElement;
+### `h2: HTMLElement;`
 
 An empty `<h2>` element.
 
-#### h3: HTMLElement;
+### `h3: HTMLElement;`
 
 An empty `<h3>` element.
 
-#### h4: HTMLElement;
+### `h4: HTMLElement;`
 
 An empty `<h4>` element.
 
-#### h5: HTMLElement;
+### `h5: HTMLElement;`
 
 An empty `<h5>` element.
 
-#### div: HTMLElement;
+### `div: HTMLElement;`
 
 An empty `<div>` element.
 
-#### div_: HTMLElement;
+### `div_: HTMLElement;`
 
 to avoid ambiguity with Std::Div::div
 
-#### span: HTMLElement;
+### `span: HTMLElement;`
 
 An empty `<span>` element.
 
-#### p: HTMLElement;
+### `p: HTMLElement;`
 
 An empty `<p>` element.
 
-#### input: HTMLElement;
+### `input: HTMLElement;`
 
 An empty `<input>` element.
 
-#### button: HTMLElement;
+### `button: HTMLElement;`
 
 An empty `<button>` element.
 
-#### table: HTMLElement;
+### `table: HTMLElement;`
 
 An empty `<table>` element.
 
-#### th: HTMLElement;
+### `th: HTMLElement;`
 
 An empty `<th>` element.
 
-#### tr: HTMLElement;
+### `tr: HTMLElement;`
 
 An empty `<tr>` element.
 
-#### td: HTMLElement;
+### `td: HTMLElement;`
 
 An empty `<td>` element.
 
-### type HTMLDocument
+### `type HTMLDocument`
 
 A type that represents an HTML document.
 
@@ -101,21 +99,21 @@ type HTMLDocument = unbox struct {
     html: HTMLElement           // root element, ie. `<html>`
 };
 ```
-### namespace HTMLDocument
+## `namespace HTMLDocument`
 
-#### empty: HTMLDocument;
+### `empty: HTMLDocument;`
 
 An empty HTML document.
 
-#### add: HTMLElement -> HTMLDocument -> HTMLDocument;
+### `add: HTMLElement -> HTMLDocument -> HTMLDocument;`
 
 Adds a child element to `<html>` element.
 
-#### to_html: HTMLDocument -> String;
+### `to_html: HTMLDocument -> String;`
 
 Converts the HTML document to HTML string.
 
-### type HTMLNode
+### `type HTMLNode`
 
 A type that represents an HTML node.
 
@@ -125,7 +123,7 @@ type HTMLNode = box union {
     text_node: String               // text node
 };
 ```
-### type HTMLElement
+### `type HTMLElement`
 
 A type that represents an HTML element.
 
@@ -136,47 +134,47 @@ type HTMLElement = unbox struct {
     children: Array HTMLNode        // child nodes
 };
 ```
-### namespace HTMLElement
+## `namespace HTMLElement`
 
-#### make: String -> HTMLElement;
+### `make: String -> HTMLElement;`
 
 `HTMLElement::make(tag)` creates an empty element with specified tag name.
 
-#### attr: String -> String -> HTMLElement -> HTMLElement;
+### `attr: String -> String -> HTMLElement -> HTMLElement;`
 
 `el.attr(name,value)` adds an attribute to `el`.
 If an attribute of same name exists, it will be removed first.
 NOTE: validity of attribute names are not checked.
 
-#### add: HTMLElement -> HTMLElement -> HTMLElement;
+### `add: HTMLElement -> HTMLElement -> HTMLElement;`
 
 `el.add(child)` adds a child element to `el`.
 
-#### text: String -> HTMLElement -> HTMLElement;
+### `text: String -> HTMLElement -> HTMLElement;`
 
 `el.text(txt)` adds a text node to `el`.
 
-#### to_html: HTMLElement -> String;
+### `to_html: HTMLElement -> String;`
 
 `el.to_html` converts the element to HTML string.
 
-### type HTMLAttribute
+### `type HTMLAttribute`
 
 A type that represents name and value of an attribute.
 
 ```
 type HTMLAttribute = (String, String);
 ```
-### namespace HTMLAttribute
+## `namespace HTMLAttribute`
 
-### namespace HTMLHelpers
+## `namespace HTMLHelpers`
 
-#### escape_html: String -> String;
+### `escape_html: String -> String;`
 
 Escapes HTML special characters.
 eg. `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
 
-#### unescape_html: String -> String;
+### `unescape_html: String -> String;`
 
 Unescapes HTML special characters.
 eg. `&amp;` -> `&`, `&lt;` -> `<`, `&gt;` -> `>`, `&quot;` -> `\"`, `&#039;` -> `'`.

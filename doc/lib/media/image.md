@@ -1,8 +1,6 @@
-# image.fix
+# Module Minilib.Media.Image (image.fix)
 
-## module Minilib.Media.Image
-
-### type Image
+### `type Image`
 
 ```
 type Image = unbox struct {
@@ -13,17 +11,17 @@ type Image = unbox struct {
     data: Array U8
 };
 ```
-#### make: I64 -> I64 -> String -> Image;
+### `make: I64 -> I64 -> String -> Image;`
 
-#### calc_channels_by_format: String -> I64;
+### `calc_channels_by_format: String -> I64;`
 
-#### calc_index: I64 -> I64 -> I64 -> Image -> I64;
+### `calc_index: I64 -> I64 -> I64 -> Image -> I64;`
 
-#### get: I64 -> Image -> U8;
+### `get: I64 -> Image -> U8;`
 
-#### set: I64 -> U8 -> Image -> Image;
+### `set: I64 -> U8 -> Image -> Image;`
 
-#### get_rgb: I64 -> Image -> (U8, U8, U8);
+### `get_rgb: I64 -> Image -> (U8, U8, U8);`
 
-#### set_rgb: I64 -> (U8, U8, U8) -> Image -> Image;
+### `set_rgb: I64 -> (U8, U8, U8) -> Image -> Image;`
 

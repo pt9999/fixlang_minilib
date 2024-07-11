@@ -1,6 +1,4 @@
-# bignat.fix
-
-## module Minilib.Math.BigNat
+# Module Minilib.Math.BigNat (bignat.fix)
 
 Arbitrary-precision natural number. This is internal module of BigInt.
 

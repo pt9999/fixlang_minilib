@@ -1,6 +1,4 @@
-# aes_gcm.fix
-
-## module Minilib.Crypto.AES.GCM
+# Module Minilib.Crypto.AES.GCM (aes_gcm.fix)
 
 Galois/Counter Mode (GCM) for AES
 
@@ -8,7 +6,7 @@ Implemented from specification of NIST Special Publication 800-38D:
 Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC
 https://doi.org/10.6028/NIST.SP.800-38D
 
-### type Block
+### `type Block`
 
 A block is a bit string of 128 bits.
 We use two U64 as a representation.
@@ -21,33 +19,33 @@ type Block = unbox struct {
   lo: U64
 };
 ```
-#### `impl Block: Eq`
+### `impl Block: Eq`
 
-#### `impl Block: ToStringHex`
+### `impl Block: ToStringHex`
 
-#### `impl Block: ToString`
+### `impl Block: ToString`
 
-#### `impl Block: FromBytes`
+### `impl Block: FromBytes`
 
-#### `impl Block: ToBytes`
+### `impl Block: ToBytes`
 
-### namespace Block
+## `namespace Block`
 
-#### make: U64 -> U64 -> Block;
+### `make: U64 -> U64 -> Block;`
 
 `Block::make(hi, lo)` creates a 128 bit block.
 
-#### get_block_be: I64 -> Array U8 -> Block;
+### `get_block_be: I64 -> Array U8 -> Block;`
 
 `buf.get_block_be(i)` reads a 128 bit block in big endian at position `i` in array `buf`.
 
-#### set_block_be: I64 -> Block -> Array U8 -> Array U8;
+### `set_block_be: I64 -> Block -> Array U8 -> Array U8;`
 
 `buf.set_block_be(i, block)` writes a 128 bit block in big endian at position `i` in array `buf`.
 
-### namespace GCM
+## `namespace GCM`
 
-#### gcm_ae: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> I64 -> (Array U8, Array U8);
+### `gcm_ae: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> I64 -> (Array U8, Array U8);`
 
 Performs authenticated encryption.
 Input:
@@ -60,7 +58,7 @@ Output: (c, t)
 - c: ciphertext
 - t: authentication tag
 
-#### gcm_ad: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> Array U8 -> I64 -> Result ErrMsg (Array U8);
+### `gcm_ad: (Block -> Block) -> Array U8 -> Array U8 -> Array U8 -> Array U8 -> I64 -> Result ErrMsg (Array U8);`
 
 Performs authenticated decryption.
 Input:
@@ -73,7 +71,7 @@ Output: ok(plaintext) or err(ErrMsg)
 - ok(plaintext): decrypted byte sequence
 - err(ErrMsg): inauthenticity
 
-### namespace CLMul
+## `namespace CLMul`
 
 Carryless Multiplication
 NOTE: the bit order is reversed, ie. bit 0 is MSB, bit (n-1) is LSB

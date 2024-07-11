@@ -1,14 +1,12 @@
-# error.fix
-
-## module Minilib.Monad.Error
+# Module Minilib.Monad.Error (error.fix)
 
 Definition of `MonadErrorIF` trait which can report errors.
 
-### trait MonadError = Monad + MonadErrorIF;
+### `trait MonadError = Monad + MonadErrorIF;`
 
 A trait for the interface of monads which can report errors.
 
-### trait MonadErrorIF
+### `trait MonadErrorIF`
 
 A trait for monads which can report errors.
 
@@ -21,13 +19,13 @@ trait [m: * -> *] m: MonadErrorIF {
     catch: (ErrMsg -> m a) -> m a -> m a;
 }
 ```
-#### `impl Result ErrMsg: MonadErrorIF`
+### `impl Result ErrMsg: MonadErrorIF`
 
-#### `impl IOFail: MonadErrorIF`
+### `impl IOFail: MonadErrorIF`
 
-#### lift_result: [m: MonadError] Result ErrMsg a -> m a;
+### `lift_result: [m: MonadError] Result ErrMsg a -> m a;`
 
-#### from_result_t: [m: MonadError] Result ErrMsg a -> m a;
+### `from_result_t: [m: MonadError] Result ErrMsg a -> m a;`
 
-#### to_result_t: [m: MonadError] m a -> m (Result ErrMsg a);
+### `to_result_t: [m: MonadError] m a -> m (Result ErrMsg a);`
 

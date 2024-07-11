@@ -1,6 +1,4 @@
-# regexp_nfa.fix
-
-## module Minilib.Text.RegExp.RegExpNFA
+# Module Minilib.Text.RegExp.RegExpNFA (regexp_nfa.fix)
 
 NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`.
 
@@ -9,7 +7,7 @@ For details, see web pages below.
 - https://zenn.dev/canalun/articles/regexp_and_automaton
 
 
-### type Group
+### `type Group`
 
 Type of a matched group.
 The group is represented as two stream positions: `(begin, end)`.
@@ -18,14 +16,14 @@ The group is represented as two stream positions: `(begin, end)`.
 ```
 type Group = (I64, I64);
 ```
-### type Groups
+### `type Groups`
 
 Type of the array of matched groups.
 
 ```
 type Groups = Array Group;
 ```
-### type QuantID
+### `type QuantID`
 
 Type of special quantifiers ID.
 Special quantifiers are quantifieres other than `X?` `X*` `X+`.
@@ -36,7 +34,7 @@ so its iteration count are stored in the NFA state, and managed by `sa_quant_*` 
 ```
 type QuantID = I64;
 ```
-### type NFA
+### `type NFA`
 
 NFA
 
@@ -50,45 +48,45 @@ type NFA = unbox struct {
     debug: Bool               // true if debug
 };
 ```
-### namespace NFA
+## `namespace NFA`
 
-#### empty: NFA;
+### `empty: NFA;`
 
 An empty NFA.
 
-#### new_node: NFA -> (NFA, NodeID);
+### `new_node: NFA -> (NFA, NodeID);`
 
 Creates new node. Returns the new node id.
 
-#### get_node: NodeID -> NFA -> NFANode;
+### `get_node: NodeID -> NFA -> NFANode;`
 
 `nfa.get_node(id)` gets the node whose @id is `id`.
 
-#### mod_node: NodeID -> (NFANode -> NFANode) -> NFA -> NFA;
+### `mod_node: NodeID -> (NFANode -> NFANode) -> NFA -> NFA;`
 
 `nfa.mod_node(id, f)` modifies the node whose @id is `id`.
 
-#### set_frag_output: NFAFrag -> NodeID -> NFA -> NFA;
+### `set_frag_output: NFAFrag -> NodeID -> NFA -> NFA;`
 
 `nfa.set_frag_output(frag, out)` sets the output of the fragment to `out`.
 
-#### new_quant: NFA -> (NFA, QuantID);
+### `new_quant: NFA -> (NFA, QuantID);`
 
 Creates new quant. Returns the new quant id.
 
-#### compile: Pattern -> NFA;
+### `compile: Pattern -> NFA;`
 
 `NFA::compile(pattern)` compiles a pattern to NFA.
 
-#### execute: String -> NFA -> NFAExecutor;
+### `execute: String -> NFA -> NFAExecutor;`
 
 `nfa.execute(target)` executes matching.
 
-#### debug: String -> NFA -> ();
+### `debug: String -> NFA -> ();`
 
-#### `impl NFA: ToString`
+### `impl NFA: ToString`
 
-### type NFANodeAction
+### `type NFANodeAction`
 
 Actions that has to be performed before the state makes a transition to `node.@out_on_action`.
 
@@ -104,9 +102,9 @@ type NFANodeAction = unbox union {
     sa_quant_end: (QuantID, I64, I64)       // The end of a special quantifier
 };
 ```
-#### `impl NFANodeAction: ToString`
+### `impl NFANodeAction: ToString`
 
-### type NFANode
+### `type NFANode`
 
 NFA node
 
@@ -123,7 +121,7 @@ type NFANode = unbox struct {
     label: String              // a label to display
 };
 ```
-### type NodeID
+### `type NodeID`
 
 ID of NFA node. -1 is invalid value.
 
@@ -132,21 +130,21 @@ type NodeID = unbox struct {
     val: I64
 };
 ```
-#### `impl NodeID: ToString`
+### `impl NodeID: ToString`
 
-#### `impl NodeID: Eq`
+### `impl NodeID: Eq`
 
-#### `impl NodeID: Hash`
+### `impl NodeID: Hash`
 
-### namespace NFANode
+## `namespace NFANode`
 
-#### empty: NFANode;
+### `empty: NFANode;`
 
 An empty node
 
-#### `impl NFANode: ToString`
+### `impl NFANode: ToString`
 
-### type NFAFrag
+### `type NFAFrag`
 
 NFA Fragment
 
@@ -163,13 +161,13 @@ type NFAFrag = unbox struct {
     label: String                      // A label to display (for debugging only)
 };
 ```
-### namespace NFAFrag
+## `namespace NFAFrag`
 
-#### compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);
+### `compile_pattern: Pattern -> NFA -> (NFA, NFAFrag);`
 
 `nfa.compile_pattern(pattern)` compiles a pattern to a fragment.
 
-### type NFAState
+### `type NFAState`
 
 NFA state
 
@@ -180,53 +178,53 @@ type NFAState = unbox struct {
     quants: Array I64   // Special quantifier counters
 };
 ```
-#### `impl NFAState: Eq`
+### `impl NFAState: Eq`
 
-#### `impl NFAState: Hash`
+### `impl NFAState: Hash`
 
-#### `impl NFAState: ToString`
+### `impl NFAState: ToString`
 
-### namespace NFAState
+## `namespace NFAState`
 
-#### make: NodeID -> Groups -> NFAState;
+### `make: NodeID -> Groups -> NFAState;`
 
 Creates a NFA state.
 
-#### transition: NodeID -> NFAState -> NFAState;
+### `transition: NodeID -> NFAState -> NFAState;`
 
 Makes transition to next node.
 
-#### get_group: I64 ->  NFAState -> Group;
+### `get_group: I64 ->  NFAState -> Group;`
 
 Gets specified group. If group index is out of range, returns (-1, -1).
 
-#### mod_group: I64 -> (Group -> Group) -> NFAState -> NFAState;
+### `mod_group: I64 -> (Group -> Group) -> NFAState -> NFAState;`
 
 Modify specified group.
 
-#### get_quant: QuantID -> NFAState -> I64;
+### `get_quant: QuantID -> NFAState -> I64;`
 
 get quant loop count
 
-#### set_quant: QuantID -> I64 -> NFAState -> NFAState;
+### `set_quant: QuantID -> I64 -> NFAState -> NFAState;`
 
 set quant loop count
 
-#### overlaps: NFAState -> NFAState -> Bool;
+### `overlaps: NFAState -> NFAState -> Bool;`
 
-#### group_length: I64 -> NFAState -> I64;
+### `group_length: I64 -> NFAState -> I64;`
 
 Gets the length of specified group.
 
-#### collect_first_match: Array NFAState -> Option NFAState;
+### `collect_first_match: Array NFAState -> Option NFAState;`
 
 Collects first match.
 
-#### collect_all_non_overlapping: Array NFAState -> Array NFAState;
+### `collect_all_non_overlapping: Array NFAState -> Array NFAState;`
 
 Collects all non overlapping matches.
 
-### type NFAStateSet
+### `type NFAStateSet`
 
 NFA state set, used for NFA state transition
 
@@ -236,30 +234,30 @@ type NFAStateSet = unbox struct {
     map: HashMap NFAState Bool          // a hashmap to check whether the state is contained or not
 };
 ```
-### namespace NFAStateSet
+## `namespace NFAStateSet`
 
-#### empty: I64 -> NFAStateSet;
+### `empty: I64 -> NFAStateSet;`
 
 `NFAStateSet::empty(node_count)` creates an empty state set.
 `node_count` is number of NFA nodes.
 
-#### is_empty: NFAStateSet -> Bool;
+### `is_empty: NFAStateSet -> Bool;`
 
 Checks whether the state set is empty.
 
-#### contains: NFAState -> NFAStateSet -> Bool;
+### `contains: NFAState -> NFAStateSet -> Bool;`
 
 Checks whether the state set contains a state.
 
-#### add: NFAState -> NFAStateSet -> NFAStateSet;
+### `add: NFAState -> NFAStateSet -> NFAStateSet;`
 
 Adds a state to the state set.
 
-#### to_iter: NFAStateSet -> Iterator NFAState;
+### `to_iter: NFAStateSet -> Iterator NFAState;`
 
 Returns an iterator of the states.
 
-### type NFAExecutor
+### `type NFAExecutor`
 
 The NFA executor
 
@@ -273,17 +271,17 @@ type NFAExecutor = unbox struct {
     accepted_states: NFAStateSet        // accepted states
 };
 ```
-### namespace NFAExecutor
+## `namespace NFAExecutor`
 
-#### make: Stream -> NFA -> NFAExecutor;
+### `make: Stream -> NFA -> NFAExecutor;`
 
 Creates an executor.
 
-#### execute: NFAExecutor -> NFAExecutor;
+### `execute: NFAExecutor -> NFAExecutor;`
 
 Make transitions until end of stream is reached, or the state set becomes empty.
 
-### type ReplaceFrag
+### `type ReplaceFrag`
 
 A replacement fragment
 
@@ -293,13 +291,13 @@ type ReplaceFrag = unbox union {
     rep_group: I64
 };
 ```
-### namespace Replacement
+## `namespace Replacement`
 
-#### compile: String -> Array ReplaceFrag;
+### `compile: String -> Array ReplaceFrag;`
 
 Compiles a replacement string to fragments.
 
-#### calc_replacement: String -> Array ReplaceFrag -> NFAState -> String;
+### `calc_replacement: String -> Array ReplaceFrag -> NFAState -> String;`
 
 Calculates actual replacement string.
 

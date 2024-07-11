@@ -1,5 +1,7 @@
 # Module Minilib.Media.Image (image.fix)
 
+Basic image definitions.
+
 ### `type Image`
 
 ```

@@ -1,7 +1,6 @@
 # Module Minilib.Encoding.Xml.XmlHelpers (xml_helpers.fix)
 
-XML helpers, such as:
-- Escape/unescape special characters
+XML helpers, such as escaping/unescaping special characters.
 
 ### `escape_special: String -> String;`
 

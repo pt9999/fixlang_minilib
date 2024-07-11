@@ -1,8 +1,6 @@
 # Module Minilib.Net.HTML (html.fix)
 
-HTML handling, such as:
-- Very simple DOM model (HTMLDocument, HTMLElement)
-- Escape/unescape HTML special characters
+Simple HTML DOM model, as well as escaping/unescaping HTML special characters.
 
 ## `namespace HTML`
 

@@ -1,6 +1,8 @@
 # Module Minilib.Net.Tcp (tcp.fix)
 
-TCP operation, such as:
+IPv4 TCP Socket operations.
+
+Features:
 - IP address, port number
 - Resolves IP address from hostname
 - IPv4 Socket address

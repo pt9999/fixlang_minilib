@@ -1,6 +1,8 @@
 # Module Minilib.Text.StringEx (string_ex.fix)
 
-String extensions, such as:
+String utility functions.
+
+Features:
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
 - Format

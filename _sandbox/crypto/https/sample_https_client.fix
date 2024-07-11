@@ -1,0 +1,144 @@
+module Main;
+
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.App.Clap;
+import Minilib.Crypto.Tls.TLSSession;
+//import Minilib.Crypto.Tls.TLSSessionMock;
+import Minilib.Crypto.Tls.TLSSocket;
+import Minilib.Net.Tcp;
+import Minilib.Net.URL;
+import Minilib.Net.Https.ResponseParser;
+import Minilib.Monad.FunctorM;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+fflush : IOHandle -> IOFail ();
+fflush = |handle| (
+    let _ = *pure();    // make it lazy
+    let res = CALL_C[I32 fflush(Ptr), handle._file_ptr];
+    if res < 0_I32 {
+        throw("flush failed!: some error occurred in fflush.")
+    };
+    pure()
+);
+
+http_fetch: URL -> IOFail ();
+http_fetch = |url| (
+    if url.@scheme != "http" {
+        throw $ "url does not start with 'http://': url=" + url.@url
+    };
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+    //let _ = *println("host_port = " + host_port).lift;
+    //let _ = *println("path = " + path).lift;
+    let socket = *connect_to_tcp_server(host_port);
+    let request = "GET " + path + " HTTP/1.0\n\n";
+    let request = request.get_bytes.pop_back;
+    let (start, end) = (0, request.get_size);
+    eval *loop_m(
+        start, |start|
+        if start >= end  { break_m $ () };
+        let len = *socket.send(request.subarray(start, end));
+        continue_m $ start + len
+    );
+    let parser = *loop_m(
+        ResponseParser::empty, |parser|
+        let recv_bytes = *socket.recv(4096);
+        eval log_debug("received " + recv_bytes.get_size.to_string + " bytes");
+        if recv_bytes.get_size == 0 {
+            let parser = *parser.end_data.from_result;
+            break_m $ parser
+        };
+        let parser = *parser.add_data(recv_bytes).from_result;
+        if parser.@state.is_completed {
+            break_m $ parser
+        };
+        continue_m $ parser
+    );
+    eval *print(parser.@body._unsafe_to_string).lift;
+    pure()
+);
+
+
+https_fetch: URL -> IOFail ();
+https_fetch = |url| (
+    if url.@scheme != "https" {
+        throw $ "url does not start with 'http://' nor 'https://': url=" + url.@url
+    };
+    let host = url.@host;
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+
+    let socket: Socket = *connect_to_tcp_server(host_port);
+    let tls_socket: TLSSocket = TLSSocket::make(socket).set_debug(true);
+    let session: TLSSession = *TLSSession::make(tls_socket, host);
+    let sm: StateT TLSSession IOFail () = do {
+        eval *establish_handshake;
+
+        // save certificates to file
+        eval *save_certificates_to_files(|i|
+            let filename = (host, i).format("tmp.cert_{}.{}.cer");
+            Path::parse(filename).as_some
+        );
+
+        let request = "GET " + path + " HTTP/1.1\nHost: " + host + "\nUser-Agent: fixlang_minilib\n\n";
+        eval *TLSSession::send_appdata(request.get_bytes.pop_back);
+        let parser = *loop_m(
+            ResponseParser::empty, |parser|
+            let recv_bytes = *recv_appdata;
+            eval log_debug("received " + recv_bytes.get_size.to_string + " bytes");
+            if recv_bytes.get_size == 0 {
+                let parser = *parser.end_data.from_result.lift_t;
+                break_m $ parser
+            };
+            let parser = *parser.add_data(recv_bytes).from_result.lift_t;
+            if parser.@state.is_completed {
+                break_m $ parser
+            };
+            continue_m $ parser
+        );
+        eval *print(parser.@body._unsafe_to_string).lift.lift_t;
+        pure()
+    };
+    sm.eval_state_t(session)
+);
+
+main: IO ();
+main = (
+    do {
+        let command = (
+            Command::new("sample_https_client")
+            .version("0.1")
+            .about("Fetches contents from remote HTTP/HTTPS server.")
+            .arg(Arg::new("URL").takes_value.default_value("https://localhost")
+                .help("The URL to fetch."))
+            .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
+        );
+        let matches = *command.get_matches;
+
+        let verbose = matches.get_one("verbose").as_some_or("0");
+        let verbose: I64 = *from_string(verbose).from_result;
+        eval *LogOptions::set_threshold(
+            if verbose >= 3 { lvl_debug3 };
+            if verbose >= 2 { lvl_debug2 };
+            if verbose >= 1 { lvl_debug };
+            lvl_info
+        ).lift;
+
+        let url = matches.get_one("URL").as_some;
+        //let _ = *println("url = " + url).lift;
+        let url = *URL::parse(url).from_result;
+        if url.@scheme == "http" {
+            http_fetch(url)
+        } else {
+            https_fetch(url)
+        }
+    }.try (
+        |err| eprintln(err)
+    )
+);

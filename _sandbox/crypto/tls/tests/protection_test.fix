@@ -1,0 +1,178 @@
+module Main;
+
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.Secret;
+import Minilib.Crypto.Tls.Hkdf;
+import Minilib.Crypto.Tls.CipherSuite;
+import Minilib.Crypto.Tls.Protection;
+import Minilib.Crypto.Tls.HandshakeProtocol;
+import Minilib.Crypto.Tls.RecordProtocol;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+parse_hex: String -> Result ErrMsg (Array U8);
+parse_hex = |str| str.from_string_hex;
+
+// RFC 8448: Example Handshake Traces for TLS 1.3
+// 3.  Simple 1-RTT Handshake
+
+// {client}  construct a ClientHello handshake message:
+res_client_hello_bytes: Result ErrMsg (Array U8);
+res_client_hello_bytes = parse_hex("
+01 00 00 c0 03 03 cb 34 ec b1 e7 81 63
+ba 1c 38 c6 da cb 19 6a 6d ff a2 1a 8d 99 12 ec 18 a2 ef 62 83
+02 4d ec e7 00 00 06 13 01 13 03 13 02 01 00 00 91 00 00 00 0b
+00 09 00 00 06 73 65 72 76 65 72 ff 01 00 01 00 00 0a 00 14 00
+12 00 1d 00 17 00 18 00 19 01 00 01 01 01 02 01 03 01 04 00 23
+00 00 00 33 00 26 00 24 00 1d 00 20 99 38 1d e5 60 e4 bd 43 d2
+3d 8e 43 5a 7d ba fe b3 c0 6e 51 c1 3c ae 4d 54 13 69 1e 52 9a
+af 2c 00 2b 00 03 02 03 04 00 0d 00 20 00 1e 04 03 05 03 06 03
+02 03 08 04 08 05 08 06 04 01 05 01 06 01 02 01 04 02 05 02 06
+02 02 02 00 2d 00 02 01 01 00 1c 00 02 40 01
+");
+
+// {server}  construct a ServerHello handshake message:
+res_server_hello_bytes: Result ErrMsg (Array U8);
+res_server_hello_bytes = parse_hex("
+02 00 00 56 03 03 a6 af 06 a4 12 18 60
+dc 5e 6e 60 24 9c d3 4c 95 93 0c 8a c5 cb 14 34 da c1 55 77 2e
+d3 e2 69 28 00 13 01 00 00 2e 00 33 00 24 00 1d 00 20 c9 82 88
+76 11 20 95 fe 66 76 2b db f7 c6 72 e1 56 d6 cc 25 3b 83 3d f1
+dd 69 b1 b0 4e 75 1f 0f 00 2b 00 02 03 04
+");
+
+// {server}  extract secret "handshake":
+// IKM (32 octets):
+
+res_dhe: Result ErrMsg (Array U8);
+res_dhe = parse_hex("8bd4054fb55b9d63fdfbacf9f04b9f0d35e6d63f537563efd46272900f89492d");
+
+// {server}  send handshake record:
+// complete record (679 octets):
+res_server_encrypted_handshake_bytes: Result ErrMsg (Array U8);
+res_server_encrypted_handshake_bytes = parse_hex("
+17 03 03 02 a2 d1 ff 33 4a 56 f5 bf
+f6 59 4a 07 cc 87 b5 80 23 3f 50 0f 45 e4 89 e7 f3 3a f3 5e df
+78 69 fc f4 0a a4 0a a2 b8 ea 73 f8 48 a7 ca 07 61 2e f9 f9 45
+cb 96 0b 40 68 90 51 23 ea 78 b1 11 b4 29 ba 91 91 cd 05 d2 a3
+89 28 0f 52 61 34 aa dc 7f c7 8c 4b 72 9d f8 28 b5 ec f7 b1 3b
+d9 ae fb 0e 57 f2 71 58 5b 8e a9 bb 35 5c 7c 79 02 07 16 cf b9
+b1 18 3e f3 ab 20 e3 7d 57 a6 b9 d7 47 76 09 ae e6 e1 22 a4 cf
+51 42 73 25 25 0c 7d 0e 50 92 89 44 4c 9b 3a 64 8f 1d 71 03 5d
+2e d6 5b 0e 3c dd 0c ba e8 bf 2d 0b 22 78 12 cb b3 60 98 72 55
+cc 74 41 10 c4 53 ba a4 fc d6 10 92 8d 80 98 10 e4 b7 ed 1a 8f
+d9 91 f0 6a a6 24 82 04 79 7e 36 a6 a7 3b 70 a2 55 9c 09 ea d6
+86 94 5b a2 46 ab 66 e5 ed d8 04 4b 4c 6d e3 fc f2 a8 94 41 ac
+66 27 2f d8 fb 33 0e f8 19 05 79 b3 68 45 96 c9 60 bd 59 6e ea
+52 0a 56 a8 d6 50 f5 63 aa d2 74 09 96 0d ca 63 d3 e6 88 61 1e
+a5 e2 2f 44 15 cf 95 38 d5 1a 20 0c 27 03 42 72 96 8a 26 4e d6
+54 0c 84 83 8d 89 f7 2c 24 46 1a ad 6d 26 f5 9e ca ba 9a cb bb
+31 7b 66 d9 02 f4 f2 92 a3 6a c1 b6 39 c6 37 ce 34 31 17 b6 59
+62 22 45 31 7b 49 ee da 0c 62 58 f1 00 d7 d9 61 ff b1 38 64 7e
+92 ea 33 0f ae ea 6d fa 31 c7 a8 4d c3 bd 7e 1b 7a 6c 71 78 af
+36 87 90 18 e3 f2 52 10 7f 24 3d 24 3d c7 33 9d 56 84 c8 b0 37
+8b f3 02 44 da 8c 87 c8 43 f5 e5 6e b4 c5 e8 28 0a 2b 48 05 2c
+f9 3b 16 49 9a 66 db 7c ca 71 e4 59 94 26 f7 d4 61 e6 6f 99 88
+2b d8 9f c5 08 00 be cc a6 2d 6c 74 11 6d bd 29 72 fd a1 fa 80
+f8 5d f8 81 ed be 5a 37 66 89 36 b3 35 58 3b 59 91 86 dc 5c 69
+18 a3 96 fa 48 a1 81 d6 b6 fa 4f 9d 62 d5 13 af bb 99 2f 2b 99
+2f 67 f8 af e6 7f 76 91 3f a3 88 cb 56 30 c8 ca 01 e0 c6 5d 11
+c6 6a 1e 2a c4 c8 59 77 b7 c7 a6 99 9b bf 10 dc 35 ae 69 f5 51
+56 14 63 6c 0b 9b 68 c1 9e d2 e3 1c 0b 3b 66 76 30 38 eb ba 42
+f3 b3 8e dc 03 99 f3 a9 f2 3f aa 63 97 8c 31 7f c9 fa 66 a7 3f
+60 f0 50 4d e9 3b 5b 84 5e 27 55 92 c1 23 35 ee 34 0b bc 4f dd
+d5 02 78 40 16 e4 b3 be 7e f0 4d da 49 f4 b4 40 a3 0c b5 d2 af
+93 98 28 fd 4a e3 79 4e 44 f9 4d f5 a6 31 ed e4 2c 17 19 bf da
+bf 02 53 fe 51 75 be 89 8e 75 0e dc 53 37 0d 2b
+");
+
+test_1_task: () -> Result ErrMsg ();
+test_1_task = |_| (
+    let protection = *Protection::make(_TLS_AES_128_GCM_SHA256());
+
+    let client_hello_bytes = *res_client_hello_bytes;
+    let handshake: Handshake = *unmarshal_from_bytes(client_hello_bytes);
+    eval log_debug(handshake.to_string);
+    let protection = protection.add_handshake_context(client_hello_bytes);
+
+    let server_hello_bytes = *res_server_hello_bytes;
+    let handshake: Handshake = *unmarshal_from_bytes(server_hello_bytes);
+    eval log_debug(handshake.to_string);
+    let protection = protection.add_handshake_context(server_hello_bytes);
+
+    let dhe = *res_dhe;
+    let protection = *protection.init_handshake(dhe);
+    eval log_debug(protection.to_string);
+
+    let ciphertext_bytes = *res_server_encrypted_handshake_bytes;
+    let ciphertext: TLSCiphertext = *unmarshal_from_bytes(ciphertext_bytes);
+    let (inner_plaintext, protection) = *protection.decrypt_record(ciphertext, TrafficKeyType::server_tk());
+    eval log_debug("inner_plaintext.@content=" + inner_plaintext.@content.to_string_hex);
+    if !inner_plaintext.@content_type.is_handshake {
+        error $ "not a handshake"
+    };
+
+    let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
+    let (protection, buf) = *loop_m(
+        (protection, buf), |(protection, buf)|
+        let start = buf.get_position;
+        let (handshake: Handshake, buf) = *buf.unmarshal;
+        let end = buf.get_position;
+        let handshake_bytes = buf.@array.subarray(start, end);
+        eval log_debug(handshake.to_string);
+        if handshake.is_finished {
+            let finished: Finished = handshake.as_finished;
+            let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_tk());
+            eval log_debug("verify_data expected="+ verify_data.to_string_hex);
+            eval log_debug("verify_data actual  ="+ finished.@verify_data.to_string_hex);
+            if verify_data != finished.@verify_data {
+                error $ "verify_data mismatch"
+            };
+            let protection = protection.add_handshake_context(handshake_bytes);
+            break_m $ (protection, buf)
+        };
+        let protection = (
+            if handshake.is_encrypted_extensions || handshake.is_certificate_request ||
+                handshake.is_certificate || handshake.is_certificate_verify {
+                    protection.add_handshake_context(handshake_bytes)
+            } else { protection }
+        );
+        continue_m $ (protection, buf)
+    );
+
+    // calc client finished
+    let client_finished = Finished {
+        verify_data: *protection.calc_finished_verify_data(TrafficKeyType::client_tk())
+    };
+    eval log_debug("client_finished=" + client_finished.to_string);
+    let client_finished_bytes = marshal_to_bytes(Handshake::finished $ client_finished);
+    eval log_debug("client_finished_bytes=(" + client_finished_bytes.get_size.to_string + " octets): " + client_finished_bytes.to_string_hex);
+    let inner_plaintext: TLSInnerPlaintext = TLSInnerPlaintext::make(
+        client_finished_bytes, ContentType::handshake(), 0
+    );
+    let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_tk());
+    let ciphertext_bytes = marshal_to_bytes(ciphertext);
+    eval log_debug("ciphertext_bytes=(" + ciphertext_bytes.get_size.to_string + " octets): " + ciphertext_bytes.to_string_hex);
+    pure()
+);
+
+test_1: TestCase;
+test_1 = (
+    make_test("test_1") $ |_|
+    test_1_task().from_result
+);
+
+
+main: IO ();
+main = (
+    [
+        test_1,
+    ]
+    .run_test_driver
+);

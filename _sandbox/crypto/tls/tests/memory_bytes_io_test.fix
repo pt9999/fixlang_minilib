@@ -1,0 +1,53 @@
+module Main;
+
+import Debug;
+
+import Minilib.Monad.BytesIO;
+import Minilib.Crypto.Tls.MemoryBytesIO;
+import Minilib.IO.Channel;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
+import Minilib.Thread.Time;
+import Minilib.Testing.UnitTest;
+
+test_memory_bytes_io: TestCase;
+test_memory_bytes_io = (
+    make_test("test_memory_bytes_io") $ |_|
+    let (local_conn, remote_conn) = *MemoryBytesIO::pipe.lift;
+    let n = 102400;
+    let bytes = Array::from_map(n, |i| i.to_U8);
+    let task = do {
+        let sent_size = *send_bytes(bytes).eval_state_t(local_conn);
+        let bytes2 = *recv_n_bytes(n).eval_state_t(remote_conn);
+        pure $ sent_size == bytes.get_size && bytes == bytes2
+    }.to_result;
+    let res = *timeit_io("send_recv", task).lift;
+    //eval *println("res="+(bytes == bytes2).to_string).lift;
+    pure()
+);
+
+test_memory_bytes_io2: TestCase;
+test_memory_bytes_io2 = (
+    make_test("test_memory_bytes_io2") $ |_|
+    let (local_conn, remote_conn) = *MemoryBytesIO::pipe.lift;
+    let n = 10240;
+    let bytes = Array::from_map(n, |i| i.to_U8);
+    let task: IO () = do {
+        let sent_size = *send_bytes(bytes).eval_state_t(local_conn);
+        eval assert_eq(|_|"sent_size", bytes.get_size, sent_size);
+        let received =  *recv_n_bytes(n).eval_state_t(remote_conn);
+        eval assert_eq(|_|"local2remote", received, bytes);
+        pure()
+    }.try(eprintln);
+    timeit_io("test", task).lift
+);
+
+main: IO ();
+main = (
+    [
+        test_memory_bytes_io,
+        test_memory_bytes_io2,
+    ]
+    .run_test_driver
+);

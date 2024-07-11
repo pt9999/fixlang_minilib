@@ -1,0 +1,53 @@
+// CA certificates list
+module Minilib.Crypto.Cert.CACertificates;
+
+import Debug;
+import HashMap;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+
+// An object which manages trusted CA certificates list.
+type CACertificates = unbox struct {
+    map: HashMap X509::Name Certificate,
+};
+
+namespace CACertificates {
+
+    // The system-specific file path which contains trusted CA certificates in PEM encoding.
+    system_ca_certificates_path: Path;
+    system_ca_certificates_path = (
+        // TODO: support other OS
+        Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some
+    );
+
+    // An empty CACertificates object.
+    empty: CACertificates;
+    empty = CACertificates {
+        map: HashMap::empty(0)
+    };
+
+    // Loads all trusted CA certificates from the system-specific file path.
+    load_ca_certificates: CACertificates -> IOFail CACertificates;
+    load_ca_certificates = |ca_certs| (
+        eval *pure();
+        let path = CACertificates::system_ca_certificates_path;
+        let certificates = *read_certificates_from_pem_file(path);
+        let ca_certs = certificates.to_iter.fold(
+            ca_certs, |ca_certs, cert|
+            ca_certs.add_certificate(cert)
+        );
+        pure $ ca_certs
+    );
+
+    // Adds a self-signed certificate to the CA certificates list.
+    add_certificate: Certificate -> CACertificates -> CACertificates;
+    add_certificate = |cert| mod_map(insert(cert.@tbs_certificate.@subject, cert));
+
+    // Find a CA certificate by its subject name.
+    find: X509::Name -> CACertificates -> Option Certificate;
+    find = |name, ca_certs| ca_certs.@map.find(name);
+}

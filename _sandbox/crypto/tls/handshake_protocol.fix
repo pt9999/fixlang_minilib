@@ -1,0 +1,533 @@
+// Handshake Protocol for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.HandshakeProtocol;
+
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.Extensions;
+import Minilib.Crypto.Tls.CipherSuite;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// 4. Handshake Protocol
+
+type Handshake = unbox union {
+    client_hello: ClientHello,
+    server_hello: ServerHello,
+    new_session_ticket: NewSessionTicket,
+    end_of_early_data: (),
+    encrypted_extensions: EncryptedExtensions,
+    certificate: Certificate,
+    certificate_request: CertificateRequest,
+    certificate_verify: CertificateVerify,
+    finished: Finished,
+    key_update: KeyUpdate,
+    message_hash: ()
+};
+
+type HandshakeType = U8;
+
+namespace Handshake {
+    get_msg_type: Handshake -> HandshakeType;
+    get_msg_type = |h| (
+        if h.is_client_hello { 1_U8 };
+        if h.is_server_hello { 2_U8 };
+        if h.is_new_session_ticket { 4_U8 };
+        if h.is_end_of_early_data { 5_U8 };
+        if h.is_encrypted_extensions { 8_U8 };
+        if h.is_certificate { 11_U8 };
+        if h.is_certificate_request { 13_U8 };
+        if h.is_certificate_verify { 15_U8 };
+        if h.is_finished { 20_U8 };
+        if h.is_key_update { 24_U8 };
+        if h.is_message_hash { 254_U8 };
+        eval assert(|_| "unknown msg_type", false);
+        0_U8
+    );
+
+    get_msg_type_as_string: Handshake -> String;
+    get_msg_type_as_string = |h| (
+        if h.is_client_hello { "ClientHello" };
+        if h.is_server_hello { "ServerHello" };
+        if h.is_new_session_ticket { "NewSessionTicket" };
+        if h.is_end_of_early_data { "EndOfEarlyData" };
+        if h.is_encrypted_extensions { "EncryptedExtensions" };
+        if h.is_certificate { "Certificate" };
+        if h.is_certificate_request { "CertificateRequest" };
+        if h.is_certificate_verify { "CerticateVerify" };
+        if h.is_finished { "Finished" };
+        if h.is_key_update { "KeyUpdate" };
+        if h.is_message_hash { "MessageHash" };
+        eval assert(|_| "unknown msg_type", false);
+        ""
+    );
+
+    _marshal_body: Handshake -> ByteBuffer -> ByteBuffer;
+    _marshal_body = |h, buf| (
+        if h.is_client_hello { buf.marshal(h.as_client_hello) };
+        if h.is_finished { buf.marshal(h.as_finished) };
+        buf
+    );
+
+    _unmarshal_body: HandshakeType -> ByteBuffer -> Result ErrMsg (Handshake, ByteBuffer);
+    _unmarshal_body = |msg_type, buf| (
+        eval log_debug("Handshake::_unmarshal_body: msg_type=" + msg_type.to_string);
+        if msg_type == 1_U8 { buf.unmarshal.map_res_0(Handshake::client_hello) };
+        if msg_type == 2_U8 { buf.unmarshal.map_res_0(Handshake::server_hello) };
+        if msg_type == 4_U8 { buf.unmarshal.map_res_0(Handshake::new_session_ticket) };
+        if msg_type == 8_U8 { buf.unmarshal.map_res_0(Handshake::encrypted_extensions) };
+        if msg_type == 11_U8 { buf.unmarshal.map_res_0(Handshake::certificate) };
+        if msg_type == 13_U8 { buf.unmarshal.map_res_0(Handshake::certificate_request) };
+        if msg_type == 15_U8 { buf.unmarshal.map_res_0(Handshake::certificate_verify) };
+        if msg_type == 20_U8 { buf.unmarshal.map_res_0(Handshake::finished) };
+        if msg_type == 24_U8 { buf.unmarshal.map_res_0(Handshake::key_update) };
+        err $ "unsupported msg_type: " + msg_type.to_string
+    );
+}
+
+impl Handshake: ToString {
+    to_string = |h| (
+        if h.is_client_hello { h.as_client_hello.to_string };
+        if h.is_server_hello { h.as_server_hello.to_string };
+        if h.is_new_session_ticket { h.as_new_session_ticket.to_string };
+        if h.is_end_of_early_data { h.as_end_of_early_data.to_string };
+        if h.is_encrypted_extensions { h.as_encrypted_extensions.to_string };
+        if h.is_certificate { h.as_certificate.to_string };
+        if h.is_certificate_request { h.as_certificate_request.to_string };
+        if h.is_certificate_verify { h.as_certificate_verify.to_string };
+        if h.is_finished { h.as_finished.to_string };
+        if h.is_key_update { h.as_key_update.to_string };
+        if h.is_message_hash { h.as_message_hash.to_string };
+        eval assert(|_| "unknown msg_type", false);
+        ""
+    );
+}
+
+impl Handshake: Marshal {
+    marshal = |h, buf| (
+        let buf = buf.marshal(h.get_msg_type);
+        let length_pos = buf.get_position;
+        let buf = buf.marshal(0_U32.to_U24);
+        let buf = buf._marshal_body(h);
+        let last_pos = buf.get_position;
+        let buf = buf.set_position(length_pos);
+        let buf = buf.marshal((last_pos - (length_pos + 3)).to_U32.to_U24);
+        let buf = buf.set_position(last_pos);
+        buf
+    );
+}
+
+impl Handshake: Unmarshal {
+    unmarshal = |buf| (
+        //eval log_debug("handshake unmarshal: pos=" + buf.get_position.to_string);
+        let (msg_type: HandshakeType, buf) = *buf.unmarshal;
+        let length_pos = buf.get_position;
+        let (length: U24, buf) = *buf.unmarshal;
+        let (handshake: Handshake, buf) = *buf._unmarshal_body(msg_type);
+        let last_pos = buf.get_position;
+        let expected_length = last_pos - (length_pos + 3);
+        if expected_length.to_U32 != length.to_U32 {
+            err $ "unexpected length"
+        };
+        ok $ (handshake, buf)
+    );
+}
+
+// 4.1.2 ClientHello
+
+type ClientHello = unbox struct {
+    legacy_version: ProtocolVersion,        // = 0x0303
+    random: Array U8,                       // [32]
+    legacy_session_id: Array U8,            // <0..32>
+    cipher_suites: Array CipherSuite,       // <2..2^16-2>
+    legacy_compression_method: Array U8,    // <1..2^8-1>
+    extensions: Array Extension            // <8..2^16-1>
+};
+
+namespace ClientHello {
+    to_handshake: ClientHello -> Handshake;
+    to_handshake = |hello| Handshake::client_hello(hello);
+
+    from_handshake: [m: MonadError] Handshake -> m ClientHello;
+    from_handshake = |handshake| (
+        if !handshake.is_client_hello { error $ "from_handshake: not a client hello" };
+        handshake.as_client_hello
+    );
+
+    empty: ClientHello;
+    empty = ClientHello {
+        legacy_version: 0x0303_U16,
+        random: Array::fill(32, 0x00_U8),
+        legacy_session_id: [],
+        cipher_suites: CipherSuite::supported_cipher_suites,
+        legacy_compression_method: [ 0_U8 ],
+        extensions: Extension::supported_extensions,
+    };
+
+    init_random: Array U8 -> ClientHello -> ClientHello;
+    init_random = |random, hello| (
+        eval assert(|_| "random size mismatch", random.get_size == 32);
+        hello.set_random(random)
+    );
+
+    add_extension: Extension -> ClientHello -> ClientHello;
+    add_extension = |ext, hello| (
+        hello.mod_extensions(push_back(ext))
+    );
+}
+
+impl ClientHello: ToString {
+    to_string = |hello| (
+        "ClientHello {" +
+        "\n  legacy_version=" + hello.@legacy_version.to_string_hex +
+        "\n  random=" + hello.@random.to_string_hex +
+        "\n  legacy_session_id=" + hello.@legacy_session_id.to_string_hex +
+        "\n  cipher_suites=" + hello.@cipher_suites.to_string +
+        "\n  legacy_compression_method=" + hello.@legacy_compression_method.to_string_hex +
+        "\n  extensions=" + hello.@extensions.to_string +
+        "\n}"
+    );
+}
+
+impl ClientHello: Marshal {
+    marshal = |msg, buf| (
+        eval assert(|_| "invalid random size", msg.@random.get_size == 32);
+        let buf = buf.marshal(msg.@legacy_version);
+        let buf = buf.marshal_fixed(msg.@random);
+        let buf = buf.marshal_var_size(msg.@legacy_session_id, to_U8);
+        let buf = buf.marshal_var_size(msg.@cipher_suites, to_U16);
+        let buf = buf.marshal_var_size(msg.@legacy_compression_method, to_U8);
+        let buf = buf.marshal_var_size(msg.@extensions, to_U16);
+        buf
+    );
+}
+
+impl ClientHello: Unmarshal {
+    unmarshal = |buf| (
+        let (legacy_version:U16, buf) = *buf.unmarshal;
+        let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
+        let (legacy_session_id:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (cipher_suites:Array CipherSuite, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (legacy_compression_method, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let msg = ClientHello {
+            legacy_version: legacy_version,
+            random: random,
+            legacy_session_id: legacy_session_id,
+            cipher_suites: cipher_suites,
+            legacy_compression_method: legacy_compression_method,
+            extensions: extensions
+        };
+        pure $ (msg, buf)
+    );
+}
+
+// 4.1.3 ServerHello
+
+type ServerHello = unbox struct {
+    legacy_version: ProtocolVersion,        // = 0x0303
+    random: Array U8,                       // [32]
+    legacy_session_id_echo: Array U8,       // <0..32>
+    cipher_suite: CipherSuite,              //
+    legacy_compression_method: U8,          // = 0
+    extensions: Array Extension            // <6..2^16-1>, SupportedVersions and KeyShare in most cases
+};
+
+impl ServerHello: ToString {
+    to_string = |hello| (
+        "ServerHello {" +
+        "\n  legacy_version=" + hello.@legacy_version.to_string_hex +
+        "\n  random=" + hello.@random.to_string_hex +
+        "\n  legacy_session_id_echo=" + hello.@legacy_session_id_echo.to_string_hex +
+        "\n  cipher_suite=" + hello.@cipher_suite.to_string +
+        "\n  legacy_compression_method=" + hello.@legacy_compression_method.to_string_hex +
+        "\n  extensions=" + hello.@extensions.to_string +
+        "\n}"
+    );
+}
+
+impl ServerHello: Unmarshal {
+    unmarshal = |buf| (
+        let (legacy_version:U16, buf) = *buf.unmarshal;
+        let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
+        let (legacy_session_id_echo:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (cipher_suite:CipherSuite, buf) = *buf.unmarshal;
+        let (legacy_compression_method, buf) = *buf.unmarshal;
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let msg = ServerHello {
+            legacy_version: legacy_version,
+            random: random,
+            legacy_session_id_echo: legacy_session_id_echo,
+            cipher_suite: cipher_suite,
+            legacy_compression_method: legacy_compression_method,
+            extensions: extensions
+        };
+        pure $ (msg, buf)
+    );
+}
+
+namespace ServerHello {
+    to_handshake: ServerHello -> Handshake;
+    to_handshake = |hello| Handshake::server_hello(hello);
+
+    from_handshake: [m: MonadError] Handshake -> m ServerHello;
+    from_handshake = |handshake| (
+        if !handshake.is_server_hello { error $ "from_handshake: not a server hello" };
+        handshake.as_server_hello
+    );
+}
+
+// 4.3.1. Encrypted Extensions
+
+type EncryptedExtensions = unbox struct {
+    extensions: Array Extension
+};
+
+impl EncryptedExtensions: ToString {
+    to_string = |exs| (
+        "EncryptedExtensions { extensions=" + exs.@extensions.to_string + " }"
+    );
+}
+
+impl EncryptedExtensions: Unmarshal {
+    unmarshal = |buf| (
+        //eval log_debug("EncryptedExtensions unmarshal " + buf.@array.to_string_hex);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let extensions = EncryptedExtensions { extensions: extensions };
+        pure $ (extensions, buf)
+    );
+}
+
+// 4.3.2. Certificate Request
+
+type CertificateRequest = unbox struct {
+    certificate_request_context: Array U8,  // <0..2^8-1>
+    extensions: Array Extension,
+};
+
+impl CertificateRequest: ToString {
+    to_string = |req| (
+        "CertificateRequest {" +
+        " context=" + req.@certificate_request_context.to_string_hex +
+        " extensions=" + req.@extensions.to_string +
+        " }"
+    );
+}
+
+impl CertificateRequest: Unmarshal {
+    unmarshal = |buf| (
+        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let cerreq = CertificateRequest {
+            certificate_request_context: context,
+            extensions: extensions
+        };
+        pure $ (cerreq, buf)
+    );
+}
+
+// 4.4.2. Certificate
+
+type CertificateType = unbox union {
+    _X509: (),              // 0
+    _RawPublicKey: (),      // 2
+};
+
+type CertificateEntry = unbox struct {
+    // NOTE: cert_data should be interpreted as ASN1_subjectPublicKeyInfo if certificate_type == RawPublicKey
+    cert_data: Array U8,                        // <1..2^24-1>
+    extensions: Array Extension,                // <0..2^16-1>, empty in most cases
+};
+
+impl CertificateEntry: ToString {
+    to_string = |entry| (
+        "CertificateEntry {" +
+        " cert_data=" + entry.@cert_data.to_string_hex +
+        " extensions=" + entry.@extensions.to_string +
+        " }"
+    );
+}
+
+impl CertificateEntry: Unmarshal {
+    unmarshal = |buf| (
+        let (cert_data:Array U8, buf) = *buf.unmarshal_var_size(U24::to_I64);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let entry = CertificateEntry {
+            cert_data: cert_data,
+            extensions: extensions
+        };
+        pure $ (entry, buf)
+    );
+}
+
+type Certificate = unbox struct {
+    certificate_request_context: Array U8,      // <0..2^8-1>, empty in most cases
+    certificate_list: Array CertificateEntry,   // <0..2^24-1>
+};
+
+impl Certificate: ToString {
+    to_string = |cert| (
+        "Certificate {" +
+        "\n certificate_request_context=" + cert.@certificate_request_context.to_string_hex +
+        "\n certificate_list=" +
+        "\n  " + cert.@certificate_list.to_iter.map(to_string).join("\n  ") +
+        "\n}"
+    );
+}
+
+impl Certificate: Unmarshal {
+    unmarshal = |buf| (
+        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (certificate_list:Array CertificateEntry, buf) = *buf.unmarshal_var_size(U24::to_I64);
+        let entry = Certificate {
+            certificate_request_context: context,
+            certificate_list: certificate_list
+        };
+        pure $ (entry, buf)
+    );
+}
+
+// 4.4.3. Certificate Verify
+
+type CertificateVerify = unbox struct {
+    algorithm: SignatureScheme,
+    signature: Array U8,            // <0..2^16-1>
+};
+
+impl CertificateVerify: ToString {
+    to_string = |cv| (
+        "CertificateVerify {" +
+        " algorithm=" + cv.@algorithm.to_string_hex +
+        " signature=" + cv.@signature.to_string_hex +
+        " }"
+    );
+}
+
+impl CertificateVerify: Unmarshal {
+    unmarshal = |buf| (
+        let (algorithm, buf) = *buf.unmarshal;
+        let (signature, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let cv = CertificateVerify {
+            algorithm: algorithm,
+            signature: signature
+        };
+        pure $ (cv, buf)
+    );
+}
+
+// 4.4.4. Finished
+
+type Finished = unbox struct {
+    verify_data: Array U8
+};
+
+impl Finished: ToString {
+    to_string = |fin| (
+        "Finished {" +
+        " verify_data=" + fin.@verify_data.to_string_hex +
+        " }"
+    );
+}
+
+impl Finished: Marshal {
+    marshal = |msg, buf| (
+        // TODO: use Hash.length
+        let buf = buf.marshal_fixed(msg.@verify_data);
+        buf
+    );
+}
+
+impl Finished: Unmarshal {
+    unmarshal = |buf| (
+        // TODO: use Hash.length
+        let (verify_data, buf) = *buf.unmarshal_fixed(buf.get_size - buf.get_position);
+        let fi = Finished {
+            verify_data: verify_data,
+        };
+        pure $ (fi, buf)
+    );
+}
+
+// 4.6.1. New Session Ticket Message
+
+type NewSessionTicket = unbox struct {
+    ticket_lifetime: U32,
+    ticket_age_add: U32,
+    ticket_nonce: Array U8,     // <0..255>
+    ticket: Array U8,           // <1..2^16-1>
+    extensions: Array Extension, // <0..2^16-2>
+};
+
+impl NewSessionTicket: ToString {
+    to_string = |nst| (
+        "NewSessionTicket {" +
+        " ticket_lifetime=" + nst.@ticket_lifetime.to_string +
+        " ticket_age_add=" + nst.@ticket_age_add.to_string +
+        " ticket_nonce=" + nst.@ticket_nonce.to_string_hex +
+        " ticket=" + nst.@ticket.to_string_hex +
+        " extensions=" + nst.@extensions.to_string +
+        " }"
+    );
+}
+
+impl NewSessionTicket: Unmarshal {
+    unmarshal = |buf| (
+        let (ticket_lifetime, buf) = *buf.unmarshal;
+        let (ticket_age_add, buf) = *buf.unmarshal;
+        let (ticket_nonce, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (ticket, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let nst = NewSessionTicket {
+            ticket_lifetime: ticket_lifetime,
+            ticket_age_add: ticket_age_add,
+            ticket_nonce: ticket_nonce,     // <0..255>
+            ticket: ticket,           // <1..2^16-1>
+            extensions: extensions, // <0..2^16-2>
+        };
+        pure $ (nst, buf)
+    );
+}
+
+// 4.6.3. Key and Initialization Vector Update
+
+type KeyUpdate = unbox union {
+    update_not_requested: (),
+    update_requested: (),
+};
+
+impl KeyUpdate: ToString {
+    to_string = |ku| (
+        if ku.is_update_not_requested { "update_not_requested()" };
+        if ku.is_update_requested { "update_requested()" };
+        ""
+    );
+}
+
+impl KeyUpdate: Marshal {
+    marshal = |ku, buf| (
+        let u8 = (
+            if ku.is_update_not_requested { 0_U8 };
+            if ku.is_update_requested { 1_U8 };
+            0_U8
+        );
+        buf.marshal(u8)
+    );
+}
+
+impl KeyUpdate: Unmarshal {
+    unmarshal = |buf| (
+        let (u8: U8, buf) = *buf.unmarshal;
+        let ku = *(
+            if u8 == 0_U8 { pure $ update_not_requested() };
+            if u8 == 1_U8 { pure $ update_requested() };
+            err $ "unexpected_message"
+        );
+        pure $ (ku, buf)
+    );
+}

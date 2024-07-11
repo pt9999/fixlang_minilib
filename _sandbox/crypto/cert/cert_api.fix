@@ -1,0 +1,54 @@
+// Public API that manages X.509 certificates.
+module Minilib.Crypto.Cert.CertApi;
+
+// A X.509 Certificate in DER-encoded bytes.
+type CerCertificateData = Array U8;
+// A string that represents a point of time in "YYYYMMDDHHMMSSZ" format.
+type CerTime = String;
+// A digital signature.
+type CerSignature = Array U8;
+// A target message of a digital signature.
+type CerSigMessage = Array U8;
+// A name of a digital signature scheme, for example "rsa_pss_rsae_sha256", "ecdsa_secp256r1_sha256" etc.
+type CerSigScheme = String;
+// A DNS name of the target server.
+type CerDnsName = String;
+
+// Public API that manages X.509 certificates.
+type CertApi = unbox struct {
+    // Reads an array of certificate data from the PEM-encoded string, which contains zero or more
+    // `-----BEGIN CERTIFICATE-----` ... `-----END CERTIFICATE-----` blocks.
+    read_cert_data_array_from_pem_string: String -> Result ErrMsg (Array CerCertificateData),
+    // Loads CA certificates from system-specific location.
+    // On Linux, the CA certificates is located in the file `/etc/ssl/certs/ca-certificates.crt`.
+    load_ca_certificates: IOFail CertApi,
+    // Adds a self-signed certificate to the CA certificates list.
+    add_to_ca_certificates: CerCertificateData -> IOFail CertApi,
+    // Gets the current time to use later to validate certificates.
+    // NOTE: `CertPathApi::@validate_date` cannot get the current time since it requires an IO operation.
+    get_now: IO CerTime,
+    // Builds a certificate path from an array of certificates (an array of DER-encoded bytes)
+    // and a collection of CA certificates.
+    build_cert_path: Array (CerCertificateData) -> Result ErrMsg CertPathApi,
+};
+
+// Public API that represents a certificate path.
+type CertPathApi = unbox struct {
+    // Gets all certificates in the certificate path.
+    get_certificates: () -> Array CertificateApi,
+    // Validates whether certificates are valid at the specified time.
+    validate_date: CerTime -> Result ErrMsg (),
+    // Validates the signature of each certificate in the certification path,
+    // using the issuer's public key.
+    // In the certificate path, the issuer's certificate is the next certificate after the subject's certificate.
+    // However, the last certificate (CA) in the certificate path is self-signed, so the subject and issuer are the same.
+    validate_certificate_signatures: () -> Result ErrMsg (),
+};
+
+// Public API that represents a X.509 certificate.
+type CertificateApi = unbox struct {
+    // Verifies a signature against a message using the subject's public key of the certificate.
+    verify_signature_by_subject_public_key: CerSigMessage -> CerSigScheme -> CerSignature -> Result ErrMsg (),
+    // Verifies the identity of the certificate against the specified DNS name.
+    verify_certificate_identity: CerDnsName -> Result ErrMsg (),
+};

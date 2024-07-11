@@ -1,0 +1,163 @@
+module Minilib.Crypto.Cert.X509Signature;
+
+import Debug;
+import HashMap;
+
+import Minilib.Crypto.Cert.CertApi;
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Crypto.Cipher.Rsa.RsaApi;
+import Minilib.Crypto.Cipher.Ec.EcApi;
+import Minilib.Monad.Error;
+
+// Validate the signature of a certificate using the specified public key.
+// The signature is retrieved from `certificate.@signature_value`, and the message to be validated is
+// retrieved from `certificate.@tbs_certificate_bytes`.
+validate_certificate_signature: CipherApi -> SubjectPublicKeyInfo -> Certificate -> Result ErrMsg ();
+validate_certificate_signature = |cipher_api, public_key, certificate| (
+    let message: Array U8 = certificate.@tbs_certificate_bytes;
+    let signature: Array U8 = certificate.@signature_value.@data;
+    let signature_algorithm: AlgorithmIdentifier = certificate.@signature_algorithm;
+    let hash_name = signature_algorithm._find_rsa_hash_name;
+    if hash_name.is_some {
+        verify_signature_pkcs1_v1_5(cipher_api, hash_name.as_some, public_key, message, signature)
+    };
+    let ec_hash_name = signature_algorithm._find_ec_hash_name;
+    if ec_hash_name.is_some {
+        verify_signature_ecdsa(cipher_api, ec_hash_name.as_some, public_key, message, signature)
+    };
+
+    err $ "Not supported signature algorithm: " + certificate.@signature_algorithm.to_string
+);
+
+_find_rsa_hash_name: AlgorithmIdentifier -> Option RsaHashName;
+_find_rsa_hash_name = |signature_algorithm| (
+    if signature_algorithm.match_name("sha-1WithRSAEncryption") {
+        some $ "sha1"
+    };
+    if signature_algorithm.match_name("sha256WithRSAEncryption") {
+        some $ "sha256"
+    };
+    if signature_algorithm.match_name("sha384WithRSAEncryption") {
+        some $ "sha384"
+    };
+    if signature_algorithm.match_name("sha512WithRSAEncryption") {
+        some $ "sha512"
+    };
+    none()
+);
+
+_find_ec_hash_name: AlgorithmIdentifier -> Option EcHashName;
+_find_ec_hash_name = |signature_algorithm| (
+    if signature_algorithm.match_name("ecdsa-with-SHA256") {
+        some $ "sha256"
+    };
+    if signature_algorithm.match_name("ecdsa-with-SHA384") {
+        some $ "sha384"
+    };
+    none()
+);
+
+// Verify the signature of a message using the public key of the certificate.
+verify_signature_by_subject_public_key: [m: MonadError] CipherApi -> Certificate -> CerSigMessage -> CerSigScheme -> CerSignature -> m ();
+verify_signature_by_subject_public_key = |cipher_api, certificate, message, scheme, signature| (
+    let public_key = certificate.get_subject_public_key;
+    let hash_name = scheme._find_sig_rsa_pss_rsae_hash_name;
+    if hash_name.is_some {
+        verify_signature_rsassa_pss(cipher_api, hash_name.as_some, public_key, message, signature).from_result_t
+    };
+    let hash_name = scheme._find_sig_rsa_pkcs1_hash_name;
+    if hash_name.is_some {
+        verify_signature_pkcs1_v1_5(cipher_api, hash_name.as_some, public_key, message, signature).from_result_t
+    };
+    let hash_name = scheme._find_sig_ecdsa_hash_name;
+    if hash_name.is_some {
+        verify_signature_ecdsa(cipher_api, hash_name.as_some, public_key, message, signature).from_result_t
+    };
+    error $ "verify_signature_by_subject_public_key: unsupported scheme: " + scheme
+);
+
+_find_sig_rsa_pss_rsae_hash_name: CerSigScheme -> Option RsaHashName;
+_find_sig_rsa_pss_rsae_hash_name = |scheme| (
+    if scheme == "rsa_pss_rsae_sha256" {
+        some $ "sha256"
+    };
+    if scheme == "rsa_pss_rsae_sha384" {
+        some $ "sha384"
+    };
+    if scheme == "rsa_pss_rsae_sha512" {
+        some $ "sha512"
+    };
+    none()
+);
+
+_find_sig_rsa_pkcs1_hash_name: CerSigScheme -> Option RsaHashName;
+_find_sig_rsa_pkcs1_hash_name = |scheme| (
+    if scheme == "rsa_pkcs1_sha256" {
+        some $ "sha256"
+    };
+    if scheme == "rsa_pkcs1_sha384" {
+        some $ "sha384"
+    };
+    if scheme == "rsa_pkcs1_sha512" {
+        some $ "sha512"
+    };
+    none()
+);
+
+_find_sig_ecdsa_hash_name: CerSigScheme -> Option EcHashName;
+_find_sig_ecdsa_hash_name = |scheme| (
+    if scheme == "ecdsa_secp256r1_sha256" {
+        some $ "sha256"
+    };
+    if scheme == "ecdsa_secp384r1_sha384" {
+        some $ "sha384"
+    };
+    none()
+);
+
+_get_rsa_public_key: SubjectPublicKeyInfo -> Result ErrMsg RsaPublicKey;
+_get_rsa_public_key = |public_key| (
+    // RFC4055 1.2. RSA Public Keys
+    let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+    if !pubkey_algorithm.match_name("rsaEncryption") {
+        error $ "Public_key algorithm does not match `rsaEncryption`: " + pubkey_algorithm.to_string
+    };
+    pure $ public_key.@subject_public_key.@data
+);
+
+// Verify the signature of a message using the specified public key, using `rsassa_pss_verify`.
+verify_signature_rsassa_pss: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+verify_signature_rsassa_pss = |cipher_api, hash_name, public_key, message, signature| (
+    let rsa_pubkey = *_get_rsa_public_key(public_key);
+    let rsa_api = *@make_rsa_api(cipher_api);
+    @rsassa_pss_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
+);
+
+// Verify the signature of a message using the specified public key, using `rsassa_pkcs1_v1_5_verify`.
+verify_signature_pkcs1_v1_5: CipherApi -> RsaHashName -> SubjectPublicKeyInfo -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+verify_signature_pkcs1_v1_5 = |cipher_api, hash_name, public_key, message, signature| (
+    let rsa_pubkey = *_get_rsa_public_key(public_key);
+    let rsa_api = *@make_rsa_api(cipher_api);
+    @rsassa_pkcs1_v1_5_verify(rsa_api, hash_name, rsa_pubkey, message, signature)
+);
+
+// Verify the signature of a message using the specified public key, using ECDSA `verify`.
+verify_signature_ecdsa: CipherApi -> EcHashName -> SubjectPublicKeyInfo -> EcSigMessage -> EcSignature -> Result ErrMsg ();
+verify_signature_ecdsa = |cipher_api, hash_name, public_key, message, signature| (
+    // RFC5480 2.1. Elliptic Curve Cryptography Public Key Algorithm Identifiers
+    let pubkey_algorithm: AlgorithmIdentifier = public_key.@algorithm;
+    if !pubkey_algorithm.match_name("id-ecPublicKey") {
+        err $ "Public_key algorithm does not match `id-ecPublicKey`: " + pubkey_algorithm.to_string
+    };
+    let named_curve: ObjectIdentifier = *decode_der_from_bytes(pubkey_algorithm.@parameters);
+    let curve_name: EcCurveName = named_curve.get_name.as_some_or("");   // secp256r1, secp384r1 etc.
+    let public_key: EcPublicKey = public_key.@subject_public_key.@data;  // UncompressedPointRepresentation (see 2.3.3 in [SEC1])
+
+    let ec_api = *@make_ec_api(cipher_api);
+    let ecdsa_api = *@make_ecdsa(ec_api, curve_name, hash_name);
+    @verify(ecdsa_api, public_key, signature, message)
+);

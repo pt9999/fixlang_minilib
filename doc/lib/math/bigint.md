@@ -55,6 +55,11 @@ Shifts `@nat` to left. NOTE `@sign` does not affect at all.
 
 Shifts `@nat` to right. NOTE `@sign` does not affect at all.
 
+#### bit_length: BigInt -> U64;
+
+Returns the bit length of `a.@nat`, ie. one plus the bit position of most significant `1`.
+Returns 0 if `a` is zero.
+
 #### two: BigInt;
 
 BigInt constant representing 2.
@@ -118,4 +123,15 @@ NOTE: -8 / 3 == -2, as with the Fix language.
 #### `impl BigInt: Rem`
 
 NOTE: -8 % 3 == -2, as with the Fix language.
+
+#### `impl BigInt: FromBytes`
+
+#### `impl BigInt: ToBytes`
+
+NOTE: Unneeded zeros might be placed at the beginning
+
+#### repeat_by_BigInt: (a -> a -> a) -> a -> a -> BigInt -> a;
+
+`repeat_by_BigInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+`op` is an associative binary operation.
 

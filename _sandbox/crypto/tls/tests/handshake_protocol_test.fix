@@ -1,0 +1,47 @@
+module Main;
+
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.HandshakeProtocol;
+
+import Debug;
+
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_client_hello_marshal: TestCase;
+test_client_hello_marshal = (
+    make_test("test_client_hello_marshal") $ |_|
+    let hello = ClientHello::empty;
+    let hello = hello.init_random(Array::fill(32, 0x0a_U8));
+    let handshake = client_hello(hello);
+    let bytes = marshal_to_bytes(handshake);
+    let expected = "0100004c03030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000002130101000021000a000400020017002b0003020304000b00020100000d00080006040108040403";
+    let actual = bytes.to_string_hex;
+    //eval *println(actual).lift;
+    assert_equal("eq", expected, actual)
+);
+
+test_server_hello_unmarshal: TestCase;
+test_server_hello_unmarshal = (
+    make_test("test_server_hello_unmarshal") $ |_|
+    let bytes = *from_string_hex("03030a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a001301000000").from_result;
+    let hello:ServerHello = *unmarshal_from_bytes(bytes).from_result;
+    let expected = "cipher_suite=1301 legacy_compression_method=0";
+    let actual = (hello.@cipher_suite, hello.@legacy_compression_method).format(
+        "cipher_suite={} legacy_compression_method={}"
+    );
+    //eval *println(actual).lift;
+    assert_equal("eq", expected, actual)
+);
+
+
+main: IO ();
+main = (
+    [
+        test_client_hello_marshal,
+        test_server_hello_unmarshal,
+    ]
+    .run_test_driver
+);

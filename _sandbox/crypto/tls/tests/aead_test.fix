@@ -1,0 +1,55 @@
+module Main;
+
+import Debug;
+
+import Minilib.Crypto.Tls.Aead;
+import Minilib.Encoding.Binary;
+import Minilib.Crypto.AES;
+import Minilib.Crypto.AES.GCM;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+// testcases extracted from AES-GCM test vectors.
+// for details, see _sandbox/crypto/aes_gcmvs.fix.
+test_aes_gcmvs: TestCase;
+test_aes_gcmvs = (
+    make_table_test("test_aes_gcmvs",
+        [
+            // 128,96,128,128,128,0
+            "c939cc13397c1d37de6ae0e1cb7c423c,b3d8cc017cbb89b39e0f67e2,c3b3c41f113a31b73d9a5cd432103069,24825602bd12a984e0092d3e448eda5f,93fe7d9e9bfd10348a5606e5cafa7354,0032a1dc85f1c9786925a2e71d8272dd",
+            // 128,96,256,0,128,0
+            "9971071059abc009e4f2bd69869db338,07a9a95ea3821e9c13c63251,f54bc3501fed4f6f6dfb5ea80106df0bd836e6826225b75c0222f6e859b35983,,0556c159f84ef36cb1602b4526b12009c775611bffb64dc0d9ca9297cd2c6a01,7870d9117f54811a346970f1de090c41",
+            // 128,96,256,128,128,0
+            "298efa1ccf29cf62ae6824bfc19557fc,6f58a93fe1d207fae4ed2f6d,cc38bccd6bc536ad919b1395f5d63801f99f8068d65ca5ac63872daf16b93901,021fafd238463973ffe80256e5b1c6b1,dfce4e9cd291103d7fe4e63351d9e79d3dfd391e3267104658212da96521b7db,542465ef599316f73a7a560509a2d9f2",
+            // 128,96,256,160,128,0
+            "fedc7155192d00b23cdd98750db9ebba,a76b74f55c1a1756a08338b1,6831435b8857daf1c513b148820d13b5a72cc490bda79a98a6f520d8763c39d1,2ad206c4176e7e552aa08836886816fafa77e759,15823805da89a1923bfc1d6f87784d56bad1128b4dffdbdeefbb2fa562c35e68,d23dc455ced49887c717e8eabeec2984",
+        ],
+        |testdata|
+        if testdata == "" { pure() };
+        let bytes_arr: Array (Array U8) = (*testdata.split(",").map_m(from_string_hex).from_result).to_array;
+        let key = bytes_arr.@(0);
+        let iv = bytes_arr.@(1);
+        let plaintext = bytes_arr.@(2);
+        let auth_data = bytes_arr.@(3);
+        let ciphertext = bytes_arr.@(4);
+        let tag = bytes_arr.@(5);
+
+        let aead = AEAD::make_aes_gcm $ _AEAD_AES_128_GCM;
+        let encrypted = *aead.aead_encrypt(key, iv, auth_data, plaintext).from_result;
+        let _ = *assert_equal("encrypted", ciphertext.append(tag), encrypted);
+        let res = aead.aead_decrypt(key, iv, auth_data, encrypted);
+        let _ = *assert_equal("plaintext", ok $ plaintext, res);
+        pure()
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_aes_gcmvs,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

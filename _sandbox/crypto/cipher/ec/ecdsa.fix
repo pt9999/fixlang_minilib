@@ -1,0 +1,676 @@
+// Elliptic Curve Cryptography
+//
+// Implemented from specification of SEC 1
+// https://www.secg.org/SEC1-Ver-1.0.pdf
+// https://www.secg.org/sec1-v2.pdf
+//
+// Implemented secp256r1, secp384r1 from specification of SEC 2
+// https://www.secg.org/sec2-v2.pdf
+//
+// secp256r1（NIST P-256)
+// https://doi.org/10.6028/NIST.FIPS.186-5
+
+module Minilib.Crypto.Cipher.Ec.ECDSA;
+
+import Character;
+import Debug;
+
+import Minilib.Monad.Random;
+import Minilib.Crypto.SHA256;
+import Minilib.Crypto.SHA512;
+import Minilib.Encoding.Binary;
+import Minilib.Math.Modular;
+import Minilib.Math.BigInt;
+import Minilib.Math.BigNat;
+import Minilib.Math.Types;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// A type that represents an integer.
+type ECInt = BigInt;
+
+namespace ECInt {
+
+    // Converts a byte array to an ECInt.
+    // SEC1: 2.3.8 Octet-String-to-Integer Conversion
+    // use FromBytes::from_bytes
+
+    // Converts a hex string to an ECInt.
+    from_string_hex: String -> Result ErrMsg ECInt;
+    from_string_hex = |str| (
+        let bytes: Array U8 = *FromStringHex::from_string_hex(str);
+        from_bytes(bytes)
+    );
+
+    // Converts an ECInt to a byte array with specified length.
+    // SEC1: 2.3.7 Integer-to-Octet-String Conversion
+    to_n_bytes: I64 -> ECInt -> Array U8;
+    to_n_bytes = |mlen, a| (
+        let bytes = a.ToBytes::to_bytes;    // use ToBytes::to_bytes
+        let n = bytes.get_size;
+        if n < mlen {
+            Array::fill(mlen - n, 0_U8).append(bytes)
+        } else if n > mlen {
+            bytes.get_sub(n - mlen, n)
+        } else {
+            bytes
+        }
+    );
+
+    // Converts an ECInt to a hex string.
+    to_string_hex: ECInt -> String;
+    to_string_hex = |a| (
+        a.to_bytes.to_string_hex
+    );
+
+    // Gets an octet string length.
+    get_mlen: ECInt -> I64;
+    get_mlen = |q| (
+        let k = q.@nat._bit_length.to_I64;      // 2^(k-1) <= q < 2^k
+        let mlen = (k + 7) / 8;
+        mlen
+    );
+
+    // `repeat_by_ECInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+    // `op` is an associative binary operation.
+    repeat_by_ECInt: (a -> a -> a) -> a -> a -> ECInt -> a;
+    repeat_by_ECInt = repeat_by_BigInt;
+
+    // Generates random ECInt `r` such that `begin <= r && r < end`.
+    generate_ECInt_range: [m: MonadRandom] ECInt -> ECInt -> m ECInt;
+    generate_ECInt_range = |begin, end| (
+        if begin > end {
+            generate_ECInt_range(end, begin)      // swap range and retry
+        };
+        let n = end - begin;
+        eval assert(|_| "invalid range", n > zero);
+        let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
+        let bytes = *generate_random_bytes(num_bits / 8);
+        let r = from_bytes(bytes).as_ok;
+        if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
+            generate_ECInt_range(begin, end)      // try again
+        };
+        let r = r % n;
+        let r = begin + r;
+        pure $ r
+    );
+}
+
+// a number in F(p) where p is an odd prime number
+type ECField = Modular ECInt;
+
+namespace ECField {
+
+    // `ECField::make(a,p)` creates a number `a` in `F(p)`.
+    make: ECInt -> ECInt -> ECField;
+    make = Modular::make;
+
+    from_ECInt: ECInt -> ECField;
+    from_ECInt = |a| (
+        Modular::make(a, zero)
+    );
+
+    // 2.3.9 Field-Element-to-Integer Conversion
+    to_ECInt: ECField -> ECInt;
+    to_ECInt = |a| (
+        let a = a.nonneg;               // 1..(q-1)
+        a.@value
+    );
+
+    from_I64: I64 -> ECField;
+    from_I64 = |i64| (
+        Modular::make(BigInt::from_I64(i64), zero)
+    );
+
+    // 2.3.5 FieldElement-to-OctetString Conversion
+    to_bytes: ECField -> Array U8;
+    to_bytes = |a| (
+        let a = a.nonneg;               // 1..(q-1)
+        let q = a.@modulus;
+        let mlen = q.get_mlen;
+        a.@value.to_n_bytes(mlen)
+    );
+
+    // Calculates the square root of `z`.
+    // Currently only supports `z.@modulus % 4 == 3`.
+    // cf. [Square Roots in Finite Prime Fields](https://www.staff.uni-mainz.de/pommeren/Cryptology/Asymmetric/5_NTh/SqRprim.pdf)
+    sqrt: ECField -> Result ErrMsg ECField;
+    sqrt = |z| (
+        let z = z.nonneg;
+        let p = z.@modulus;
+        let (k, r) = divmod(p, BigInt::from_I64(4));
+        if r != BigInt::from_I64(3) {
+            err $ "Currently only supports `z.@modulus % 4 == 3`"
+        };
+        // x = z^(k + 1) mod p
+        let x: ECField = repeat_by_ECInt(mul, (one: ECField), z, k + (one: ECInt));
+        let x = x.nonneg;
+        if x * x != z {
+            err $ "Square Root not found"
+        };
+        ok $ x
+    );
+}
+
+
+type ECPoint = unbox struct {
+    ec: Option ECParam,    // should be some() if not infinity.
+    xy: Option (ECField, ECField)    // none() means `O` (the point at infinity)
+};
+
+namespace ECPoint {
+    make: ECParam -> ECField -> ECField -> ECPoint;
+    make = |ec, x, y| (
+        ECPoint { ec: some(ec), xy: some $ (x, y) }
+    );
+
+    is_zero: ECPoint -> Bool;
+    is_zero = |p| p.@xy.is_none;
+
+    nonneg: ECPoint -> ECPoint;
+    nonneg = |p| (
+        p.mod_xy(map(|(x, y)| (x.nonneg, y.nonneg)))
+    );
+
+    _get_lhs: ECParam -> ECField -> ECField;
+    _get_lhs = |ec, y| (
+        let lhs = y * y;
+        lhs.nonneg
+    );
+
+    _get_rhs: ECParam -> ECField -> ECField;
+    _get_rhs = |ec, x| (
+        let a = ECField::make(ec.@a, ec.@p);
+        let b = ECField::make(ec.@b, ec.@p);
+        let rhs = x * (x * x + a) + b;
+        rhs.nonneg
+    );
+
+    // Checks whether the point is on the elliptic curve.
+    check_on_curve: ECPoint -> Result ErrMsg ();
+    check_on_curve = |p| (
+        if p.is_zero { ok() };
+        let ec = p.@ec.as_some;
+        let (x, y) = p.@xy.as_some;
+        let lhs = _get_lhs(ec, y);
+        let rhs = _get_rhs(ec, x);
+        if lhs != rhs {
+            err $ [lhs, rhs].format("ECPoint check_on_curve failed! lhs={} rhs={}")
+        };
+        ok()
+    );
+
+    // 2.3.3 EllipticCurvePoint-to-OctetString Conversion
+    to_bytes_compressed: ECPoint -> Array U8;
+    to_bytes_compressed = |p| (
+        if p.is_zero { [ 0_U8 ] };
+        let (x, y) = p.@xy.as_some;
+        let x_bytes = x.to_bytes;
+        let y = y.nonneg;
+        let y_bytes = if y.@value.is_even { [ 2_U8 ] } else { [ 3_U8 ]};
+        y_bytes.append(x_bytes)
+    );
+
+    to_bytes_uncompressed: ECPoint -> Array U8;
+    to_bytes_uncompressed = |p| (
+        if p.is_zero { [ 0_U8 ] };
+        let (x, y) = p.@xy.as_some;
+        let x_bytes = x.to_bytes;
+        let y_bytes = y.to_bytes;
+        [ 4_U8 ].append(x_bytes).append(y_bytes)
+    );
+
+    // 2.3.4 OctetString-to-EllipticCurvePoint Conversion
+    from_bytes_ec: ECParam -> Array U8 -> Result ErrMsg ECPoint;
+    from_bytes_ec = |ec, bytes| (
+        if bytes == [ 0_U8 ] { ok $ zero };
+        let mlen = ec.@p.get_mlen;
+        if bytes.get_size == mlen + 1 {     // compressed
+            let y_bytes = bytes.get_sub(0, 1);
+            let x_bytes = bytes.get_sub(1, mlen + 1);
+            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
+            let y_even = (y_bytes.@(0) == 2_U8);
+            let y_odd = (y_bytes.@(0) == 3_U8);
+            if !y_even && !y_odd {
+                err $ "from_bytes_ec: invalid y parity"
+            };
+            let alpha = _get_rhs(ec, x);
+            let beta = *alpha.sqrt;
+            let beta_even = beta.@value.is_even;
+            let y: ECField = if y_even == beta_even { beta } else {
+                (-beta).nonneg
+            };
+            let p = ECPoint::make(ec, x, y);
+            let _ = *p.check_on_curve;
+            ok $ p
+        };
+        if bytes.get_size == 2 * mlen + 1 {     // uncompressed
+            let w = bytes.get_sub(0, 1);
+            let x_bytes = bytes.get_sub(1, mlen + 1);
+            let y_bytes = bytes.get_sub(mlen + 1, 2 * mlen + 1);
+            if w.@(0) != 4_U8 {
+                err $ "from_bytes_ec: invalid uncompressed marker"
+            };
+            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
+            let y = ECField::make(*from_bytes(y_bytes), ec.@p);
+            let p = ECPoint::make(ec, x, y);
+            let _ = *p.check_on_curve;
+            ok $ p
+        };
+        err $ (bytes.get_size, mlen).format("from_bytes_ec: invalid size: bytes_size={} mlen={}")
+    );
+}
+
+impl ECPoint: Eq {
+    eq = |a, b| a.@ec == b.@ec && a.@xy == b.@xy;
+}
+
+impl ECPoint: ToString {
+    to_string = |p| p.@xy.to_string;
+}
+
+// `O` (the point at infinity)
+impl ECPoint: Zero {
+    zero = ECPoint{ ec:none(), xy:none() };
+}
+
+// Add two points.
+impl ECPoint: Add {
+    add = |p1, p2| (
+        // 1. O + O = O
+        // 2. (x, y) + O = O + (x, y) = (x, y)
+        if p1.is_zero { p2 };
+        if p2.is_zero { p1 };
+        let (x1, y1) = p1.@xy.as_some;
+        let (x2, y2) = p2.@xy.as_some;
+        eval assert(|_| "ec mismatch", p1.@ec == p2.@ec);
+        let ec = p1.@ec.as_some;
+        if x1 == x2 {
+            // 3. (x, y) + (x, -y) = O
+            if y1 == -y2 {
+                zero
+            };
+            // 5. Rule to add a point to itself (double a point)
+            eval assert(|_| "invalid y", y1 == y2);
+            let dividend = ECField::from_I64(3) * x1 * x1 + ECField::from_ECInt(ec.@a);
+            let divisor = ECField::from_I64(2) * y1;
+            let lambda = dividend / divisor;
+            let x3 = lambda * lambda - ECField::from_I64(2) * x1;
+            let y3 = lambda * (x1 - x3) - y1;
+            ECPoint::make(ec, x3, y3)
+        };
+        // 4. Rule to add two points with different x-coordinates
+        let lambda = (y2 - y1) / (x2 - x1);
+        let x3 = lambda * lambda - x1 - x2;
+        let y3 = lambda * (x1 - x3) - y1;
+        ECPoint::make(ec, x3, y3)
+    );
+}
+
+namespace ECPoint {
+    // `p.mul_by_ECInt(n)` calculates `n * p`.
+    mul_by_ECInt: ECInt -> ECPoint -> ECPoint;
+    mul_by_ECInt = |n, p| repeat_by_ECInt(add, zero, p, n);
+}
+
+// Elliptic Curve Domain Parameters over F(p), where p is an odd prime number
+// E(F(p)): y^2 = x^3 + a*x + b
+type ECParam = box struct {
+    id: String,    // a unique id
+    p: ECInt,      // a prime `p` for F(p)
+    a: ECInt,      // coefficient of `x`
+    b: ECInt,      // constant
+    g: (ECInt, ECInt),     // a base point `G`
+    n: ECInt,      // a prime `n` which is order of `G`
+    h: ECInt       // the cofactor `h = #E(F(p)) / n`
+};
+
+impl ECParam: Eq {
+    // NOTE only `id` is compared
+    eq = |a, b| a.@id == b.@id;
+}
+
+impl ECParam: ToString {
+    to_string = |ec| (
+        [ec.@p, ec.@a, ec.@b, ec.@g.@0, ec.@g.@1, ec.@n, ec.@h]
+        .format("ECParam { p:{}, a:{}, b:{}, g:({},{}), n:{}, h:{} }")
+    );
+}
+
+namespace ECParam {
+    // Creates a point.
+    make_point: (ECInt, ECInt) -> ECParam -> ECPoint;
+    make_point = |xy, ec| (
+        let x = ECField::make(xy.@0, ec.@p);
+        let y = ECField::make(xy.@1, ec.@p);
+        ECPoint::make(ec, x, y)
+    );
+
+    // Gets the base point of a ECParam.
+    get_g: ECParam -> ECPoint;
+    get_g = |ec| (
+        ec.make_point(ec.@g)
+    );
+
+    // The Elliptic Curve secp256r1.
+    // cf. [SEC2: 2.1 Properties of Elliptic Curve Domain Parameters over F(p)](https://www.secg.org/sec2-v2.pdf)
+    secp256r1: ECParam;
+    secp256r1 = ECParam {
+        id: "secp256r1",
+        p: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF").as_ok,
+        a: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFC").as_ok,
+        b: ECInt::from_string_hex("5AC635D8 AA3A93E7 B3EBBD55 769886BC 651D06B0 CC53B0F6 3BCE3C3E 27D2604B").as_ok,
+        g: (
+            ECInt::from_string_hex("6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296").as_ok,
+            ECInt::from_string_hex("4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5").as_ok
+        ),
+        n: ECInt::from_string_hex("FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551").as_ok,
+        h: ECInt::from_string_hex("01").as_ok
+    };
+
+    // The Elliptic Curve secp384r1.
+    secp384r1: ECParam;
+    secp384r1 = ECParam {
+        id: "secp384r1",
+        p: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF
+FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFF").as_ok,
+        a: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF
+FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFC").as_ok,
+        b: ECInt::from_string_hex("B3312FA7 E23EE7E4 988E056B E3F82D19 181D9C6E FE814112 0314088F
+5013875A C656398D 8A2ED19D 2A85C8ED D3EC2AEF").as_ok,
+        g: (
+            ECInt::from_string_hex("AA87CA22 BE8B0537 8EB1C71E F320AD74 6E1D3B62 8BA79B98 59F741E0
+82542A38 5502F25D BF55296C 3A545E38 72760AB7").as_ok,
+            ECInt::from_string_hex("3617DE4A 96262C6F 5D9E98BF 9292DC29 F8F41DBD 289A147C E9DA3113
+B5F0B8C0 0A60B1CE 1D7E819D 7A431D7C 90EA0E5F").as_ok
+        ),
+        n: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF C7634D81
+F4372DDF 581A0DB2 48B0A77A ECEC196A CCC52973").as_ok,
+        h: ECInt::from_string_hex("01").as_ok
+    };
+
+    find_curve: String -> Result ErrMsg ECParam;
+    find_curve = |curve_name| (
+        if curve_name == "secp256r1" {
+            pure $ secp256r1
+        };
+        if curve_name == "secp384r1" {
+            pure $ secp384r1
+        };
+        err $ "unsupported curve: " + curve_name
+    );
+}
+
+// Cryptographics key pair
+type ECKeyPair = unbox struct {
+    ec: ECParam,    // an elliptic curve to use
+    d: ECInt,       // a private key
+    q: ECPoint      // a public key
+};
+
+impl ECKeyPair: ToString {
+    to_string = |kp| (
+        (kp.@ec.@id, kp.@d, kp.@q).format("ECKeyPair { ec:{}, d:{}, p:{} }")
+    );
+}
+
+namespace ECKeyPair {
+    // Generates a keypair from a RandGen and an ECParam.
+    generate_keypair: [m: MonadRandom] ECParam -> m ECKeyPair;
+    generate_keypair = |ec| (
+        let n = ec.@n;
+        let d = *generate_ECInt_range(
+            one, n
+        );
+        eval assert(|_| "d is out of range", one <= d && d <= n - one);
+        let g = ec.get_g;
+        let q = g.mul_by_ECInt(d);
+        let q = q.nonneg;
+        let key_pair = ECKeyPair {
+            ec: ec,
+            d: d,
+            q: q
+        };
+        pure $ key_pair
+    );
+
+    // Validates the public key.
+    // cf. 3.2.2.1 Elliptic Curve Public Key Validation Primitive
+    validate_pubkey: ECPoint -> Result ErrMsg ();
+    validate_pubkey = |q| (
+        if q.is_zero {
+            err $ "validate_pubkey: q is zero"
+        };
+        let _ = *q.check_on_curve;
+        let _ = *do {
+            let ec = q.@ec.as_some;
+            if ec.@h == one {
+                // if h == 1, then n * q == O for all points q in E(F(p)).
+                ok()
+            };
+            let n = ec.@n;
+            let nq = q.mul_by_ECInt(n);
+            if !nq.is_zero {
+                err $ "validate_pubkey: nq != zero: nq=" + nq.to_string
+            };
+            ok()
+        };
+        ok()
+    );
+}
+
+// 4.1 Elliptic Curve Digital Signature Algorithm
+
+// ECDSA Signature
+type ECDSASignature = unbox struct {
+    r: ECInt,
+    s: ECInt
+};
+
+namespace ECDSASignature {
+    make: ECInt -> ECInt -> ECDSASignature;
+    make = |r, s| (
+        ECDSASignature { r: r, s: s }
+    );
+}
+
+impl ECDSASignature: Eq {
+    eq = |a, b| a.@r == b.@r && a.@s == b.@s;
+}
+
+impl ECDSASignature: ToString {
+    to_string = |sig| (sig.@r.to_string_hex, sig.@s.to_string_hex).to_string;
+}
+
+type ECHashParam = unbox struct {
+    hash: Array U8 -> Array U8,
+    hashlen: I64      // hash length in octets
+};
+
+namespace ECHashParam {
+    sha256: ECHashParam;
+    sha256 = ECHashParam {
+        hash: SHA256::digest,
+        hashlen: 32
+    };
+
+    sha384: ECHashParam;
+    sha384 = ECHashParam {
+        hash: SHA384::digest,
+        hashlen: 48
+    };
+
+    find_hash: String -> Result ErrMsg ECHashParam;
+    find_hash = |hash_name| (
+        if hash_name == "sha256" {
+            pure $ ECHashParam::sha256
+        };
+        if hash_name == "sha384" {
+            pure $ ECHashParam::sha384
+        };
+        err $ "unsupported hash: " + hash_name
+    );
+}
+
+// ECDSA Scheme
+type ECDSAScheme = unbox struct {
+    ec: ECParam,
+    hash: ECHashParam
+};
+
+namespace ECDSAScheme {
+    ecdsa_secp256r1_sha256: ECDSAScheme;
+    ecdsa_secp256r1_sha256 = ECDSAScheme {
+        ec: ECParam::secp256r1,
+        hash: ECHashParam::sha256,
+    };
+
+    ecdsa_secp384r1_sha384: ECDSAScheme;
+    ecdsa_secp384r1_sha384 = ECDSAScheme {
+        ec: ECParam::secp384r1,
+        hash: ECHashParam::sha256,
+    };
+
+    // 4.1.1 Scheme Setup
+    make: ECParam -> ECHashParam -> ECDSAScheme;
+    make = |ec, hash| (
+        ECDSAScheme {
+            ec: ec,
+            hash: hash,
+        }
+    );
+
+    // 4.1.3 Signing Operation
+    sign: [m: MonadRandom, m: MonadError] ECKeyPair -> Array U8 -> ECDSAScheme -> m ECDSASignature;
+    sign = |key_pair, message, scheme| (
+        // 1. Select an ephemeral elliptic curve key pair (k, R)
+        let ec = scheme.@ec;
+        let n = ec.@n;
+        let k = *generate_ECInt_range(
+            one, n
+        );
+        eval assert(|_| "k is out of range", one <= k && k <= n - one);
+
+        // sign with generated k
+        let res = scheme._sign_with_k(key_pair, message, k);
+        if res.is_err {
+            if res == err(_Err_Retry) {
+                // return to Step 1.
+                scheme.sign(key_pair, message)
+            };
+            error $ res.as_err
+        };
+        pure $ res.as_ok
+    );
+
+    _Err_Retry: ErrMsg;
+    _Err_Retry = "Retry";
+
+    // signing operation with the specified `k` value.
+    _sign_with_k: ECKeyPair -> Array U8 -> ECInt -> ECDSAScheme -> Result ErrMsg ECDSASignature;
+    _sign_with_k = |key_pair, message, k, scheme| (
+        // 1. Select an ephemeral elliptic curve key pair (k, R)
+        let ec = scheme.@ec;
+        let g = ec.get_g;
+        let _R = g.mul_by_ECInt(k);
+        let _R = _R.nonneg;
+        // 2. Convert the field element xR to an integer xR using the conversion routine specified in Section 2.3.9.
+        let xR: ECField = _R.@xy.as_some.@0;
+        let xR: ECInt = xR.to_ECInt;
+        // 3. Set r = xR mod n. If r = 0, or optionally r fails to meet other publicly verifiable criteria (see below), return to Step 1.
+        let r: Modular ECInt = Modular::make(xR, ec.@n);
+        if r == zero {
+            err $ _Err_Retry
+        };
+        // 4. Use the hash function selected during the setup procedure to compute the hash value
+        let _H: Array U8 = (scheme.@hash.@hash)(message);
+        // 5. Derive an integer e from H
+        let e: ECInt = *scheme._derive_e(_H);
+        // 6. Compute:
+        //    s = k^−1(e + r dU ) mod n.
+        // If s = 0, return to Step 1.
+        let n = ec.@n;
+        let dividend = Modular::make(e, n) + r * Modular::make(key_pair.@d, n);
+        let divisor = Modular::make(k, n);
+        let s: Modular ECInt = dividend / divisor;
+        if s == zero {
+            err $ _Err_Retry
+        };
+        // 7. Output S = (r, s). Optionally, output additional information needed to recover R efficiently from r (see below).
+        pure $ ECDSASignature::make(r.to_ECInt, s.to_ECInt)
+    );
+
+    _derive_e: Array U8 -> ECDSAScheme -> Result ErrMsg ECInt;
+    _derive_e = |_H, scheme| (
+        let ec = scheme.@ec;
+        let hashlen = scheme.@hash.@hashlen;
+        eval assert_eq(|_| "invalid hashlen: " + [_H.get_size, hashlen].format("{}, {}"), _H.get_size, hashlen);
+        // 5. Derive an integer e from H as follows:
+        // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
+        // ...does nothing
+        // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
+        let ceil_log2_n = ec.@n.@nat._bit_length.to_I64;
+        eval assert(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0);
+        let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
+        else { _H.get_sub(0, ceil_log2_n / 8) };
+        // 5.3. Convert the bit string E to an octet string E using the conversion routine specified in Section 2.3.1.
+        // ...does nothing
+        // 5.4. Convert the octet string E to an integer e using the conversion routine specified in Section 2.3.8.
+        let e: ECInt = *from_bytes(_E);
+        pure $ e
+    );
+
+    _Err_Signature_OutOfRange: ErrMsg;
+    _Err_Signature_OutOfRange = "signature out of range";
+
+    _Err_R_Is_Zero: ErrMsg;
+    _Err_R_Is_Zero = "R is zero";
+
+    _Err_Signature_Mismatch: ErrMsg;
+    _Err_Signature_Mismatch = "signature mismatch";
+
+    // 4.1.4 Verifying Operation
+    // _Qu is public key
+    verify: ECPoint -> ECDSASignature -> Array U8 -> ECDSAScheme -> Result ErrMsg ();
+    verify = |_Qu, signature, message, scheme| (
+        let ec = scheme.@ec;
+        let n = ec.@n;
+        // 1. If r and s are not both integers in the interval [1, n − 1], output “invalid” and stop.
+        let r = signature.@r;
+        let s = signature.@s;
+        if !(one <= r && r < n &&
+             one <= s && s < n) {
+            err $ _Err_Signature_OutOfRange
+        };
+        // 2. Use the hash function established during the setup procedure to compute the hash value:
+        let _H: Array U8 = (scheme.@hash.@hash)(message);
+        // 3. Derive an integer e from H
+        let e: ECInt = *scheme._derive_e(_H);
+        // 4. Compute:
+        //     u1 = e s^−1 mod n and u2 = r s^−1 mod n.
+        let u1: Modular ECInt = Modular::make(e, n) / Modular::make(s, n);
+        let u2: Modular ECInt = Modular::make(r, n) / Modular::make(s, n);
+        let u1: ECInt = u1.nonneg.@value;
+        let u2: ECInt = u2.nonneg.@value;
+        // 5. Compute:
+        //     R = (xR, yR) = u1 G + u2 QU .
+        //      If R = O, output “invalid” and stop.
+        let g = ec.get_g;
+        let _R = g.mul_by_ECInt(u1) + _Qu.mul_by_ECInt(u2);
+        if _R == zero { err $ _Err_R_Is_Zero };
+        // 6. Convert the field element xR to an integer xR using the conversion routine specified in Section 2.3.9.
+        let xR: ECField = _R.@xy.as_some.@0;
+        let xR: ECInt = xR.to_ECInt;
+        // 7. Set v = xR mod n.
+        let v = Modular::make(xR, n);
+        // 8. Compare v and r — if v = r, output “valid”, and if v != r, output “invalid”.
+        let r = Modular::make(r, n);
+        if v == r {
+            ok()
+        } else {
+            err $ _Err_Signature_Mismatch
+        }
+    );
+
+}

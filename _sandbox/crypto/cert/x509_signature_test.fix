@@ -1,0 +1,109 @@
+module Main;
+
+import Debug;
+import AsyncTask;
+
+import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Crypto.Cert.X509Path;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Crypto.Cipher.CipherApiDefault;
+//import Minilib.Crypto.Cipher.CipherApiMock;
+import Minilib.Monad.FunctorM;
+import Minilib.Thread.TaskPool;
+import Minilib.Thread.Future;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_validate_self_signed_certificate: TestCase;
+test_validate_self_signed_certificate = (
+    make_test("test_validate_self_signed_certificate") $ |_|
+    //let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_CA.pem").as_some;   // sha-1WithRSAEncryption
+    //let path = Path::parse("/etc/ssl/certs/Amazon_Root_CA_1.pem").as_some;   // sha256WithRSAEncryption
+    //let path = Path::parse("/etc/ssl/certs/Amazon_Root_CA_2.pem").as_some;   // sha384WithRSAEncryption
+    //let path = Path::parse("/etc/ssl/certs/Certum_Trusted_Root_CA.pem").as_some;   // sha512WithRSAEncryption
+    //let path = Path::parse("/etc/ssl/certs/Amazon_Root_CA_3.pem").as_some;   // ecdsa-with-SHA256
+    //let path = Path::parse("/etc/ssl/certs/Amazon_Root_CA_4.pem").as_some;   // ecdsa-with-SHA384
+    let path = Path::parse("/etc/ssl/certs/SSL.com_Root_Certification_Authority_ECC.pem").as_some;   // ecdsa-with-SHA256 but secp384r1
+    //let path = Path::parse("/etc/ssl/certs/Hellenic_Academic_and_Research_Institutions_ECC_RootCA_2015.pem").as_some;   // ecdsa-with-SHA256 but secp384r1
+
+    let certificates = *read_certificates_from_pem_file(path);
+    if certificates.get_size != 1 { throw $ "read_certificates_pem failed" };
+    let certificate = certificates.@(0);
+    let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+    let cipher_api = *make_cipher_api.from_result;
+    eval *certificate.validate_certificate_signature(cipher_api, public_key).from_result;
+    println("validation ok").lift
+);
+
+test_validate_ca_certificates: TestCase;
+test_validate_ca_certificates = (
+    make_test("test_validate_ca_certificates") $ |_|
+    let cipher_api = *make_cipher_api.from_result;
+    let certificates = *CACertificates::read_all;
+    let results = *certificates.map_m(|certificate|
+        let subject = certificate.@tbs_certificate.@subject;
+        let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+        let res = certificate.validate_certificate_signature(cipher_api, public_key);
+        eval *println(res.to_string + ": " + subject.to_string).lift;
+        pure $ res
+    );
+    let error_count = results.to_iter.map(|res| if res.is_err { 1 } else { 0 }).sum;
+    assert_equal("error_count", 0, error_count)
+);
+
+// parallel version
+test_validate_ca_certificates_mt: TestCase;
+test_validate_ca_certificates_mt = (
+    make_test("test_validate_ca_certificates_mt") $ |_|
+    let cipher_api = *make_cipher_api.from_result;
+    let certificates = *CACertificates::read_all;
+    let task_count = number_of_processors;
+    //eval debug_eprintln("task_count=" + task_count.to_string);
+    let task_pool = *TaskPool::make(task_count).lift;
+    let validate: Certificate -> IO (Result ErrMsg (), String) = |certificate| (
+        eval *pure(); // make it lazy
+        let public_key = certificate.@tbs_certificate.@subject_public_key_info;
+        let res = certificate.validate_certificate_signature(cipher_api, public_key);
+        let subject = certificate.@tbs_certificate.@subject;
+        pure $ (res, subject.to_string)
+    );
+    //eval debug_eprintln("creating futures start");
+    let futures = *certificates.to_iter.map_m(|certificate|
+        Future::make(task_pool, validate(certificate))
+    );
+    //eval debug_eprintln("creating futures end");
+    let results = *futures.map_m(|future|
+        let (res, subject) = *future.get;
+        eval *println(res.to_string + ": " + subject.to_string).lift;
+        pure $ res
+    );
+    let error_count = results.map(|res| if res.is_err { 1 } else { 0 }).sum;
+    assert_equal("error_count", 0, error_count)
+);
+
+test_validate_cert_path: TestCase;
+test_validate_cert_path = (
+    make_test("test_validate_cert_path") $ |_|
+    let cipher_api = *make_cipher_api.from_result;
+    let certs = *Iterator::range(0, 3).to_array.map_m(|i|
+        let path = Path::parse((i,).format(".local/tmp.cert_{}.cer")).as_some;
+        read_certificate_from_file(path)
+    );
+    let ca_certs = *CACertificates::make;
+    let path = *CertificatePath::make(certs, ca_certs);
+    eval *path.validate_certificate_signatures(cipher_api);
+    println("validation ok").lift
+);
+
+main: IO ();
+main = (
+    [
+        test_validate_self_signed_certificate,
+        //test_validate_ca_certificates,
+        test_validate_ca_certificates_mt,
+        test_validate_cert_path,
+    ]
+    .run_test_driver
+);

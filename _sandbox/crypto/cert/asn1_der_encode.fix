@@ -1,0 +1,218 @@
+// https://en.wikipedia.org/wiki/ASN.1
+// https://en.wikipedia.org/wiki/X.690
+module Minilib.Crypto.Cert.Asn1DerEncode;
+
+import Debug;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Encoding.Binary;
+import Minilib.Math.Types;
+import Minilib.Math.BigNat;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Text.Unicode;
+
+// -------------------
+// Output Byte Stream
+// -------------------
+
+trait MonadWriteByte = Functor + Monad + MonadErrorIF + MonadWriteByteIF;
+
+// A trait for an output byte stream.
+trait [m: * -> *] m: MonadWriteByteIF {
+    // Writes a byte.
+    write_byte: U8 -> m ();
+    // get the position of the stream.
+    get_pos: m I64;
+    // set the position of the stream.
+    set_pos: I64 -> m ();
+    // Runs the inner monad and extract the written contents.
+    extract_inner: m () -> m (Array U8);
+}
+
+impl [m: MonadError] StateT ByteBuffer m: MonadWriteByteIF {
+    write_byte = |u8| mod_state(marshal(u8));
+    get_pos = get_state.map(get_position);
+    set_pos = |pos| mod_state(set_position(pos));
+    extract_inner = |inner| (
+        let buf_inner = ByteBuffer::make(Array::empty(4096), big_endian());
+        let buf_inner = *inner.exec_state_t(buf_inner).lift_t;
+        pure $ buf_inner.@array
+    );
+}
+
+// -----------------
+// Encode an object
+// -----------------
+
+// A trait for an object that can be encoded to DER-encoded bytes.
+trait a: EncodeDer {
+    encode_obj: [m: MonadWriteByte] a -> m ();
+}
+
+// Encodes an object to DER-encoded bytes.
+encode_der_to_bytes: [a: EncodeDer] a -> Result ErrMsg (Array U8);
+encode_der_to_bytes = |obj| (
+    let buf = ByteBuffer::make(Array::empty(4096), big_endian());
+    let buf = *encode_obj(obj).exec_state_t(buf);
+    pure $ buf.@array
+);
+
+// -----------
+// Triplet
+// -----------
+
+// A monad that encodes the ASN.1 identifier octets.
+encode_identifier: [m: MonadWriteByte] Identifier -> m ();
+encode_identifier = |identifier| (
+    let tag_class = identifier.@tag_class;
+    let constructed = identifier.@constructed;
+    let tag = identifier.@tag;
+
+    let u8 = tag_class.bit_and(3_U8).shift_left(6_U8)
+            .bit_or(if constructed { 0x20_U8 } else { 0_U8 });
+
+    if tag < 31_U8 {
+        let u8 = u8.bit_or(tag);
+        eval *write_byte(u8);
+        pure()
+    } else if tag <= 0x7f_U8 {
+        let u8 = u8.bit_or(31_U8);  // long form
+        eval *write_byte(u8);
+        let u8 = tag;
+        eval *write_byte(u8);
+        pure()
+    } else if tag <= 0xff_U8 {
+        let u8 = u8.bit_or(31_U8);  // long form
+        eval *write_byte(u8);
+        let u8 = tag.shift_left(7_U8).bit_and(0x7f_U8).bit_or(0x80_U8);
+        eval *write_byte(u8);
+        let u8 = tag.bit_and(0x7f_U8); // currently only tag <= 255 is supported
+        eval *write_byte(u8);
+        pure()
+    } else {
+        error $ "invalid tag: " + tag.to_string
+    }
+);
+
+// A monad that encodes the ASN.1 length octets.
+encode_length: [m: MonadWriteByte] I64 -> m ();
+encode_length = |length| (
+    if length <= 127 {
+        write_byte(length.to_U8)
+    };
+    let n = 8;  // sizeof(U64)
+    let len_buf = Array::fill(n, 0_U8);
+    let len_buf = len_buf.set_u64_be(0, length.to_U64);
+    let i = len_buf.find_by(|u8| u8 != 0_U8).as_some_or(n - 1);
+    eval *write_byte(0x80_U8.bit_or((n - i).to_U8));    // first octet
+    Iterator::range(i, n).foreach_m(|i|
+        write_byte(len_buf.@(i))
+    )
+);
+
+// A monad that encodes the ASN.1 contents octets.
+encode_contents: [m: MonadWriteByte] Array U8 -> m ();
+encode_contents = |contents| (
+    contents.foreach_m(write_byte)
+);
+
+// `encode_triplet(tag_class, constructed, tag, inner_monad)` writes the identifier,
+// then runs `inner_monad` and extract the contents,
+// then writes the length and the contents.
+encode_triplet: [m: MonadWriteByte] TagClass -> Bool -> Tag -> m () -> m ();
+encode_triplet = |tag_class, constructed, tag, inner_monad| (
+    eval *encode_identifier(Identifier::make(tag_class, constructed, tag));
+    let contents = *extract_inner(inner_monad);
+    eval *encode_length(contents.get_size);
+    eval *encode_contents(contents);
+    pure()
+);
+
+// ----------------------
+// Constructed Types
+// ----------------------
+
+// `encode_sequence(inner_monad)` writes a triplet of a sequence
+// surrounding a inner monad.
+encode_sequence: [m: MonadWriteByte] m () -> m ();
+encode_sequence = |inner_monad| (
+    encode_triplet(tc_universal, true, tag_sequence, inner_monad)
+);
+
+// `encode_sequence_of(inner_monad)` writes a triplet of a sequence_of
+// surrounding a inner monad.
+encode_sequence_of: [m: MonadWriteByte] m () -> m ();
+encode_sequence_of = |inner_monad| (
+    encode_triplet(tc_universal, true, tag_sequence, inner_monad)
+);
+
+// `encode_set_of(inner_monad)` writes a triplet of a set
+// surrounding a inner monad.
+encode_set_of: [m: MonadWriteByte] m () -> m ();
+encode_set_of = |inner_monad| (
+    encode_triplet(tc_universal, true, tag_set, inner_monad)
+);
+
+// ----------------------
+// Primitive Types
+// ----------------------
+
+// `encode_integer(i64)` writes a triplet of an integer.
+encode_integer: [m: MonadWriteByte] I64 -> m ();
+encode_integer = |i64| (
+    let n = 8;  // sizeof(U64)
+    let contents = Array::fill(n, 0_U8).set_u64_be(0, i64.to_U64);
+    let pad = if i64 >= 0 { 0x00_U8 } else { 0xff_U8 };
+    let start = contents.find_by(|u8| u8 != pad).as_some_or(n - 1);
+    let contents = contents.subarray(start, n);
+    encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
+);
+
+impl I64: EncodeDer {
+    encode_obj = encode_integer;
+}
+
+// `encode_bigint(x)` writes a triplet of an integer.
+encode_bigint: [m: MonadWriteByte] BigInt -> m ();
+encode_bigint = |x| (
+    let msb_is_set = |contents: Array U8| (
+        contents.@(0).bit_and(0x80_U8) != 0_U8
+    );
+    let contents: Array U8 = if x.is_positive {
+        // Case 1: Positive integer
+        let contents = x.to_bytes;
+        let n = contents.get_size;
+        let start = contents.find_by(|u8| u8 != 0x00_U8).as_some_or(n - 1);
+        let contents = contents.subarray(start, n);
+        // If MSB is set, it is interpreted as a negative integer.
+        // To prevent this, insert zero byte(0x00) into the head.
+        if contents.msb_is_set {
+            [0x00_U8].append(contents)
+        } else {
+            contents
+        }
+    } else {
+        // Case 2: Negative integer
+        let bit_length = x.@nat._bit_length.to_I64;
+        let n = (bit_length + 7) / 8;
+        // convert to two's complement representation
+        let x = x + (one.shift_left((n * 8).to_U64));
+        let contents = x.to_bytes;
+        let contents = contents.subarray(contents.get_size - n, contents.get_size);
+        eval assert(|_| "MSB is not set", contents.msb_is_set);
+        contents
+    };
+    encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
+);
+
+impl BigInt: EncodeDer {
+    encode_obj = encode_bigint;
+}
+

@@ -1,0 +1,111 @@
+module Main;
+
+import Math;
+
+type Timeval = unbox struct {
+    arr: Array U64
+};
+
+namespace Timeval {
+    from_seconds: F64 -> Timeval;
+    from_seconds = |seconds| (
+        let sec: U64 = Math::floor(seconds).to_U64;
+        let usec: U64 = ((seconds - Math::floor(seconds)) * 1.0e6).to_U64;
+        Timeval { arr: [sec, usec] }
+    );
+
+    force_unique: Timeval -> Timeval;
+    force_unique = mod_arr(force_unique);
+}
+
+impl Timeval: Zero {
+    zero = Timeval::from_seconds(0.0);
+}
+
+type FDSet = unbox struct {
+    arr: Array U32,
+    nfds: I64
+};
+
+namespace FDSet {
+    _max_nfds: I64;
+    _max_nfds = 1024;
+
+    make: I64 -> FDSet;
+    make = |nfds| (
+        let nfds = min(nfds, _max_nfds);
+        FDSet {
+            arr: Array::fill(_max_nfds / 32, 0_U32),
+            nfds: nfds
+        }
+    );
+
+    force_unique: FDSet -> FDSet;
+    force_unique = mod_arr(force_unique);
+
+    _idx: I64 -> I64;
+    _idx = |fd| fd / 32;
+
+    _mask: I64 -> U32;
+    _mask = |fd| 1_U32.shift_left(fd.bit_and(31).to_U32);
+
+    is_set: I64 -> FDSet -> Bool;
+    is_set = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.@arr.@(idx).bit_and(mask) != 0_U32
+    );
+
+    set_bit: I64 -> FDSet -> FDSet;
+    set_bit = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.mod_arr(|arr|
+            arr.set(idx, arr.@(idx).bit_or(mask))
+        )
+    );
+
+    clear_bit: I64 -> FDSet -> FDSet;
+    clear_bit = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.mod_arr(|arr|
+            arr.set(idx, arr.@(idx).bit_and(U32::maximum - mask))
+        )
+    );
+}
+
+select: (FDSet, FDSet, FDSet, Timeval) -> IOFail (FDSet, FDSet, FDSet, Timeval);
+select = |(readfds, writefds, exceptfds, timeout)| (
+    eval *pure();
+    let readfds = readfds.force_unique;
+    let writefds = writefds.force_unique;
+    let exceptfds = exceptfds.force_unique;
+    let timeout = timeout.force_unique;
+    let nfds = max(readfds.@nfds, max(writefds.@nfds, exceptfds.@nfds));
+    let ret = readfds.@arr.borrow_ptr(|readfds|
+        writefds.@arr.borrow_ptr(|writefds|
+        exceptfds.@arr.borrow_ptr(|exceptfds|
+        timeout.@arr.borrow_ptr(|timeout|
+        CALL_C[I32 select(I32,Ptr,Ptr,Ptr,Ptr), nfds.to_I32, readfds, writefds, exceptfds, timeout]
+    ))));
+    if ret == -1_I32 {
+        throw $ "select failed"
+    };
+    pure $ (readfds, writefds, exceptfds, timeout)
+);
+
+main: IO ();
+main = do {
+    let readfds = FDSet::make(5);
+    let writefds = FDSet::make(5);
+    let exceptfds = FDSet::make(5);
+    let readfds = readfds.set_bit(0);
+    let timeout = Timeval::from_seconds(5.0);
+    eval *println("start").lift;
+    eval *println((readfds.@arr, timeout.@arr).to_string).lift;
+    let (readfds, writefds, exceptfds, timeout) =  *select((readfds, writefds, exceptfds, timeout));
+    eval *println("end").lift;
+    eval *println((readfds.@arr, timeout.@arr).to_string).lift;
+    println(readfds.is_set(0).to_string).lift
+}.try(eprintln);

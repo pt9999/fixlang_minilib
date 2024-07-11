@@ -1,0 +1,489 @@
+
+/*
+// crypto/cipher_api.fix
+trait a: CipherApi {
+    type TlsImpl a;
+    type CertImpl a;
+    type RsaImpl a;
+    type EcImpl a;
+    get_tls_api: [tls: TlsApi, TlsImpl a = tls] a -> tls;
+    get_cert_api: [cert: CertApi, CertImpl a = cert] a -> cert;
+    get_rsa_api: [rsa: RsaApi, RsaImpl a = rsa] a -> rsa;
+    get_ec_api: [ec: EcApi, EcImpl a = ec] a -> ec;
+}
+*/
+
+// crypto/tls/tls_api.fix
+trait a: TlsApi {
+    type CertImpl a;
+    type Asn1Impl a;
+    type RsaImpl a;
+    type EcImpl a;
+    type TlsSessionImpl a;
+    get_cert_api: [cert: CertApi, TlsApi::CertImpl a = cert] a -> cert;
+    get_asn1_api: [asn1: Asn1Api, TlsApi::Asn1Impl a = asn1] a -> asn1;
+    get_rsa_api: [rsa: RsaApi, TlsApi::RsaImpl a = rsa] a -> rsa;
+    get_ec_api: [ec: EcApi, TlsApi::EcImpl a = ec] a -> ec;
+    get_tls_session_api: [s: TlsSessionApi, TlsApi::TlsSessionImpl a = s] a -> s;
+};
+
+// crypto/cert/cert_api.fix
+trait a: CertApi {
+    type RsaImpl a;
+    type EcImpl a;
+    get_rsa_api: [rsa: RsaApi, CertApi::RsaImpl a = rsa] a -> rsa;
+    get_ec_api: [ec: EcApi, CertApi::EcImpl a = ec] a -> ec;
+};
+
+// crypto/asn1/asn1_api.fix
+
+trait a: Asn1Api {
+    decode_der_from_bytes: [obj: DecodeDer, m: MonadError] Array U8 -> a -> m obj;
+};
+
+// crypto/ec/ec_api.fix
+module Minilib.Crypto.Ec.EcApi;
+
+type EcCurveName = String;
+type EcHashName = String;
+type EcPublicKey = Array U8;    // UncompressedPointRepresentation
+type EcSharedSecret = Array U8;
+type EcSignature = Array U8;
+type EcMessage = Array U8;
+
+trait a: EcApi {
+  type EcdheImpl a;
+  type EcdsaImpl a;
+  make_ecdhe: [ecdhe: EcdheApi, EcdheImpl a = ecdhe, m: MonadRandom] EcCurveName -> a -> m ecdhe;
+  make_ecdsa: [ecdsa: EcdsaApi, EcdsaImpl a = ecdsa, m: MonadError] EcCurveName -> EcHashName -> a -> m ecdsa,
+}
+
+trait a: EcdheApi {
+    get_curve_name: a -> EcCurveName;
+    get_key_exchange: a -> EcPublicKey;
+    accept_peer_key_exchange: [m: MonadError] EcPublicKey -> a -> m EcSharedSecret;
+}
+
+trait a: EcdsaApi {
+    verify: [m: MonadError, asn1: Asn1Api] EcPublicKey -> EcSignature -> EcMessage -> asn1 -> a -> m ();
+}
+
+// crypto/ec/default_ec_impl.fix
+module Minilib.Crypto.Ec.DefaultEcImpl;
+
+type DefaultEcImpl = unbox struct {
+    dummy: ()
+};
+
+namespace DefaultEcImpl {
+    make: DefaultEcImpl;
+    make = DefaultEcImpl {
+        dummy: ()
+    };
+}
+
+impl DefaultEcImpl: EcApi {
+    type EcdheImpl DefaultEcImpl = DefaultEcdheImpl;
+    type EcdsaImpl DefaultEcImpl = DefaultEcdsaImpl;
+
+    //make_ecdhe: [ecdhe: EcdheApi, EcdheImpl a = ecdhe, m: MonadRandom] EcCurveName -> a -> m ecdhe;
+    make_ecdhe = |curve_name, ec_impl| DefaultEcdheImpl::make(curve_name);
+
+    //make_ecdsa: [ecdsa: EcdsaApi, EcdsaImpl a = ecdsa, m: MonadError] EcCurveName -> EcHashName -> a -> m ecdsa,
+    make_ecdsa = |curve_name, hash_name, ec_impl| DefaultEcdsaImpl::make(curve_name, hash_name);
+}
+
+type DefaultEcdheImpl = unbox struct {
+    curve_name: EcCurveName,
+    ecdhe: ECDHE,
+};
+
+namespace DefaultEcdheImpl {
+    make: [m: MonadRandom] EcCurveName -> m DefaultEcdheImpl;
+    make = |curve_name| (
+        let ec = ECParam::from_curve_name(curve_name);
+        pure $ DefaultEcdheImpl {
+            curve_name: curve_name,
+            ecdhe: *ECDHE::make(ec),
+        }
+    );
+}
+
+impl DefaultEcdheImpl: EcdheApi {
+    get_curve_name = @curve_name;
+    get_key_exchange = @ecdhe >> get_pub_key;
+    accept_peer_key_exchange = |peer_key, a| (
+        a.@ecdhe.accept_server_share(peer_key).from_result_t
+    );
+}
+
+type DefaultEcdsaImpl = unbox struct {
+    curve_name: EcCurveName,
+    hash_name: EcHashName,
+    ecdsa_scheme: ECDSAScheme
+};
+
+namespace DefaultEcdsaImpl {
+    make: [m: MonadError] EcCurveName -> EcHashName -> m DefaultEcdsaImpl;
+    make = (
+        let ecdsa_scheme = ECDSAScheme::from_curve_name_and_hash_name(curve_name, hash_name);
+        pure $ DefaultEcdsaImpl {
+            curve_name: curve_name,
+            hash_name: hash_name,
+            ecdsa_scheme: ecdsa_scheme
+        }
+    );
+}
+
+impl DefaultEcdsaImpl: EcdsaApi {
+    //verify: [m: MonadError, asn1: Asn1Api] EcPublicKey -> EcSignature -> EcMessage -> asn1 -> a -> m ();
+    verify = |pub_key, signature, message, asn1_impl, ecdsa_impl| (
+        let ecdsa_scheme = ecdsa_impl.@ecdsa_scheme;
+        let (ecdsa_scheme, ec_point) = *get_ec_point_from_public_key(ecdsa_scheme, public_key).from_result_t;
+        let sig_value: EcdsaSigValue = *asn1_impl.decode_der_from_bytes(signature).from_result_t;         // uses Asn1Api
+        let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
+        ecdsa_scheme.verify(ec_point, signature, content).from_result_t
+    );
+}
+
+// crypto/ec/mock_ec_impl.fix
+module Minilib.Crypto.Ec.MockEcImpl;
+
+type MockEcImpl = unbox struct {
+    dummy: ()
+};
+
+namespace MockEcImpl {
+    make: MockEcImpl;
+    make = MockEcImpl {
+        dummy: ()
+    };
+}
+
+impl MockEcImpl: EcApi {
+    type EcdheImpl MockEcImpl = MockEcdheImpl;
+    type EcdsaImpl MockEcImpl = MockEcdsaImpl;
+
+    //make_ecdhe: [ecdhe: EcdheApi, EcdheImpl a = ecdhe, m: MonadRandom] EcCurveName -> a -> m ecdhe;
+    make_ecdhe = |curve_name, ec_impl| MockEcdheImpl::make(curve_name);
+
+    //make_ecdsa: [ecdsa: EcdsaApi, EcdsaImpl a = ecdsa, m: MonadError] EcCurveName -> EcHashName -> a -> m ecdsa,
+    make_ecdsa = |curve_name, hash_name, ec_impl| MockEcdsaImpl::make(curve_name, hash_name);
+}
+
+type MockEcdheImpl = unbox struct {
+    curve_name: EcCurveName,
+};
+
+namespace MockEcdheImpl {
+    make: [m: MonadRandom] EcCurveName -> m MockEcdheImpl;
+    make = |curve_name| (
+        pure $ MockEcdheImpl {
+            curve_name: curve_name,
+        }
+    );
+}
+
+impl MockEcdheImpl: EcdheApi {
+    get_curve_name = @curve_name;
+    get_key_exchange = |_| Array::fill(64, 0_U8);
+    accept_peer_key_exchange = |peer_key, a| pure $ Array::fill(64, 0_U8)
+}
+
+type MockEcdsaImpl = unbox struct {
+    curve_name: EcCurveName,
+    hash_name: EcHashName,
+};
+
+namespace MockEcdsaImpl {
+    make: [m: MonadError] EcCurveName -> EcHashName -> m MockEcdsaImpl;
+    make = (
+        pure $ MockEcdsaImpl {
+            curve_name: curve_name,
+            hash_name: hash_name,
+        }
+    );
+}
+
+impl MockEcdsaImpl: EcdsaApi {
+    //verify: [m: MonadError] EcPublicKey -> EcSignature -> EcMessage -> a -> m ();
+    verify = |pub_key, signature, message, ecdsa_impl| pure();
+}
+
+----------------------------------
+// Alternative: record-of-functions pattern
+// NOTE: In FixLang, a field type of a structure can not have `forall`.
+
+// cipher/api.fix
+module Minilib.Crypto.Cipher.Api;
+
+type [m: * -> *] CipherApi m = box struct {
+    rsa_api: Option RsaApi m,
+    ec_api: Option EcApi m,
+    //x25519_api: Option X25519Api m,
+    //chacha_api: Option ChaChaApi m,
+};
+
+// cipher_api_mock.fix
+module Minilib.Crypto.Cipher.CipherApiMock;
+
+namespace MockCipherImpl {
+    make: [m: MonadError] CipherApi m;
+    make = pure $ CipherApi {
+        rsa_api: some $ *MockRsaImpl::make,  // or none()
+        ec_api: some $ *MockEcImpl::make,    // or none()
+    };
+}
+
+// tls_api.fix
+module Minilib.Crypto.Tls.TlsApi;
+
+type [m: * -> *] TlsApi m = unbox struct {
+    cert_api: CertApi m,
+    cipher_api: CipherApi m,
+    tls_session_api: TlsSessionApi m,
+};
+
+// log_api.fix
+module Minilib.Common.LogApi;
+
+type [m: * -> *] LogApi m = unbox struct {
+    debug: Lazy String -> m (),
+};
+
+// cert_api.fix
+module Minilib.Crypto.Cert.CertApi;
+
+type CerSignature = Array U8;
+type CerSigMessage = Array U8;
+type CerSigScheme = String;      // "rsa_pss_rsae_sha256", "ecdsa_secp256r1_sha256" etc.
+type CerTime = String;           // GeneralizedTime
+
+type [m: * -> *, iof: * -> *] CertApi m iof = unbox struct {
+    load_ca_certificates: iof (CertApi m),  // requires MonadIOFail
+    get_now: iof CerTime,
+    build_cert_path: Array (Array U8) -> m (CertPathApi m),
+};
+
+type [m: * -> *] CertPathApi m = unbox struct {
+    get_first: m CertificateApi,
+    validate_date: CerTime -> m (),
+    validate_certificate_signatures: m (),
+};
+
+type [m: * -> *] CertificateApi m = unbox struct {
+    check_certificate_verify: CerSigMessage -> CerSigScheme -> CerSignature -> m (),
+};
+
+// default_cert_impl.fix
+module Minilib.Crypto.Cert.DefaultCertImpl;
+
+type [m: * -> *] DefaultCertImpl m = unbox struct {
+    cipher_api: CipherApi m,
+    ca_certificates: Option CACertificates,
+};
+
+namespace DefaultCertImpl {
+    make: [m: MonadError] CipherApi m -> iof (CertApi m);
+    make = |cipher_api| (
+        pure $ DefaultCertImpl {
+           cipher_api: cipher_api,
+           ca_certificates: none()
+        }
+    );
+
+    to_api: [m: MonadError, iof: MonadIOFail] DefaultCertImpl -> iof (CertApi m);
+    to_api = |cert_impl| (
+        pure $ CertApi {
+            load_ca_certificates: _load_ca_certificates(cert_impl),
+            get_now: _get_now,
+            build_cert_path: _build_cert_path(cert_impl),
+        };
+    );
+
+    _get_now: [iof: MonadIOFail] iof CerTime;
+    _get_now = (
+        eval *pure();
+        let now = *Time::get_now().lift_io;
+        let now = X509Time::from_time(now);
+        pure $ now.to_generalized_time_string
+    )
+
+    _load_ca_certificates: [m: MonadError, iof: MonadIOFail] DefaultCertImpl -> iof (CertApi m);
+    _load_ca_certificates = |cert_impl| (
+        eval *pure();
+        let ca_certificates = *CACertificates::read_all;
+        let cert_impl = cert_impl.set_ca_certificates(ca_certificates);
+        cert_impl.to_api
+    );
+
+    _build_cert_path: [m: MonadError, iof: MonadIOFail] DefaultCertImpl -> Array (Array U8) -> m (CertPathApi m);
+    _build_cert_path = |cert_impl, cert_data_array| (
+        eval *pure();
+        if cert_impl.@ca_certificates.is_none {
+            error $ "CACertificates not loaded"
+        };
+        let cert_path = *CertificatePath::make(certs, cert_impl.@ca_certificates.as_some);
+        DefaultCertPathImpl::make(cert_impl.@cipher_api, cert_path).bind(to_api)
+    );
+}
+
+type [m: * -> *] DefaultCertPathImpl m = unbox struct {
+    cipher_api: CipherApi m,
+    cert_path: CertPath,
+};
+
+namespace DefaultCertPathImpl {
+    make: [m: MonadError] CipherApi m -> CertificatePath -> m (DefaultCertPathImpl m);
+    make = |cipher_api, cert_path| (
+        pure $ DefaultCertPathImpl {
+            cipher_api: cipher_api,
+            cert_path: cert_path,
+        }
+    );
+
+    to_api: [m: MonadError] DefaultCertPathImpl m -> m (CertPathApi m);
+    to_api = |impl| (
+        pure $ CertPathApi {
+            get_first: m CertificateApi,
+            validate_date: _validate_date(impl)
+            validate_certificate_signatures: _validate_signatures(impl)
+        }
+    );
+
+    _get_first: [m: MonadError] DefaultCertPathImpl m -> m (CertificateApi m);
+    _get_first = |impl, time| (
+        eval *pure();
+        DefaultCertificateImpl::make(impl.@cipher_api, impl.@cert_path.@data.@(0)).bind(to_api)
+    );
+
+    _validate_date: [m: MonadError] DefaultCertPathImpl m -> CerTime -> m ();
+    _validate_date = |impl, time| (
+        eval *pure();
+        let time: X509Time = *X509Time::from_generalized_time_string(time);
+        impl.@cert_path.validate_date(time, impl.@cipher_api)
+    );
+
+    _validate_signatures: [m: MonadError] DefaultCertImpl m -> m ();
+    _validate_signatures = |impl| (
+        eval *pure();
+        impl.@cert_path.validate_certificate_signatures(impl.@cipher_api)
+    );
+}
+
+type [m: * -> *] DefaultCertificateImpl m = unbox struct {
+    cipher_api: CipherApi m,
+    certificate: Certificate
+};
+
+namespace DefaultCertificateImpl {
+    make:
+
+}
+
+// asn1_api.fix
+module Minilib.Crypto.Asn1.Asn1Api;
+
+type [m: * -> *] Asn1Api m = unbox struct {
+    // NOTE: cannot use constraints in a field type
+    decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a
+};
+
+// rsa_api.fix
+module Minilib.Crypto.Cipher.RSA.RsaApi;
+
+type RsaHashName = String;
+type RsaPublicKey = Array U8;
+type RsaSignature = Array U8;
+type RsaSigMessage = Array U8;
+
+type [m: * -> *] RsaApi m = unbox struct {
+    rsassa_pss_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> m (),
+    rsassa_pkcs1_v1_5_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> m (),
+};
+
+// mock_rsa_impl.fix
+module Minilib.Crypto.RSA.MockRsaImpl;
+
+namespace MockRsaImpl {
+    make: [m: MonadError] m (RsaApi m);
+    make = pure $ RsaApi {
+        rsassa_pss_verify: |_, _, _, _| pure(),
+        rsassa_pkcs1_v1_5_verify: |_, _, _, _| pure(),
+    };
+}
+
+// ec_api.fix
+module Minilib.Crypto.Cipher.EC.EcApi;
+
+type EcCurveName = String;
+type EcHashName = String;
+type EcPublicKey = Array U8;    // UncompressedPointRepresentation
+type EcSharedSecret = Array U8;
+type EcSignature = Array U8;
+type EcSigMessage = Array U8;
+
+type [m: * -> *] EcApi m = unbox struct {
+    make_ecdhe: EcCurveName -> m (EcdheApi m),
+    make_ecdsa: EcCurveName -> EcHashName -> m (EcdsaApi m),
+};
+
+type [m: * -> *] EcdheApi m = unbox struct {
+    curve_name: EcCurveName,
+    key_exchange: EcPublicKey,
+    accept_peer_key_exchange: EcPublicKey -> m EcSharedSecret,
+};
+
+type [m: * -> *] EcdsaApi m = unbox struct {     // ECDSAScheme
+    curve_name: EcCurveName,
+    hash_name: EcHashName,
+    verify: Asn1Api -> EcPublicKey -> EcSignature -> EcMessage -> m (),
+};
+
+// default_ec_impl.fix
+module Minilib.Crypto.EC.DefaultEcImpl
+
+make: [m: MonadError, m: MonadRandom] m (EcApi m);
+make = (
+    pure $ EcApi {
+        make_ecdhe: DefaultEcdheImpl::make,
+        make_ecdsa: _make_ecdsa,
+    }
+);
+
+namespace DefaultEcdheImpl {
+    make: [m: MonadRandom] EcCurveName -> m (EcdheApi m);
+    make = |curve_name| (
+        let ec = ECParam::from_curve_name(curve_name);
+        let ecdhe = *ECDHE::make(ec);
+        pure $ EcdheApi {
+            curve_name: curve_name,
+            key_exchange: ecdhe.get_pub_key,
+            accept_peer_key_exchange: |peer_key| (
+               ecdhe.accept_server_share(peer_key).from_result_t
+            )
+        }
+    );
+}
+
+namespace DefaultEcdsaImpl {
+    make: [m: MonadError] EcCurveName -> EcHashName -> m (EcdsaApi m);
+    make = (
+        let ecdsa_scheme = *ECDSAScheme::from_curve_name_and_hash_name(curve_name, hash_name);
+        pure $ EcdsaApi {
+            curve_name: curve_name,
+            hash_name: hash_name,
+            ecdsa_scheme: ecdsa_scheme
+            verify: _verify(ecdsa_scheme)
+        }
+    );
+
+    //_verify: [m: MonadError] ECDSAScheme ->  Asn1Api -> EcPublicKey -> EcSignature -> EcSigMessage ->m ();
+    _verify = |ecdsa_scheme, asn1_api, pub_key, signature, message| (
+        let (ecdsa_scheme, ec_point) = *get_ec_point_from_public_key(ecdsa_scheme, public_key).from_result_t;
+        // NOTE: decoding a custom structure is difficult
+        let sig_value: EcdsaSigValue = *asn1_api.decode_der_from_bytes(signature).from_result_t;         // uses Asn1Api
+        let signature: ECDSASignature = ECDSASignature { r: sig_value.@r, s: sig_value.@s };
+        ecdsa_scheme.verify(ec_point, signature, content).from_result_t
+    );
+}

@@ -54,6 +54,15 @@ Galois/Counter Mode (GCM) for AES
 
 Advanced Encryption Standard (AES)
 
+### [module Minilib.Crypto.HMAC.HmacMD5 (lib/crypto/hmac/hmac_md5.fix)](lib/crypto/hmac/hmac_md5.md)
+
+
+### [module Minilib.Crypto.HMAC.HmacSHA1 (lib/crypto/hmac/hmac_sha1.fix)](lib/crypto/hmac/hmac_sha1.md)
+
+
+### [module Minilib.Crypto.HMAC.HmacSHA256 (lib/crypto/hmac/hmac_sha256.fix)](lib/crypto/hmac/hmac_sha256.md)
+
+
 ### [module Minilib.Crypto.HMAC (lib/crypto/hmac.fix)](lib/crypto/hmac.md)
 
 The Keyed-Hash Message Authentication Code (HMAC)
@@ -73,6 +82,14 @@ SHA-1 secure hash function.
 ### [module Minilib.Crypto.SHA256 (lib/crypto/sha256.fix)](lib/crypto/sha256.md)
 
 SHA-256 secure hash function.
+
+### [module Minilib.Crypto.SHA512 (lib/crypto/sha512.fix)](lib/crypto/sha512.md)
+
+SHA-512 secure hash function.
+
+### [module Minilib.Encoding.Base64 (lib/encoding/base64.fix)](lib/encoding/base64.md)
+
+BASE64 encoding and decoding
 
 ### [module Minilib.Encoding.Binary (lib/encoding/binary.fix)](lib/encoding/binary.md)
 

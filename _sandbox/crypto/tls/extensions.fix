@@ -1,0 +1,450 @@
+// Extensions for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.Extensions;
+
+import Debug;
+
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.KeyShare;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// 4.2 Extensions
+
+type ExtensionType = U16;
+type Extension = unbox union {
+    unknown_extension: ExtensionType,
+    server_name: ServerNameList,
+    max_fragment_length: (),
+    status_request: (),
+    supported_groups: NamedGroupList,   // a.k.a. elliptic_curves in RFC 8422
+    ec_point_formats: ECPointFormatList,   // RFC 8422
+    signature_algorithms: SignatureSchemeList,
+    use_srtp: (),
+    heartbeat: (),
+    application_layer_protocol_negotiation: (),
+    signed_certificate_timestamp: (),
+    client_certificate_type: (),
+    server_certificate_type: (),
+    padding: (),
+    pre_shared_key: (),
+    early_data: (),
+    supported_versions: SupportedVersions,
+    cookie: (),
+    psk_key_exchange_modes: (),
+    certificate_authorities: (),
+    oid_filters: (),
+    post_handshake_auth: (),
+    signature_algorithms_cert: (),
+    key_share: KeyShare,
+};
+
+namespace Extension {
+    supported_extensions: Array Extension;
+    supported_extensions = [
+        supported_groups(NamedGroupList::default),
+        supported_versions(SupportedVersions::default),
+        ec_point_formats(ECPointFormatList::default),
+        signature_algorithms(SignatureSchemeList::default),
+    ];
+
+    get_extension_type: Extension -> ExtensionType;
+    get_extension_type = |ex| (
+        if ex.is_unknown_extension { ex.as_unknown_extension.to_I64 };
+        if ex.is_server_name { 0 };
+        if ex.is_max_fragment_length { 1 };
+        if ex.is_status_request { 5 };
+        if ex.is_supported_groups { 10 };   // a.k.a. elliptic_curves in RFC 8422
+        if ex.is_ec_point_formats { 11 };   // RFC 8422
+        if ex.is_signature_algorithms { 13 };
+        if ex.is_use_srtp { 14 };
+        if ex.is_heartbeat { 15 };
+        if ex.is_application_layer_protocol_negotiation { 16 };
+        if ex.is_signed_certificate_timestamp { 18 };
+        if ex.is_client_certificate_type { 19 };
+        if ex.is_server_certificate_type { 20 };
+        if ex.is_padding { 21 };
+        if ex.is_pre_shared_key { 41 };
+        if ex.is_early_data { 42 };
+        if ex.is_supported_versions { 43 };
+        if ex.is_cookie { 44 };
+        if ex.is_psk_key_exchange_modes { 45 };
+        if ex.is_certificate_authorities { 47 };
+        if ex.is_oid_filters { 48 };
+        if ex.is_post_handshake_auth { 49 };
+        if ex.is_signature_algorithms_cert { 50 };
+        if ex.is_key_share { 51 };
+        eval assert(|_| "invalid extension type", false);
+        65535
+    ).to_U16;
+
+    find: (Extension -> Bool) -> Array Extension -> Option Extension;
+    find = |f, exs| exs.to_iter.filter(f).get_first;
+}
+
+impl Extension: ToString {
+    to_string = |ex| (
+        if ex.is_unknown_extension { "unknown_extension(" + ex.as_unknown_extension.to_string_hex + ")" };
+        if ex.is_server_name { ex.as_server_name.to_string };
+        if ex.is_supported_groups { ex.as_supported_groups.to_string };
+        if ex.is_ec_point_formats { ex.as_ec_point_formats.to_string };
+        if ex.is_signature_algorithms { ex.as_signature_algorithms.to_string };
+        if ex.is_supported_versions { ex.as_supported_versions.to_string };
+        if ex.is_key_share { ex.as_key_share.to_string };
+        "unsupported"
+    );
+}
+
+impl Extension: Marshal {
+    marshal = |ex, buf| (
+        let buf = buf.marshal(ex.get_extension_type);
+        let size_pos = buf.get_position;
+        let buf = buf.marshal(0_U16);       // size
+        let buf = (
+            if ex.is_server_name { buf.marshal(ex.as_server_name) };
+            if ex.is_supported_groups { buf.marshal(ex.as_supported_groups) };
+            if ex.is_ec_point_formats { buf.marshal(ex.as_ec_point_formats) };
+            if ex.is_signature_algorithms { buf.marshal(ex.as_signature_algorithms) };
+            if ex.is_supported_versions { buf.marshal(ex.as_supported_versions) };
+            if ex.is_key_share { buf.marshal(ex.as_key_share) };
+            buf
+        );
+        let last_pos = buf.get_position;
+        let buf = buf.set_u16(size_pos, (last_pos - (size_pos + 2)).to_U16);
+        buf
+    );
+}
+
+impl Extension: Unmarshal {
+    unmarshal = |buf| (
+        //eval debug_eprintln("extension unmarshal");
+        let (extension_type, buf) = *buf.unmarshal;
+        //eval debug_eprintln("extension_type=" + extension_type.to_string);
+        let (extension_data_size: U16, buf) = *buf.unmarshal;
+        //eval debug_eprintln("extension_data_size=" + extension_data_size.to_string);
+        let (extension_data: Array U8, buf) = *buf.unmarshal_fixed(extension_data_size.to_I64);
+        //eval debug_eprintln("extension_data=" + extension_data.to_string_hex);
+
+        let extension: Extension = *do {
+            if extension_type == 0_U16 { unmarshal_from_bytes(extension_data).map(server_name) };
+            if extension_type == 10_U16 { unmarshal_from_bytes(extension_data).map(supported_groups) };
+            if extension_type == 11_U16 { unmarshal_from_bytes(extension_data).map(ec_point_formats) };
+            if extension_type == 13_U16 { unmarshal_from_bytes(extension_data).map(signature_algorithms) };
+            if extension_type == 43_U16 { unmarshal_from_bytes(extension_data).map(supported_versions) };
+            if extension_type == 51_U16 { unmarshal_from_bytes(extension_data).map(key_share) };
+            pure $ unknown_extension(extension_type)
+        };
+        pure $ (extension, buf)
+    );
+}
+
+// RFC6066 3. Server Name Indication
+type HostName = String;
+
+type ServerName = unbox union {
+    host_name: HostName,
+};
+
+namespace ServerName {
+    make: String -> ServerName;
+    make = |name| ServerName::host_name(name);
+}
+
+impl ServerName: ToString {
+    to_string = |obj| obj.as_host_name;
+}
+
+impl ServerName: Marshal {
+    marshal = |obj, buf| (
+        if obj.is_host_name {
+            let buf = buf.marshal(0_U8);
+            let name = obj.as_host_name.get_bytes.pop_back;
+            buf.marshal_var_size(name, to_U16)
+        };
+        eval assert(|_| "invalid server name", false);
+        buf
+    );
+}
+
+impl ServerName: Unmarshal {
+    unmarshal = |buf| (
+        let (name_type: U8, buf) = *buf.unmarshal;
+        if name_type == 0_U8 {
+            let (name: Array U8, buf) = *buf.unmarshal_var_size(U16::to_I64);
+            let name: ServerName = host_name $ name._unsafe_to_string;
+            pure $ (name, buf)
+        };
+        err $ "invalid name_type"
+    );
+}
+
+type ServerNameList = unbox struct {
+    server_name_list: Array ServerName
+};
+
+namespace ServerNameList {
+    make: Array ServerName -> ServerNameList;
+    make = |server_name_list| (
+        ServerNameList { server_name_list: server_name_list }
+    );
+}
+
+impl ServerNameList: ToString {
+    to_string = |obj| "ServerNameList:" + obj.@server_name_list.to_string;
+}
+
+impl ServerNameList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@server_name_list, to_U16)
+    );
+}
+
+impl ServerNameList: Unmarshal {
+    unmarshal = |buf| (
+        if buf.get_position >= buf.get_size {
+            // workaround for empty extension data
+            ok $ (ServerNameList::make([]), buf)
+        };
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(ServerNameList::make)
+    );
+}
+
+// 4.2.1 Supported Versions
+type SupportedVersions = unbox struct {
+    versions: Array ProtocolVersion
+};
+
+namespace SupportedVersions {
+    default: SupportedVersions;
+    default = SupportedVersions {
+        versions: [
+            0x0304_U16     // TLS 1.3
+        ]
+    };
+}
+
+impl SupportedVersions: ToString {
+    to_string = |obj| "SupportedVersions: " + obj.@versions.map(to_string_hex).to_string;
+}
+
+impl SupportedVersions: Marshal {
+    marshal = |obj, buf| (
+        // for ClientHello
+        buf.marshal_var_size(obj.@versions, to_U8)
+    );
+}
+
+impl SupportedVersions: Unmarshal {
+    unmarshal = |buf| (
+        // for ServerHello, HelloRetryRequest
+        buf.unmarshal.map_res_0(|version|
+            SupportedVersions { versions: [ version ] }
+        )
+    );
+}
+
+// 4.2.3. Signature Algorithms
+type SignatureScheme = U16;
+
+namespace SignatureScheme {
+    /* RSASSA-PKCS1-v1_5 algorithms */
+    rsa_pkcs1_sha256: SignatureScheme;
+    rsa_pkcs1_sha256 = 0x0401_U16;
+    rsa_pkcs1_sha384: SignatureScheme;
+    rsa_pkcs1_sha384 = 0x0501_U16;
+    rsa_pkcs1_sha512: SignatureScheme;
+    rsa_pkcs1_sha512 = 0x0601_U16;
+
+    /* ECDSA algorithms */
+    ecdsa_secp256r1_sha256: SignatureScheme;
+    ecdsa_secp256r1_sha256 = 0x0403_U16;
+    ecdsa_secp384r1_sha384: SignatureScheme;
+    ecdsa_secp384r1_sha384 = 0x0503_U16;
+    ecdsa_secp521r1_sha512: SignatureScheme;
+    ecdsa_secp521r1_sha512 = 0x0603_U16;
+
+    /* RSASSA-PSS algorithms with public key OID rsaEncryption */
+    rsa_pss_rsae_sha256: SignatureScheme;
+    rsa_pss_rsae_sha256 = 0x0804_U16;
+    rsa_pss_rsae_sha384: SignatureScheme;
+    rsa_pss_rsae_sha384 = 0x0805_U16;
+    rsa_pss_rsae_sha512: SignatureScheme;
+    rsa_pss_rsae_sha512 = 0x0806_U16;
+
+    /* EdDSA algorithms */
+    ed25519: SignatureScheme;
+    ed25519 = 0x0807_U16;
+    ed448: SignatureScheme;
+    ed448 = 0x0808_U16;
+
+    /* RSASSA-PSS algorithms with public key OID RSASSA-PSS */
+    rsa_pss_pss_sha256: SignatureScheme;
+    rsa_pss_pss_sha256 = 0x0809_U16;
+    rsa_pss_pss_sha384: SignatureScheme;
+    rsa_pss_pss_sha384 = 0x080a_U16;
+    rsa_pss_pss_sha512: SignatureScheme;
+    rsa_pss_pss_sha512 = 0x080b_U16;
+
+    /* Legacy algorithms */
+    rsa_pkcs1_sha1: SignatureScheme;
+    rsa_pkcs1_sha1 = 0x0201_U16;
+    ecdsa_sha1: SignatureScheme;
+    ecdsa_sha1 = 0x0203_U16;
+}
+
+namespace SignatureScheme {
+    _to_string: SignatureScheme -> String;
+    _to_string = |scheme| (
+        if scheme == SignatureScheme::rsa_pkcs1_sha256 { "rsa_pkcs1_sha256" };
+        if scheme == SignatureScheme::rsa_pkcs1_sha384 { "rsa_pkcs1_sha384" };
+        if scheme == SignatureScheme::rsa_pkcs1_sha512 { "rsa_pkcs1_sha512" };
+        if scheme == SignatureScheme::ecdsa_secp256r1_sha256 { "ecdsa_secp256r1_sha256" };
+        if scheme == SignatureScheme::ecdsa_secp384r1_sha384 { "ecdsa_secp384r1_sha384" };
+        if scheme == SignatureScheme::ecdsa_secp521r1_sha512 { "ecdsa_secp521r1_sha512" };
+        if scheme == SignatureScheme::rsa_pss_rsae_sha256 { "rsa_pss_rsae_sha256" };
+        if scheme == SignatureScheme::rsa_pss_rsae_sha384 { "rsa_pss_rsae_sha384" };
+        if scheme == SignatureScheme::rsa_pss_rsae_sha512 { "rsa_pss_rsae_sha512" };
+        if scheme == SignatureScheme::ed25519 { "ed25519" };
+        if scheme == SignatureScheme::ed448 { "ed448" };
+        if scheme == SignatureScheme::rsa_pss_pss_sha256 { "rsa_pss_pss_sha256" };
+        if scheme == SignatureScheme::rsa_pss_pss_sha384 { "rsa_pss_pss_sha384" };
+        if scheme == SignatureScheme::rsa_pss_pss_sha512 { "rsa_pss_pss_sha512" };
+        if scheme == SignatureScheme::rsa_pkcs1_sha1 { "rsa_pkcs1_sha1" };
+        if scheme == SignatureScheme::ecdsa_sha1 { "ecdsa_sha1" };
+        ""
+    );
+}
+
+type SignatureSchemeList = unbox struct {
+    v: Array SignatureScheme
+};
+
+namespace SignatureSchemeList {
+    default: SignatureSchemeList;
+    default = SignatureSchemeList {
+        v: [
+            // 9.1. Mandatory-to-Implement Cipher Suites
+            // MUST support
+            rsa_pkcs1_sha256,       // for certificates
+            rsa_pss_rsae_sha256,    // for CertificateVerify and certificates
+            ecdsa_secp256r1_sha256,
+        ]
+    };
+}
+
+impl SignatureSchemeList: ToString {
+    to_string = |obj| "SignatureSchemeList: " + obj.@v.map(to_string_hex).to_string;
+}
+
+impl SignatureSchemeList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@v, to_U16)
+    );
+}
+
+impl SignatureSchemeList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(|v|
+            SignatureSchemeList { v: v }
+        )
+    );
+}
+
+// 4.2.7 Supported Groups
+// RFC8422 5.1.1. Supported Elliptic Curves Extension
+
+namespace NamedGroup {
+    /* Elliptic Curve Groups (ECDHE) */
+    secp256r1: NamedGroup;
+    secp256r1 = 0x0017_U16;
+    secp384r1: NamedGroup;
+    secp384r1 = 0x0018_U16;
+    secp521r1: NamedGroup;
+    secp521r1 = 0x0019_U16;
+    x25519: NamedGroup;
+    x25519 = 0x001D_U16;
+    x448: NamedGroup;
+    x448 = 0x001E_U16;
+
+    /* Finite Field Groups (DHE) */
+    ffdhe2048: NamedGroup;
+    ffdhe2048 = 0x0100_U16;
+    ffdhe3072: NamedGroup;
+    ffdhe3072 = 0x0101_U16;
+    ffdhe4096: NamedGroup;
+    ffdhe4096 = 0x0102_U16;
+    ffdhe6144: NamedGroup;
+    ffdhe6144 = 0x0103_U16;
+    ffdhe8192: NamedGroup;
+    ffdhe8192 = 0x0104_U16;
+}
+
+type NamedGroupList = unbox struct {
+    v: Array NamedGroup
+};
+
+namespace NamedGroupList {
+    default: NamedGroupList;
+    default = NamedGroupList {
+        v: [
+           NamedGroup::secp256r1,
+        ]
+    };
+}
+
+impl NamedGroupList: ToString {
+    to_string = |obj| "NamedGroupList: " + obj.@v.map(to_string_hex).to_string;
+}
+
+impl NamedGroupList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@v, to_U16)
+    );
+}
+
+impl NamedGroupList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U16::to_I64).map_res_0(|v|
+            NamedGroupList { v: v }
+        )
+    );
+}
+
+// RFC8422 5.1.2. Supported Point Formats Extension
+
+type ECPointFormat = U8;
+
+type ECPointFormatList = unbox struct {
+    v: Array ECPointFormat
+};
+
+namespace ECPointFormatList {
+    default: ECPointFormatList;
+    default = ECPointFormatList {
+        v: [ 0_U8 ]     // uncompressed
+    };
+}
+
+impl ECPointFormatList: ToString {
+    to_string = |obj| "ECPointFormatList: " + obj.@v.map(to_string_hex).to_string;
+}
+
+impl ECPointFormatList: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@v, to_U8)
+    );
+}
+
+impl ECPointFormatList: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal_var_size(U8::to_I64).map_res_0(|v|
+            ECPointFormatList { v: v }
+        )
+    );
+}
+
+// 4.2.8. Key Share
+// see key_share.fix

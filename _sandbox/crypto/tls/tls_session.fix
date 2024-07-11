@@ -1,0 +1,189 @@
+// Session for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.TLSSession;
+
+import AsyncTask;
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.HandshakeState;
+import Minilib.Crypto.Tls.TLSSocket;
+import Minilib.Crypto.SecureRandom;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Crypto.Cipher.CipherApiDefault;
+//import Minilib.Crypto.Cipher.CipherApiMock;
+import Minilib.Crypto.Cert.CertApi;
+import Minilib.Crypto.Cert.CertApiDefault;
+//import Minilib.Crypto.Cert.CertApiMock;
+import Minilib.Monad.BytesIO;
+import Minilib.Monad.Random;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+import Minilib.Monad.FunctorM;
+import Minilib.Net.Tcp;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type TLSSession = unbox struct {
+    socket: TLSSocket,
+    var_secure_random: Var SecureRandom,
+    init_param: HandshakeInitParam,
+    handshake_state: HandshakeState,
+};
+
+impl TLSSession: GetRandomSource {
+    type RandomGeneratorType TLSSession = SecureRandom;
+    get_random_generator = @var_secure_random;
+}
+
+impl TLSSession: GetByteIO {
+    type BytesIOType TLSSession = TLSSocket;
+    get_bytes_io = TLSSession::@socket;
+}
+
+type StateTLSSession = StateT TLSSession IOFail;
+
+namespace TLSSession {
+    // Creates a TLSSession object.
+    make: TLSSocket -> String -> IOFail TLSSession;
+    make = |socket, server_name| (
+        let secure_random = *SecureRandom::make;
+        let var_secure_random = *Var::make(secure_random).lift;
+        let init_param = *_make_init_param(server_name);
+        let handshake_state = *HandshakeState::make;
+        pure $ TLSSession {
+            socket: socket,
+            var_secure_random: var_secure_random,
+            init_param: init_param,
+            handshake_state: handshake_state,
+        }
+    );
+
+    _make_init_param: String -> IOFail HandshakeInitParam;
+    _make_init_param = |server_name| (
+        let cipher_api = *make_cipher_api.from_result_t;
+        let cert_api = *make_cert_api(cipher_api).from_result_t;
+        let cert_api = *@load_ca_certificates(cert_api);
+        let now = *@get_now(cert_api).lift;
+        pure $ HandshakeInitParam {
+            cipher_api: cipher_api,
+            cert_api: cert_api,
+            server_name: server_name,
+            session_start_time: now,
+        }
+    );
+
+
+    // Gets the current handshake state.
+    get_hstate: StateTLSSession HandshakeState;
+    get_hstate = get_state.map(@handshake_state);
+
+    // Sets the current handshake state.
+    set_hstate: HandshakeState -> StateTLSSession ();
+    set_hstate = |hstate| mod_state(set_handshake_state(hstate));
+
+    lift_hstate: (HandshakeState -> StateTLSSession HandshakeState) -> StateTLSSession ();
+    lift_hstate = |f| (
+        let hstate = *get_hstate;
+        let hstate = *f(hstate);
+        set_hstate(hstate)
+    );
+
+    act_hstate: (HandshakeState -> StateTLSSession (a, HandshakeState)) -> StateTLSSession a;
+    act_hstate = |f| (
+        let hstate = *get_hstate;
+        let (a, hstate) = *f(hstate);
+        eval *set_hstate(hstate);
+        pure $ a
+    );
+
+    // Establishes a handshake.
+    // Specifically, it sends a ClientHello message, and receives ServerHello,
+    // EncryptedExtensions, Certificate, CertificateVerify, Finished messages.
+    // Then it sends a Finished message.
+    establish_handshake: StateTLSSession ();
+    establish_handshake = (
+        eval *pure();
+        let hstate = *get_hstate;
+        if hstate.is_after_finished {
+            pure () // already established
+        };
+        if !hstate.is_before_client_hello {
+            error $ "establish_handshake: wrong state"
+        };
+        eval *_send_client_hello;
+        eval *_recv_server_hello;
+        eval *_recv_server_params;
+        pure()
+    );
+
+    save_certificates_to_files: (I64 -> Path) -> StateTLSSession ();
+    save_certificates_to_files = |make_filepath| (
+        let hstate = *get_hstate;
+        if !hstate.is_after_finished {
+            error $ "save_certificates_to_files: wrong state"
+        };
+        let certs = hstate.get_certificates;
+        eval *Iterator::range(0, certs.get_size).foreach_m(|i|
+            let cert_data = certs.@(i);
+            let filepath = make_filepath(i);
+            //let filename = (host, i).format("tmp.cert_{}.{}.cer");
+            eval log_info("writing " + filepath.to_string);
+            write_file_bytes(filepath, cert_data)
+        ).lift_t;
+        pure()
+    );
+
+    _send_client_hello: StateTLSSession ();
+    _send_client_hello =  (
+        eval *pure();
+        let session = *get_state;
+        let init_param = session.@init_param;
+        eval *HandshakeState::start_handshake(init_param).lift_hstate;
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
+    );
+
+    _recv_server_hello: StateTLSSession ();
+    _recv_server_hello = (
+        eval *HandshakeState::recv_record.lift_hstate;
+        pure()
+    );
+
+    _recv_server_params: StateTLSSession ();
+    _recv_server_params = (
+        eval *HandshakeState::recv_record.lift_hstate;
+        if !(*get_hstate).is_after_finished {
+            _recv_server_params  // try again
+        };
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
+    );
+
+    // Sends an application data.
+    send_appdata: Array U8 -> StateTLSSession ();
+    send_appdata = |appdata| (
+        eval *HandshakeState::send_appdata(appdata).lift_hstate;
+        eval *HandshakeState::send_records.lift_hstate;
+        pure()
+    );
+
+    // Receives an application data.
+    recv_appdata: StateTLSSession (Array U8);
+    recv_appdata = (
+        eval *HandshakeState::send_records.lift_hstate;
+        eval *HandshakeState::recv_record.lift_hstate;
+        let appdata = *HandshakeState::pop_appdata_received.act_hstate;
+        if appdata.is_empty {
+            // try again
+            recv_appdata
+        };
+        pure $ appdata
+    );
+}

@@ -1,0 +1,116 @@
+// Debug Logging
+module Minilib.Common.DebugLog;
+
+import AsyncTask;
+import Debug;
+
+type LogMessage = String;
+type LazyLogMessage = Lazy LogMessage;
+
+type LogOptions = unbox struct {
+	threshold_level: LogLevel,
+};
+
+namespace LogOptions {
+    // unsafe
+    _var_options: Var LogOptions;
+    _var_options = Var::make(
+        LogOptions {
+            threshold_level: lvl_all,
+        }
+    )._unsafe_perform;
+
+    _unsafe_get: () -> LogOptions;
+    _unsafe_get = |_| _var_options.get._unsafe_perform;
+
+    _mod_options: (LogOptions -> LogOptions) -> IO ();
+    _mod_options = |f| _var_options.mod(f);
+
+    set_threshold: LogLevel -> IO ();
+    set_threshold = |lvl| _mod_options(set_threshold_level(lvl));
+}
+
+type LogLevel = I64;
+
+namespace LogLevel {
+    lvl_critical: LogLevel;
+    lvl_critical = 30;
+
+    lvl_error: LogLevel;
+    lvl_error = 20;
+
+    lvl_warn: LogLevel;
+    lvl_warn = 10;
+
+    lvl_info: LogLevel;
+    lvl_info = 0;
+
+    lvl_debug: LogLevel;
+    lvl_debug = -10;
+
+    lvl_debug2: LogLevel;
+    lvl_debug2 = -20;
+
+    lvl_debug3: LogLevel;
+    lvl_debug3 = -30;
+
+    lvl_all: LogLevel;
+    lvl_all = I64::minimum;
+}
+
+namespace Logger {
+	_write_log: LogLevel -> String -> LogMessage -> ();
+	_write_log = |level, level_str, message| (
+        _write_log_lazy(level, level_str, |_| message)
+    );
+
+	_write_log_lazy: LogLevel -> String -> LazyLogMessage -> ();
+	_write_log_lazy = |level, level_str, message| (
+        let options = LogOptions::_unsafe_get();
+        if level >= options.@threshold_level {
+            debug_eprintln(level_str + " " + message())
+        } else { () }
+    );
+
+    _red: String;
+    _red = "\u001b[31m";
+
+    _green: String;
+    _green = "\u001b[32m";
+
+    _yellow: String;
+    _yellow = "\u001b[33m";
+
+    _white: String;
+    _white = "\u001b[m";
+
+	log_critical: LogMessage -> ();
+	log_critical = |message| _write_log(LogLevel::lvl_error, _red + "[critical]" + _white, message);
+
+	log_error: LogMessage -> ();
+	log_error = |message| _write_log(LogLevel::lvl_error, _red + "[error]" + _white, message);
+
+	log_warn: LogMessage -> ();
+	log_warn = |message| _write_log(LogLevel::lvl_warn, _red + "[warn]" + _white, message);
+
+	log_info: LogMessage -> ();
+	log_info = |message| _write_log(LogLevel::lvl_info, _green + "[info]" + _white, message);
+
+	log_debug: LogMessage -> ();
+	log_debug = |message| _write_log(LogLevel::lvl_debug, _yellow + "[debug]" + _white, message);
+
+	log_debug2: LogMessage -> ();
+	log_debug2 = |message| _write_log(LogLevel::lvl_debug2, "[debug2]", message);
+
+	log_debug3: LogMessage -> ();
+	log_debug3 = |message| _write_log(LogLevel::lvl_debug3, "[debug3]", message);
+
+	log_debug_lazy: LazyLogMessage -> ();
+	log_debug_lazy = |message| _write_log_lazy(LogLevel::lvl_debug, _yellow + "[debug]" + _white, message);
+
+	log_debug2_lazy: LazyLogMessage -> ();
+	log_debug2_lazy = |message| _write_log_lazy(LogLevel::lvl_debug2, "[debug2]", message);
+
+	log_debug3_lazy: LazyLogMessage -> ();
+	log_debug3_lazy = |message| _write_log_lazy(LogLevel::lvl_debug3, "[debug3]", message);
+}

@@ -113,6 +113,7 @@ matches = |str, parser| (
 
 // The state of parsing FixLang source code.
 type State = unbox struct {
+    input_filename: String, // input file name
     output: IOHandle,   // output file handle
     module_name: String, // module name
     module_summary: String, // module summary
@@ -130,6 +131,7 @@ namespace State {
     make: IOHandle -> State;
     make = |output| (
         State{
+            input_filename: "",
             output: output,
             module_name: "",
             module_summary: "",
@@ -202,7 +204,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        eval *state.println("## module " + module_name + "\n");
+        eval *state.println("# Module " + module_name + " (" + state.@input_filename + ")\n");
         eval *state.print_doc;
         let state = state.set_module_name(module_name);
         let state = state.set_module_summary(state.@doc);
@@ -215,7 +217,8 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        eval *state.println("#### " + line + "\n");
+
+        eval *state.println("### `" + line + "`\n");
         eval *state.print_doc;
         let state = state.set_doc("");
         pure $ state
@@ -236,7 +239,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_type_decl("").set_doc("")
         };
-        eval *state.println("### type " + state.@type_name + "\n");
+        eval *state.println("### `type " + state.@type_name + "`\n");
         eval *state.print_doc;
         eval *state.print_type_declaration;
         let state = state.set_doc("").set_type_decl("");
@@ -258,7 +261,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_trait_decl("").set_doc("")
         };
-        eval *state.println("### trait " + state.@trait_name + "\n");
+        eval *state.println("### `trait " + state.@trait_name + "`\n");
         eval *state.print_doc;
         eval *state.print_trait_declaration;
         let state = state.set_doc("").set_trait_decl("");
@@ -270,7 +273,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        eval *state.println("### " + line + "\n");
+        eval *state.println("### `" + line + "`\n");
         eval *state.print_doc;
         let state = state.set_doc("");
         pure $ state
@@ -290,7 +293,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_impl_decl("").set_doc("")
         };
-        eval *state.println("#### `impl " + state.@impl_name + "`\n");
+        eval *state.println("### `impl " + state.@impl_name + "`\n");
         eval *state.print_doc;
         let state = state.set_doc("").set_impl_decl("").set_impl_name("");
         pure $ state
@@ -301,7 +304,7 @@ namespace State {
         if state.contains_nofixdoc {
             pure $ state.set_doc("")
         };
-        eval *state.println("### namespace " + namespace_name + "\n");
+        eval *state.println("## `namespace " + namespace_name + "`\n");
         eval *state.print_doc;
         let state = state.set_doc("");
         pure $ state
@@ -362,8 +365,7 @@ namespace State {
         eval *make_parent_dir(output_file_path, none());
         let output_fh = *open_file(Path::parse(output_file_path).as_some, "w");
         let state = State::make(output_fh);
-        eval *state.println("# " + input_filename);
-        eval *state.println("");
+        let state = state.set_input_filename(input_filename);
         let state = *contents.split("\n").loop_iter_m(
             state,
             |state, orig_line|
@@ -411,6 +413,7 @@ namespace IndexInfo
         index.mod_modules(push_back(module))
     );
 
+    /*
     // Writes contents of document index file to the output stream.
     write_index: IOHandle -> IndexInfo -> IOFail ();
     write_index = |output_fh, index| (
@@ -429,6 +432,34 @@ namespace IndexInfo
             let (summary, _) = summary.split_first("\n\n");
             let summary = summary.strip_spaces;
             eval *if summary == "" { println("\n") } else { println ("\n" + summary + "\n") };
+            pure()
+        );
+        pure()
+    );
+    */
+
+    // Writes contents of document index file to the output stream.
+    write_index: IOHandle -> IndexInfo -> IOFail ();
+    write_index = |output_fh, index| (
+        let print = |str| write_string(output_fh, str);
+        let println = |str| print(str + "\n");
+
+        eval *println("# Index\n");
+
+        eval *println("| Module Name | Summary |");
+        eval *println("| ----------- | ------- |");
+        eval *index.@modules.to_iter.fold_m(
+            (), |_, module|
+            let fix_path = module.@file_path;
+            let doc_path = *fix_path.replace_suffix(".fix", ".md").from_result;
+            //let link_title = "module " + module.@name + " (" + fix_path + ")";
+            let link_title = module.@name;
+            let link = "[" + link_title + "](" + doc_path + ")";
+            let summary = module.@summary;
+            let (summary, _) = summary.split_first("\n");
+            let summary = summary.strip_spaces;
+            let summary = summary.replace_all("\\", "\\\\").replace_all("|", "\\|");
+            eval *println("| " + link + " | " + summary + " |");
             pure()
         );
         pure()
@@ -479,7 +510,7 @@ namespace BatchMode
 command: Command;
 command = (
     Command::new("fixdoc")
-    .version("0.1.0")
+    .version("0.2.0")
     .about("Output a reference document from a fix source file")
     .arg(Arg::new("input").short('i').long("input").help("Input Directory, or in single mode, input file (*.fix)").required.takes_value)
     .arg(Arg::new("output").short('o').long("output").help("Output Directory, or in single mode, output file (*.md)").required.takes_value)

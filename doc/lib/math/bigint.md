@@ -55,6 +55,11 @@ Shifts `@nat` to left. NOTE `@sign` does not affect at all.
 
 Shifts `@nat` to right. NOTE `@sign` does not affect at all.
 
+#### bit_length: BigInt -> U64;
+
+Returns the bit length of `a.@nat`, ie. one plus the bit position of most significant `1`.
+Returns 0 if `a` is zero.
+
 #### two: BigInt;
 
 BigInt constant representing 2.

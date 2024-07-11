@@ -25,5 +25,9 @@ trait [m: * -> *] m: MonadErrorIF {
 
 #### `impl IOFail: MonadErrorIF`
 
+#### lift_result: [m: MonadError] Result ErrMsg a -> m a;
+
 #### from_result_t: [m: MonadError] Result ErrMsg a -> m a;
+
+#### to_result_t: [m: MonadError] m a -> m (Result ErrMsg a);
 

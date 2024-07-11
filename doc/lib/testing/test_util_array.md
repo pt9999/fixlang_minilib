@@ -2,7 +2,7 @@
 
 Array utility functions for testing.
 
-### `shuffle_array: Random -> Array a -> (Array a, Random);`
+### `shuffle_array: Random -> Array a -> (Random, Array a);`
 
 Shuffles an array.
 

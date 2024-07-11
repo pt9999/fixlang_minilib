@@ -17,7 +17,7 @@ type SecureRandom = unbox struct {
 
 Creates a SecureRandom instance.
 
-### `generate_bytes: I64 -> SecureRandom -> IOFail (Array U8, SecureRandom);`
+### `generate_bytes: I64 -> SecureRandom -> IOFail (SecureRandom, Array U8);`
 
 Generates a random byte array with specified size.
 

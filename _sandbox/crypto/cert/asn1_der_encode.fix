@@ -1,5 +1,11 @@
+// An encoder for ASN.1 Distinguished Encoding Rules(DER).
+//
+// For ASN.1 and DER, see below:
 // https://en.wikipedia.org/wiki/ASN.1
 // https://en.wikipedia.org/wiki/X.690
+//
+// For encoding rules, see below (PDF):
+// https://www.itu.int/rec/T-REC-X.690-202102-I/en
 module Minilib.Crypto.Cert.Asn1DerEncode;
 
 import Debug;
@@ -164,55 +170,47 @@ encode_set_of = |inner_monad| (
 // Primitive Types
 // ----------------------
 
-// `encode_integer(i64)` writes a triplet of an integer.
-encode_integer: [m: MonadWriteByte] I64 -> m ();
-encode_integer = |i64| (
-    let n = 8;  // sizeof(U64)
-    let contents = Array::fill(n, 0_U8).set_u64_be(0, i64.to_U64);
-    let pad = if i64 >= 0 { 0x00_U8 } else { 0xff_U8 };
-    let start = contents.find_by(|u8| u8 != pad).as_some_or(n - 1);
-    let contents = contents.subarray(start, n);
-    encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
-);
-
 impl I64: EncodeDer {
-    encode_obj = encode_integer;
+    encode_obj = |i64| (
+        let n = 8;  // sizeof(U64)
+        let contents = Array::fill(n, 0_U8).set_u64_be(0, i64.to_U64);
+        let pad = if i64 >= 0 { 0x00_U8 } else { 0xff_U8 };
+        let start = contents.find_by(|u8| u8 != pad).as_some_or(n - 1);
+        let contents = contents.subarray(start, n);
+        encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
+    );
 }
 
-// `encode_bigint(x)` writes a triplet of an integer.
-encode_bigint: [m: MonadWriteByte] BigInt -> m ();
-encode_bigint = |x| (
-    let msb_is_set = |contents: Array U8| (
-        contents.@(0).bit_and(0x80_U8) != 0_U8
-    );
-    let contents: Array U8 = if x.is_positive {
-        // Case 1: Positive integer
-        let contents = x.to_bytes;
-        let n = contents.get_size;
-        let start = contents.find_by(|u8| u8 != 0x00_U8).as_some_or(n - 1);
-        let contents = contents.subarray(start, n);
-        // If MSB is set, it is interpreted as a negative integer.
-        // To prevent this, insert zero byte(0x00) into the head.
-        if contents.msb_is_set {
-            [0x00_U8].append(contents)
-        } else {
-            contents
-        }
-    } else {
-        // Case 2: Negative integer
-        let bit_length = x.@nat._bit_length.to_I64;
-        let n = (bit_length + 7) / 8;
-        // convert to two's complement representation
-        let x = x + (one.shift_left((n * 8).to_U64));
-        let contents = x.to_bytes;
-        let contents = contents.subarray(contents.get_size - n, contents.get_size);
-        eval assert(|_| "MSB is not set", contents.msb_is_set);
-        contents
-    };
-    encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
-);
-
 impl BigInt: EncodeDer {
-    encode_obj = encode_bigint;
+    encode_obj = |x| (
+        let msb_is_set = |contents: Array U8| (
+            contents.@(0).bit_and(0x80_U8) != 0_U8
+        );
+        let contents: Array U8 = if x.is_positive {
+            // Case 1: Positive integer
+            let contents = x.to_bytes;
+            let n = contents.get_size;
+            let start = contents.find_by(|u8| u8 != 0x00_U8).as_some_or(n - 1);
+            let contents = contents.subarray(start, n);
+            // If MSB is set, it is interpreted as a negative integer.
+            // To prevent this, insert zero byte(0x00) into the head.
+            if contents.msb_is_set {
+                [0x00_U8].append(contents)
+            } else {
+                contents
+            }
+        } else {
+            // Case 2: Negative integer
+            let bit_length = x.@nat._bit_length.to_I64;
+            let n = (bit_length + 7) / 8;
+            // convert to two's complement representation
+            let x = x + (one.shift_left((n * 8).to_U64));
+            let contents = x.to_bytes;
+            let contents = contents.subarray(contents.get_size - n, contents.get_size);
+            eval assert(|_| "MSB is not set", contents.msb_is_set);
+            contents
+        };
+        encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
+    );
 }
 

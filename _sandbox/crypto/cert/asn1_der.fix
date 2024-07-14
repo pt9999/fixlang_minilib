@@ -60,7 +60,7 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         pure $ buf.get_position >= buf.get_size
     );
     run_inner = |length, inner_monad| (
-        let buf = *get_state;
+        make_state_t_monad $ |buf|
         let inner_array = buf.@array.subarray(
             0,
             min(buf.@position + length, buf.get_size)
@@ -69,8 +69,8 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         let inner_buf = inner_buf.set_position(buf.@position);
         let (inner_buf, a) = *inner_monad.run_state_t(inner_buf).lift_t;
         // TODO: should check whether inner_buf is at the end of stream?
-        eval *put_state(buf.set_position(buf.@position + length));
-        pure $ a
+        let buf = buf.set_position(buf.@position + length);
+        pure $ (buf, a)
     );
 
     get_pos = (
@@ -278,16 +278,6 @@ decode_any = (
     decode_contents(end_pos - start_pos)
 );
 
-decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
-decode_primitive = (
-    let identifier = *decode_identifier;
-    eval *identifier.assert_tag_class(tc_universal);
-    eval *identifier.assert_primitive;
-    let length = *decode_length;
-    let contents = *decode_contents(length);
-    pure $ (identifier, contents)
-);
-
 // ----------------------
 // Constructed Types
 // ----------------------
@@ -361,6 +351,19 @@ choice = |monads| (
 // Primitive Types
 // ----------------------
 
+// `decode_primitive` reads the identifier,
+// then checks whether the identifier is a primitive,
+// then reads the length and the contents,
+// then returns the identifier and the contents.
+decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
+decode_primitive = (
+    let identifier = *decode_identifier;
+    eval *identifier.assert_tag_class(tc_universal);
+    eval *identifier.assert_primitive;
+    let length = *decode_length;
+    let contents = *decode_contents(length);
+    pure $ (identifier, contents)
+);
 
 impl Asn1::Boolean: DecodeDer {
     decode_obj = (

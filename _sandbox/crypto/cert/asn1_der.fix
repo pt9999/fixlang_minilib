@@ -1,5 +1,11 @@
+// A decoder for ASN.1 Distinguished Encoding Rules(DER).
+//
+// For ASN.1 and DER, see below:
 // https://en.wikipedia.org/wiki/ASN.1
 // https://en.wikipedia.org/wiki/X.690
+//
+// For encoding rules, see below (PDF):
+// https://www.itu.int/rec/T-REC-X.690-202102-I/en
 module Minilib.Crypto.Cert.Asn1Der;
 
 import Debug;
@@ -204,6 +210,7 @@ decode_identifier = (
 );
 
 // A monad that decodes the ASN.1 length octets.
+// 10.1 Length forms
 decode_length: [m: MonadReadByte] m I64;
 decode_length = (
     let u8 = *read_byte;
@@ -338,6 +345,9 @@ with_context = |tag, inner_monad| (
     decode_constructed(tc_context_specific, tag.to_U8, inner_monad)
 );
 
+// `choice(inner_monads)` attempts to execute each inner monad in turn,
+// and returns the first successful result.
+// If all inner monads fail, it reports the last failure.
 choice: [m: MonadError] Array (m a) -> m a;
 choice = |monads| (
     let inner = fix $ |inner, i| (
@@ -481,13 +491,16 @@ impl String: DecodeDer {
     );
 }
 
+// 8.6 Encoding of a bitstring value
 impl Asn1::BitString: DecodeDer {
     decode_obj = (
+        // With DER (Distinguished encoding rules), according to "10.2 String encoding forms",
+        // the constructed form of encoding shall not be used for bitstring.
         let (identifier, contents) = *decode_primitive;
-        // TODO: support constructed
         eval *assert_tag(tag_bit_string, identifier);
         if contents.get_size <= 0 { error $ "invalid bitstring" };
         let number_of_unused_bits = contents.@(0);
+        if number_of_unused_bits >= 8_U8 { error $ "invalid bitstring" };
         let data = contents.subarray(1, contents.get_size);
         pure $ BitString {
             number_of_unused_bits: number_of_unused_bits,
@@ -496,8 +509,11 @@ impl Asn1::BitString: DecodeDer {
     );
 }
 
+// 8.7 Encoding of an octetstring value
 impl Asn1::OctetString: DecodeDer {
     decode_obj = (
+        // With DER (Distinguished encoding rules), according to "10.2 String encoding forms",
+        // the constructed form of encoding shall not be used for octetstring.
         let (identifier, contents) = *decode_primitive;
         eval *assert_tag(tag_octet_string, identifier);
         pure $ OctetString {
@@ -506,8 +522,6 @@ impl Asn1::OctetString: DecodeDer {
     );
 }
 
-
-// T-REC-X.690-202102
 // 8.19 Encoding of an object identifier value
 impl Asn1::ObjectIdentifier: DecodeDer {
     decode_obj = (

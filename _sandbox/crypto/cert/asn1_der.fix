@@ -67,7 +67,7 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
         );
         let inner_buf = ByteBuffer::make(inner_array, big_endian());
         let inner_buf = inner_buf.set_position(buf.@position);
-        let (inner_buf, a) = *inner_monad.run_state_t(inner_buf).lift_t;
+        let (inner_buf, a) = *inner_monad.run_state_t(inner_buf);
         // TODO: should check whether inner_buf is at the end of stream?
         let buf = buf.set_position(buf.@position + length);
         pure $ (buf, a)
@@ -374,118 +374,111 @@ impl Asn1::Boolean: DecodeDer {
     );
 }
 
-decode_integer: [m: MonadReadByte] m Asn1::Integer;
-decode_integer = (
-    let (identifier, contents) = *decode_primitive;
-    eval *assert_tag(tag_integer, identifier);
-    if contents.get_size == 0 {
-        pure $ 0
-    };
-    if contents.get_size > 8 {
-        error $ "OutOfRange"
-    };
-    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
-    let bytes = if sign >= 0 { contents }
-    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
-    let u64: U64 = bytes.to_iter.fold(
-        0_U64, |u64, u8|
-        u64.shift_left(8_U64).bit_or(u8.to_U64)
-    );
-    if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
-    let i64: I64 = if sign >= 0 {
-        u64.to_I64
-    } else {
-        -((u64 + 1_U64).to_I64)
-    };
-    pure $ i64
-);
-
-impl Asn1::Integer: DecodeDer {
-    decode_obj = decode_integer;
-}
-
-decode_bigint: [m: MonadReadByte] m BigInt;
-decode_bigint = (
-    let (identifier, contents) = *decode_primitive;
-    eval *assert_tag(tag_integer, identifier);
-    if contents.get_size == 0 {
-        pure $ Zero::zero
-    };
-    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
-    let bytes = if sign >= 0 { contents }
-    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
-
-    let bigint_positive: BigInt = (
-        let u8_len = bytes.get_size;
-        if u8_len == 0 { zero };
-        let u32_len = (u8_len + 3) / 4;
-        let bytes = if 4 * u32_len == u8_len { bytes }
-        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
-        let nat = Array::from_map(u32_len, |i|
-            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+// Integer
+impl I64: DecodeDer {
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        eval *assert_tag(tag_integer, identifier);
+        if contents.get_size == 0 {
+            pure $ 0
+        };
+        if contents.get_size > 8 {
+            error $ "OutOfRange"
+        };
+        let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+        let bytes = if sign >= 0 { contents }
+        else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+        let u64: U64 = bytes.to_iter.fold(
+            0_U64, |u64, u8|
+            u64.shift_left(8_U64).bit_or(u8.to_U64)
         );
-        BigInt::make(1, nat)
+        if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
+        let i64: I64 = if sign >= 0 {
+            u64.to_I64
+        } else {
+            -((u64 + 1_U64).to_I64)
+        };
+        pure $ i64
     );
-
-    if sign >= 0 {
-        pure $ bigint_positive
-    } else {    // if negative, add one and negate the result (because of two's complement)
-        pure $ -(bigint_positive + one)
-    }
-);
+}
 
 impl BigInt: DecodeDer {
-    decode_obj = decode_bigint;
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        eval *assert_tag(tag_integer, identifier);
+        if contents.get_size == 0 {
+            pure $ Zero::zero
+        };
+        let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+        let bytes = if sign >= 0 { contents }
+        else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+
+        let bigint_positive: BigInt = (
+            let u8_len = bytes.get_size;
+            if u8_len == 0 { zero };
+            let u32_len = (u8_len + 3) / 4;
+            let bytes = if 4 * u32_len == u8_len { bytes }
+            else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+            let nat = Array::from_map(u32_len, |i|
+                bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+            );
+            BigInt::make(1, nat)
+        );
+
+        if sign >= 0 {
+            pure $ bigint_positive
+        } else {    // if negative, add one and negate the result (because of two's complement)
+            pure $ -(bigint_positive + one)
+        }
+    );
 }
 
-decode_string: [m: MonadReadByte] m String;
-decode_string = (
-    let (identifier, contents) = *decode_primitive;
-    let tag = identifier.@tag;
-    if tag == tag_utf8_string
-    {
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_ia5_string
-    {
-        // ISO 646 (IA5) characters are almost identical to ASCII character set.
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_printable_string
-    {
-        // PrintableString is restricted subset of ASCII character set.
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_t61_string
-    {
-        let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
-        eval if _8bit_chars.get_size > 0 {
-            log_warn("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
-        } else { () };
-        pure $ contents._unsafe_to_string // OK?
-    };
-    if tag == tag_universal_string
-    {
-        eval log_warn("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
-        // implemented but not tested
-        let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
-        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-        pure $ u8array._unsafe_to_string
-    };
-    if tag == tag_bmp_string
-    {
-        eval log_warn("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
-        // implemented but not tested
-        let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
-        let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
-        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-        pure $ u8array._unsafe_to_string
-    };
-    error $ [tag].format("tag mismatch: expected=(string) actual={}")
-);
-
+// UTF8String, IA5String, PrintableString, T61String, UniversalString, BmpString
 impl String: DecodeDer {
-    decode_obj = decode_string;
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        let tag = identifier.@tag;
+        if tag == tag_utf8_string
+        {
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_ia5_string
+        {
+            // ISO 646 (IA5) characters are almost identical to ASCII character set.
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_printable_string
+        {
+            // PrintableString is restricted subset of ASCII character set.
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_t61_string
+        {
+            let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
+            eval if _8bit_chars.get_size > 0 {
+                log_warn("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
+            } else { () };
+            pure $ contents._unsafe_to_string // OK?
+        };
+        if tag == tag_universal_string
+        {
+            eval log_warn("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
+            // implemented but not tested
+            let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+            pure $ u8array._unsafe_to_string
+        };
+        if tag == tag_bmp_string
+        {
+            eval log_warn("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
+            // implemented but not tested
+            let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
+            let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+            pure $ u8array._unsafe_to_string
+        };
+        error $ [tag].format("tag mismatch: expected=(string) actual={}")
+    );
 }
 
 impl Asn1::BitString: DecodeDer {

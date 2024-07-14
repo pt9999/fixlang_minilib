@@ -97,9 +97,9 @@ read_cert_data_array_from_pem_string = |contents| (
 // A X.509 certificate with signature
 type Certificate = unbox struct {
     tbs_certificate: TBSCertificate,
+    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
     signature_algorithm:   AlgorithmIdentifier,
     signature_value: BitString,
-    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
 };
 
 namespace Certificate {
@@ -145,13 +145,11 @@ impl Certificate: DecodeDer {
             let tbs_certificate_bytes = *decode_contents(end_pos - start_pos);
             eval *set_pos(end_pos);
 
-            let signature_algorithm = *decode_obj;
-            let signature_value = *decode_obj;
             pure $ Certificate {
                 tbs_certificate: tbs_certificate,
-                signature_algorithm: signature_algorithm,
-                signature_value: signature_value,
                 tbs_certificate_bytes: tbs_certificate_bytes,
+                signature_algorithm: *decode_obj,
+                signature_value: *decode_obj,
             }
         }
     );
@@ -192,26 +190,17 @@ impl TBSCertificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
             let version = *with_context(0, decode_obj).if_exists.map(as_some_or(0));
-            let serial_number = *decode_obj;
-            let signature = *decode_obj;
-            let issuer = *decode_name;
-            let validity = *decode_obj;
-            let subject = *decode_name;
-            let subject_public_key_info = *decode_obj;
-            let issuer_unique_id = *with_context(1, decode_obj).if_exists;
-            let subject_unique_id = *with_context(2, decode_obj).if_exists;
-            let extensions = *with_context(3, decode_extensions).if_exists;
             pure $ TBSCertificate {
                 version: version,
-                serial_number: serial_number,
-                signature: signature,
-                issuer: issuer,
-                validity: validity,
-                subject: subject,
-                subject_public_key_info: subject_public_key_info,
-                issuer_unique_id: issuer_unique_id,
-                subject_unique_id: subject_unique_id,
-                extensions: extensions,
+                serial_number: *decode_obj,
+                signature: *decode_obj,
+                issuer: *decode_obj,
+                validity: *decode_obj,
+                subject: *decode_obj,
+                subject_public_key_info: *decode_obj,
+                issuer_unique_id: *with_context(1, decode_obj).if_exists,
+                subject_unique_id: *with_context(2, decode_obj).if_exists,
+                extensions: *with_context(3, _decode_extensions).if_exists,
             }
         }
     );
@@ -324,31 +313,32 @@ impl Name: ToString {
     );
 }
 
-decode_name: [m: MonadReadByte] m Name;
-decode_name = (
-    pure $ Name {
-        data: *decode_RDNSequence
-    }
-);
+impl Name: DecodeDer {
+    decode_obj = (
+        pure $ Name {
+            data: *_decode_RDNSequence
+        }
+    );
+}
 
 type RDNSequence = Array RelativeDistinguishedName;
 
-decode_RDNSequence: [m: MonadReadByte] m RDNSequence;
-decode_RDNSequence = (
-    decode_sequence_of(decode_RelativeDistinguishedName)
+_decode_RDNSequence: [m: MonadReadByte] m RDNSequence;
+_decode_RDNSequence = (
+    decode_sequence_of(_decode_RelativeDistinguishedName)
 );
 
 type RelativeDistinguishedName = Array AttributeTypeAndValue;
 
-decode_RelativeDistinguishedName: [m: MonadReadByte] m RelativeDistinguishedName;
-decode_RelativeDistinguishedName = (
-    decode_set_of(decode_AttributeTypeAndValue)
+_decode_RelativeDistinguishedName: [m: MonadReadByte] m RelativeDistinguishedName;
+_decode_RelativeDistinguishedName = (
+    decode_set_of(_decode_AttributeTypeAndValue)
 );
 
 type AttributeTypeAndValue = (AttributeType, AttributeValue);
 
-decode_AttributeTypeAndValue: [m: MonadReadByte] m AttributeTypeAndValue;
-decode_AttributeTypeAndValue = (
+_decode_AttributeTypeAndValue: [m: MonadReadByte] m AttributeTypeAndValue;
+_decode_AttributeTypeAndValue = (
     decode_sequence $ do {
         let type_ = *decode_obj;
         let value = *decode_obj;
@@ -401,8 +391,8 @@ impl AlgorithmIdentifier: DecodeDer {
 
 type Extensions = Array Extension;
 
-decode_extensions:  [m: MonadReadByte] m Extensions;
-decode_extensions = (
+_decode_extensions:  [m: MonadReadByte] m Extensions;
+_decode_extensions = (
     decode_sequence_of(decode_obj)
 );
 

@@ -32,6 +32,9 @@ bin/fixdoc: bin/fixautolink
 test: bin/fixautotest
 	bin/fixautotest -L ./lib -T ./tests -k $(OPT_TESTS)
 
+test-crypto: bin/fixautotest
+	make -C _sandbox/crypto test
+
 document: bin/fixdoc
 	bin/fixdoc -i lib -o doc
 

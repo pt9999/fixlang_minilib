@@ -28,7 +28,7 @@ test-curdir::
 
 test-subdirs::
   ifneq ($(SUBDIRS),)
-	for subdir in $(SUBDIRS); do $(MAKE) -C $$subdir test; done
+	set -e && for subdir in $(SUBDIRS); do $(MAKE) -C $$subdir test; done
   endif
 
 clean::

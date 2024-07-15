@@ -1,0 +1,135 @@
+// Certificate Revocation List (CRL)
+//
+// For details, see below:
+// RFC 5280 - Internet X.509 Public Key Infrastructure Certificate and Certificate Revocation List (CRL) Profile
+// https://tex2e.github.io/rfc-translater/html/rfc5280.html
+module Minilib.Crypto.Cert.CRL;
+
+import Hash;
+import Debug;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+// 5.1. CRL Fields
+
+type CertificateList = unbox struct {
+    tbs_cert_list: TBSCertList,
+    tbs_cert_list_bytes: Array U8,        // DER encoding of tbs_cert_list
+    signature_algorithm: AlgorithmIdentifier,
+    signature_value: BitString,
+};
+
+impl CertificateList: ToString {
+    to_string = |obj| (
+        "CertificateList {" +
+        "\n tbs_cert_list=" + obj.@tbs_cert_list.to_string.replace_all("\n", "\n  ") +
+        "\n signature_algorithm=" + obj.@signature_algorithm.to_string +
+        "\n signature_value=" + obj.@signature_value.to_string +
+        "\n }"
+    );
+}
+
+impl CertificateList: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let start_pos = *get_pos;
+            let tbs_cert_list = *decode_obj;
+            let end_pos = *get_pos;
+
+            // save DER encoding of tbs_cert_list for signature validation
+            eval *set_pos(start_pos);
+            let tbs_cert_list_bytes = *decode_contents(end_pos - start_pos);
+            eval *set_pos(end_pos);
+
+            pure $ CertificateList {
+                tbs_cert_list: tbs_cert_list,
+                tbs_cert_list_bytes: tbs_cert_list_bytes,
+                signature_algorithm: *decode_obj,
+                signature_value: *decode_obj,
+            }
+        }
+    );
+}
+
+// 5.1.2. Certificate List "To Be Signed"
+
+type TBSCertList = unbox struct {
+    version: Version,
+    signature: AlgorithmIdentifier,
+    issuer: Name, // the issuer name
+    this_update: X509Time, // the issue date of this CRL
+    next_update: Option X509Time,
+    revoked_certificates: Array CrlEntry,
+    crl_extensions: Option Extensions,
+};
+
+impl TBSCertList: ToString {
+    to_string = |obj| (
+        "TBSCertificate {" +
+        "\n version=" + obj.@version.to_string +
+        "\n signature=" + obj.@signature.to_string +
+        "\n issuer=" + obj.@issuer.to_string +
+        "\n this_update=" + obj.@this_update.to_string +
+        "\n next_update=" + obj.@next_update.to_string +
+        "\n revoked_certificates=" + obj.@revoked_certificates.map(|entry| "\n    " + entry.to_string).to_string +
+        "\n crl_extensions=" + obj.@crl_extensions.map(map(|ex| "\n    " + ex.to_string)).to_string +
+        "\n }"
+    );
+}
+
+impl TBSCertList: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let version = *decode_obj.if_exists.map(as_some_or(0));
+            pure $ TBSCertList {
+                version: version,
+                signature: *decode_obj,
+                issuer: *decode_obj,
+                this_update: *decode_obj,
+                next_update: *decode_obj.if_exists,
+                revoked_certificates: *decode_sequence_of(decode_obj).if_exists.map(as_some_or([])),
+                crl_extensions: *with_context(0, _decode_extensions).if_exists,
+            }
+        }
+    );
+}
+
+type CrlEntry = unbox struct {
+    user_certificate: CertificateSerialNumber,
+    revocation_date: X509Time,
+    crl_entry_extensions: Option Extensions,
+};
+
+impl CrlEntry: ToString {
+    to_string = |obj| (
+        "CrlEntry {" +
+        " user_certificate=" + obj.@user_certificate.to_string +
+        " revocation_date=" + obj.@revocation_date.to_string +
+        " crl_entry_extensions=" + obj.@crl_entry_extensions.map(map(|ex| "\n    " + ex.to_string)).to_string +
+        " }"
+    );
+}
+
+impl CrlEntry: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ CrlEntry {
+                user_certificate: *decode_obj,
+                revocation_date: *decode_obj,
+                crl_entry_extensions: *_decode_extensions.if_exists,
+            }
+        }
+    );
+}

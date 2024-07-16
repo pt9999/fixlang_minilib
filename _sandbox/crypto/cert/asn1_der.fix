@@ -24,20 +24,25 @@ import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 import Minilib.Text.Unicode;
 
-// -------------------
-// Input Byte Stream
-// -------------------
+// -------------------------------
+// Monad interface for Der Decoder
+// -------------------------------
 
-trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
+trait MonadDerDecoder = Functor + Monad + MonadErrorIF + MonadDerDecoderIF;
 
-trait [m: * -> *] m: MonadReadByteIF {
+trait [m: * -> *] m: MonadDerDecoderIF {
     // Reads a byte. If the end-of-stream is reached, it reports an error.
     read_byte: m U8;
+
     // Checks whether the end-of-stream is reached.
     is_eos: m Bool;
+
     // Runs the inner monad with the inner contents.
     // The inner contents is created from current position to the position advanced by the specified length,
     run_inner: I64 -> m a -> m a;
+
+    // Runs the inner monad repeatedly until it reaches the end-of-stream.
+    repeat: m a -> m (Array a);
 
     // get the position of the stream.
     get_pos: m I64;
@@ -49,6 +54,7 @@ trait [m: * -> *] m: MonadReadByteIF {
 __Err_EndOfStream: ErrMsg;
 __Err_EndOfStream = "End of stream";
 
+// A buffer for decoding DER.
 type DecodeDerBuffer = unbox struct {
     array: Array U8,
     position: I64,
@@ -56,6 +62,7 @@ type DecodeDerBuffer = unbox struct {
 };
 
 namespace DecodeDerBuffer {
+    // Creates a DecodeDerBuffer from a byte array.
     make: Array U8 -> DecodeDerBuffer;
     make = |array| DecodeDerBuffer {
         array: array,
@@ -63,6 +70,7 @@ namespace DecodeDerBuffer {
         end: array.get_size,
     };
 
+    // Creates a sub-buffer of the specifie range.
     subbuffer: I64 -> I64 -> DecodeDerBuffer -> DecodeDerBuffer;
     subbuffer = |begin, end, buf| (
         let array = buf.@array;
@@ -74,10 +82,11 @@ namespace DecodeDerBuffer {
             end: end,
         }
     );
+
 }
 
-
-impl [m: MonadError] StateT DecodeDerBuffer m: MonadReadByteIF {
+// We restrict the underlying monad to `Result ErrMsg` in order to avoid stack overflow
+impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
     read_byte = make_state_t_monad $ |buf| (
         let DecodeDerBuffer {
             array: array,
@@ -106,6 +115,27 @@ impl [m: MonadError] StateT DecodeDerBuffer m: MonadReadByteIF {
         pure $ (buf, a)
     );
 
+    repeat = |inner_monad| (
+        make_state_t_monad $ |buf|
+        StateDecodeDer::_repeat_inner(inner_monad, buf, [])
+    );
+/*
+    repeat = |inner_monad| (
+        make_state_t_monad $ |buf|
+        // To avoid stack overflow, we don't use monadic binding here
+        loop(
+            (buf, []), |(buf, arr)|
+            if buf.@position >= buf.@end { break $ ok $ (buf, arr) };
+            let res = inner_monad.run_state_t(buf);
+            if res.is_err { break $ err $ res.as_err };
+            let (buf, a) = res.as_ok;
+            let arr = arr.push_back(a);
+            eval if arr.get_size % 100 == 0 { debug_eprintln("repeat: " + arr.get_size.to_string) } else { () };
+            continue $ (buf, arr)
+        )
+    );
+*/
+
     get_pos = (
         let buf = *get_state;
         pure $ buf.@position
@@ -116,22 +146,43 @@ impl [m: MonadError] StateT DecodeDerBuffer m: MonadReadByteIF {
     );
 }
 
+namespace StateDecodeDer {
+    type StateDecodeDer = StateT DecodeDerBuffer (Result ErrMsg);
+
+    _repeat_inner: StateDecodeDer a -> DecodeDerBuffer -> Array a -> Result ErrMsg (DecodeDerBuffer, Array a);
+    _repeat_inner = |inner_monad, buf, arr| (
+        if buf.@position >= buf.@end { ok $ (buf, arr) };
+        let res = (inner_monad.@data)(buf);     // = run_state_t
+        if res.is_err { err $ res.as_err };
+        let (buf, a) = res.as_ok;
+        let arr = arr.push_back(a);
+        eval if arr.get_size % 100 == 0 { debug_eprintln("repeat: " + arr.get_size.to_string) } else { () };
+        _repeat_inner(inner_monad, buf, arr)
+    );
+
+    // Runs the specified decoder against the specified byte array.
+    eval_der_decoder: Array U8 ->  StateDecodeDer a -> Result ErrMsg a;
+    eval_der_decoder = |bytes, decoder| (
+        let buf = DecodeDerBuffer::make(bytes);
+        let (buf, a) = *decoder.run_state_t(buf);
+        // TODO: should check whether buf is at the end of stream?
+        pure $ a
+    );
+}
+
 // -----------------
 // Decode an object
 // -----------------
 
 // A trait for an object that can be decoded from DER-encoded bytes.
 trait a: DecodeDer {
-    decode_obj: [m: MonadReadByte] m a;
+    decode_obj: [m: MonadDerDecoder] m a;
 }
 
 // Decodes an object from DER-encoded bytes.
 decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
 decode_der_from_bytes = |bytes| (
-    let buf = DecodeDerBuffer::make(bytes);
-    let (buf, a) = *decode_obj.run_state_t(buf);
-    // TODO: should check whether buf is at the end of stream?
-    pure $ a
+    decode_obj.eval_der_decoder(bytes)
 );
 
 // -----------
@@ -210,7 +261,7 @@ impl Identifier: ToString {
 }
 
 // A monad that decodes the ASN.1 identifier octets.
-decode_identifier: [m: MonadReadByte] m Identifier;
+decode_identifier: [m: MonadDerDecoder] m Identifier;
 decode_identifier = (
     let pos = *get_pos;
     let u8 = *read_byte;
@@ -238,7 +289,7 @@ decode_identifier = (
 
 // A monad that decodes the ASN.1 length octets.
 // 10.1 Length forms
-decode_length: [m: MonadReadByte] m I64;
+decode_length: [m: MonadDerDecoder] m I64;
 decode_length = (
     let u8 = *read_byte;
     if u8.bit_and(0x80_U8) == 0_U8 {
@@ -261,7 +312,7 @@ decode_length = (
 );
 
 // A monad that decodes the ASN.1 contents octets.
-decode_contents: [m: MonadReadByte] I64 -> m (Array U8);
+decode_contents: [m: MonadDerDecoder] I64 -> m (Array U8);
 decode_contents = |length| (
     Array::fill(length, read_byte).map_m(|x| x)
 );
@@ -301,7 +352,7 @@ dump_der_triplets = |bytes| (
 );
 
 // Extracts one triplet (identifier, length, contents) as a DER-encoded bytes.
-decode_any: [m: MonadReadByte] m (Array U8);
+decode_any: [m: MonadDerDecoder] m (Array U8);
 decode_any = (
     let start_pos = *get_pos;
     let identifier = *decode_identifier;
@@ -319,7 +370,7 @@ decode_any = (
 // `decode_constructed(tag, inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches the `tag`,
 // then runs `inner_monad` in the inner contents.
-decode_constructed: [m: MonadReadByte] TagClass -> Tag -> m a -> m a;
+decode_constructed: [m: MonadDerDecoder] TagClass -> Tag -> m a -> m a;
 decode_constructed = |tag_class, tag, inner_monad| (
     let identifier = *decode_identifier;
     eval *identifier.assert_tag_class(tag_class);
@@ -329,23 +380,8 @@ decode_constructed = |tag_class, tag, inner_monad| (
     run_inner(length, inner_monad)
 );
 
-// `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end-of-stream.
-repeat: [m: MonadReadByte] m a -> m (Array a);
-repeat = |inner_monad| (
-    _repeat_inner(inner_monad, [])
-);
-
-_repeat_inner: [m: MonadReadByte] m a -> Array a -> m (Array a);
-_repeat_inner = |inner_monad, arr| (
-    if *is_eos { pure $ arr };
-    let a = *inner_monad;
-    let arr = arr.push_back(a);
-    eval if arr.get_size % 100 == 0 { debug_eprintln("_repeat_inner: " + arr.get_size.to_string) } else { () };
-    _repeat_inner(inner_monad, arr)
-);
-
 // `inner_monad.if_exists` is a monad that runs `inner_monad` as an optional value.
-if_exists: [m: MonadReadByte] m a -> m (Option a);
+if_exists: [m: MonadDerDecoder] m a -> m (Option a);
 if_exists = |inner_monad| (
     inner_monad.map(some).catch(|errmsg| pure $ none())
 );
@@ -353,17 +389,17 @@ if_exists = |inner_monad| (
 // `decode_sequence(inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches `tag_sequence` and the tag class is `tc_universal`,
 // then runs `inner_monad` in the inner contents.
-decode_sequence: [m: MonadReadByte] m a -> m a;
+decode_sequence: [m: MonadDerDecoder] m a -> m a;
 decode_sequence = |inner_monad| (
     decode_constructed(tc_universal, tag_sequence, inner_monad)
 );
 
-decode_sequence_of: [m: MonadReadByte] m a -> m (Array a);
+decode_sequence_of: [m: MonadDerDecoder] m a -> m (Array a);
 decode_sequence_of = |inner_monad| (
     decode_constructed(tc_universal, tag_sequence, repeat $ inner_monad)
 );
 
-decode_set_of: [m: MonadReadByte] m a -> m (Array a);
+decode_set_of: [m: MonadDerDecoder] m a -> m (Array a);
 decode_set_of = |inner_monad| (
     decode_constructed(tc_universal, tag_set, repeat $ inner_monad)
 );
@@ -371,7 +407,7 @@ decode_set_of = |inner_monad| (
 // `with_context(tag, inner_monad)`reads the identifier and the length,
 // then checks whether the identifier matches `tag` and the tag class is `tc_context_specific`,
 // then runs `inner_monad` in the inner contents.
-with_context: [m: MonadReadByte] I64 -> m a -> m a;
+with_context: [m: MonadDerDecoder] I64 -> m a -> m a;
 with_context = |tag, inner_monad| (
     decode_constructed(tc_context_specific, tag.to_U8, inner_monad)
 );
@@ -396,7 +432,7 @@ choice = |monads| (
 // then checks whether the identifier is a primitive,
 // then reads the length and the contents,
 // then returns the identifier and the contents.
-decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
+decode_primitive: [m: MonadDerDecoder] m (Identifier, Array U8);
 decode_primitive = (
     let identifier = *decode_identifier;
     eval *identifier.assert_tag_class(tc_universal);

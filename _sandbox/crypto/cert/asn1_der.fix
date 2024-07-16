@@ -49,39 +49,66 @@ trait [m: * -> *] m: MonadReadByteIF {
 __Err_EndOfStream: ErrMsg;
 __Err_EndOfStream = "End of stream";
 
-impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
+type DecodeDerBuffer = unbox struct {
+    array: Array U8,
+    position: I64,
+    end: I64,
+};
+
+namespace DecodeDerBuffer {
+    make: Array U8 -> DecodeDerBuffer;
+    make = |array| DecodeDerBuffer {
+        array: array,
+        position: 0,
+        end: array.get_size,
+    };
+
+    subbuffer: I64 -> I64 -> DecodeDerBuffer -> DecodeDerBuffer;
+    subbuffer = |begin, end, buf| (
+        let array = buf.@array;
+        eval assert(|_| "begin out of range", 0 <= begin && begin <= array.get_size);
+        eval assert(|_| "end out of range", begin <= end && end <= array.get_size);
+        DecodeDerBuffer {
+            array: array,
+            position: begin,
+            end: end,
+        }
+    );
+}
+
+
+impl [m: MonadError] StateT DecodeDerBuffer m: MonadReadByteIF {
     read_byte = make_state_t_monad $ |buf| (
-        if buf.get_position >= buf.get_size {
+        let DecodeDerBuffer {
+            array: array,
+            position: position,
+            end: end
+        } = buf;
+        if position >= end {
             error $ __Err_EndOfStream
         };
-        let res: Result ErrMsg (U8, ByteBuffer) = buf.unmarshal;
-        if res.is_err {
-            error $ res.as_err
-        };
-        let (u8, buf) = res.as_ok;
+        let u8 = array.@(position);
+        let buf = buf.set_position(position + 1);
         pure $ (buf, u8)
     );
     is_eos = (
         let buf = *get_state;
-        pure $ buf.get_position >= buf.get_size
+        pure $ buf.@position >= buf.@end
     );
     run_inner = |length, inner_monad| (
         make_state_t_monad $ |buf|
-        let inner_array = buf.@array.subarray(
-            0,
-            min(buf.@position + length, buf.get_size)
-        );
-        let inner_buf = ByteBuffer::make(inner_array, big_endian());
-        let inner_buf = inner_buf.set_position(buf.@position);
+        let inner_begin = buf.@position;
+        let inner_end = min(inner_begin + length, buf.@end);
+        let inner_buf = buf.subbuffer(inner_begin, inner_end);
         let (inner_buf, a) = *inner_monad.run_state_t(inner_buf);
         // TODO: should check whether inner_buf is at the end of stream?
-        let buf = buf.set_position(buf.@position + length);
+        let buf = buf.set_position(inner_end);
         pure $ (buf, a)
     );
 
     get_pos = (
         let buf = *get_state;
-        pure $ buf.get_position
+        pure $ buf.@position
     );
 
     set_pos = |pos| (
@@ -101,7 +128,7 @@ trait a: DecodeDer {
 // Decodes an object from DER-encoded bytes.
 decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
 decode_der_from_bytes = |bytes| (
-    let buf = ByteBuffer::make(bytes, big_endian());
+    let buf = DecodeDerBuffer::make(bytes);
     let (buf, a) = *decode_obj.run_state_t(buf);
     // TODO: should check whether buf is at the end of stream?
     pure $ a
@@ -242,8 +269,8 @@ decode_contents = |length| (
 // Dumps triplets to text from DER-encoded bytes.
 dump_der_triplets: Array U8 -> Result ErrMsg String;
 dump_der_triplets = |bytes| (
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let sm: StateT ByteBuffer (Result ErrMsg) String = loop_m(
+    let buf = DecodeDerBuffer::make(bytes);
+    let sm: StateT DecodeDerBuffer (Result ErrMsg) String = loop_m(
         "", |output|
         let buf = *get_state;
         if buf.@position >= buf.get_size { break_m $ output };
@@ -305,12 +332,16 @@ decode_constructed = |tag_class, tag, inner_monad| (
 // `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end-of-stream.
 repeat: [m: MonadReadByte] m a -> m (Array a);
 repeat = |inner_monad| (
-    loop_m(
-        [], |arr|
-        if *is_eos { break_m $ arr };
-        let a = *inner_monad;
-        continue_m $ arr.push_back(a)
-    )
+    _repeat_inner(inner_monad, [])
+);
+
+_repeat_inner: [m: MonadReadByte] m a -> Array a -> m (Array a);
+_repeat_inner = |inner_monad, arr| (
+    if *is_eos { pure $ arr };
+    let a = *inner_monad;
+    let arr = arr.push_back(a);
+    eval if arr.get_size % 100 == 0 { debug_eprintln("_repeat_inner: " + arr.get_size.to_string) } else { () };
+    _repeat_inner(inner_monad, arr)
 );
 
 // `inner_monad.if_exists` is a monad that runs `inner_monad` as an optional value.

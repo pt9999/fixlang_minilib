@@ -32,7 +32,7 @@ If found, returns the index of that byte.
 
 ### `replace_all: String -> String -> String -> String;`
 
-Replaces all occurrences of `from` in the string with `to`.
+`input.replace_all(from, to)` replaces all occurrences of `from` in the input string with `to`.
 
 ### `replace_suffix: String -> String -> String -> Result ErrMsg String;`
 

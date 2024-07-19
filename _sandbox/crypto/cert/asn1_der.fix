@@ -34,6 +34,9 @@ trait [m: * -> *] m: MonadDerDecoderIF {
     // Reads a byte. If the end-of-stream is reached, it reports an error.
     read_byte: m U8;
 
+    // Reads a byte array of the specified size. If the end-of-stream is reached, it reports an error.
+    read_bytes: I64 -> m (Array U8);
+
     // Checks whether the end-of-stream is reached.
     is_eos: m Bool;
 
@@ -53,6 +56,14 @@ trait [m: * -> *] m: MonadDerDecoderIF {
 
 __Err_EndOfStream: ErrMsg;
 __Err_EndOfStream = "End of stream";
+
+
+debug: [m: MonadDerDecoder] String -> m a -> m a;
+debug = |mesg, ma| (
+    let a = *ma;
+    eval debug_eprintln(mesg);
+    pure $ a
+);
 
 // A buffer for decoding DER.
 type DecodeDerBuffer = unbox struct {
@@ -100,10 +111,29 @@ impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
         let buf = buf.set_position(position + 1);
         pure $ (buf, u8)
     );
+
+    read_bytes = |length| make_state_t_monad $ |buf| (
+        let DecodeDerBuffer {
+            array: array,
+            position: position,
+            end: end
+        } = buf;
+        if length < 0 {
+            error $ "invalid length"
+        };
+        if position + length > end {
+            error $ __Err_EndOfStream
+        };
+        let bytes = array.subarray(position, position + length);
+        let buf = buf.set_position(position + length);
+        pure $ (buf, bytes)
+    );
+
     is_eos = (
         let buf = *get_state;
         pure $ buf.@position >= buf.@end
     );
+
     run_inner = |length, inner_monad| (
         make_state_t_monad $ |buf|
         let inner_begin = buf.@position;
@@ -117,24 +147,25 @@ impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
 
     repeat = |inner_monad| (
         make_state_t_monad $ |buf|
-        StateDecodeDer::_repeat_inner(inner_monad, buf, [])
-    );
-/*
-    repeat = |inner_monad| (
-        make_state_t_monad $ |buf|
-        // To avoid stack overflow, we don't use monadic binding here
-        loop(
-            (buf, []), |(buf, arr)|
-            if buf.@position >= buf.@end { break $ ok $ (buf, arr) };
-            let res = inner_monad.run_state_t(buf);
-            if res.is_err { break $ err $ res.as_err };
+        let loop_inner = fix $ |loop_inner, buf: DecodeDerBuffer, arr| (
+            // To avoid stack overflow, we don't use monadic binding here
+            if buf.@position >= buf.@end { ok $ (buf, arr) };
+            let res = (inner_monad.@data)(buf);     // = run_state_t
+            if res.is_err { err $ res.as_err };
             let (buf, a) = res.as_ok;
             let arr = arr.push_back(a);
-            eval if arr.get_size % 100 == 0 { debug_eprintln("repeat: " + arr.get_size.to_string) } else { () };
-            continue $ (buf, arr)
-        )
+            /*
+            eval if arr.get_size % 100 == 0 {
+                debug_eprintln("repeat: " + arr.get_size.to_string +
+                    " pos=" + buf.@position.to_string +
+                    " end=" + buf.@end.to_string
+                )
+            } else { () };
+            */
+            loop_inner(buf, arr)
+        );
+        loop_inner(buf, [])
     );
-*/
 
     get_pos = (
         let buf = *get_state;
@@ -148,17 +179,6 @@ impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
 
 namespace StateDecodeDer {
     type StateDecodeDer = StateT DecodeDerBuffer (Result ErrMsg);
-
-    _repeat_inner: StateDecodeDer a -> DecodeDerBuffer -> Array a -> Result ErrMsg (DecodeDerBuffer, Array a);
-    _repeat_inner = |inner_monad, buf, arr| (
-        if buf.@position >= buf.@end { ok $ (buf, arr) };
-        let res = (inner_monad.@data)(buf);     // = run_state_t
-        if res.is_err { err $ res.as_err };
-        let (buf, a) = res.as_ok;
-        let arr = arr.push_back(a);
-        eval if arr.get_size % 100 == 0 { debug_eprintln("repeat: " + arr.get_size.to_string) } else { () };
-        _repeat_inner(inner_monad, buf, arr)
-    );
 
     // Runs the specified decoder against the specified byte array.
     eval_der_decoder: Array U8 ->  StateDecodeDer a -> Result ErrMsg a;
@@ -313,9 +333,7 @@ decode_length = (
 
 // A monad that decodes the ASN.1 contents octets.
 decode_contents: [m: MonadDerDecoder] I64 -> m (Array U8);
-decode_contents = |length| (
-    Array::fill(length, read_byte).map_m(|x| x)
-);
+decode_contents = read_bytes;
 
 // Dumps triplets to text from DER-encoded bytes.
 dump_der_triplets: Array U8 -> Result ErrMsg String;
@@ -324,7 +342,7 @@ dump_der_triplets = |bytes| (
     let sm: StateT DecodeDerBuffer (Result ErrMsg) String = loop_m(
         "", |output|
         let buf = *get_state;
-        if buf.@position >= buf.get_size { break_m $ output };
+        if buf.@position >= buf.@end { break_m $ output };
         let identifier = *decode_identifier;
         let length = *decode_length;
         if identifier.@constructed {

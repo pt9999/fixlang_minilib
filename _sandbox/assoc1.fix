@@ -1,52 +1,150 @@
-// From the paper "Associated type synomyms".
+// Modified version of sprintf from the paper "Associated type synomyms".
+// For the original version, see "2.1 Formatting: type functions compute function types" in the paper below.
 // https://www.researchgate.net/publication/221241277_Associated_type_synonyms
 // DOI:10.1145/1086365.1086397
 module Main;
 
-// 2.1 Formatting: type functions compute function types
+import Minilib.Text.StringEx;
+
+type FormatSpec = unbox union {
+    terminator: String,
+    int_field: (),
+    char_field: (),
+    const_str: String,
+};
+
+trait field: FormatField {
+    type Formatter field;
+    to_formatter: String -> field -> Formatter field;
+    from_specs: Iterator FormatSpec -> Result ErrMsg field;
+}
+
 type IntField next = unbox struct { next: next };
+
+namespace IntField {
+    make: [next: FormatField] next -> IntField next;
+    make = |next| IntField { next: next };
+}
+
 type CharField next = unbox struct { next: next };
+
+namespace CharField {
+    make: [next: FormatField] next -> CharField next;
+    make = |next| CharField { next: next };
+}
+
 type ConstStr next = unbox struct { data: String, next: next };
 
-trait fspec: FormatSpec {
-    type Formatter fspec;
-    to_formatter: String -> fspec -> Formatter fspec;
+namespace ConstStr {
+    make: [next: FormatField] String -> next -> ConstStr next;
+    make = |str, next| ConstStr { data: str, next: next };
 }
-impl String: FormatSpec {
+
+impl String: FormatField {
     type Formatter String = String;
     to_formatter = |prefix, str| prefix + str;
+    from_specs = |specs| (
+        specs.advance.map_or(
+            err $ "spec not found",
+            |(spec, next)|
+            if !next.is_empty { err $ "found elements after terminator" };
+            if !spec.is_terminator { err $ "not a terminator" };
+            ok $ spec.as_terminator
+        )
+    );
 }
-impl [a: FormatSpec] IntField a: FormatSpec {
+
+impl [a: FormatField] IntField a: FormatField {
     type Formatter (IntField a) = I64 -> Formatter a;
-    to_formatter = |prefix, fspec, i| to_formatter(prefix + i.to_string, fspec.@next);
+    to_formatter = |prefix, field, i| to_formatter(prefix + i.to_string, field.@next);
+    from_specs = |specs| (
+        specs.advance.map_or(
+            err $ "spec not found",
+            |(spec, next)|
+            if !spec.is_int_field { err $ "not a int field" };
+            ok $ IntField::make(*from_specs(next))
+        )
+    );
 }
-impl [a: FormatSpec] CharField a: FormatSpec {
+
+impl [a: FormatField] CharField a: FormatField {
     type Formatter (CharField a) = U8 -> Formatter a;
-    to_formatter = |prefix, fspec, c| to_formatter(prefix + [c, 0_U8]._unsafe_from_c_str.to_string, fspec.@next);
+    to_formatter = |prefix, field, c| to_formatter(prefix + [c, 0_U8]._unsafe_from_c_str.to_string, field.@next);
+    from_specs = |specs| (
+        specs.advance.map_or(
+            err $ "spec not found",
+            |(spec, next)|
+            if !spec.is_char_field { err $ "not a char field" };
+            ok $ CharField::make(*from_specs(next))
+        )
+    );
 }
-impl [a: FormatSpec] ConstStr a: FormatSpec {
+impl [a: FormatField] ConstStr a: FormatField {
     type Formatter (ConstStr a) = Formatter a;
-    to_formatter = |prefix, fspec| to_formatter(prefix + fspec.@data, fspec.@next);
+    to_formatter = |prefix, field| to_formatter(prefix + field.@data, field.@next);
+    from_specs = |specs| (
+        specs.advance.map_or(
+            err $ "spec not found",
+            |(spec, next)|
+            if !spec.is_const_str { err $ "not a const str" };
+            ok $ ConstStr::make(spec.as_const_str, *from_specs(next))
+        )
+    );
 }
 
-int_field: [next: FormatSpec] next -> IntField next;
-int_field = |next| IntField { next: next };
+parse_format_spec: String -> Result ErrMsg (Iterator FormatSpec);
+parse_format_spec = |input| (
+    let end = input.get_size;
+    loop_m(
+        ([], 0, 0), |(output, begin, pos)|
+        if pos >= end {
+            let output = output.push_back(terminator(input.substring(begin, end)));
+            break_m $ output.to_iter
+        };
+        let c = input.get_bytes.@(pos);
+        if c != '%' {
+            continue_m $ (output, begin, pos + 1)
+        };
+        let output = output.push_back(const_str(input.substring(begin, pos)));
+        let pos = pos + 1;
+        if pos >= end {
+            let output = output.push_back(terminator(""));
+            break_m $ output.to_iter
+        };
+        let c = input.get_bytes.@(pos);
+        if c == '%' {
+            let output = output.push_back(const_str("%"));
+            let begin = pos + 1;
+            continue_m $ (output, begin, pos + 1)
+        };
+        if c == 'd' {
+            let output = output.push_back(int_field());
+            let begin = pos + 1;
+            continue_m $ (output, begin, pos + 1)
+        };
+        if c == 'c' {
+            let output = output.push_back(char_field());
+            let begin = pos + 1;
+            continue_m $ (output, begin, pos + 1)
+        };
+        err $ "unknown specifier"
+    )
+);
 
-char_field: [next: FormatSpec] next -> CharField next;
-char_field = |next| CharField { next: next };
-
-const_str: [next: FormatSpec] String -> next -> ConstStr next;
-const_str = |str, next| ConstStr { data: str, next: next };
-
-sprintf: [fspec: FormatSpec] fspec -> Formatter fspec;
+sprintf: [field: FormatField] field -> Formatter field;
 sprintf = to_formatter("");
 
 test_sprintf: IO ();
 test_sprintf = (
-    let format_spec : ConstStr (IntField (ConstStr (CharField String)))
-        = const_str("Int: ") $ int_field $ const_str(" Char: ") $ char_field $ ".";
-    let msg = sprintf(format_spec, 123, 'a');
-    println(msg)
+    do {
+        let format = "Int: %d Char: %c.";
+        // Requires type annotations
+        let fields : ConstStr (IntField (ConstStr (CharField String))) = *do {
+            from_specs(*parse_format_spec(format))
+        }.from_result;
+        let msg = sprintf(fields, 123, 'a');
+        println(msg).lift
+    }.try(eprintln)
 );
 
 main: IO ();

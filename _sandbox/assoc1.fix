@@ -4,46 +4,47 @@
 module Main;
 
 // 2.1 Formatting: type functions compute function types
-type I f = unbox struct { next: f };
-type C f = unbox struct { next: f };
-type S f = unbox struct { data: String, next: f };
+type IntField next = unbox struct { next: next };
+type CharField next = unbox struct { next: next };
+type ConstStr next = unbox struct { data: String, next: next };
 
-_I: f -> I f;
-_I = |f| I { next: f };
-
-_C: f -> C f;
-_C = |f| C { next: f };
-
-_S: String -> f -> S f;
-_S = |str, f| S { data: str, next: f };
-
-trait fmt: Format {
-    type Sprintf fmt;
-    sprintf_: String -> fmt -> Sprintf fmt;
+trait fspec: FormatSpec {
+    type Formatter fspec;
+    to_formatter: String -> fspec -> Formatter fspec;
 }
-impl String: Format {
-    type Sprintf String = String;
-    sprintf_ = |prefix, str| prefix + str;
+impl String: FormatSpec {
+    type Formatter String = String;
+    to_formatter = |prefix, str| prefix + str;
 }
-impl [a: Format] I a: Format {
-    type Sprintf (I a) = I64 -> Sprintf a;
-    sprintf_ = |prefix, fmt, i| sprintf_(prefix + i.to_string, fmt.@next);
+impl [a: FormatSpec] IntField a: FormatSpec {
+    type Formatter (IntField a) = I64 -> Formatter a;
+    to_formatter = |prefix, fspec, i| to_formatter(prefix + i.to_string, fspec.@next);
 }
-impl [a: Format] C a: Format {
-    type Sprintf (C a) = U8 -> Sprintf a;
-    sprintf_ = |prefix, fmt, c| sprintf_(prefix + [c, 0_U8]._unsafe_from_c_str.to_string, fmt.@next);
+impl [a: FormatSpec] CharField a: FormatSpec {
+    type Formatter (CharField a) = U8 -> Formatter a;
+    to_formatter = |prefix, fspec, c| to_formatter(prefix + [c, 0_U8]._unsafe_from_c_str.to_string, fspec.@next);
 }
-impl [a: Format] S a: Format {
-    type Sprintf (S a) = Sprintf a;
-    sprintf_ = |prefix, fmt| sprintf_(prefix + fmt.@data, fmt.@next);
+impl [a: FormatSpec] ConstStr a: FormatSpec {
+    type Formatter (ConstStr a) = Formatter a;
+    to_formatter = |prefix, fspec| to_formatter(prefix + fspec.@data, fspec.@next);
 }
 
-sprintf: [fmt: Format] fmt -> Sprintf fmt;
-sprintf = sprintf_("");
+int_field: [next: FormatSpec] next -> IntField next;
+int_field = |next| IntField { next: next };
+
+char_field: [next: FormatSpec] next -> CharField next;
+char_field = |next| CharField { next: next };
+
+const_str: [next: FormatSpec] String -> next -> ConstStr next;
+const_str = |str, next| ConstStr { data: str, next: next };
+
+sprintf: [fspec: FormatSpec] fspec -> Formatter fspec;
+sprintf = to_formatter("");
 
 test_sprintf: IO ();
 test_sprintf = (
-    let format_spec = _S("Int: ") $ _I $ _S(" Char: ") $ _C $ ".";
+    let format_spec : ConstStr (IntField (ConstStr (CharField String)))
+        = const_str("Int: ") $ int_field $ const_str(" Char: ") $ char_field $ ".";
     let msg = sprintf(format_spec, 123, 'a');
     println(msg)
 );

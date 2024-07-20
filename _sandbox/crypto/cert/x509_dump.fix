@@ -8,6 +8,7 @@ import Minilib.Crypto.Cert.CACertificates;
 import Minilib.Crypto.Cert.CRL;
 import Minilib.Crypto.Cert.X509;
 import Minilib.Crypto.Cert.X509Path;
+import Minilib.Crypto.Cert.X509Policy;
 import Minilib.Crypto.Cert.X509DnsName;
 import Minilib.Crypto.Cert.Pem;
 import Minilib.Encoding.Binary;
@@ -63,23 +64,41 @@ test_cert_path = (
     println(path.to_string).lift
 );
 
+print_subject_alt_name: Certificate -> IOFail ();
+print_subject_alt_name = |certificate| (
+    let extn = certificate.find_extension(match_name("id-ce-subjectAltName"));
+    if extn.is_none {
+        println("subjectAltName not found").lift
+    };
+    let bytes = extn.as_some.@extn_value.to_bytes;
+    //eval *println("bytes="+bytes.to_string_hex).lift;
+    let subjectAltName: SubjectAltName = *decode_der_from_bytes(bytes).from_result;
+    println("subjectAltName=" + subjectAltName.to_string).lift
+);
+
+print_certificate_policies: Certificate -> IOFail ();
+print_certificate_policies = |certificate| (
+    let opt = certificate.find_certificate_policies;
+    if opt.is_none { pure () };
+    let policies = opt.as_some;
+    println(policies.to_string).lift
+);
+
 test_read_certificates_from_file: IOFail ();
 test_read_certificates_from_file = (
     let path = Path::parse(".local/tmp.cert_0.cer").as_some;
     //let path = Path::parse("/etc/ssl/certs/ca-certificates.crt").as_some;
     //let path = Path::parse("/etc/ssl/certs/Amazon_Root_CA_3.pem").as_some;
+    let path = Path::parse("/etc/ssl/certs/DigiCert_Global_Root_G2.pem").as_some;
+
+    let args = *IO::get_args.lift;
+    let path = if args.get_size >= 2 { Path::parse(args.@(1)).as_some } else { path };
+
     let certificates = *read_certificates_from_file(path);
     certificates.foreach_m(|certificate|
         eval *println(certificate.to_string).lift;
-        let extn = certificate.find_extension(match_name("id-ce-subjectAltName"));
-        eval *if extn.is_none {
-            println("subjectAltName not found").lift
-        } else {
-            let bytes = extn.as_some.@extn_value.to_bytes;
-            eval *println("bytes="+bytes.to_string_hex).lift;
-            let subjectAltName: SubjectAltName = *decode_der_from_bytes(bytes).from_result;
-            println("subjectAltName=" + subjectAltName.to_string).lift
-        };
+        //eval *print_subject_alt_name(certificate);
+        eval *print_certificate_policies(certificate);
         //eval *verify_certificate_identity(certificate, "example.com").from_result;
         println("").lift
     )
@@ -103,8 +122,8 @@ main = (
     do {
         //eval *test_dump_triplets;
         //eval *test_cert_path;
-        //eval *test_read_certificates_from_file;
-        eval *test_read_crl_from_file;
+        eval *test_read_certificates_from_file;
+        //eval *test_read_crl_from_file;
         pure()
     }.try(eprintln)
 );

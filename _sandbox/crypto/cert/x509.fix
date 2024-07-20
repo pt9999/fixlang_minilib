@@ -157,7 +157,7 @@ impl Certificate: DecodeDer {
 
 // Information associated with the subject of the certificate and the issuer.
 type TBSCertificate = unbox struct {
-    version: Version,
+    version: Option Version,
     serial_number: CertificateSerialNumber,
     signature: AlgorithmIdentifier,
     issuer: Name,
@@ -173,7 +173,7 @@ impl TBSCertificate: ToString {
     to_string = |obj| (
         "TBSCertificate {" +
         "\n version=" + obj.@version.to_string +
-        "\n serial_number=" + obj.@serial_number.to_string +
+        "\n serial_number=" + obj.@serial_number.to_bytes.to_string_hex +
         "\n signature=" + obj.@signature.to_string +
         "\n issuer=" + obj.@issuer.to_string +
         "\n validity=" + obj.@validity.to_string +
@@ -189,9 +189,8 @@ impl TBSCertificate: ToString {
 impl TBSCertificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
-            let version = *with_context(0, decode_obj).if_exists.map(as_some_or(0));
             pure $ TBSCertificate {
-                version: version,
+                version: *with_context(0, decode_obj).if_exists,
                 serial_number: *decode_obj,
                 signature: *decode_obj,
                 issuer: *decode_obj,
@@ -415,13 +414,10 @@ impl Extension: ToString {
 impl Extension: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
-            let extn_id = *decode_obj;
-            let critical = (*decode_obj.if_exists).as_some_or(false);
-            let extn_value = *decode_obj;
             pure $ Extension {
-                extn_id: extn_id,
-                critical: critical,
-                extn_value: extn_value
+                extn_id: *decode_obj,
+                critical: *decode_obj.if_exists_or(false),
+                extn_value: *decode_obj
             }
         }
     );

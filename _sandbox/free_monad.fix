@@ -4,6 +4,7 @@ import Debug;
 
 import Minilib.Monad.Reader;
 import Minilib.Monad.Identity;
+import Minilib.Text.Hex;
 
 // Free Monad
 // https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
@@ -169,33 +170,23 @@ test_str_parser = (
 //-------------------------------------------
 // Free monad as a effect
 
-trait [m: * -> *] MonadCommIF {
-    send_bytes: Array U8 -> m (),
-    recv_bytes: I64 -> m (Array U8),
-    gen_bytes: I64 -> m (Array U8),
-};
+trait [m: * -> *] m: MonadCommIF {
+    send_bytes: Array U8 -> m ();
+    recv_bytes: I64 -> m (Array U8);
+    gen_bytes: I64 -> m (Array U8);
+}
 
-type MonadComm = Monad + MonadCommIF;
-
-monad_comm_1: [m: MonadComm] m ();
-monad_comm_1 = (
-    let size = 100;
-    let bytes = *gen_bytes(size);
-    eval *send_bytes(bytes);
-    let bytes = *recv_bytes(size);
-    eval *send_bytes(bytes);
-    pure()
-);
+trait MonadComm = Monad + MonadCommIF;
 
 type Comm next = box union {
-    comm_send_bytes: (Array U8, next),
+    comm_send_bytes: (Array U8, () -> next),
     comm_recv_bytes: (I64, Array U8 -> next),
     comm_gen_bytes: (I64, Array U8 -> next),
 };
 
 impl Comm: Functor {
     map = |f, obj| (
-        if obj.is_comm_send_bytes { comm_send_bytes $ obj.as_comm_send_bytes.map(f) };
+        if obj.is_comm_send_bytes { comm_send_bytes $ obj.as_comm_send_bytes.map(|g| g >> f) };
         if obj.is_comm_recv_bytes { comm_recv_bytes $ obj.as_comm_recv_bytes.map(|g| g >> f) };
         if obj.is_comm_gen_bytes { comm_gen_bytes $ obj.as_comm_gen_bytes.map(|g| g >> f) };
         eval assert(|_| "invalid type", false);
@@ -204,14 +195,54 @@ impl Comm: Functor {
 }
 
 impl Free Comm: MonadCommIF {
-    send_bytes = |bytes| free_f $ comm_send_bytes $ (bytes, pure());
+    send_bytes = |bytes| free_f $ comm_send_bytes $ (bytes, pure);
     recv_bytes = |length| free_f $ comm_recv_bytes $ (length, pure);
     gen_bytes = |length| free_f $ comm_gen_bytes $ (length, pure);
 }
 
+namespace FreeComm {
+    interpret: Free Comm a -> IO a;
+    interpret = |free| (
+        if free.is_pure_f { pure $ free.as_pure_f };
+        let comm = free.as_free_f;
+        if comm.is_comm_send_bytes {
+            let (bytes, cont) = comm.as_comm_send_bytes;
+            eval *println("send_bytes: " + bytes.to_string_hex);
+            cont().interpret
+        };
+        if comm.is_comm_recv_bytes {
+            let (length, cont) = comm.as_comm_recv_bytes;
+            let bytes = Array::from_map(length, |i| i.to_U8);
+            eval *println("recv_bytes: " + bytes.to_string_hex);
+            cont(bytes).interpret
+        };
+        if comm.is_comm_gen_bytes {
+            let (length, cont) = comm.as_comm_gen_bytes;
+            let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
+            eval *println("gen_bytes: " + bytes.to_string_hex);
+            cont(bytes).interpret
+        };
+        eval assert(|_| "invalid type", false);
+        abort()
+    );
+}
+
+monad_comm_1: [m: MonadComm] m ();
+monad_comm_1 = (
+    let size = 20;
+    let bytes = *gen_bytes(size);
+    eval *send_bytes(bytes);
+    let bytes = *recv_bytes(size);
+    eval *send_bytes(bytes);
+    pure()
+);
+
 test_monad_comm: IO ();
-@@@@
+test_monad_comm = (
+    monad_comm_1.interpret
+);
+
 main: IO ();
 //main = test_toy_free_f2;
-main = test_str_parser;
-
+//main = test_str_parser;
+main = test_monad_comm;

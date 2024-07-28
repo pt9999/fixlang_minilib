@@ -201,29 +201,44 @@ impl Free Comm: MonadCommIF {
 }
 
 namespace FreeComm {
-    interpret: Free Comm a -> IO a;
+    interpret: [m: MonadComm] Free Comm a -> m a;
     interpret = |free| (
         if free.is_pure_f { pure $ free.as_pure_f };
         let comm = free.as_free_f;
         if comm.is_comm_send_bytes {
             let (bytes, cont) = comm.as_comm_send_bytes;
-            eval *println("send_bytes: " + bytes.to_string_hex);
+            eval *send_bytes(bytes);
             cont().interpret
         };
         if comm.is_comm_recv_bytes {
             let (length, cont) = comm.as_comm_recv_bytes;
-            let bytes = Array::from_map(length, |i| i.to_U8);
-            eval *println("recv_bytes: " + bytes.to_string_hex);
+            let bytes = *recv_bytes(length);
             cont(bytes).interpret
         };
         if comm.is_comm_gen_bytes {
             let (length, cont) = comm.as_comm_gen_bytes;
-            let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
-            eval *println("gen_bytes: " + bytes.to_string_hex);
+            let bytes = *gen_bytes(length);
             cont(bytes).interpret
         };
         eval assert(|_| "invalid type", false);
         abort()
+    );
+}
+
+impl IO: MonadCommIF {
+    send_bytes = |bytes| (
+        eval *println("send_bytes: " + bytes.to_string_hex);
+        pure()
+    );
+    recv_bytes = |length| (
+        let bytes = Array::from_map(length, |i| i.to_U8);
+        eval *println("recv_bytes: " + bytes.to_string_hex);
+        pure $ bytes
+    );
+    gen_bytes = |length| (
+        let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
+        eval *println("gen_bytes: " + bytes.to_string_hex);
+        pure $ bytes
     );
 }
 
@@ -239,7 +254,10 @@ monad_comm_1 = (
 
 test_monad_comm: IO ();
 test_monad_comm = (
-    monad_comm_1.interpret
+    // Record a computation as a free monad
+    let ma: Free Comm () = monad_comm_1;
+    // Interpret the free monad as an IO monad
+    ma.interpret
 );
 
 main: IO ();

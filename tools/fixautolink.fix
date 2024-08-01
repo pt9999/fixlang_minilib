@@ -17,7 +17,7 @@ help_message = (
     "An automatic linking tool to make using the library easier.\n" +
     "It does the following:\n" +
     "- Checks for modules that are imported from source files.\n" +
-    "- Searches for modules in library directories (specified by `-I` option) and adds them to the source file list.\n" +
+    "- Searches for modules in import-lib directories (specified by `-I` option) and adds them to the source file list.\n" +
     "- Searches for modules that are imported from added files recursively.\n" +
     "- Runs the Fix command.\n" +
     "- Updates the dependency file (`.depend`) if an output file is specified.\n" +
@@ -103,8 +103,8 @@ namespace Module {
 
 // Automatic linker
 type Linker = unbox struct {
-    lib_dirs: Array String,             // library directory
-    lib_files: Array String,            // library files
+    import_lib_dirs: Array String,      // import-lib directory
+    import_lib_files: Array String,     // import-lib files
     modules: HashMap String Module,     // map from module name to module
     main_files: Array String,           // main source files
     required_files: Array String,       // required source files
@@ -115,8 +115,8 @@ type Linker = unbox struct {
 namespace Linker {
     empty: Linker;
     empty = Linker {
-        lib_dirs: [],
-        lib_files: [],
+        import_lib_dirs: [],
+        import_lib_files: [],
         modules: HashMap::empty(0),
         main_files: [],
         required_files: [],
@@ -124,30 +124,30 @@ namespace Linker {
         needed: Iterator::empty
     };
 
-    // find library files under `lib_dirs`, and store them to @lib_files
-    find_library_files: Array String -> Linker -> IOFail Linker;
-    find_library_files = |lib_dirs, linker| (
-        let linker = linker.set_lib_dirs(lib_dirs);
-        linker.@lib_dirs.to_iter.fold_m(
-            linker, |linker, lib_dir|
-            if !(*directory_exists(lib_dir).lift) {
-                throw $ "library directory not found: " + lib_dir
+    // find `*.fix` files under `import_lib_dirs`, and store them to @import_lib_files
+    find_import_lib_files: Array String -> Linker -> IOFail Linker;
+    find_import_lib_files = |import_lib_dirs, linker| (
+        let linker = linker.set_import_lib_dirs(import_lib_dirs);
+        linker.@import_lib_dirs.to_iter.fold_m(
+            linker, |linker, import_lib_dir|
+            if !(*directory_exists(import_lib_dir).lift) {
+                throw $ "import-lib directory not found: " + import_lib_dir
             };
-            let file_paths = *find_files(lib_dir);
+            let file_paths = *find_files(import_lib_dir);
             let fix_file_paths = (
                 file_paths.to_iter.filter(|path|
                     path.ends_with(".fix") &&
                     path.find("/.fixlang/", 0).is_none
                 ).to_array
             );
-            pure $ linker.mod_lib_files(append(fix_file_paths))
+            pure $ linker.mod_import_lib_files(append(fix_file_paths))
         )
     );
 
-    // Read each @lib_files and insert it to @modules
+    // Read each @import_lib_files and insert it to @modules
     read_modules: Linker -> IOFail Linker;
     read_modules = |linker| (
-        linker.@lib_files.to_iter.fold_m(
+        linker.@import_lib_files.to_iter.fold_m(
             linker, |linker, lib_file|
             let module = *Module::read(lib_file);
             pure $ linker.mod_modules(insert(module.@name, module))
@@ -219,7 +219,7 @@ type App = unbox struct {
     original_args: Array String,            // original command line arguments
     source_files: Array String,             // main source files (*.fix)
     output_file: String,                    // output file (`-o`)
-    lib_dirs: Array String,                 // lib directories (`-I`)
+    import_lib_dirs: Array String,                 // lib directories (`-I`)
     before_source_args: Array String,       // arguments before source files
     after_source_args: Array String,        // arguments after source_files
     args: Array String,                     // final arguments
@@ -233,7 +233,7 @@ namespace App {
         before_source_args: [],
         source_files: [],
         output_file: "",
-        lib_dirs: [],
+        import_lib_dirs: [],
         after_source_args: [],
         args: [],
         linker: Linker::empty
@@ -256,17 +256,17 @@ namespace App {
         } else { app };
 
         // Extract lib dirs (`-I LIB_DIR`)
-        let (args, lib_dirs, _) = args.to_iter.fold(
-            ([], [], false), |(args, lib_dirs, found_lib_opt), arg|
+        let (args, import_lib_dirs, _) = args.to_iter.fold(
+            ([], [], false), |(args, import_lib_dirs, found_lib_opt), arg|
             if found_lib_opt {
-                (args, lib_dirs.push_back(arg), false)
+                (args, import_lib_dirs.push_back(arg), false)
             };
             if arg == "-I" {
-                (args, lib_dirs, true)
+                (args, import_lib_dirs, true)
             };
-            (args.push_back(arg), lib_dirs, false)
+            (args.push_back(arg), import_lib_dirs, false)
         );
-        let app = app.set_lib_dirs(lib_dirs);
+        let app = app.set_import_lib_dirs(import_lib_dirs);
 
         // Find first source file
         let pos = *args.find_by(|arg| arg.ends_with(".fix")).map_or(
@@ -296,11 +296,11 @@ namespace App {
         array.get_sub(begin, end)
     );
 
-    // resolve imports from @source_files and @lib_dirs, and store the result to @required_files
+    // resolve imports from @source_files and @import_lib_dirs, and store the result to @required_files
     link_files: App -> IOFail App;
     link_files = |app| (
         let linker = Linker::empty;
-        let linker = *linker.find_library_files(app.@lib_dirs);
+        let linker = *linker.find_import_lib_files(app.@import_lib_dirs);
         let linker = *linker.read_modules;
         let linker = *linker.read_main_files(app.@source_files);
         let linker = linker.calc_required_files;

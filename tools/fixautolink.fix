@@ -13,18 +13,18 @@ import Minilib.Text.StringEx;
 
 help_message: String;
 help_message = (
-    "fixautolink ver 0.1.0\n" +
+    "fixautolink ver 0.2.0\n" +
     "An automatic linking tool to make using the library easier.\n" +
     "It does the following:\n" +
     "- Checks for modules that are imported from source files.\n" +
-    "- Searches for modules in library directories and adds them to the source file list.\n" +
+    "- Searches for modules in library directories (specified by `-I` option) and adds them to the source file list.\n" +
     "- Searches for modules that are imported from added files recursively.\n" +
     "- Runs the Fix command.\n" +
     "- Updates the dependency file (`.depend`) if an output file is specified.\n" +
     "\n" +
     "Example:\n" +
-    "   fixautolink run -f main.fix sub.fix -L ./lib/\n" +
-    "   fixautolink build -o main_exe -f main.fix sub.fix -L ./lib/ -d lib\n"
+    "   fixautolink run -f main.fix sub.fix -I ./lib/\n" +
+    "   fixautolink build -o main_exe -f main.fix sub.fix -I ./lib/ -d lib\n"
 );
 
 // Matches against declarations, such as `module ModuleName`, `import ModuleName`
@@ -219,7 +219,7 @@ type App = unbox struct {
     original_args: Array String,            // original command line arguments
     source_files: Array String,             // main source files (*.fix)
     output_file: String,                    // output file (`-o`)
-    lib_dirs: Array String,                 // lib directories (`-L`)
+    lib_dirs: Array String,                 // lib directories (`-I`)
     before_source_args: Array String,       // arguments before source files
     after_source_args: Array String,        // arguments after source_files
     args: Array String,                     // final arguments
@@ -239,7 +239,7 @@ namespace App {
         linker: Linker::empty
     };
 
-    // parse command line arguments, and extract `-o`, `-L`, `*.fix`.
+    // parse command line arguments, and extract `-o`, `-I`, `*.fix`.
     parse_args: App -> IOFail App;
     parse_args = |app| (
         let args = *IO::get_args.lift;
@@ -255,13 +255,13 @@ namespace App {
             app.set_output_file(args.@(opt.as_some + 1))
         } else { app };
 
-        // Extract lib dirs (`-L LIB_DIR`)
+        // Extract lib dirs (`-I LIB_DIR`)
         let (args, lib_dirs, _) = args.to_iter.fold(
             ([], [], false), |(args, lib_dirs, found_lib_opt), arg|
             if found_lib_opt {
                 (args, lib_dirs.push_back(arg), false)
             };
-            if arg == "-L" {
+            if arg == "-I" {
                 (args, lib_dirs, true)
             };
             (args.push_back(arg), lib_dirs, false)

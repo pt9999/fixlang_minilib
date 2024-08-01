@@ -4,7 +4,7 @@
 TOPDIR = $(CRYPTO_DIR)/../..
 FIXAUTOLINK = $(TOPDIR)/bin/fixautolink
 FIXAUTOTEST = $(TOPDIR)/bin/fixautotest
-LIBS = -L $(TOPDIR)/lib -L $(TOPDIR)/_sandbox/crypto
+LIBS = -I $(TOPDIR)/lib -I $(TOPDIR)/_sandbox/crypto
 
 OPT = separated
 OPT_BUILD = -O $(OPT)

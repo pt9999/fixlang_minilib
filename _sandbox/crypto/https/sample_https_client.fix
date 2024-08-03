@@ -4,11 +4,12 @@ import Debug;
 
 import Minilib.Common.DebugLog;
 import Minilib.App.Clap;
-import Minilib.Crypto.Tls.TLSSession;
-//import Minilib.Crypto.Tls.TLSSessionMock;
+//import Minilib.Crypto.Tls.TLSSession;
+import Minilib.Crypto.Tls.TLSSessionMock;
 import Minilib.Crypto.Tls.TLSSocket;
 import Minilib.Net.Tcp;
 import Minilib.Net.URL;
+import Minilib.Net.Request;
 import Minilib.Net.Https.ResponseParser;
 import Minilib.Monad.FunctorM;
 import Minilib.Monad.State;
@@ -26,6 +27,57 @@ fflush = |handle| (
     };
     pure()
 );
+
+type FetchOptions = unbox struct {
+    url: URL,
+    http_version: String,       // eg. "HTTP/1.1"
+    method: String,             // eg. "GET"
+    headers: Headers,           // A collection of headers of the request
+    body: Array U8,             // The body of the request
+    save_certificates: Bool,
+};
+
+namespace FetchOptions {
+    make: [m: MonadError] URL -> m FetchOptions;
+    make = |url| (
+        if url.@scheme != "http" && url.@scheme != "https" {
+            error $ "url does not start with 'http://' nor 'https://': url=" + url.@url
+        };
+
+        pure $ FetchOptions {
+            url: url,
+            http_version: "HTTP/1.1",
+            method: "GET",
+            headers: _default_request_headers(url),
+            body: [],
+            save_certificates: false,
+        }
+    );
+
+    _default_request_headers: URL -> Headers;
+    _default_request_headers = |url| (
+        Headers::empty
+        .set("Host", url.@host)
+        .set("User-Agent", "fixlang_minilib")
+    );
+
+    to_request_bytes: FetchOptions -> Array U8;
+    to_request_bytes = |fetch| (
+        let url = fetch.@url;
+        let http_version = fetch.@http_version;
+        let method = fetch.@method;
+        let headers = fetch.@headers;
+        let body = fetch.@body;
+
+        let path = url.@path;   // including query strings, already encoded with `encodeURI()`
+
+        let request_line = method + " " + path + " " + http_version + "\n";
+        let headers_lines = headers.to_iter.map(|(name, value)| name + ": " + value + "\n").concat_iter + "\n";
+        let request_bytes = (request_line + headers_lines).get_bytes.pop_back;
+        let request_bytes = request_bytes.append(body);
+        request_bytes
+    );
+}
 
 http_fetch: URL -> IOFail ();
 http_fetch = |url| (
@@ -118,6 +170,7 @@ main = (
             .arg(Arg::new("URL").takes_value.default_value("https://localhost")
                 .help("The URL to fetch."))
             .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
+            .arg(Arg::new("save_certificates").short('S').help("Save certificates to temporary files"))
         );
         let matches = *command.get_matches;
 
@@ -130,9 +183,15 @@ main = (
             lvl_info
         ).lift;
 
+        let save_certificates = (matches.get_one("verbose") == some("true"));
+
         let url = matches.get_one("URL").as_some;
         //let _ = *println("url = " + url).lift;
         let url = *URL::parse(url).from_result;
+
+        let fetch = *FetchOptions::make(url);
+        let req_bytes = fetch.to_request_bytes;
+
         if url.@scheme == "http" {
             http_fetch(url)
         } else {

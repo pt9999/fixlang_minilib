@@ -1,0 +1,166 @@
+module Minilib.Net.HttpClient;
+
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.TLSSession;
+//import Minilib.Crypto.Tls.TLSSessionMock;
+import Minilib.Crypto.Tls.TLSSocket;
+import Minilib.Net.Tcp;
+import Minilib.Net.URL;
+import Minilib.Net.Request;
+import Minilib.Net.HttpClient.ResponseParser;
+import Minilib.Monad.FunctorM;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type HttpClientRequest = unbox struct {
+    url: URL,
+    http_version: String,       // eg. "HTTP/1.1"
+    method: String,             // eg. "GET"
+    headers: Headers,           // A collection of headers of the request
+    body: Array U8,             // The body of the request
+};
+
+namespace HttpClientRequest {
+    make: [m: MonadError] URL -> m HttpClientRequest;
+    make = |url| (
+        if url.@scheme != "http" && url.@scheme != "https" {
+            error $ "url does not start with 'http://' nor 'https://': url=" + url.@url
+        };
+
+        pure $ HttpClientRequest {
+            url: url,
+            http_version: "HTTP/1.1",
+            method: "GET",
+            headers: _default_request_headers(url),
+            body: [],
+        }
+    );
+
+    _default_request_headers: URL -> Headers;
+    _default_request_headers = |url| (
+        Headers::empty
+        .set("Host", url.@host)
+        .set("User-Agent", "fixlang_minilib")
+    );
+}
+
+impl HttpClientRequest: ToBytes {
+    to_bytes = |request| (
+        let url = request.@url;
+        let http_version = request.@http_version;
+        let method = request.@method;
+        let headers = request.@headers;
+        let body = request.@body;
+
+        let path = url.@path;   // including query strings, already encoded with `encodeURI()`
+
+        let request_line = method + " " + path + " " + http_version + "\n";
+        let headers_lines = headers.to_iter.map(|(name, value)| name + ": " + value + "\n").concat_iter + "\n";
+        let request_bytes = (request_line + headers_lines).get_bytes.pop_back;
+        let request_bytes = request_bytes.append(body);
+        request_bytes
+    );
+}
+
+type HttpClient = unbox struct {
+    save_certificates: Bool,
+};
+
+namespace HttpClient {
+    empty: HttpClient;
+    empty = HttpClient {
+        save_certificates: false
+    };
+
+    fetch: HttpClientRequest -> HttpClient -> IOFail HttpClientResponse;
+    fetch = |request, client| (
+        let url = request.@url;
+        if url.@scheme == "http" {
+            client._fetch_http(request)
+        };
+        if url.@scheme == "https" {
+            client._fetch_https(request)
+        };
+        throw $ "url does not start with 'http://' nor 'https://': url=" + url.@url
+    );
+
+    _fetch_http: HttpClientRequest -> HttpClient -> IOFail HttpClientResponse;
+    _fetch_http = |request, client| (
+        let url = request.@url;
+        let host_port = url.@host + ":" + url.@port;
+        let socket = *connect_to_tcp_server(host_port);
+        let request_bytes = request.to_bytes;
+        let (start, end) = (0, request_bytes.get_size);
+        eval *loop_m(
+            start, |start|
+            if start >= end  { break_m $ () };
+            let len = *socket.send(request_bytes.subarray(start, end));
+            continue_m $ start + len
+        );
+        let parser = *loop_m(
+            ResponseParser::empty, |parser|
+            let recv_bytes = *socket.recv(4096);
+            eval log_debug("received " + recv_bytes.get_size.to_string + " bytes");
+            if recv_bytes.get_size == 0 {
+                let parser = *parser.end_data.from_result;
+                break_m $ parser
+            };
+            let parser = *parser.add_data(recv_bytes).from_result;
+            if parser.@state.is_completed {
+                break_m $ parser
+            };
+            continue_m $ parser
+        );
+        pure $ parser.@response
+    );
+
+    _fetch_https: HttpClientRequest -> HttpClient -> IOFail HttpClientResponse;
+    _fetch_https = |request, client| (
+        let url = request.@url;
+        let host = url.@host;
+        let host_port = url.@host + ":" + url.@port;
+        let path = url.@path;
+
+        let socket: Socket = *connect_to_tcp_server(host_port);
+        let tls_socket: TLSSocket = TLSSocket::make(socket).set_debug(true);
+        let session: TLSSession = *TLSSession::make(tls_socket, host);
+        let sm: StateT TLSSession IOFail HttpClientResponse = do {
+            eval *establish_handshake;
+
+            // save certificates to file
+            eval *when(
+                client.@save_certificates,
+                save_certificates_to_files(|i|
+                    let filename = (host, i).format("tmp.cert_{}.{}.cer");
+                    Path::parse(filename).as_some
+                )
+            );
+
+            let request_bytes = request.to_bytes;
+            eval *TLSSession::send_appdata(request_bytes);
+            let parser = *loop_m(
+                ResponseParser::empty, |parser|
+                let recv_bytes = *recv_appdata;
+                eval log_debug("received " + recv_bytes.get_size.to_string + " bytes");
+                if recv_bytes.get_size == 0 {
+                    let parser = *parser.end_data.from_result.lift_t;
+                    break_m $ parser
+                };
+                let parser = *parser.add_data(recv_bytes).from_result.lift_t;
+                if parser.@state.is_completed {
+                    break_m $ parser
+                };
+                continue_m $ parser
+            );
+            //eval *print(parser.@response.@body._unsafe_to_string).lift.lift_t;
+            pure $ parser.@response
+        };
+        sm.eval_state_t(session)
+    );
+
+}

@@ -30,15 +30,6 @@ obj_test:
 mandelbrot: 
 	../bin/fixautolink run -I ../lib -I . -f mandelbrot.fix -d png -d z
 
-lens:
-	../bin/fixautolink run -I ../lib -I . -f lens.fix
-
-state_monad_test2:
-	../bin/fixautolink run -I ../lib -I . -f state_monad_test2.fix -O separated
-
-reader_writer_test:
-	../bin/fixautolink run -I ../lib -f reader_writer_test.fix -O separated
-
 lnum:
 	../bin/fixautolink build -I ../lib -f lnum.fix
 
@@ -50,9 +41,6 @@ bigfloat_test1:
 
 algebra_test1:
 	../bin/fixautolink run -I ../lib -I . -f algebra_test1.fix
-
-monoid_test1:
-	../bin/fixautolink run -I ../lib -I . -f monoid_test1.fix -O separated
 
 xml_test1:
 	../bin/fixautolink run -I ../lib -I . -f xml_test1.fix -O minimum

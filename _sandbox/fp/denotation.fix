@@ -1,0 +1,146 @@
+// https://okmij.org/ftp/Computation/having-effect.html
+
+module Main;
+
+import Debug;
+
+/*
+// 1. Unstable Denotations, Brittle Interpreters, Hard-to-apply Theory
+
+type Expr = box union {
+    eint: I64,
+    einc: (),
+    eapp: (Expr, Expr)
+};
+
+tinc: Expr;
+tinc = eapp((einc(), eapp((einc(), eint(2)))));
+
+type Dom = box union {
+    derror: (),
+    dint: I64,
+    dbool: Bool,
+    dfun: Dom -> Dom,
+};
+
+eeval: Expr -> Dom;
+eeval = |ex| (
+    //eval debug_eprintln("eeval");
+    if ex.is_eint {
+        dint $ ex.as_eint
+    } else if ex.is_einc {
+        dfun $ |x| (
+            if ! x.is_dint { derror() };
+            dint $ x.as_dint + 1
+        )
+    } else {
+        let (e1, e2) = ex.as_eapp;
+        let e1 = eeval(e1);
+        if ! e1.is_dfun { derror() };
+        let f = e1.as_dfun;
+        let e2 = eeval(e2);
+        f(e2)
+    }
+);
+
+test_unstable: IO ();
+test_unstable = (
+    let dom = eeval(tinc);
+    if dom.is_dint { println("dom=" + dom.as_dint.to_string) };
+    println("dom=other")
+);
+*/
+
+// Extensible interpreters
+trait d: EBasic {
+    int: I64 -> d;
+    inc: d;
+    app: d -> d -> d;
+}
+
+trait d: ECond {
+    eq: d;
+    if_: d -> d -> d -> d;
+}
+
+// 3. Stable Denotations, Extensible Effects
+
+type Comp = box union {
+    done: DomC,
+    req: (ReqT, DomC -> Comp)
+};
+
+impl Comp: ToString {
+    to_string = |obj| (
+        if obj.is_done { "done(" + obj.as_done.to_string + ")" };
+        if obj.is_req {
+            let (reqt, f) = obj.as_req;
+            "req((" + reqt.to_string + ", ...))"
+        };
+        "invalid_comp"
+    );
+}
+
+type DomC = box union {
+    dcint: I64,
+    dcbool: Bool,
+    dcfun: DomC -> Comp
+};
+
+impl DomC: ToString {
+    to_string = |obj| (
+        if obj.is_dcint { "dcint(" + obj.as_dcint.to_string + ")" };
+        if obj.is_dcbool { "dcbool(" + obj.as_dcbool.to_string + ")" };
+        if obj.is_dcfun { "dcfun(...)" };
+        "invalid_domc"
+    );
+}
+
+type ReqT = box union {
+    reqerror: (),
+};
+
+impl ReqT: ToString {
+    to_string = |obj| (
+        if obj.is_reqerror { "reqerror()" };
+        "invalid_reqt"
+    );
+}
+
+cerr: Comp;
+cerr = req $ (reqerror(), |_| cerr);
+
+impl Comp: EBasic {
+    int = done << dcint;
+    inc = done << dcfun $ |x| (
+        if ! x.is_dcint { cerr };
+        int(x.as_dcint + 1)
+    );
+    app = |e1, e2| (
+        if e1.is_req {
+            let (r, k) = e1.as_req;
+            req $ (r, |x| app(k(x), e2))
+        };
+        if e2.is_req {
+            let (r, k) = e2.as_req;
+            req $ (r, |x| app(e1, k(x)))
+        };
+        let d1 = e1.as_done;
+        let d2 = e2.as_done;
+        if ! d1.is_dcfun { cerr };
+        let f = d1.as_dcfun;
+        f(d2)
+    );
+}
+
+ttinc: [d: EBasic] d;
+ttinc = int(2).app(inc).app(inc);
+
+test_ttinc: IO ();
+test_ttinc = (
+    println((ttinc: Comp).to_string)
+);
+
+main: IO ();
+//main = test_unstable;
+main = test_ttinc;

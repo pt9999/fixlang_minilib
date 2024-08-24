@@ -26,18 +26,18 @@ _EOF = "EOF";
 readline: String -> IOFail String;
 readline = |prompt| (
     let ptr = prompt.borrow_c_str(|p_prompt|
-        CALL_C[Ptr readline(Ptr), p_prompt]
+        FFI_CALL[Ptr readline(Ptr), p_prompt]
     );
     if ptr == nullptr {
         throw $ _EOF
     };
     let str = String::_unsafe_from_c_str_ptr(ptr);
     let _ = if str.get_size > 0 {
-        CALL_C[() add_history(Ptr), ptr]
+        FFI_CALL[() add_history(Ptr), ptr]
     } else {
         ()
     };
-    let _ = CALL_C[() free(Ptr), ptr];
+    let _ = FFI_CALL[() free(Ptr), ptr];
     pure $ str
 );
 
@@ -108,7 +108,7 @@ impl Expr: ToString {
 // expr ( "+" | "-" ) expr
 // expr ":" expr
 // expr "=" expr
-// 
+//
 
 namespace Expr {
 
@@ -283,7 +283,7 @@ namespace Expr {
         let str = [c].append(rest)._unsafe_to_string;
         pure $ ex_ident(str)
     };
- 
+
     _parse_number_lit: Parser Expr;
     _parse_number_lit = (
         let match_decimal_point = match_str(".");
@@ -358,7 +358,7 @@ impl Value: ToString {
         if v.is_v_none { "" };
         if v.is_v_err { "ERR:" + v.as_v_err };
         if v.is_v_float { v.as_v_float.to_string };
-        if v.is_v_range { 
+        if v.is_v_range {
             let (lhs, rhs) = v.as_v_range;
             lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
         };
@@ -435,7 +435,7 @@ namespace Evaluator
         };
         pure $ opt.as_some
     );
-    
+
     _eval_assign: (Expr, Expr) -> EvalEffect Value;
     _eval_assign = |(lhs, rhs)| (
         if lhs.is_ex_ident {
@@ -456,14 +456,14 @@ namespace Evaluator
             f, |f, arg|
             if !f.is_v_func {
                 error $ "invalid func type: " + f.to_string
-            }; 
+            };
             let (f_name, f) = f.as_v_func;
             let arg = *evaluate(arg);
             let value = *f(arg);
             pure $ value
         )
     );
-    
+
     _eval_infix: (Expr, String, Expr) -> EvalEffect Value;
     _eval_infix = |(lhs, op, rhs)| (
         let lhs = *evaluate(lhs);
@@ -495,7 +495,7 @@ namespace Evaluator
     _eval_unary: (String, Expr) -> EvalEffect Value;
     _eval_unary = |(op, expr)| (
         let value = *evaluate(expr);
-        
+
         if value.is_v_float {
             _eval_unary_op((op, value.as_v_float), v_float)
         };
@@ -604,7 +604,7 @@ namespace Builtin {
     add_builtin_func = |name, f, app_state| (
         let func = v_func $ (name, f);
         app_state.mod_env(insert(name, func))
-    ); 
+    );
 
     ndarray: Value -> EvalEffect Value;
     ndarray = |arg| (
@@ -626,7 +626,7 @@ namespace Builtin {
     stack = |arg| (
         if !arg.is_v_array {
             error $ "invalid arg type"
-        }; 
+        };
         let array = arg.as_v_array;
         if array.get_size == 0 {
             error $ "invalid arg count"

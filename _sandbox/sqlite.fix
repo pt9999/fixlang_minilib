@@ -12,7 +12,7 @@ _sqlite3_open = |filepath| (
     let pdb : Array Ptr = Array::fill(1, nullptr);
     let res = pdb.borrow_ptr(|p_pdb|
         filepath.borrow_c_str(|p_filepath|
-            CALL_C[I32 sqlite3_open(Ptr, Ptr), p_filepath, p_pdb]
+            FFI_CALL[I32 sqlite3_open(Ptr, Ptr), p_filepath, p_pdb]
         )
     );
     if res != 0_I32 {
@@ -24,7 +24,7 @@ _sqlite3_open = |filepath| (
 
 _sqlite3_close: Ptr -> IOFail ();
 _sqlite3_close = |db| (
-    let res = CALL_C[I32 sqlite3_close(Ptr), db];
+    let res = FFI_CALL[I32 sqlite3_close(Ptr), db];
     if res != 0_I32 {
         throw $ "sqlite3_close failed: res = " + res.to_string
     };
@@ -40,7 +40,7 @@ _sqlite3_prepare_v2 = |db, sql| (
         ztail.borrow_ptr(|pztail|
             pstmt.borrow_ptr(|ppstmt|
                 sql.borrow_c_str(|zsql|
-                    CALL_C[I32 sqlite3_prepare_v2(Ptr, Ptr, I32, Ptr, Ptr), db, zsql, nbyte, ppstmt, pztail]
+                    FFI_CALL[I32 sqlite3_prepare_v2(Ptr, Ptr, I32, Ptr, Ptr), db, zsql, nbyte, ppstmt, pztail]
                 )
             )
         )
@@ -50,11 +50,11 @@ _sqlite3_prepare_v2 = |db, sql| (
     };
     let stmt = pstmt.@(0);
     pure $ stmt
-); 
+);
 
 _sqlite3_finalize: Ptr -> IOFail ();
 _sqlite3_finalize = |stmt| (
-    let res = CALL_C[I32 sqlite3_finalize(Ptr), stmt];
+    let res = FFI_CALL[I32 sqlite3_finalize(Ptr), stmt];
     if res != 0_I32 {
         throw $ "sqlite3_finalize failed: res = " + res.to_string
     };
@@ -63,7 +63,7 @@ _sqlite3_finalize = |stmt| (
 
 _sqlite3_step: Ptr -> IOFail ();
 _sqlite3_step = |stmt| (
-    let res = CALL_C[I32 sqlite3_step(Ptr), stmt];
+    let res = FFI_CALL[I32 sqlite3_step(Ptr), stmt];
     if res != 0_I32 && res != /* SQLITE_ROW: */ 100_I32 && res != /* SQLITE_DONE: */ 101_I32 {
         throw $ "sqlite3_step failed: res = " + res.to_string
     };
@@ -83,20 +83,20 @@ _SQLITE_NULL = 5_I32;
 
 _sqlite3_column_type: I64 -> Ptr -> IOFail I32;
 _sqlite3_column_type = |icol, stmt| (
-    let res = CALL_C[I32 sqlite3_column_type(Ptr, I32), stmt, icol.to_I32];
+    let res = FFI_CALL[I32 sqlite3_column_type(Ptr, I32), stmt, icol.to_I32];
     pure $ res
 );
 
 _sqlite3_column_int: I64 -> Ptr -> IOFail I32;
 _sqlite3_column_int = |icol, stmt| (
-    let res = CALL_C[I32 sqlite3_column_int(Ptr, I32), stmt, icol.to_I32];
+    let res = FFI_CALL[I32 sqlite3_column_int(Ptr, I32), stmt, icol.to_I32];
     pure $ res
 );
 
 _sqlite3_column_text: I64 -> Ptr -> IOFail String;
 _sqlite3_column_text = |icol, stmt| (
     //eval debug_eprintln("get text: icol="+icol.to_string);
-    let ptr = CALL_C[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32];
+    let ptr = FFI_CALL[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32];
     //eval debug_eprintln("get text done: icol="+icol.to_string);
     let str = _unsafe_from_c_str_ptr(ptr);
     pure $ str
@@ -115,7 +115,7 @@ namespace Sqlite {
             _sqlite3_close(db).to_result.map(|_|())._unsafe_perform
         );
         pure $ Sqlite { dtor:dtor }
-    ); 
+    );
 }
 
 type Statement = unbox struct {
@@ -127,7 +127,7 @@ namespace Statement {
     prepare: String -> Sqlite -> IOFail Statement;
     prepare = |sql, db| (
         eval debug_eprintln ("prepare: "+ sql);
-        db.@dtor.borrow(|pdb| 
+        db.@dtor.borrow(|pdb|
             let stmt = *_sqlite3_prepare_v2(pdb, sql);
             let dtor = Destructor::make(stmt, |stmt|
                 //eval debug_eprintln ("finalizing statement");

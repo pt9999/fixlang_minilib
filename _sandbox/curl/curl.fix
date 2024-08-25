@@ -1,34 +1,49 @@
-// 実行方法: fix run -d curl -f curl.fix
-// ビルド方法: fix build -d curl -f curl.fix
+module Minilib.Net.Curl;
 
-module Main;
+import Debug;
 
-type Curl = unbox struct { _ptr: Ptr };
+type Easy = box struct {
+    dtor: Destructor Ptr
+};
 
-curl_easy_init : I64 -> IOFail ();
-curl_easy_init = |arg| (
-    let _ = *(lift $ eprintln("before call"));
-    let res = (
-        if arg == 0 { // argが0のときだけ実行する
-            FFI_CALL[Ptr curl_easy_init()]
-        } else {
-            nullptr
-        }
+type WriteFunction = Array U8 -> IOFail I64;
+
+
+namespace Easy {
+
+    make: IOFail Easy;
+    make = (
+        eval *pure();
+        eval debug_eprintln("curl_easy_init");
+        let handle = FFI_CALL[Ptr curl_easy_init()];
+        let easy = Easy {
+            dtor: Destructor::make(handle, |handle|
+                eval debug_eprintln("curl_easy_cleanup");
+                FFI_CALL[() curl_easy_cleanup(Ptr), handle]
+            )
+        };
+        pure $ easy
     );
-    let _ = *(lift $ eprintln("after call"));
-    if res == nullptr {
-        throw $ "curl_easy_init failed!"
-    };
-    let curl = Curl { _ptr: res };
-    pure()
-);
 
-main : IO ();
-main = (
-    let _ = *(eprintln("program start"));
-    do {
-        let _ = *(curl_easy_init(0));
-        pure()
-    }
-    .try (|err| eprintln (err))
-);
+/*
+    url: String -> Easy -> IOFail ();
+
+    write_function: WriteFunction -> Easy -> IOFail ();
+    write_function = |func, easy| (
+        // func: Array U8 -> IOFail I64, a fix value
+        // how to get a fix value from _callback_write_function?
+    );
+
+    _callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> Array I64 -> ();
+    _callback_write_function = |ptr, size, nmemb, userdata, result| (
+
+    );
+
+    perform: Easy -> IOFail ();
+    perform = |easy| (
+        eval *pure();
+
+
+    );
+*/
+}

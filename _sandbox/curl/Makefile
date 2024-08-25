@@ -1,8 +1,10 @@
-%.out: %.fix
-	../../bin/fixautolink build -o $@ -I ../lib -I . -f $<
+TOPDIR = ../..
+LIBS = -L . -d curl
 
+%.out: %.fix
+	$(TOPDIR)/bin/fixautolink build -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $<
 %.run: %.fix
-	../../bin/fixautolink run -o $@ -I ../lib -I . -f $< -O separated
+	$(TOPDIR)/bin/fixautolink run -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
 
 all:
 
@@ -11,6 +13,8 @@ libcurl_test.out: libcurl_test.c
 
 test: libcurl_test.out
 	./libcurl_test.out
+
+test2: curl_test1.run
 
 clean:
 	rm -f *.out

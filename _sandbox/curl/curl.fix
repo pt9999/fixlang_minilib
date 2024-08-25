@@ -1,57 +1,72 @@
 module Minilib.Net.Curl;
 
 import Debug;
+import Minilib.Text.StringEx;
 
-type Easy = box struct {
+type Curl = box struct {
     dtor: Destructor Ptr
 };
 
 type WriteFunction = Array U8 -> IOFail I64;
 
+make: IOFail Curl;
+make = (
+    eval *pure();
+    eval debug_eprintln("curl_glue_init");
+    let glue = FFI_CALL[Ptr curl_glue_init()];
+    let curl = Curl {
+        dtor: Destructor::make(glue, |glue|
+            eval debug_eprintln("curl_glue_cleanup");
+            FFI_CALL[() curl_glue_cleanup(Ptr), glue]
+        )
+    };
+    pure $ curl
+);
 
-namespace Easy {
+_throw_error: Curl -> IOFail ();
+_throw_error = |curl| (
+    curl.@dtor.borrow(|glue|
+        let errmsg = FFI_CALL[Ptr curl_glue_get_error_message(Ptr), glue];
+        throw $ String::_unsafe_from_c_str_ptr(errmsg)
+    )
+);
 
-    make: IOFail Easy;
-    make = (
-        eval *pure();
-        eval debug_eprintln("curl_easy_init");
-        let handle = FFI_CALL[Ptr curl_easy_init()];
-        let easy = Easy {
-            dtor: Destructor::make(handle, |handle|
-                eval debug_eprintln("curl_easy_cleanup");
-                FFI_CALL[() curl_easy_cleanup(Ptr), handle]
-            )
-        };
-        pure $ easy
+set_url: String -> Curl -> IOFail ();
+set_url = |url, curl| (
+    eval *pure();
+    let res = url.borrow_c_str(|p_url|
+        curl.@dtor.borrow(|glue|
+            FFI_CALL[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url]
+        )
     );
+    if res != 0.to_CInt {
+        _throw_error(curl)
+    };
+    pure()
+);
 
-    url: String -> Easy -> IOFail ();
-    url = |url, easy| (
-        eval *pure();
-        let res = easy.@dtor.borrow(|handle|
-            FFI_CALL[Ptr curl_easy_setopt()];
-        );
-        pure()
+perform: Curl -> IOFail ();
+perform = |curl| (
+    eval *pure();
+    let res = curl.@dtor.borrow(|glue|
+        FFI_CALL[CInt curl_glue_perform(Ptr), glue]
     );
-
+    if res != 0.to_CInt {
+        _throw_error(curl)
+    };
+    pure()
+);
 /*
 
-    write_function: WriteFunction -> Easy -> IOFail ();
-    write_function = |func, easy| (
-        // func: Array U8 -> IOFail I64, a fix value
-        // how to get a fix value from _callback_write_function?
-    );
+write_function: WriteFunction -> Curl -> IOFail ();
+write_function = |func, curl| (
+    // func: Array U8 -> IOFail I64, a fix value
+    // how to get a fix value from _callback_write_function?
+);
 
-    _callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> Array I64 -> ();
-    _callback_write_function = |ptr, size, nmemb, userdata, result| (
+_callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> Array I64 -> ();
+_callback_write_function = |ptr, size, nmemb, userdata, result| (
 
-    );
+);
 
-    perform: Easy -> IOFail ();
-    perform = |easy| (
-        eval *pure();
-
-
-    );
 */
-}

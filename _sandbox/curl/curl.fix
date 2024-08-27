@@ -86,14 +86,16 @@ _callback_write_function = |ptr, size, nmemb, userdata| (
         FFI_CALL[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
     );
 
-    let boxed: Boxed WriteFunc = glue._get_boxed_value(0);
-    let iof: IOFail I64 = (boxed.@value)(bytes);
-    let res: Result ErrMsg I64 = iof.to_result._unsafe_perform;
-    if res.is_err {
-        eval debug_eprintln("err=" + res.as_err);
-        0.to_CSizeT
-    };
-    res.as_ok.to_CSizeT
+    let boxed: Boxed (Destructor WriteFunc) = glue._get_boxed_value(0);
+    boxed.@value.borrow(|write_func|
+        let iof: IOFail I64 = write_func(bytes);
+        let res: Result ErrMsg I64 = iof.to_result._unsafe_perform;
+        if res.is_err {
+            eval debug_eprintln("write_func failed! err=" + res.as_err);
+            0.to_CSizeT
+        };
+        res.as_ok.to_CSizeT
+    )
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];
 
@@ -103,7 +105,12 @@ set_write_callback: WriteFunc -> Curl -> IOFail ();
 set_write_callback = |func, curl| (
     eval *pure();
     let func = mark_threaded(func);
-    let boxed: Boxed WriteFunc = mark_threaded(Boxed { value: func });
+    let boxed: Boxed (Destructor WriteFunc) = Boxed {
+        value: Destructor::make(func, |func|
+            debug_eprintln("write_func destructor is called")
+        )
+    };
+    let boxed = mark_threaded(boxed);
     eval *curl.set_boxed_value(0, boxed);
     curl.@dtor.borrow(|glue|
         glue._check_error(FFI_CALL[CInt curl_glue_set_write_callback(Ptr), glue])

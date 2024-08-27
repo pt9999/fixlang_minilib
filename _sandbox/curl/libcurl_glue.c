@@ -90,9 +90,9 @@ void _curl_glue_release_boxed_value(CurlGlue* glue, int index) {
         return;
     }
     if (boxed.release != NULL) {
-        fprintf(stderr, "calling release\n");
+        //fprintf(stderr, "calling release\n");
         (*boxed.release)(boxed.retained_ptr);
-        fprintf(stderr, "calling release end\n");
+        //fprintf(stderr, "calling release end\n");
     }
     boxed.retained_ptr = NULL;
     boxed.retain = NULL;

@@ -6,14 +6,20 @@
 #define MAX_BOXED_VALUES 10
 
 typedef struct {
+    void* retained_ptr;
+    void (*retain) (void*);
+    void (*release) (void*);
+} BoxedValue;
+
+typedef struct {
     CURL *curl;
     char error_buf[CURL_ERROR_SIZE];
-    void* boxed_values[MAX_BOXED_VALUES];
+    BoxedValue boxed_values[MAX_BOXED_VALUES];
 } CurlGlue;
 
 // prototype declarations
 int _curl_glue_set_write_callback(CurlGlue* glue);
-
+void _curl_glue_release_boxed_value(CurlGlue* glue, int index);
 
 CurlGlue* curl_glue_init() {
     CURL* curl = curl_easy_init();
@@ -44,6 +50,9 @@ void curl_glue_cleanup(CurlGlue* glue) {
             curl_easy_cleanup(glue->curl);
             glue->curl = NULL;
         }
+        for (int index = 0; index < MAX_BOXED_VALUES; index++) {
+            _curl_glue_release_boxed_value(glue, index);
+        }
         free(glue);
     }
 }
@@ -62,17 +71,49 @@ const char* curl_glue_get_error_message(CurlGlue* glue) {
     return glue->error_buf;
 }
 
-void curl_glue_set_boxed_value(CurlGlue* glue, int index, void* ptr) {
-    if (0 <= index && index < MAX_BOXED_VALUES) {
-        glue->boxed_values[index] = ptr;
+void curl_glue_set_boxed_value(CurlGlue* glue, int index, void* retained_ptr, void (*retain) (void*), void (*release) (void*)) {
+    if (index < 0 || MAX_BOXED_VALUES <= index) {
+        return;
     }
+    BoxedValue boxed = {
+        retained_ptr, retain, release
+    };
+    glue->boxed_values[index] = boxed;
+}
+
+void _curl_glue_release_boxed_value(CurlGlue* glue, int index) {
+    if (index < 0 || MAX_BOXED_VALUES <= index) {
+        return;
+    }
+    BoxedValue boxed = glue->boxed_values[index];
+    if (boxed.retained_ptr == NULL) {
+        return;
+    }
+    if (boxed.release != NULL) {
+        fprintf(stderr, "calling release\n");
+        (*boxed.release)(boxed.retained_ptr);
+        fprintf(stderr, "calling release end\n");
+    }
+    boxed.retained_ptr = NULL;
+    boxed.retain = NULL;
+    boxed.release = NULL;
+    glue->boxed_values[index] = boxed;
 }
 
 void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
-    if (0 <= index && index < MAX_BOXED_VALUES) {
-        return glue->boxed_values[index];
+    if (index < 0 || MAX_BOXED_VALUES <= index) {
+        return NULL;
     }
-    return NULL;
+    BoxedValue boxed = glue->boxed_values[index];
+    if (boxed.retained_ptr == NULL) {
+        return NULL;
+    }
+    if (boxed.retain != NULL) {
+        fprintf(stderr, "calling retain\n");
+        (*boxed.retain)(boxed.retained_ptr);
+        fprintf(stderr, "calling retain end\n");
+    }
+    return boxed.retained_ptr;
 }
 
 int curl_glue_set_write_callback(CurlGlue* glue) {

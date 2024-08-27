@@ -1,5 +1,6 @@
 module Minilib.Net.Curl;
 
+import AsyncTask;
 import Debug;
 import Minilib.Text.StringEx;
 
@@ -53,7 +54,9 @@ set_boxed_value = |index, boxed, curl| (
     eval *pure();
     curl.@dtor.borrow(|glue|
         let retained_ptr = FFI::unsafe_get_retained_ptr_of_boxed_value(boxed);
-        pure $ FFI_CALL[() curl_glue_set_boxed_value(Ptr, CInt, Ptr), glue, index.to_CInt, retained_ptr]
+        let retain = FFI::unsafe_get_retain_function_of_boxed_value(boxed);
+        let release = FFI::unsafe_get_release_function_of_boxed_value(boxed);
+        pure $ FFI_CALL[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release]
     )
 );
 
@@ -104,7 +107,8 @@ type WriteFunc = Array U8 -> IOFail I64;
 set_write_callback: WriteFunc -> Curl -> IOFail ();
 set_write_callback = |func, curl| (
     eval *pure();
-    let boxed: Boxed WriteFunc = Boxed { value: func };
+    let func = mark_threaded(func);
+    let boxed: Boxed WriteFunc = mark_threaded(Boxed { value: func });
     eval *curl.set_boxed_value(0, boxed);
     curl.@dtor.borrow(|glue|
         glue._check_error(FFI_CALL[CInt curl_glue_set_write_callback(Ptr), glue])

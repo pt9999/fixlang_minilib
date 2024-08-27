@@ -69,41 +69,25 @@ get_boxed_value: I64 -> Curl -> IOFail (Boxed a);
 get_boxed_value = |index, curl| (
     eval *pure();
     let boxed = curl.@dtor.borrow(|glue|
-        let retained_ptr = FFI_CALL[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
-        FFI::unsafe_get_boxed_value_from_retained_ptr(retained_ptr)
+        _get_boxed_value(index, glue)
     );
     pure $ boxed
 );
 
-/*
-
-set_write_function: (Array U8 -> IOFail I64) -> Curl -> IOFail ();
-set_write_function = |write_func, curl| (
-    let boxed = Boxed { value: write_func };
-    let res = url.borrow_c_str(|p_url|
-        curl.@dtor.borrow(|glue|
-            FFI_CALL[CInt curl_glue_set_write_function(Ptr, Ptr), glue, p_write_func]
-        )
-    );
-    if res != 0.to_CInt {
-        _throw_error(curl)
-    };
-    pure()
+_get_boxed_value: I64 -> Ptr -> Boxed a;
+_get_boxed_value = |index, glue| (
+    let retained_ptr = FFI_CALL[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
+    FFI::unsafe_get_boxed_value_from_retained_ptr(retained_ptr)
 );
-
-write_function: WriteFunction -> Curl -> IOFail ();
-write_function = |func, curl| (
-    // func: Array U8 -> IOFail I64, a fix value
-    // how to get a fix value from _callback_write_function?
-);
-
-
-*/
 
 _callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> CSizeT;
 _callback_write_function = |ptr, size, nmemb, userdata| (
     // char* ptr, void* userdata
     eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
+    let glue = userdata;
+    let boxed: Boxed String = glue._get_boxed_value(1);
+    let value: String = boxed.@value;
+    eval debug_eprintln("value=" + value + " size=" + value.get_size.to_string);
     nmemb
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];

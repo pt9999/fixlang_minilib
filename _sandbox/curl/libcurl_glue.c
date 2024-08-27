@@ -80,23 +80,14 @@ void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
     return NULL;
 }
 
-size_t _curl_glue_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
-{
-    CurlGlue* glue = (CurlGlue*) userdata;
-    //CurlGlueWriteFunc* write_func = glue->write_func;
-    // typedef void CurlGlueWriteFunc(char *ptr, size_t size, size_t nmemb, int* result);
-    // TODO: call FFI_EXPORTED function
-    extern size_t _callback_write_function(char*, size_t, size_t, void*);
-    return _callback_write_function(ptr, size, nmemb, userdata);
-}
-
 int _curl_glue_set_write_callback(CurlGlue* glue) {
     CURLcode res;
     res = curl_easy_setopt(glue->curl, CURLOPT_WRITEDATA, (void*) glue);
     if (res != CURLE_OK) {
         return (int) res;
     }
-    res = curl_easy_setopt(glue->curl, CURLOPT_WRITEFUNCTION, _curl_glue_write_callback);
+    extern size_t _callback_write_function(char*, size_t, size_t, void*);
+    res = curl_easy_setopt(glue->curl, CURLOPT_WRITEFUNCTION, _callback_write_function);
     return (int) res;
 }
 

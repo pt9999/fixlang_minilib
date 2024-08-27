@@ -76,16 +76,36 @@ _callback_write_function = |ptr, size, nmemb, userdata| (
     // char* ptr, void* userdata
     eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
     let glue = userdata;
+    /*
     let boxed: Boxed String = glue._get_boxed_value(1);
     let value: String = boxed.@value;
     eval debug_eprintln("value=" + value + " size=" + value.get_size.to_string);
-    nmemb
+    */
+    eval assert(|_| "invalid size", size == 1.to_CSizeT);
+    eval assert(|_| "invalid nmemb", nmemb >= 0.to_CSizeT);
+    let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
+    eval bytes.borrow_ptr(|p_bytes|
+        FFI_CALL[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
+    );
+
+    let boxed: Boxed WriteFunc = glue._get_boxed_value(0);
+    let iof: IOFail I64 = (boxed.@value)(bytes);
+    let res: Result ErrMsg I64 = iof.to_result._unsafe_perform;
+    if res.is_err {
+        eval debug_eprintln("err=" + res.as_err);
+        0.to_CSizeT
+    };
+    res.as_ok.to_CSizeT
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];
 
-set_write_callback: Curl -> IOFail ();
-set_write_callback = |curl| (
+type WriteFunc = Array U8 -> IOFail I64;
+
+set_write_callback: WriteFunc -> Curl -> IOFail ();
+set_write_callback = |func, curl| (
     eval *pure();
+    let boxed: Boxed WriteFunc = Boxed { value: func };
+    eval *curl.set_boxed_value(0, boxed);
     curl.@dtor.borrow(|glue|
         glue._check_error(FFI_CALL[CInt curl_glue_set_write_callback(Ptr), glue])
     )

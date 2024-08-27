@@ -109,9 +109,9 @@ void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
         return NULL;
     }
     if (boxed.retain != NULL) {
-        fprintf(stderr, "calling retain\n");
+        //fprintf(stderr, "calling retain\n");
         (*boxed.retain)(boxed.retained_ptr);
-        fprintf(stderr, "calling retain end\n");
+        //fprintf(stderr, "calling retain end\n");
     }
     return boxed.retained_ptr;
 }

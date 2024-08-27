@@ -3,17 +3,16 @@
 #include <curl/curl.h>
 
 // type definitions
-typedef void CurlGlueWriteFunc(char *ptr, size_t size, size_t nmemb, int* result);
+#define MAX_BOXED_VALUES 10
 
 typedef struct {
     CURL *curl;
     char error_buf[CURL_ERROR_SIZE];
-    CurlGlueWriteFunc* write_func;
-    void* fix_value1;
+    void* boxed_values[MAX_BOXED_VALUES];
 } CurlGlue;
 
 // prototype declarations
-int curl_glue_set_write_func(CurlGlue* glue, CurlGlueWriteFunc* write_func);
+int _curl_glue_set_write_callback(CurlGlue* glue);
 
 
 CurlGlue* curl_glue_init() {
@@ -31,7 +30,7 @@ CurlGlue* curl_glue_init() {
         goto error;
     }
 
-    res = (CURLcode) curl_glue_set_write_func(glue, NULL);
+    res = (CURLcode) _curl_glue_set_write_callback(glue);
     if (res != CURLE_OK) {
         goto error;
     }
@@ -68,12 +67,17 @@ const char* curl_glue_get_error_message(CurlGlue* glue) {
     return glue->error_buf;
 }
 
-void curl_glue_set_fix_value1(CurlGlue* glue, void* ptr) {
-    glue->fix_value1 = ptr;
+void curl_glue_set_boxed_value(CurlGlue* glue, int index, void* ptr) {
+    if (0 <= index && index < MAX_BOXED_VALUES) {
+        glue->boxed_values[index] = ptr;
+    }
 }
 
-void* curl_glue_get_fix_value1(CurlGlue* glue) {
-    return glue->fix_value1;
+void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
+    if (0 <= index && index < MAX_BOXED_VALUES) {
+        return glue->boxed_values[index];
+    }
+    return NULL;
 }
 
 size_t _curl_glue_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
@@ -86,8 +90,7 @@ size_t _curl_glue_write_callback(char *ptr, size_t size, size_t nmemb, void *use
     return _callback_write_function(ptr, size, nmemb, userdata);
 }
 
-int curl_glue_set_write_func(CurlGlue* glue, CurlGlueWriteFunc* write_func) {
-    glue->write_func = write_func;
+int _curl_glue_set_write_callback(CurlGlue* glue) {
     CURLcode res;
     res = curl_easy_setopt(glue->curl, CURLOPT_WRITEDATA, (void*) glue);
     if (res != CURLE_OK) {

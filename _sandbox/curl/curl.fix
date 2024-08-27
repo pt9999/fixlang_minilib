@@ -7,8 +7,6 @@ type Curl = box struct {
     dtor: Destructor Ptr
 };
 
-type WriteFunction = Array U8 -> IOFail I64;
-
 make: IOFail Curl;
 make = (
     eval *pure();
@@ -56,7 +54,42 @@ perform = |curl| (
     };
     pure()
 );
+
+set_fix_value1: Boxed a -> Curl -> IOFail ();
+set_fix_value1 = |boxed, curl| (
+    eval *pure();
+    eval curl.@dtor.borrow(|glue|
+        let retained_ptr = FFI::unsafe_get_retained_ptr_of_boxed_value(boxed);
+        FFI_CALL[() curl_glue_set_fix_value1(Ptr, Ptr), glue, retained_ptr]
+    );
+    pure()
+);
+
+get_fix_value1: Curl -> IOFail (Boxed a);
+get_fix_value1 = |curl| (
+    eval *pure();
+    let boxed = curl.@dtor.borrow(|glue|
+        let retained_ptr = FFI_CALL[Ptr curl_glue_get_fix_value1(Ptr), glue];
+        FFI::unsafe_get_boxed_value_from_retained_ptr(retained_ptr)
+    );
+    pure $ boxed
+);
+
 /*
+
+set_write_function: (Array U8 -> IOFail I64) -> Curl -> IOFail ();
+set_write_function = |write_func, curl| (
+    let boxed = Boxed { value: write_func };
+    let res = url.borrow_c_str(|p_url|
+        curl.@dtor.borrow(|glue|
+            FFI_CALL[CInt curl_glue_set_write_function(Ptr, Ptr), glue, p_write_func]
+        )
+    );
+    if res != 0.to_CInt {
+        _throw_error(curl)
+    };
+    pure()
+);
 
 write_function: WriteFunction -> Curl -> IOFail ();
 write_function = |func, curl| (

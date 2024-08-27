@@ -8,6 +8,7 @@ typedef struct {
     CURL *curl;
     char error_buf[CURL_ERROR_SIZE];
     CurlGlueWriteFunc* write_func;
+    void* fix_value1;
 } CurlGlue;
 
 CurlGlue* curl_glue_init() {
@@ -51,6 +52,14 @@ int curl_glue_perform(CurlGlue* glue) {
 
 const char* curl_glue_get_error_message(CurlGlue* glue) {
     return glue->error_buf;
+}
+
+void curl_glue_set_fix_value1(CurlGlue* glue, void* ptr) {
+    glue->fix_value1 = ptr;
+}
+
+void* curl_glue_get_fix_value1(CurlGlue* glue) {
+    return glue->fix_value1;
 }
 
 size_t _curl_glue_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)

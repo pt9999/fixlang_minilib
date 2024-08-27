@@ -8,16 +8,11 @@ LIBS = -L . -d curl_glue -d curl
 
 all: test
 
-test: libcurl_glue.so curl_test1.out
-	LD_LIBRARY_PATH=. MALLOC_PERTURB_=1 ./curl_test1.out
+test: libcurl_glue.so curl_test.out
+	LD_LIBRARY_PATH=. MALLOC_PERTURB_=1 ./curl_test.out
 
 libcurl_glue.so: libcurl_glue.c
 	gcc $(INCLUDE) $(LIBPATH) -lcurl -shared -fPIC -o $@ $<
-
-#test0: libcurl_test.out
-#	./libcurl_test.out
-#libcurl_test.out: libcurl_test.c
-#	gcc -o $@ $< -l curl
 
 clean:
 	rm -f *.out *.so tmp.*

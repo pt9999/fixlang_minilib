@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <curl/curl.h>
 
+// type definitions
 typedef void CurlGlueWriteFunc(char *ptr, size_t size, size_t nmemb, int* result);
 
 typedef struct {
@@ -10,6 +11,10 @@ typedef struct {
     CurlGlueWriteFunc* write_func;
     void* fix_value1;
 } CurlGlue;
+
+// prototype declarations
+int curl_glue_set_write_func(CurlGlue* glue, CurlGlueWriteFunc* write_func);
+
 
 CurlGlue* curl_glue_init() {
     CURL* curl = curl_easy_init();
@@ -23,11 +28,20 @@ CurlGlue* curl_glue_init() {
     CURLcode res;
     res = curl_easy_setopt(glue->curl, CURLOPT_ERRORBUFFER, glue->error_buf);
     if (res != CURLE_OK) {
-        curl_easy_cleanup(glue->curl);
-        free(glue);
-        return NULL;
+        goto error;
     }
+
+    res = (CURLcode) curl_glue_set_write_func(glue, NULL);
+    if (res != CURLE_OK) {
+        goto error;
+    }
+
     return glue;
+
+error:
+    curl_easy_cleanup(glue->curl);
+    free(glue);
+    return NULL;
 }
 
 void curl_glue_cleanup(CurlGlue* glue) {
@@ -65,10 +79,13 @@ void* curl_glue_get_fix_value1(CurlGlue* glue) {
 size_t _curl_glue_write_callback(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     CurlGlue* glue = (CurlGlue*) userdata;
-    CurlGlueWriteFunc* write_func = glue->write_func;
+    //CurlGlueWriteFunc* write_func = glue->write_func;
     // typedef void CurlGlueWriteFunc(char *ptr, size_t size, size_t nmemb, int* result);
     // TODO: call FFI_EXPORTED function
-    return 0;
+    extern void _callback_write_function(char*, size_t, size_t, void*, int64_t*);
+    int64_t result[1];
+    _callback_write_function(ptr, size, nmemb, userdata, result);
+    return (size_t) result[0];
 }
 
 int curl_glue_set_write_func(CurlGlue* glue, CurlGlueWriteFunc* write_func) {

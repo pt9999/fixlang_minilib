@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <curl/curl.h>
 
-// type definitions
+// type definitions and constants
+
 #define MAX_BOXED_VALUES 10
 
 typedef struct {
@@ -18,8 +19,11 @@ typedef struct {
 } CurlGlue;
 
 // prototype declarations
+
 int _curl_glue_set_write_callback(CurlGlue* glue);
 void _curl_glue_release_boxed_value(CurlGlue* glue, int index);
+
+// functions
 
 CurlGlue* curl_glue_init() {
     CURL* curl = curl_easy_init();

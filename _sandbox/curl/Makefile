@@ -1,5 +1,5 @@
 TOPDIR = ../..
-LIBS = -L . -d curl_glue -d curl
+LIBS = -L . -d fixglue_curl -d curl
 
 %.out: %.fix
 	$(TOPDIR)/bin/fixautolink build -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
@@ -8,11 +8,16 @@ LIBS = -L . -d curl_glue -d curl
 
 all: test
 
-test: libcurl_glue.so curl_test.out
+test: libfixglue_curl.so curl_test.out
 	LD_LIBRARY_PATH=. MALLOC_PERTURB_=1 ./curl_test.out
 
-libcurl_glue.so: libcurl_glue.c
+libfixglue_curl.so: libfixglue_curl.c
 	gcc $(INCLUDE) $(LIBPATH) -lcurl -shared -fPIC -o $@ $<
+
+#%.o: %.c
+#	gcc $(INCLUDE) $(LIBPATH) -lcurl -c -o $@ $<
+#libfixglue_curl.a: libfixglue_curl.o
+#	ar r $@ $^
 
 clean:
 	rm -f *.out *.so tmp.*

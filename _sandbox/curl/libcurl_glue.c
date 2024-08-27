@@ -30,11 +30,6 @@ CurlGlue* curl_glue_init() {
         goto error;
     }
 
-    res = (CURLcode) _curl_glue_set_write_callback(glue);
-    if (res != CURLE_OK) {
-        goto error;
-    }
-
     return glue;
 
 error:
@@ -80,7 +75,7 @@ void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
     return NULL;
 }
 
-int _curl_glue_set_write_callback(CurlGlue* glue) {
+int curl_glue_set_write_callback(CurlGlue* glue) {
     CURLcode res;
     res = curl_easy_setopt(glue->curl, CURLOPT_WRITEDATA, (void*) glue);
     if (res != CURLE_OK) {

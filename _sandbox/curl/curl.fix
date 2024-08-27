@@ -21,57 +21,48 @@ make = (
     pure $ curl
 );
 
-_throw_error: Curl -> IOFail ();
-_throw_error = |curl| (
-    curl.@dtor.borrow(|glue|
+_check_error: CInt -> Ptr -> IOFail ();
+_check_error = |code, glue| (
+    if code != 0.to_CInt {
         let errmsg = FFI_CALL[Ptr curl_glue_get_error_message(Ptr), glue];
         throw $ String::_unsafe_from_c_str_ptr(errmsg)
-    )
+    };
+    pure()
 );
 
 set_url: String -> Curl -> IOFail ();
 set_url = |url, curl| (
     eval *pure();
-    let res = url.borrow_c_str(|p_url|
+    url.borrow_c_str(|p_url|
         curl.@dtor.borrow(|glue|
-            FFI_CALL[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url]
+            glue._check_error(FFI_CALL[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url])
         )
-    );
-    if res != 0.to_CInt {
-        _throw_error(curl)
-    };
-    pure()
+    )
 );
 
 perform: Curl -> IOFail ();
 perform = |curl| (
     eval *pure();
-    let res = curl.@dtor.borrow(|glue|
-        FFI_CALL[CInt curl_glue_perform(Ptr), glue]
-    );
-    if res != 0.to_CInt {
-        _throw_error(curl)
-    };
-    pure()
+    curl.@dtor.borrow(|glue|
+        glue._check_error(FFI_CALL[CInt curl_glue_perform(Ptr), glue])
+    )
 );
 
 set_boxed_value: I64 -> Boxed a -> Curl -> IOFail ();
 set_boxed_value = |index, boxed, curl| (
     eval *pure();
-    eval curl.@dtor.borrow(|glue|
+    curl.@dtor.borrow(|glue|
         let retained_ptr = FFI::unsafe_get_retained_ptr_of_boxed_value(boxed);
-        FFI_CALL[() curl_glue_set_boxed_value(Ptr, CInt, Ptr), glue, index.to_CInt, retained_ptr]
-    );
-    pure()
+        pure $ FFI_CALL[() curl_glue_set_boxed_value(Ptr, CInt, Ptr), glue, index.to_CInt, retained_ptr]
+    )
 );
 
 get_boxed_value: I64 -> Curl -> IOFail (Boxed a);
 get_boxed_value = |index, curl| (
     eval *pure();
-    let boxed = curl.@dtor.borrow(|glue|
-        _get_boxed_value(index, glue)
-    );
-    pure $ boxed
+    curl.@dtor.borrow(|glue|
+        pure $ _get_boxed_value(index, glue)
+    )
 );
 
 _get_boxed_value: I64 -> Ptr -> Boxed a;
@@ -91,3 +82,11 @@ _callback_write_function = |ptr, size, nmemb, userdata| (
     nmemb
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];
+
+set_write_callback: Curl -> IOFail ();
+set_write_callback = |curl| (
+    eval *pure();
+    curl.@dtor.borrow(|glue|
+        glue._check_error(FFI_CALL[CInt curl_glue_set_write_callback(Ptr), glue])
+    )
+);

@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <curl/curl.h>
 
-// type definitions and constants
+// ==================================
+// Type definitions and constants
+// ==================================
 
 #define MAX_BOXED_VALUES 10
 
@@ -13,27 +15,35 @@ typedef struct {
 } BoxedValue;
 
 typedef struct {
-    CURL *curl;
-    char error_buf[CURL_ERROR_SIZE];
-    BoxedValue boxed_values[MAX_BOXED_VALUES];
+    CURL *curl;                                 // curl_easy handle
+    char error_buf[CURL_ERROR_SIZE];            // a buffer where error messages are written
+    BoxedValue boxed_values[MAX_BOXED_VALUES];  // manages many boxed values
 } CurlGlue;
 
-// prototype declarations
+// ==================================
+// Prototype declarations
+// ==================================
 
 int _curl_glue_set_write_callback(CurlGlue* glue);
 void _curl_glue_release_boxed_value(CurlGlue* glue, int index);
 
-// functions
+// ==================================
+// Functions
+// ==================================
 
+// Initializes a curl_glue structure.
 CurlGlue* curl_glue_init() {
+    // initializes a curl_easy handle
     CURL* curl = curl_easy_init();
     if (curl == NULL) {
         return NULL;
     }
 
+    // creates a curl_glue structure
     CurlGlue* glue = (CurlGlue*) calloc(1, sizeof(CurlGlue));
     glue->curl = curl;
 
+    // sets the error buffer
     CURLcode res;
     res = curl_easy_setopt(glue->curl, CURLOPT_ERRORBUFFER, glue->error_buf);
     if (res != CURLE_OK) {
@@ -48,6 +58,7 @@ error:
     return NULL;
 }
 
+// Destructs a curl_glue structure.
 void curl_glue_cleanup(CurlGlue* glue) {
     if (glue != NULL) {
         if (glue->curl != NULL) {
@@ -61,20 +72,25 @@ void curl_glue_cleanup(CurlGlue* glue) {
     }
 }
 
+// Sets the target url.
 int curl_glue_set_url(CurlGlue* glue, const char* url) {
     CURLcode res = curl_easy_setopt(glue->curl, CURLOPT_URL, url);
     return (int) res;
 }
 
+// Sends an HTTP request, and receives an HTTP response.
 int curl_glue_perform(CurlGlue* glue) {
     CURLcode res = curl_easy_perform(glue->curl);
     return (int) res;
 }
 
+// Retrieves an error message when an error has occured.
 const char* curl_glue_get_error_message(CurlGlue* glue) {
     return glue->error_buf;
 }
 
+// Sets a boxed value, such as a write callback function.
+// the index should be in range: 0 <= index && index < MAX_BOXED_VALUES.
 void curl_glue_set_boxed_value(CurlGlue* glue, int index, void* retained_ptr, void (*retain) (void*), void (*release) (void*)) {
     if (index < 0 || MAX_BOXED_VALUES <= index) {
         return;
@@ -104,6 +120,7 @@ void _curl_glue_release_boxed_value(CurlGlue* glue, int index) {
     glue->boxed_values[index] = boxed;
 }
 
+// Retrieves `retained_ptr` of the specified boxed value.
 void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
     if (index < 0 || MAX_BOXED_VALUES <= index) {
         return NULL;
@@ -130,4 +147,3 @@ int curl_glue_set_write_callback(CurlGlue* glue) {
     res = curl_easy_setopt(glue->curl, CURLOPT_WRITEFUNCTION, _callback_write_function);
     return (int) res;
 }
-

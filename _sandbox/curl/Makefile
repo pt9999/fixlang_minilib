@@ -1,26 +1,30 @@
 TOPDIR = ../..
-LIBS = -L . -d fixglue_curl -d curl
 
-%.out: %.fix
+GLUE_NAME = fixglue_curl
+GLUE_LIB = lib$(GLUE_NAME).a
+
+LIBS = -L . -s $(GLUE_NAME) -d curl
+
+%.out: %.fix $(GLUE_LIB)
 	$(TOPDIR)/bin/fixautolink build -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
-%.run: %.fix
+%.run: %.fix $(GLUE_LIB)
 	$(TOPDIR)/bin/fixautolink run -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
 
 all: test
 
-test: libfixglue_curl.so curl_test.out
-	LD_LIBRARY_PATH=. MALLOC_PERTURB_=1 ./curl_test.out
+test: curl_test.out
+	./curl_test.out
 
-libfixglue_curl.so: libfixglue_curl.c
-	gcc $(INCLUDE) $(LIBPATH) -lcurl -shared -fPIC -o $@ $<
+#libfixglue_curl.so: libfixglue_curl.c
+#	gcc $(INCLUDE) $(LIBPATH) -lcurl -shared -fPIC -o $@ $<
 
-#%.o: %.c
-#	gcc $(INCLUDE) $(LIBPATH) -lcurl -c -o $@ $<
-#libfixglue_curl.a: libfixglue_curl.o
-#	ar r $@ $^
+%.o: %.c
+	gcc $(INCLUDE) $(LIBPATH) -c -fPIC -o $@ $<
+$(GLUE_LIB): libfixglue_curl.o
+	ar r $@ $^
 
 clean:
-	rm -f *.out *.so tmp.*
+	rm -f *.out *.so *.a tmp.*
 	rm -f .depend
 	fix clean
 

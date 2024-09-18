@@ -24,7 +24,7 @@ $(GLUE_LIB): libfixglue_curl.o
 	ar r $@ $^
 
 clean:
-	rm -f *.out *.so *.a tmp.*
+	rm -f *.out *.so *.a *.o tmp.*
 	rm -f .depend
 	fix clean
 

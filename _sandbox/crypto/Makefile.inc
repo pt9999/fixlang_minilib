@@ -7,9 +7,9 @@ FIXAUTOTEST = $(TOPDIR)/bin/fixautotest
 LIBS = -I $(TOPDIR)/lib -I $(TOPDIR)/_sandbox/crypto
 
 OPT = separated
-OPT_BUILD = -O $(OPT)
-OPT_RUN = -O $(OPT)
-OPT_TESTS = -O $(OPT)
+OPT_BUILD = --opt-level $(OPT)
+OPT_RUN = --opt-level $(OPT)
+OPT_TESTS = --opt-level $(OPT)
 
 %.out: %.fix
 	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< $(OPT_BUILD)

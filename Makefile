@@ -8,12 +8,12 @@ clean:
 
 -include .depend
 
-#OPT_TOOLS = -O default
-OPT_TOOLS = -O separated
+#OPT_TOOLS = --opt-level default
+OPT_TOOLS = --opt-level separated
 
-#OPT_TESTS = -O default
-OPT_TESTS = -O separated
-#OPT_TESTS = -O minimum
+#OPT_TESTS = --opt-level default
+OPT_TESTS = --opt-level separated
+#OPT_TESTS = --opt-level minimum
 
 TOOLS = bin/fixautolink bin/fixautotest bin/fixdoc
 tools: $(TOOLS)

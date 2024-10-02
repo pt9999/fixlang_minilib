@@ -1,8 +1,8 @@
 %.out: %.fix
-	../bin/fixautolink build -o $@ -I ../lib -I . -f $<
+	cd .. && bin/fixautolink build -o _sandbox/$@ -I lib -I _sandbox -f _sandbox/$<
 
 %.run: %.fix
-	../bin/fixautolink run -o $@ -I ../lib -I . -f $< --opt-level separated
+	cd .. && bin/fixautolink run -o _sandbox/$@ -I lib -I _sandbox -f _sandbox/$< --opt-level separated
 
 all:
 

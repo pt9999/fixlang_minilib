@@ -96,9 +96,9 @@ read_cert_data_array_from_pem_string = |contents| (
 // A X.509 certificate with signature
 type Certificate = unbox struct {
     tbs_certificate: TBSCertificate,
+    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
     signature_algorithm:   AlgorithmIdentifier,
     signature_value: BitString,
-    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
 };
 
 namespace Certificate {
@@ -144,13 +144,11 @@ impl Certificate: DecodeDer {
             let tbs_certificate_bytes = *decode_contents(end_pos - start_pos);
             eval *set_pos(end_pos);
 
-            let signature_algorithm = *decode_obj;
-            let signature_value = *decode_obj;
             pure $ Certificate {
                 tbs_certificate: tbs_certificate,
-                signature_algorithm: signature_algorithm,
-                signature_value: signature_value,
                 tbs_certificate_bytes: tbs_certificate_bytes,
+                signature_algorithm: *decode_obj,
+                signature_value: *decode_obj,
             }
         }
     );
@@ -158,7 +156,7 @@ impl Certificate: DecodeDer {
 
 // Information associated with the subject of the certificate and the issuer.
 type TBSCertificate = unbox struct {
-    version: Version,
+    version: Option Version,
     serial_number: CertificateSerialNumber,
     signature: AlgorithmIdentifier,
     issuer: Name,
@@ -174,7 +172,7 @@ impl TBSCertificate: ToString {
     to_string = |obj| (
         "TBSCertificate {" +
         "\n version=" + obj.@version.to_string +
-        "\n serial_number=" + obj.@serial_number.to_string +
+        "\n serial_number=" + obj.@serial_number.to_bytes.to_string_hex +
         "\n signature=" + obj.@signature.to_string +
         "\n issuer=" + obj.@issuer.to_string +
         "\n validity=" + obj.@validity.to_string +
@@ -190,27 +188,17 @@ impl TBSCertificate: ToString {
 impl TBSCertificate: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
-            let version = *with_context(0, decode_integer).if_exists;
-            let serial_number = *decode_bigint;
-            let signature = *decode_obj;
-            let issuer = *decode_name;
-            let validity = *decode_obj;
-            let subject = *decode_name;
-            let subject_public_key_info = *decode_obj;
-            let issuer_unique_id = *with_context(1, decode_obj).if_exists;
-            let subject_unique_id = *with_context(2, decode_obj).if_exists;
-            let extensions = *with_context(3, decode_extensions).if_exists;
             pure $ TBSCertificate {
-                version: version.as_some_or(0),
-                serial_number: serial_number,
-                signature: signature,
-                issuer: issuer,
-                validity: validity,
-                subject: subject,
-                subject_public_key_info: subject_public_key_info,
-                issuer_unique_id: issuer_unique_id,
-                subject_unique_id: subject_unique_id,
-                extensions: extensions,
+                version: *with_context(0, decode_obj).if_exists,
+                serial_number: *decode_obj,
+                signature: *decode_obj,
+                issuer: *decode_obj,
+                validity: *decode_obj,
+                subject: *decode_obj,
+                subject_public_key_info: *decode_obj,
+                issuer_unique_id: *with_context(1, decode_obj).if_exists,
+                subject_unique_id: *with_context(2, decode_obj).if_exists,
+                extensions: *with_context(3, _decode_extensions).if_exists,
             }
         }
     );
@@ -323,31 +311,32 @@ impl Name: ToString {
     );
 }
 
-decode_name: [m: MonadReadByte] m Name;
-decode_name = (
-    pure $ Name {
-        data: *decode_RDNSequence
-    }
-);
+impl Name: DecodeDer {
+    decode_obj = (
+        pure $ Name {
+            data: *_decode_RDNSequence
+        }
+    );
+}
 
 type RDNSequence = Array RelativeDistinguishedName;
 
-decode_RDNSequence: [m: MonadReadByte] m RDNSequence;
-decode_RDNSequence = (
-    decode_sequence_of(decode_RelativeDistinguishedName)
+_decode_RDNSequence: [m: MonadDerDecoder] m RDNSequence;
+_decode_RDNSequence = (
+    decode_sequence_of(_decode_RelativeDistinguishedName)
 );
 
 type RelativeDistinguishedName = Array AttributeTypeAndValue;
 
-decode_RelativeDistinguishedName: [m: MonadReadByte] m RelativeDistinguishedName;
-decode_RelativeDistinguishedName = (
-    decode_set_of(decode_AttributeTypeAndValue)
+_decode_RelativeDistinguishedName: [m: MonadDerDecoder] m RelativeDistinguishedName;
+_decode_RelativeDistinguishedName = (
+    decode_set_of(_decode_AttributeTypeAndValue)
 );
 
 type AttributeTypeAndValue = (AttributeType, AttributeValue);
 
-decode_AttributeTypeAndValue: [m: MonadReadByte] m AttributeTypeAndValue;
-decode_AttributeTypeAndValue = (
+_decode_AttributeTypeAndValue: [m: MonadDerDecoder] m AttributeTypeAndValue;
+_decode_AttributeTypeAndValue = (
     decode_sequence $ do {
         let type_ = *decode_obj;
         let value = *decode_obj;
@@ -400,8 +389,8 @@ impl AlgorithmIdentifier: DecodeDer {
 
 type Extensions = Array Extension;
 
-decode_extensions:  [m: MonadReadByte] m Extensions;
-decode_extensions = (
+_decode_extensions:  [m: MonadDerDecoder] m Extensions;
+_decode_extensions = (
     decode_sequence_of(decode_obj)
 );
 
@@ -424,13 +413,10 @@ impl Extension: ToString {
 impl Extension: DecodeDer {
     decode_obj = (
         decode_sequence $ do {
-            let extn_id = *decode_obj;
-            let critical = (*decode_obj.if_exists).as_some_or(false);
-            let extn_value = *decode_obj;
             pure $ Extension {
-                extn_id: extn_id,
-                critical: critical,
-                extn_value: extn_value
+                extn_id: *decode_obj,
+                critical: *decode_obj.if_exists_or(false),
+                extn_value: *decode_obj
             }
         }
     );

@@ -1,5 +1,11 @@
+// A decoder for ASN.1 Distinguished Encoding Rules(DER).
+//
+// For ASN.1 and DER, see below:
 // https://en.wikipedia.org/wiki/ASN.1
 // https://en.wikipedia.org/wiki/X.690
+//
+// For encoding rules, see below (PDF):
+// https://www.itu.int/rec/T-REC-X.690-202102-I/en
 module Minilib.Crypto.Cert.Asn1Der;
 
 
@@ -17,20 +23,28 @@ import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 import Minilib.Text.Unicode;
 
-// -------------------
-// Input Byte Stream
-// -------------------
+// -------------------------------
+// Monad interface for Der Decoder
+// -------------------------------
 
-trait MonadReadByte = Functor + Monad + MonadErrorIF + MonadReadByteIF;
+trait MonadDerDecoder = Functor + Monad + MonadErrorIF + MonadDerDecoderIF;
 
-trait [m: * -> *] m: MonadReadByteIF {
+trait [m: * -> *] m: MonadDerDecoderIF {
     // Reads a byte. If the end-of-stream is reached, it reports an error.
     read_byte: m U8;
+
+    // Reads a byte array of the specified size. If the end-of-stream is reached, it reports an error.
+    read_bytes: I64 -> m (Array U8);
+
     // Checks whether the end-of-stream is reached.
     is_eos: m Bool;
+
     // Runs the inner monad with the inner contents.
     // The inner contents is created from current position to the position advanced by the specified length,
     run_inner: I64 -> m a -> m a;
+
+    // Runs the inner monad repeatedly until it reaches the end-of-stream.
+    repeat: m a -> m (Array a);
 
     // get the position of the stream.
     get_pos: m I64;
@@ -42,43 +56,136 @@ trait [m: * -> *] m: MonadReadByteIF {
 __Err_EndOfStream: ErrMsg;
 __Err_EndOfStream = "End of stream";
 
-impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
+
+debug: [m: MonadDerDecoder] String -> m a -> m a;
+debug = |mesg, ma| (
+    let a = *ma;
+    eval debug_eprintln(mesg);
+    pure $ a
+);
+
+// A buffer for decoding DER.
+type DecodeDerBuffer = unbox struct {
+    array: Array U8,
+    position: I64,
+    end: I64,
+};
+
+namespace DecodeDerBuffer {
+    // Creates a DecodeDerBuffer from a byte array.
+    make: Array U8 -> DecodeDerBuffer;
+    make = |array| DecodeDerBuffer {
+        array: array,
+        position: 0,
+        end: array.get_size,
+    };
+
+    // Creates a sub-buffer of the specifie range.
+    subbuffer: I64 -> I64 -> DecodeDerBuffer -> DecodeDerBuffer;
+    subbuffer = |begin, end, buf| (
+        let array = buf.@array;
+        eval assert(|_| "begin out of range", 0 <= begin && begin <= array.get_size);
+        eval assert(|_| "end out of range", begin <= end && end <= array.get_size);
+        DecodeDerBuffer {
+            array: array,
+            position: begin,
+            end: end,
+        }
+    );
+
+}
+
+// We restrict the underlying monad to `Result ErrMsg` in order to avoid stack overflow
+impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
     read_byte = make_state_t_monad $ |buf| (
-        if buf.get_position >= buf.get_size {
+        let DecodeDerBuffer {
+            array: array,
+            position: position,
+            end: end
+        } = buf;
+        if position >= end {
             error $ __Err_EndOfStream
         };
-        let res: Result ErrMsg (U8, ByteBuffer) = buf.unmarshal;
-        if res.is_err {
-            error $ res.as_err
-        };
-        let (u8, buf) = res.as_ok;
+        let u8 = array.@(position);
+        let buf = buf.set_position(position + 1);
         pure $ (buf, u8)
     );
+
+    read_bytes = |length| make_state_t_monad $ |buf| (
+        let DecodeDerBuffer {
+            array: array,
+            position: position,
+            end: end
+        } = buf;
+        if length < 0 {
+            error $ "invalid length"
+        };
+        if position + length > end {
+            error $ __Err_EndOfStream
+        };
+        let bytes = array.subarray(position, position + length);
+        let buf = buf.set_position(position + length);
+        pure $ (buf, bytes)
+    );
+
     is_eos = (
         let buf = *get_state;
-        pure $ buf.get_position >= buf.get_size
+        pure $ buf.@position >= buf.@end
     );
+
     run_inner = |length, inner_monad| (
-        let buf = *get_state;
-        let inner_array = buf.@array.subarray(
-            0,
-            min(buf.@position + length, buf.get_size)
-        );
-        let inner_buf = ByteBuffer::make(inner_array, big_endian());
-        let inner_buf = inner_buf.set_position(buf.@position);
-        let (inner_buf, a) = *inner_monad.run_state_t(inner_buf).lift_t;
+        make_state_t_monad $ |buf|
+        let inner_begin = buf.@position;
+        let inner_end = min(inner_begin + length, buf.@end);
+        let inner_buf = buf.subbuffer(inner_begin, inner_end);
+        let (inner_buf, a) = *inner_monad.run_state_t(inner_buf);
         // TODO: should check whether inner_buf is at the end of stream?
-        eval *put_state(buf.set_position(buf.@position + length));
-        pure $ a
+        let buf = buf.set_position(inner_end);
+        pure $ (buf, a)
+    );
+
+    repeat = |inner_monad| (
+        make_state_t_monad $ |buf|
+        let loop_inner = fix $ |loop_inner, buf: DecodeDerBuffer, arr| (
+            // To avoid stack overflow, we don't use monadic binding here
+            if buf.@position >= buf.@end { ok $ (buf, arr) };
+            let res = (inner_monad.@data)(buf);     // = run_state_t
+            if res.is_err { err $ res.as_err };
+            let (buf, a) = res.as_ok;
+            let arr = arr.push_back(a);
+            /*
+            eval if arr.get_size % 100 == 0 {
+                debug_eprintln("repeat: " + arr.get_size.to_string +
+                    " pos=" + buf.@position.to_string +
+                    " end=" + buf.@end.to_string
+                )
+            } else { () };
+            */
+            loop_inner(buf, arr)
+        );
+        loop_inner(buf, [])
     );
 
     get_pos = (
         let buf = *get_state;
-        pure $ buf.get_position
+        pure $ buf.@position
     );
 
     set_pos = |pos| (
         mod_state(set_position(pos))
+    );
+}
+
+namespace StateDecodeDer {
+    type StateDecodeDer = StateT DecodeDerBuffer (Result ErrMsg);
+
+    // Runs the specified decoder against the specified byte array.
+    eval_der_decoder: Array U8 ->  StateDecodeDer a -> Result ErrMsg a;
+    eval_der_decoder = |bytes, decoder| (
+        let buf = DecodeDerBuffer::make(bytes);
+        let (buf, a) = *decoder.run_state_t(buf);
+        // TODO: should check whether buf is at the end of stream?
+        pure $ a
     );
 }
 
@@ -88,16 +195,13 @@ impl [m: MonadError] StateT ByteBuffer m: MonadReadByteIF {
 
 // A trait for an object that can be decoded from DER-encoded bytes.
 trait a: DecodeDer {
-    decode_obj: [m: MonadReadByte] m a;
+    decode_obj: [m: MonadDerDecoder] m a;
 }
 
 // Decodes an object from DER-encoded bytes.
 decode_der_from_bytes: [a: DecodeDer] Array U8 -> Result ErrMsg a;
 decode_der_from_bytes = |bytes| (
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let (buf, a) = *decode_obj.run_state_t(buf);
-    // TODO: should check whether buf is at the end of stream?
-    pure $ a
+    decode_obj.eval_der_decoder(bytes)
 );
 
 // -----------
@@ -176,7 +280,7 @@ impl Identifier: ToString {
 }
 
 // A monad that decodes the ASN.1 identifier octets.
-decode_identifier: [m: MonadReadByte] m Identifier;
+decode_identifier: [m: MonadDerDecoder] m Identifier;
 decode_identifier = (
     let pos = *get_pos;
     let u8 = *read_byte;
@@ -203,7 +307,8 @@ decode_identifier = (
 );
 
 // A monad that decodes the ASN.1 length octets.
-decode_length: [m: MonadReadByte] m I64;
+// 10.1 Length forms
+decode_length: [m: MonadDerDecoder] m I64;
 decode_length = (
     let u8 = *read_byte;
     if u8.bit_and(0x80_U8) == 0_U8 {
@@ -226,19 +331,17 @@ decode_length = (
 );
 
 // A monad that decodes the ASN.1 contents octets.
-decode_contents: [m: MonadReadByte] I64 -> m (Array U8);
-decode_contents = |length| (
-    Array::fill(length, read_byte).map_m(|x| x)
-);
+decode_contents: [m: MonadDerDecoder] I64 -> m (Array U8);
+decode_contents = read_bytes;
 
 // Dumps triplets to text from DER-encoded bytes.
 dump_der_triplets: Array U8 -> Result ErrMsg String;
 dump_der_triplets = |bytes| (
-    let buf = ByteBuffer::make(bytes, big_endian());
-    let sm: StateT ByteBuffer (Result ErrMsg) String = loop_m(
+    let buf = DecodeDerBuffer::make(bytes);
+    let sm: StateT DecodeDerBuffer (Result ErrMsg) String = loop_m(
         "", |output|
         let buf = *get_state;
-        if buf.@position >= buf.get_size { break_m $ output };
+        if buf.@position >= buf.@end { break_m $ output };
         let identifier = *decode_identifier;
         let length = *decode_length;
         if identifier.@constructed {
@@ -266,7 +369,7 @@ dump_der_triplets = |bytes| (
 );
 
 // Extracts one triplet (identifier, length, contents) as a DER-encoded bytes.
-decode_any: [m: MonadReadByte] m (Array U8);
+decode_any: [m: MonadDerDecoder] m (Array U8);
 decode_any = (
     let start_pos = *get_pos;
     let identifier = *decode_identifier;
@@ -277,16 +380,6 @@ decode_any = (
     decode_contents(end_pos - start_pos)
 );
 
-decode_primitive: [m: MonadReadByte] m (Identifier, Array U8);
-decode_primitive = (
-    let identifier = *decode_identifier;
-    eval *identifier.assert_tag_class(tc_universal);
-    eval *identifier.assert_primitive;
-    let length = *decode_length;
-    let contents = *decode_contents(length);
-    pure $ (identifier, contents)
-);
-
 // ----------------------
 // Constructed Types
 // ----------------------
@@ -294,7 +387,7 @@ decode_primitive = (
 // `decode_constructed(tag, inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches the `tag`,
 // then runs `inner_monad` in the inner contents.
-decode_constructed: [m: MonadReadByte] TagClass -> Tag -> m a -> m a;
+decode_constructed: [m: MonadDerDecoder] TagClass -> Tag -> m a -> m a;
 decode_constructed = |tag_class, tag, inner_monad| (
     let identifier = *decode_identifier;
     eval *identifier.assert_tag_class(tag_class);
@@ -304,37 +397,33 @@ decode_constructed = |tag_class, tag, inner_monad| (
     run_inner(length, inner_monad)
 );
 
-// `repeat(inner_monad)` is a monad that repeatedly runs `inner_monad` until it reaches the end-of-stream.
-repeat: [m: MonadReadByte] m a -> m (Array a);
-repeat = |inner_monad| (
-    loop_m(
-        [], |arr|
-        if *is_eos { break_m $ arr };
-        let a = *inner_monad;
-        continue_m $ arr.push_back(a)
-    )
-);
-
 // `inner_monad.if_exists` is a monad that runs `inner_monad` as an optional value.
-if_exists: [m: MonadReadByte] m a -> m (Option a);
+if_exists: [m: MonadDerDecoder] m a -> m (Option a);
 if_exists = |inner_monad| (
     inner_monad.map(some).catch(|errmsg| pure $ none())
+);
+
+// `inner_monad.if_exists_or(default)` is a monad that runs `inner_monad` as an optional value.
+// If it does not exist, returns the default value.
+if_exists_or: [m: MonadDerDecoder] a -> m a -> m a;
+if_exists_or = |default_value, inner_monad| (
+    inner_monad.catch(|errmsg| pure $ default_value)
 );
 
 // `decode_sequence(inner_monad)` reads the identifier and the length,
 // then checks whether the identifier matches `tag_sequence` and the tag class is `tc_universal`,
 // then runs `inner_monad` in the inner contents.
-decode_sequence: [m: MonadReadByte] m a -> m a;
+decode_sequence: [m: MonadDerDecoder] m a -> m a;
 decode_sequence = |inner_monad| (
     decode_constructed(tc_universal, tag_sequence, inner_monad)
 );
 
-decode_sequence_of: [m: MonadReadByte] m a -> m (Array a);
+decode_sequence_of: [m: MonadDerDecoder] m a -> m (Array a);
 decode_sequence_of = |inner_monad| (
     decode_constructed(tc_universal, tag_sequence, repeat $ inner_monad)
 );
 
-decode_set_of: [m: MonadReadByte] m a -> m (Array a);
+decode_set_of: [m: MonadDerDecoder] m a -> m (Array a);
 decode_set_of = |inner_monad| (
     decode_constructed(tc_universal, tag_set, repeat $ inner_monad)
 );
@@ -342,11 +431,14 @@ decode_set_of = |inner_monad| (
 // `with_context(tag, inner_monad)`reads the identifier and the length,
 // then checks whether the identifier matches `tag` and the tag class is `tc_context_specific`,
 // then runs `inner_monad` in the inner contents.
-with_context: [m: MonadReadByte] I64 -> m a -> m a;
+with_context: [m: MonadDerDecoder] I64 -> m a -> m a;
 with_context = |tag, inner_monad| (
     decode_constructed(tc_context_specific, tag.to_U8, inner_monad)
 );
 
+// `choice(inner_monads)` attempts to execute each inner monad in turn,
+// and returns the first successful result.
+// If all inner monads fail, it reports the last failure.
 choice: [m: MonadError] Array (m a) -> m a;
 choice = |monads| (
     let inner = fix $ |inner, i| (
@@ -360,6 +452,19 @@ choice = |monads| (
 // Primitive Types
 // ----------------------
 
+// `decode_primitive` reads the identifier,
+// then checks whether the identifier is a primitive,
+// then reads the length and the contents,
+// then returns the identifier and the contents.
+decode_primitive: [m: MonadDerDecoder] m (Identifier, Array U8);
+decode_primitive = (
+    let identifier = *decode_identifier;
+    eval *identifier.assert_tag_class(tc_universal);
+    eval *identifier.assert_primitive;
+    let length = *decode_length;
+    let contents = *decode_contents(length);
+    pure $ (identifier, contents)
+);
 
 impl Asn1::Boolean: DecodeDer {
     decode_obj = (
@@ -370,127 +475,123 @@ impl Asn1::Boolean: DecodeDer {
     );
 }
 
-decode_integer: [m: MonadReadByte] m Asn1::Integer;
-decode_integer = (
-    let (identifier, contents) = *decode_primitive;
-    eval *assert_tag(tag_integer, identifier);
-    if contents.get_size == 0 {
-        pure $ 0
-    };
-    if contents.get_size > 8 {
-        error $ "OutOfRange"
-    };
-    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
-    let bytes = if sign >= 0 { contents }
-    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
-    let u64: U64 = bytes.to_iter.fold(
-        0_U64, |u64, u8|
-        u64.shift_left(8_U64).bit_or(u8.to_U64)
-    );
-    if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
-    let i64: I64 = if sign >= 0 {
-        u64.to_I64
-    } else {
-        -((u64 + 1_U64).to_I64)
-    };
-    pure $ i64
-);
-
-impl Asn1::Integer: DecodeDer {
-    decode_obj = decode_integer;
-}
-
-decode_bigint: [m: MonadReadByte] m BigInt;
-decode_bigint = (
-    let (identifier, contents) = *decode_primitive;
-    eval *assert_tag(tag_integer, identifier);
-    if contents.get_size == 0 {
-        pure $ Zero::zero
-    };
-    let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
-    let bytes = if sign >= 0 { contents }
-    else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
-
-    let bigint_positive: BigInt = (
-        let u8_len = bytes.get_size;
-        if u8_len == 0 { zero };
-        let u32_len = (u8_len + 3) / 4;
-        let bytes = if 4 * u32_len == u8_len { bytes }
-        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
-        let nat = Array::from_map(u32_len, |i|
-            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
-        );
-        BigInt::make(1, nat)
-    );
-
-    if sign >= 0 {
-        pure $ bigint_positive
-    } else {    // if negative, add one and negate the result (because of two's complement)
-        pure $ -(bigint_positive + one)
-    }
-);
-
-impl BigInt: DecodeDer {
-    decode_obj = decode_bigint;
-}
-
-decode_string: [m: MonadReadByte] m String;
-decode_string = (
-    let (identifier, contents) = *decode_primitive;
-    let tag = identifier.@tag;
-    if tag == tag_utf8_string
-    {
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_ia5_string
-    {
-        // ISO 646 (IA5) characters are almost identical to ASCII character set.
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_printable_string
-    {
-        // PrintableString is restricted subset of ASCII character set.
-        pure $ contents._unsafe_to_string
-    };
-    if tag == tag_t61_string
-    {
-        let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
-        eval if _8bit_chars.get_size > 0 {
-            log_warn("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
-        } else { () };
-        pure $ contents._unsafe_to_string // OK?
-    };
-    if tag == tag_universal_string
-    {
-        eval log_warn("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
-        // implemented but not tested
-        let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
-        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-        pure $ u8array._unsafe_to_string
-    };
-    if tag == tag_bmp_string
-    {
-        eval log_warn("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
-        // implemented but not tested
-        let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
-        let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
-        let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-        pure $ u8array._unsafe_to_string
-    };
-    error $ [tag].format("tag mismatch: expected=(string) actual={}")
-);
-
-impl String: DecodeDer {
-    decode_obj = decode_string;
-}
-
-impl Asn1::BitString: DecodeDer {
+// Integer
+impl I64: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
-        // TODO: support constructed
+        eval *assert_tag(tag_integer, identifier);
+        if contents.get_size == 0 {
+            pure $ 0
+        };
+        if contents.get_size > 8 {
+            error $ "OutOfRange"
+        };
+        let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+        let bytes = if sign >= 0 { contents }
+        else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+        let u64: U64 = bytes.to_iter.fold(
+            0_U64, |u64, u8|
+            u64.shift_left(8_U64).bit_or(u8.to_U64)
+        );
+        if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
+        let i64: I64 = if sign >= 0 {
+            u64.to_I64
+        } else {
+            -((u64 + 1_U64).to_I64)
+        };
+        pure $ i64
+    );
+}
+
+impl BigInt: DecodeDer {
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        eval *assert_tag(tag_integer, identifier);
+        if contents.get_size == 0 {
+            pure $ Zero::zero
+        };
+        let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
+        let bytes = if sign >= 0 { contents }
+        else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
+
+        let bigint_positive: BigInt = (
+            let u8_len = bytes.get_size;
+            if u8_len == 0 { zero };
+            let u32_len = (u8_len + 3) / 4;
+            let bytes = if 4 * u32_len == u8_len { bytes }
+            else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+            let nat = Array::from_map(u32_len, |i|
+                bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+            );
+            BigInt::make(1, nat)
+        );
+
+        if sign >= 0 {
+            pure $ bigint_positive
+        } else {    // if negative, add one and negate the result (because of two's complement)
+            pure $ -(bigint_positive + one)
+        }
+    );
+}
+
+// UTF8String, IA5String, PrintableString, T61String, UniversalString, BmpString
+impl String: DecodeDer {
+    decode_obj = (
+        let (identifier, contents) = *decode_primitive;
+        let tag = identifier.@tag;
+        if tag == tag_utf8_string
+        {
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_ia5_string
+        {
+            // ISO 646 (IA5) characters are almost identical to ASCII character set.
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_printable_string
+        {
+            // PrintableString is restricted subset of ASCII character set.
+            pure $ contents._unsafe_to_string
+        };
+        if tag == tag_t61_string
+        {
+            let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
+            eval if _8bit_chars.get_size > 0 {
+                log_warn("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
+            } else { () };
+            pure $ contents._unsafe_to_string // OK?
+        };
+        if tag == tag_universal_string
+        {
+            eval log_warn("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
+            // implemented but not tested
+            let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+            pure $ u8array._unsafe_to_string
+        };
+        if tag == tag_bmp_string
+        {
+            eval log_warn("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
+            // implemented but not tested
+            let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
+            let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
+            pure $ u8array._unsafe_to_string
+        };
+        error $ [tag].format("tag mismatch: expected=(string) actual={}")
+    );
+}
+
+// 8.6 Encoding of a bitstring value
+impl Asn1::BitString: DecodeDer {
+    decode_obj = (
+        // With DER (Distinguished encoding rules), according to "10.2 String encoding forms",
+        // the constructed form of encoding shall not be used for bitstring.
+        let (identifier, contents) = *decode_primitive;
         eval *assert_tag(tag_bit_string, identifier);
         if contents.get_size <= 0 { error $ "invalid bitstring" };
         let number_of_unused_bits = contents.@(0);
+        if number_of_unused_bits >= 8_U8 { error $ "invalid bitstring" };
         let data = contents.subarray(1, contents.get_size);
         pure $ BitString {
             number_of_unused_bits: number_of_unused_bits,
@@ -499,8 +600,11 @@ impl Asn1::BitString: DecodeDer {
     );
 }
 
+// 8.7 Encoding of an octetstring value
 impl Asn1::OctetString: DecodeDer {
     decode_obj = (
+        // With DER (Distinguished encoding rules), according to "10.2 String encoding forms",
+        // the constructed form of encoding shall not be used for octetstring.
         let (identifier, contents) = *decode_primitive;
         eval *assert_tag(tag_octet_string, identifier);
         pure $ OctetString {
@@ -509,8 +613,6 @@ impl Asn1::OctetString: DecodeDer {
     );
 }
 
-
-// T-REC-X.690-202102
 // 8.19 Encoding of an object identifier value
 impl Asn1::ObjectIdentifier: DecodeDer {
     decode_obj = (

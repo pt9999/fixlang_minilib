@@ -1,0 +1,153 @@
+module TreeSetTest;
+
+import Minilib.Collection.TreeSet;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+test_insert_erase_ok: (I64, Reorder, Reorder) -> TestCase;
+test_insert_erase_ok = |(n, insert_reorder, erase_reorder)| (
+    let testname = "test_insert_erase_ok("+ n.to_string + "," +
+                    insert_reorder.to_string + "," +
+                    erase_reorder.to_string + ")";
+    make_test(testname) $ |_|
+    let keys_sorted = Iterator::range(0, n).to_array;
+
+    // insert with keys shuffled
+    let keys_shuffled = keys_sorted.reorder(insert_reorder);
+    let set: TreeSet I64 = TreeSet::make();
+    let set = keys_shuffled.to_iter.fold(
+        set, |set, k|
+        set.insert(k)
+    );
+
+    // assert that keys are sorted
+    let keys_current = set.to_iter.to_array;
+    let _ = *assert_equal("keys are sorted", keys_sorted, keys_current);
+
+    // assert that keys exist
+    let _ = *keys_sorted.to_iter.fold_m(
+        (), |_, k|
+        assert_equal("set.contains", true, set.contains(k))
+    );
+
+    // erase keys
+    let keys_shuffled = keys_sorted.reorder(erase_reorder);
+    let set = keys_shuffled.to_iter.fold(
+        set, |set, i|
+        set.erase(i)
+    );
+    let keys_current = set.to_iter.to_array;
+    let _ = *assert_equal("[] == keys_current", [], keys_current);
+    let _ = *assert_true("set.is_empty", set.is_empty);
+    pure()      // success
+);
+
+test_insert_erase: TestCase;
+test_insert_erase = (
+    do {
+        let n = 30;
+        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
+        let erase_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
+        pure $ test_insert_erase_ok $ (n, insert_reorder, erase_reorder)
+    }.run_tests
+);
+
+test_find_range: TestCase;
+test_find_range = (
+    let testname = "test_find_range";
+    make_test(testname) $ |_|
+    let keys_sorted = Iterator::range(0, 30).to_array;
+    let keys_shuffled = keys_sorted.reorder(shuffle(345));
+    let set = keys_shuffled.to_iter.fold(
+        TreeSet::make(), |set, x|
+        set.insert(x)
+    );
+    let test_find_range_ok = |begin, end, expected| (
+        let actual = set.find_range(begin, end).to_array;
+        assert_equal("begin="+begin.to_string+" end="+end.to_string, expected, actual)
+    );
+    let test_find_raw_range_ok = |lt_begin, lt_end, expected| (
+        let actual = set.find_raw_range(lt_begin, lt_end).to_array;
+        assert_equal("raw_range", expected, actual)
+    );
+
+    let _ = *test_find_range_ok(3, 6, [3, 4, 5]);
+    let _ = *test_find_range_ok(5, 6, [5]);
+    let _ = *test_find_range_ok(5, 5, []);
+    let _ = *test_find_range_ok(-1, 1, [0]);
+    let _ = *test_find_range_ok(29, 31, [29]);
+    let _ = *test_find_raw_range_ok(|x| x < 11, |x| x < 14, [11, 12, 13]);
+    let _ = *test_find_raw_range_ok(|x| x < 28, |x| true, [28, 29]);
+    let _ = *test_find_raw_range_ok(|x| false, |x| x < 2, [0, 1]);
+    pure()
+);
+
+test_equivalence: TestCase;
+test_equivalence = (
+    make_test("test_equivalence") $ |_|
+    let less_than = |a, b| a/10 < b/10;     // compare with x/10
+    let ts = TreeSet::make_lt(less_than);
+    let ts = ts.insert(35).insert(17).insert(23)
+                .insert(12).insert(22).insert(32);
+    let array = ts.to_iter.to_array;
+    assert_equal("eq", [12, 22, 32], array)
+);
+
+test_intersect: TestCase;
+test_intersect = (
+    make_test("test_intersect") $ |_|
+    let ts1 = TreeSet::from_iter(Iterator::range(0,20));
+    let ts2 = TreeSet::from_iter(Iterator::range(10,30));
+    let ts = ts1.intersect(ts2);
+    let actual = ts.to_iter.to_array;
+    let expected = Iterator::range(10,20).to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_merge: TestCase;
+test_merge = (
+    make_test("test_merge") $ |_|
+    let ts1 = TreeSet::from_iter(Iterator::range(0,10));
+    let ts2 = TreeSet::from_iter(Iterator::range(10,20));
+    let ts = ts1.merge(ts2);
+    let actual = ts.to_iter.to_array;
+    let expected = Iterator::range(0,20).to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_tuple2: TestCase;
+test_tuple2 = (
+    make_test("test_tuple2") $ |_|
+    let less_than = |(user1, book1), (user2, book2)| (
+        (user1 < user2) || (user1 == user2 && book1 < book2)
+    );
+    let iter = do {
+        let user = *Iterator::range(0,10).map(|i| "user" + i.to_string);
+        let book = *Iterator::range(0,10).map(|i| "book" + i.to_string);
+        pure $ (user,book)
+    };
+    let iter = iter.to_array.reorder(shuffle(345)).to_iter;
+    let ts = TreeSet::from_iter_lt(less_than, iter);
+    let target_user = "user5";
+    let lt_begin = |(user,book)| user < target_user;
+    let lt_end = |(user,book)| !(target_user < user);
+    let actual = ts.find_raw_range(lt_begin, lt_end).to_array;
+    let expected = Iterator::range(0,10).map(|i| (target_user, "book" + i.to_string)).to_array;
+    assert_equal("eq", expected, actual)
+);
+
+main: IO ();
+main = (
+     [
+        test_insert_erase,
+        test_find_range,
+        test_equivalence,
+        test_intersect,
+        test_merge,
+        test_tuple2,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

@@ -1,0 +1,312 @@
+// Decodes a JSON value from a string.
+module Minilib.Encoding.Json.JsonDecoder;
+
+import Character;
+
+import Minilib.Collection.OrderedMap;
+import Minilib.Encoding.Json;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Text.Unicode;
+
+// Parses JSON text and returns a JSON value.
+decode: String -> Result ErrMsg Json;
+decode = |str| (
+    let (json, next) = *(_json_text.run_parser_str(str));
+    pure $ json
+);
+
+//=============================================================
+// 1. Introduction
+//=============================================================
+
+// The definitions below are private, so users of this module do not
+// need to worry about them.
+//
+// JSON file format is specified by RFC 8259.
+// see: https://datatracker.ietf.org/doc/html/rfc8259
+
+//=============================================================
+// 2. JSON Grammer
+//=============================================================
+
+_json_text: Parser Json;
+_json_text = do {
+    let json = *(_wrap_whitespaces(_parse_value));
+    let _ = *match_end_of_stream;
+    pure $ json
+};
+
+_begin_array: Parser ();
+_begin_array = _wrap_whitespaces(match_str("["));
+
+_begin_object: Parser ();
+_begin_object = _wrap_whitespaces(match_str("{"));
+
+_end_array: Parser ();
+_end_array = _wrap_whitespaces(match_str("]"));
+
+_end_object: Parser ();
+_end_object = _wrap_whitespaces(match_str("}"));
+
+_name_separator: Parser ();
+_name_separator = _wrap_whitespaces(match_str(":"));
+
+_value_separator: Parser ();
+_value_separator = _wrap_whitespaces(match_str(","));
+
+_ws: Parser ();
+_ws = match_str_class_whitespace.map(|str| ());
+
+_wrap_whitespaces: Parser a -> Parser a;
+_wrap_whitespaces = |p| do {
+    let _ = *_ws;
+    let value = *p;
+    let _ = *_ws;
+    pure $ value
+};
+
+//=============================================================
+// 3. Values
+//=============================================================
+
+_parse_value: Parser Json;
+_parse_value = parser $ |s| (
+    // Make a lazy parser, so that we can avoid stack overflow.
+    let parser = (
+        _parse_null.map(null)
+        .or_else(_parse_bool.map(bool))
+        .or_else(_parse_string.map(string))
+        .or_else(_parse_object.map(object))
+        .or_else(_parse_array.map(array))
+        .or_else(_parse_number.map(number))
+    );
+    parser.run_parser(s)
+);
+
+_parse_null: Parser ();
+_parse_null = match_str("null").map(|_| ());
+
+_parse_bool: Parser Bool;
+_parse_bool = (
+    let parse_true = match_str("true").map(|_| true);
+    let parse_false = match_str("false").map(|_| false);
+    parse_true.or_else(parse_false)
+);
+
+//=============================================================
+// 4. Objects
+//=============================================================
+
+_parse_object: Parser (OrderedMap String Json);
+_parse_object = (
+    let member : Parser (String, Json) = do {
+
+        let k = *_parse_string;
+        let _ = *(_name_separator.or_error("Missing ':'"));
+        let v = *_parse_value;
+        pure $ (k, v)
+    };
+
+    let sep_member : Parser (String, Json) = do {
+        let _ = *_value_separator;
+        member
+    };
+    let to_ordered_map: Array (String, Json) -> OrderedMap String Json =
+        |kvs| kvs.to_iter.fold(
+            OrderedMap::empty(100),
+            |h, (k, v)| h.insert(k, v)
+        );
+    let body : Parser (OrderedMap String Json) = do {
+        let first = *(member);
+        let rest = *(repeat(sep_member));
+        pure $ [ first ].append(rest).to_ordered_map
+    };
+    let body = body.or_else(
+        unit.map(|_| OrderedMap::empty(0))
+    );
+
+    let begin_object = _begin_object;
+    let end_object = _end_object.or_error("Missing '}'");
+
+    do {
+        let _ = *begin_object;
+        let hashmap = *body;
+        let _ = *end_object;
+        pure $ hashmap
+    }
+);
+
+//=============================================================
+// 5. Arrays
+//=============================================================
+
+_parse_array: Parser (Array Json);
+_parse_array = (
+    let sep_value : Parser Json = do {
+        let _ = *_value_separator;
+        _parse_value
+    };
+    let body : Parser (Array Json) = do {
+        let first = *_parse_value;
+        let rest = *(repeat(sep_value));
+        pure $ [ first ].append(rest)
+    };
+    let body = body.or_else(unit.map(|_| Array::empty(0)));
+
+    do {
+        let _ = *_begin_array;
+        let values = *body;
+        let _ = *(_end_array.or_error("Missing ']'"));
+        pure $ values
+    }
+);
+
+//=============================================================
+// 6. Numbers
+//=============================================================
+
+_parse_number: Parser F64;
+_parse_number = (
+    let match_decimal_point = match_str(".");
+    let match_digit = match_any_char.filter(|c| '0' <= c && c <= '9');
+    let match_digit1_9 = match_any_char.filter(|c| '1' <= c && c <= '9');
+    let match_e = match_any_char.filter(|c| c == 'e' || c == 'E');
+    let match_minus = match_str("-");
+    let match_plus = match_str("+");
+    let match_zero = match_str("0");
+    let match_int = match_zero.or_else(
+        do {
+            let _ = *match_digit1_9;
+            let _ = *(repeat(match_digit));
+            pure $ ()
+        }
+    );
+    let match_exp = do {
+        let _ = *match_e;
+        let _ = *(match_minus.or_else(match_plus).or_else(unit));
+        let _ = *(one_or_more(match_digit));
+        pure $ ()
+    };
+    let match_frac = do {
+        let _ = *match_decimal_point;
+        let _ = *(repeat(match_digit));
+        pure $ ()
+    };
+    let match_number = do {
+        let _ = *(match_minus.or_else(unit));
+        let _ = *(match_int);
+        let _ = *(match_frac.or_else(unit));
+        let _ = *(match_exp.or_else(unit));
+        pure $ ()
+    };
+
+    do {
+        let stream_begin = *get_stream;
+        let _ = *match_number;
+        let stream_end = *get_stream;
+        let byte_count = stream_end.@position - stream_begin.@position;
+        eval assert(|_| "number byte count is negative", byte_count >= 0);
+        let number_str = stream_begin.read_string(byte_count);
+        //eval debug_println ("number_str="+number_str);
+        let res: Result ErrMsg F64 = from_string(number_str);
+        if res.is_err {
+            error_parser(res.as_err)
+        };
+        pure $ res.as_ok
+    }
+);
+
+//=============================================================
+// 7. Strings
+//=============================================================
+
+_DOUBLEQUOTE: U8;
+_DOUBLEQUOTE = 34_U8; // '\"'
+
+_match_unquoted_char: Parser U8;
+_match_unquoted_char = match_any_char.filter(|c| c != _DOUBLEQUOTE && c != '\\');
+
+_match_unquoted_str: Parser String;
+_match_unquoted_str = (
+    one_or_more(_match_unquoted_char).map(|array| array._unsafe_to_string)
+);
+
+_unescape_table: Array U8;
+_unescape_table = (
+    let unescape_from = "\"\\/bfnrt".get_bytes.pop_back;
+    let unescape_to = "\"\\/\u0008\u000c\n\r\t".get_bytes.pop_back;
+    Iterator::count_up(0).take(256)
+    .map(|i|
+        unescape_from.find_by(|x| x == i.to_U8)
+        .map_or(0_U8,
+            |pos| unescape_to.@(pos)
+        )
+    )
+    .to_array
+);
+
+// Parse a quoted character. ("\n", "\uD83D" etc.)
+// NOTE: Escape sequences of the form "\uXXXX" can only represent 
+// the range U+0000 to U+FFFF. Characters in the range U+10000 to U+10FFFF
+// become surrogate pairs and are split like "\uD83D\uDE38".
+// Therefore, we first interpret these strings as UTF16. Later convert it 
+// to UTF32 and join the surrogate pair, then convert it to UTF8.
+_match_quoted_char_u16: Parser U16;
+_match_quoted_char_u16 = (
+    let match_escaped: Parser U16 = (
+        match_any_char
+        .map(|c| _unescape_table.@(c.to_I64))
+        .filter(|c| c != 0_U8)
+        .map(|c| c.to_U16)
+    );
+    let match_hex: Parser U8 = match_any_char.filter(is_xdigit).map_result(decode_hex_char);
+    let match_u_hex4: Parser U16 = do {
+        let _ = *(match_char('u'));
+        let a = (*match_hex).to_U16.shift_left(12_U16);
+        let b = (*match_hex).to_U16.shift_left(8_U16);
+        let c = (*match_hex).to_U16.shift_left(4_U16);
+        let d = (*match_hex).to_U16.shift_left(0_U16);
+        let u16 : U16 = a.bit_or(b).bit_or(c).bit_or(d);
+        pure $ u16
+    };
+
+    do {
+        let _ = *(match_char('\\'));
+        let u16 = *(match_escaped.or_else(match_u_hex4));
+        pure $ u16
+    }
+);
+
+_match_quoted_str: Parser String;
+_match_quoted_str = do {
+    let a16: Array U16 = *(one_or_more(_match_quoted_char_u16));
+    // compose surrogate pairs
+    let a32: Array U32 = utf16_to_utf32(a16, Array::empty(a16.get_size));
+    let a8: Array U8 = utf32_to_utf8(a32, Array::empty(a32.get_size * 4));
+    pure $ a8._unsafe_to_string
+};
+
+_match_str_inner: Parser String;
+_match_str_inner = do {
+    repeat(
+        _match_quoted_str
+        .or_else(_match_unquoted_str) // match one or more characters
+    ).map(
+        |array| array.to_iter.concat_iter
+    )
+    .or_else(unit.map(|_| ""))
+};
+
+_parse_string: Parser String;
+_parse_string = do {
+    let _ = *(match_char(_DOUBLEQUOTE));
+    let str = *_match_str_inner;
+    let _ = *(
+        match_char(_DOUBLEQUOTE)
+        .or_error("The double quote at the end of the string is missing.")
+    );
+    pure $ str
+};
+

@@ -1,0 +1,142 @@
+// TreeSet is a set that manages elements in sorted order.
+module Minilib.Collection.TreeSet;
+
+import Minilib.Collection.RBTree;
+
+namespace TreeSet {
+    // A trait of the element. Currently `ToString` is required.
+    trait TreeSetElem = ToString;
+
+    // A type of set that manages elements in sorted order.
+    type TreeSet a = unbox struct {
+        root: RBNode a,
+        less_than: a -> a -> Bool
+    };
+
+    // `TreeSet::make()` creates an empty `TreeSet` using default `LessThan` ordering.
+    make: [a: TreeSetElem, a: LessThan] () -> TreeSet a;
+    make = |_| (
+        make_lt(|x,y| x < y)
+    );
+
+    // `TreeSet::make_lt(less_than)` creates an empty `TreeSet` using specified ordering.
+    // NOTE: `less_than` function must meet specific conditions. For details, see documentation of 
+    // [`RBTree`](./rbtree.md).
+    make_lt: [a: TreeSetElem] (a -> a -> Bool) -> TreeSet a;
+    make_lt = |less_than| (
+        TreeSet {
+            root: RBNode::empty(),
+            less_than: less_than
+        }
+    );
+
+    // Inserts an element into a TreeSet.
+    // For example, `ts.insert(x)` inserts `x` into `ts`.
+    //
+    // NOTE: If `ts` already contains an element `y` equivalent to `x`,
+    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // then `y` is replaced with `x`.
+    insert: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
+    insert = |x, ts| (
+       ts.mod_root(insert_lt(x, ts.@less_than))
+    );
+
+    // Erases an element from a TreeSet.
+    // For example, `ts.erase(x)` removes `x` from `ts`.
+    //
+    // NOTE: If `ts` contains an element `y` equivalent to `x`,
+    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // then `y` is removed.
+    erase: [a: TreeSetElem] a -> TreeSet a -> TreeSet a;
+    erase = |x, ts| (
+       ts.mod_root(remove_lt(x, ts.@less_than))
+    );
+
+    // Checks whether a TreeSet is empty.
+    is_empty: [a: TreeSetElem] TreeSet a -> Bool;
+    is_empty = |ts| (
+        ts.@root.is_empty
+    );
+
+    // Gets the number of elements.
+    get_size: TreeSet a -> I64;
+    get_size = |ts| (
+        ts.@root.get_size
+    );
+
+    // Checks whether a TreeSet contains an element.
+    contains: [a: TreeSetElem] a -> TreeSet a -> Bool;
+    contains = |x, ts| (
+        ts.@root.find(x, ts.@less_than).is_some
+    );
+
+    // `ts.find_range(begin, end)` finds all elements `x`
+    // where `!less_than(x, begin) && less_than(x, end)` is true.
+    // In default `LessThan` ordering, that condition is same as `begin <= x && x < end`.
+    find_range: [a: TreeSetElem] a -> a -> TreeSet a -> Iterator a;
+    find_range = |begin, end, ts| (
+        let less_than = ts.@less_than;
+        let lt_begin = |x| less_than(x, begin);
+        let lt_end   = |x| less_than(x, end);
+        ts.@root.find_range(lt_begin, lt_end)
+    );
+
+    // `ts.find_raw_range(lt_begin, lt_end)` finds all elements `x`
+    // where `!lt_begin(x) && lt_end(x)` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    find_raw_range: [a: TreeSetElem] (a -> Bool) -> (a -> Bool) -> TreeSet a -> Iterator a;
+    find_raw_range = |lt_begin, lt_end, ts| (
+        ts.@root.find_range(lt_begin, lt_end)
+    );
+
+    // Converts a TreeSet into an iterator in sorted order.
+    to_iter: [a: TreeSetElem] TreeSet a -> Iterator a;
+    to_iter = |ts| (
+        ts.@root.to_iter
+    );
+
+    // Converts an iterator into a TreeSet using specified ordering.
+    from_iter_lt: [a: TreeSetElem] (a -> a -> Bool) -> Iterator a -> TreeSet a;
+    from_iter_lt = |less_than, iter| (
+        TreeSet {
+            root: RBNode::from_iter_lt(less_than, iter),
+            less_than: less_than
+        }
+    );
+
+    // Converts an iterator into a TreeSet using default `LessThan` ordering.
+    from_iter: [a: LessThan, a: TreeSetElem] Iterator a -> TreeSet a;
+    from_iter = |iter| (
+        TreeSet::from_iter_lt(RBNode::_less_than, iter)
+    );
+
+    // Calculates intersection of two TreeSets.
+    intersect: [a : TreeSetElem] TreeSet a -> TreeSet a -> TreeSet a;
+    intersect = |ts1, ts2| (
+        ts1.to_iter.fold(
+            ts1, |ts1, x|
+            if ts2.contains(x) {
+                ts1
+            } else {
+                ts1.erase(x)
+            }
+        )
+    );
+
+    // Calculates union of two TreeSets.
+    merge: [a : TreeSetElem] TreeSet a -> TreeSet a -> TreeSet a;
+    merge = |ts1, ts2| (
+        ts2.to_iter.fold(
+            ts1, |ts1, x|
+            ts1.insert(x)
+        )
+    );
+}
+
+// Converts a TreeSet into a String.
+impl [a: TreeSetElem] TreeSet a: ToString {
+    to_string = |ts| (
+        "TreeSet{" + ts.to_iter.map(to_string).join(",") + "}"
+    );
+}

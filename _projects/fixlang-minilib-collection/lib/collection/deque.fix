@@ -1,0 +1,102 @@
+// Deque (double-ended queue).
+// Deque can be used as a FIFO such as a message queue.
+// When used as a FIFO, the amortized costs of `push_back()` and 
+// `pop_front()` are `O(1)`.
+module Minilib.Collection.Deque;
+
+//import Minilib.Text.StringEx;
+
+// A type that represents a double-ended queue.
+type Deque a = unbox struct {
+    front: Array a,     // reversed array
+    back: Array a
+};
+
+namespace Deque {
+    // Creates an empty double-ended queue.
+    empty: I64 -> Deque a;
+    empty = |n| Deque {
+        front: Array::empty(n),
+        back: Array::empty(n)
+    };
+
+    // Gets the size of the queue.
+    get_size: Deque a -> I64;
+    get_size = |q| q.@front.get_size + q.@back.get_size;
+
+    // Returns true iff the queue is empty.
+    is_empty: Deque a -> Bool;
+    is_empty = |q| q.get_size == 0;
+
+    // Gets the front element of the queue.
+    get_front: Deque a -> Option a;
+    get_front = |q| (
+        if q.@front.get_size > 0 { some $ q.@front.@(q.@front.get_size - 1) };
+        if q.@back.get_size > 0 { some $ q.@back.@(0) };
+        none()
+    );
+
+    // Gets the back element of the queue.
+    get_back: Deque a -> Option a;
+    get_back = |q| (
+        if q.@back.get_size > 0 { some $ q.@back.@(q.@back.get_size - 1) };
+        if q.@front.get_size > 0 { some $ q.@front.@(0) };
+        none()
+    );
+
+    // Pushes an element to the front of the queue.
+    push_front: a -> Deque a -> Deque a;
+    push_front = |x, q| q.mod_front(push_back(x));
+
+    // Pushes an element to the back of the queue.
+    push_back: a -> Deque a -> Deque a;
+    push_back = |x, q| q.mod_back(push_back(x));
+
+    // Pops an element from the front of the queue. If the queue is empty, it does nothing.
+    pop_front: Deque a -> Deque a;
+    pop_front = |q| (
+        if q.@front.get_size > 0 { q.mod_front(pop_back) };
+        if q.@back.get_size > 0 { 
+            Deque {
+                front: q.@back._reverse_array.pop_back,
+                back: q.@back.truncate(0)
+            }
+        };
+        // if empty, does nothing.
+        q
+    );
+
+    // Pops an element from the back of the queue. If the queue is empty, it does nothing.
+    pop_back: Deque a -> Deque a;
+    pop_back = |q| (
+        if q.@back.get_size > 0 { q.mod_back(pop_back) };
+        if q.@front.get_size > 0 { 
+            Deque {
+                front: q.@front.truncate(0),
+                back: q.@front._reverse_array.pop_back
+            }
+        };
+        // if empty, does nothing.
+        q
+    );
+
+    // Returns an iterator of elements.
+    to_iter: Deque a -> Iterator a;
+    to_iter = |q| (
+        q.@front.to_iter.reverse.append(q.@back.to_iter)
+    );
+
+    // Reverses an array.
+    _reverse_array: Array a -> Array a;
+    _reverse_array = |arr| (
+        let n = arr.get_size;
+        let output = arr.force_unique;
+        loop((output, 0), |(output, i)|
+            if i >= n { break $ output };
+            let output = output.set(n - i - 1, arr.@(i));
+            continue $ (output, i + 1)
+        )
+    );
+
+}
+

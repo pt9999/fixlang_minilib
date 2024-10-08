@@ -1,0 +1,104 @@
+// Ordered map. 
+// This is similar to HashMap except it preserves the order of entries.
+module Minilib.Collection.OrderedMap;
+
+import Hash;
+import HashMap;
+
+import Minilib.Text.StringEx;
+
+// Similar to HashMap, but `to_iter()` returns entries in the same order as they were inserted.
+type OrderedMap k v = unbox struct {
+    map: HashMap k (I64, v),
+    serial: I64
+};
+
+namespace OrderedMap {
+    // Check whether an OrderedMap contains a key.
+    contains_key: [k : HashKey] k -> OrderedMap k v -> Bool;
+    contains_key = |k, self| self.@map.contains_key(k);
+
+    // Create an empty OrderedMap which is reserved so that it will not rehash until size exceeds the spacified value.
+    empty: I64 -> OrderedMap k v;
+    empty = |max_size| (
+        OrderedMap {
+            map: HashMap::empty(max_size),
+            serial: 0
+        }
+    );
+
+    // Erase an element from an OrderedMap.
+    erase: [k : HashKey] k -> OrderedMap k v -> OrderedMap k v;
+    erase = |k, self| self.mod_map(|m| m.erase(k));
+
+    // Find an element from an OrderedMap.
+    find: [k : HashKey] k -> OrderedMap k v -> Option v;
+    find = |k, self| self.@map.find(k).map(|(s,v)| v);
+
+    // Find an element from an OrderedMap. If the map doesn't contain the key, it returns the given default value.
+    find_or: [k : HashKey] k -> v -> OrderedMap k v -> v;
+    find_or = |key, def, self| self.find(key).as_some_or(def);
+
+    // Get capacity of an OrderedMap.
+    get_capacity: OrderedMap k v -> I64;
+    get_capacity = |self| self.@map.get_capacity;
+
+    // Get size (number of elements) in an OrderedMap.
+    get_size: OrderedMap k v -> I64;
+    get_size = |self| self.@map.get_size;
+
+    // Insert an element into an OrderedMap.
+    insert: [k : HashKey] k -> v -> OrderedMap k v -> OrderedMap k v;
+    insert = |k, v, self| (
+        let s = self.@serial;
+        self.mod_map(|m| m.insert(k, (s, v)))
+        .mod_serial(|s| s + 1)
+    );
+
+    // Reserve an OrderedMap so that it will not rehash until size exceeds the spacified value.
+    reserve : [k : HashKey] I64 -> OrderedMap k v -> OrderedMap k v;
+    reserve = |max_size, self| self.mod_map(|m| m.reserve(max_size));
+
+    // Convert an OrderedMap into an iterator. The order of the elements is the same as 
+    // when they were inserted into the map.
+    to_iter : OrderedMap k v -> Iterator (k, v);
+    to_iter = |self| (
+        let array = self.@map.to_iter.to_array;
+        let array = array.sort_by(|(e1, e2)|
+            let (k1,(s1,v1)) = e1;
+            let (k2,(s2,v2)) = e2;
+            s1 < s2
+        );
+        array.to_iter.map(|(k, (s,v))| (k, v))
+    );
+}
+
+impl [k: HashKey, v: Eq] OrderedMap k v: Eq
+{
+    eq = |omap1, omap2| (
+        if omap1.get_size != omap2.get_size {
+            false
+        };
+        let every = |f, iter| (
+            iter.loop_iter(
+                true,
+                |_, x|
+                if !f(x) {
+                    break $ false
+                };
+                continue $ true
+            )
+        );
+        omap1.to_iter.every(|(k,v)| omap2.find(k) == some(v)) &&
+        omap2.to_iter.every(|(k,v)| omap1.find(k) == some(v))
+    );
+}
+
+
+impl [k: HashKey, k: ToString, v: ToString] OrderedMap k v : ToString {
+    to_string = |om| (
+        "{" +
+        om.to_iter.map(|(k,v)| k.to_string + ":" + v.to_string).join(",")
+        + "}"
+    );
+}

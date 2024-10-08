@@ -1,0 +1,83 @@
+// Array utility functions for testing.
+module Minilib.Testing.TestUtilArray;
+
+import Random;
+
+// Shuffles an array.
+shuffle_array: Random -> Array a -> (Random, Array a);
+shuffle_array = |random, array| (
+    loop(
+        (random, array, array.get_size - 1), |(random, array, i)|
+        if i <= 0 {
+            break $ (random, array)
+        };
+        let (random, j) = random.generate_U64;
+        let j = (j % (i + 1).to_U64).to_I64;
+        let tmp = array.@(i);
+        let array = array.set(i, array.@(j));
+        let array = array.set(j, tmp);
+        continue $ (random, array, i - 1)
+    )
+);
+
+// Make a skip array.
+skip_array: I64 -> Array a -> Array a;
+skip_array = |m, array| (
+    let n = array.get_size;
+    let output = Array::empty(0);
+    let output = loop(
+        (output, 0), |(output, i)|
+        if i >= m { break $ output };
+        let output = loop(
+            (output, i), |(output, i)|
+            if i >= n { break $ output };
+            let output = output.push_back(array.@(i));
+            continue $ (output, i + m)
+        );
+        continue $ (output, i + 1)
+    );
+    eval assert (|_| "output.get_size == n", output.get_size == n);
+    output
+);
+
+// How to reorder the elements of an array.
+type Reorder = unbox union {
+    ascending: (),      // don't reorder elements
+    descending: (),     // reverse elements
+    skip: I64,          // skip elements (argument: skip modulo)
+    shuffle: I64        // shuffle elements (argument: random seed)
+};
+
+
+impl Reorder: ToString {
+    to_string = |reorder| (
+        if reorder.is_ascending { "ascending()" };
+        if reorder.is_descending { "descending()" };
+        if reorder.is_skip { "skip(" + reorder.as_skip.to_string + ")" };
+        if reorder.is_shuffle { "shuffle(" + reorder.as_shuffle.to_string + ")" };
+        eval assert (|_| "invalid reorder", false);
+        ""
+    );
+}
+
+// Changes the order of elements in an array.
+reorder: Reorder -> Array a -> Array a;
+reorder = |reorder, array| (
+    if reorder.is_ascending {
+        array
+    };
+    if reorder.is_descending {
+        array.to_iter.reverse.to_array
+    };
+    if reorder.is_skip {
+        array.skip_array(reorder.as_skip)
+    };
+    if reorder.is_shuffle {
+        let seed = reorder.as_shuffle;
+        let rand = Random::init_by_seed(seed.to_U64);
+        let (rand, array) = array.shuffle_array(rand);
+        array
+    };
+    eval assert (|_| "invalid reorder", false);
+    array
+);

@@ -1,0 +1,132 @@
+module TreeMapTest;
+
+import Minilib.Collection.TreeMap;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+test_insert_erase_ok: (I64, Reorder, Reorder) -> TestCase;
+test_insert_erase_ok = |(n, insert_reorder, erase_reorder)| (
+    let testname = "test_insert_erase_ok("+ n.to_string + "," +
+                    insert_reorder.to_string + "," +
+                    erase_reorder.to_string + ")";
+    make_test(testname) $ |_|
+    let keys_sorted = Iterator::range(0, n).to_array;
+
+    // insert with keys shuffled
+    let keys_shuffled = keys_sorted.reorder(insert_reorder);
+    let map: TreeMap I64 String = TreeMap::make();
+    let map = keys_shuffled.to_iter.fold(
+        map, |map, k|
+        map.insert(k, "value-1-" + k.to_string )
+    );
+
+    // assert that keys are sorted
+    let keys_current = map.keys.to_array;
+    let _ = *assert_equal("keys are sorted", keys_sorted, keys_current);
+
+    // assert that keys exist and values are correct
+    let _ = *keys_sorted.to_iter.fold_m(
+        (), |_, k|
+        let _ = *assert_equal("map.contains_key", true, map.contains_key(k));
+        let v = map.find(k);
+        assert_equal("map.find", some("value-1-" + k.to_string), v)
+    );
+
+    // change values
+    let map = keys_shuffled.to_iter.fold(
+        map, |map, k|
+        map.insert(k, "value-2-" + k.to_string )
+    );
+
+    // assert that keys are sorted
+    let keys_current = map.keys.to_array;
+    let _ = *assert_equal("keys are sorted", keys_sorted, keys_current);
+
+    // assert that keys exist and values are correct
+    let _ = *keys_sorted.to_iter.fold_m(
+        (), |_, k|
+        let _ = *assert_equal("map.contains_key", true, map.contains_key(k));
+        let v = map.find(k);
+        assert_equal("map.find", some("value-2-" + k.to_string), v)
+    );
+
+    // erase keys
+    let keys_shuffled = keys_sorted.reorder(erase_reorder);
+    let map = keys_shuffled.to_iter.fold(
+        map, |map, i|
+        map.erase(i)
+    );
+    let keys_current = map.keys.to_array;
+    let _ = *assert_equal("[] == keys_current", [], keys_current);
+    let _ = *assert_true("map.is_empty", map.is_empty);
+    pure()      // success
+);
+
+test_insert_erase: TestCase;
+test_insert_erase = (
+    do {
+        let n = 30;
+        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
+        let erase_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
+        pure $ test_insert_erase_ok $ (n, insert_reorder, erase_reorder)
+    }.run_tests
+);
+
+test_upsert: TestCase;
+test_upsert = (
+    make_test("test_upsert") $ |_|
+    let map = TreeMap::make();
+    let map = map.upsert(1, [11], push_back(12));
+    let map = map.upsert(2, [21], push_back(22));
+    let map = map.upsert(3, [31], push_back(32));
+    let map = map.upsert(1, [13], push_back(14));
+    let map = map.upsert(2, [23], pop_back);
+    let _ = *assert_equal("eq", none(), map.find(0));
+    let _ = *assert_equal("eq", some([11, 14]), map.find(1));
+    let _ = *assert_equal("eq", some([]), map.find(2));
+    let _ = *assert_equal("eq", some([31]), map.find(3));
+    pure()
+);
+
+test_find_range: TestCase;
+test_find_range = (
+    let testname = "test_find_range";
+    make_test(testname) $ |_|
+    let keys_sorted = Iterator::range(0, 30).to_array;
+    let keys_shuffled = keys_sorted.reorder(shuffle(345));
+    let map = keys_shuffled.to_iter.fold(
+        TreeMap::make(), |map, k|
+        map.insert(k, k*10)
+    );
+    let test_find_range_ok = |begin, end, expected| (
+        let actual = map.find_range(begin, end).to_array;
+        assert_equal("begin="+begin.to_string+" end="+end.to_string, expected, actual)
+    );
+    let test_find_raw_range_ok = |lt_begin, lt_end, expected| (
+        let actual = map.find_raw_range(lt_begin, lt_end).to_array;
+        assert_equal("raw_range", expected, actual)
+    );
+
+    let _ = *test_find_range_ok(3, 6, [(3,30),(4,40),(5,50)]);
+    let _ = *test_find_range_ok(5, 6, [(5,50)]);
+    let _ = *test_find_range_ok(5, 5, []);
+    let _ = *test_find_range_ok(-1, 1, [(0,0)]);
+    let _ = *test_find_range_ok(29, 31, [(29,290)]);
+    let _ = *test_find_raw_range_ok(|(k,_)| k < 11, |(k,_)| k < 14, [(11,110), (12,120), (13,130)]);
+    let _ = *test_find_raw_range_ok(|(k,_)| k < 28, |(k,_)| true, [(28,280), (29,290)]);
+    let _ = *test_find_raw_range_ok(|(k,_)| false, |(k,_)| k < 2, [(0,0), (1,10)]);
+    pure()
+);
+
+main: IO ();
+main = (
+     [
+        test_insert_erase,
+        test_upsert,
+        test_find_range,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

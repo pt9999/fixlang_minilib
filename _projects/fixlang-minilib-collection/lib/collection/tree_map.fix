@@ -1,0 +1,163 @@
+// TreeMap is a map that manages keys in sorted order.
+module Minilib.Collection.TreeMap;
+
+import Minilib.Collection.RBTree;
+import Minilib.Text.StringEx;
+
+namespace TreeMap {
+    // A trait of the key. Currently `ToString` is required.
+    trait TreeMapKey = ToString;
+
+    // A trait of the value. Currently `ToString` is required.
+    trait TreeMapValue = ToString;
+
+    // Converts key_less_than to entry_less_than.
+    _lift_lt: (k -> k -> Bool) -> (k, v) -> (k, v) -> Bool;
+    _lift_lt = |key_less_than, (k1, v1), (k2, v2)| (
+        key_less_than(k1, k2)
+    );
+
+    // `TreeMap` is a structure that stores key-value pairs into a red-black tree.
+    type TreeMap k v = unbox struct {
+        root: RBNode (k, v),
+        key_less_than: k -> k -> Bool,
+        entry_less_than: (k, v) -> (k, v) -> Bool
+    };
+
+    // `TreeMap::make()` creates an empty `TreeMap` using default `LessThan` ordering.
+    make: [k: LessThan, k: TreeMapKey, v: TreeMapValue] () -> TreeMap k v;
+    make = |_| (
+        make_lt(RBNode::_less_than)
+    );
+
+    // `TreeMap::make_lt(less_than)` creates an empty `TreeMap` using specified ordering.
+    // NOTE: `less_than` function must meet specific conditions. For details, see documentation of 
+    // [`RBTree`](./rbtree.md).
+    make_lt: [k: TreeMapKey, v: TreeMapValue] (k -> k -> Bool) -> TreeMap k v;
+    make_lt = |key_less_than| (
+        TreeMap {
+            root: RBNode::empty(),
+            key_less_than: key_less_than,
+            entry_less_than: _lift_lt(key_less_than)
+        }
+    );
+
+    // Inserts an entry into a TreeMap.
+    // For example, `tm.insert(k, v)` inserts an entry `(k,v)` into `tm`.
+    //
+    // NOTE: If `tm` already contains an entry `(k1,v1)`
+    // where the key `k1` is equivalent to `k`,
+    // ie. `!less_than(k,k1) && !less_than(k1,k)` is true,
+    // then `(k1,v1)` is replaced with `(k,v)`.
+    insert: [k: TreeMapKey, v: TreeMapValue] k -> v -> TreeMap k v -> TreeMap k v;
+    insert = |k, v, tm| (
+       tm.mod_root(insert_lt((k, v), tm.@entry_less_than))
+    );
+
+    // Inserts or updates an entry in a TreeMap.
+    // For example, `tm.upsert(k, v, updater)` inserts an entry `(k,v)` into `tm`.
+    //
+    // NOTE: If `tm` already contains an entry `(k1,v1)`
+    // where the key `k1` is equivalent to `k`,
+    // ie. `!less_than(k,k1) && !less_than(k1,k)` is true,
+    // then `(k1,v1)` is replaced with `(k, updater(v1))`.
+    upsert: [k: TreeMapKey, v: TreeMapValue] k -> v -> (v -> v) -> TreeMap k v -> TreeMap k v;
+    upsert = |k, v, updater, tm| (
+       tm.mod_root(upsert_lt((k, v), |(k1,v1)| (k,updater(v1)), tm.@entry_less_than))
+    );
+
+    // Erases an entry from a TreeMap.
+    // For example, `tm.erase(k)` removes an entry `(k,v)` from `tm`.
+    //
+    // NOTE: If `tm` contains an entry `(k1,v1)`
+    // where the key `k1` is equivalent to `k`,
+    // ie. `!less_than(k,k1) && !less_than(k1,k)` is true,
+    // then `(k1,v1)` is removed.
+    erase: [k: TreeMapKey, v: TreeMapValue] k -> TreeMap k v -> TreeMap k v;
+    erase = |k, tm| (
+        let less_than = tm.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, k);
+        let lt_end   = |(ent_k,_)| !less_than(k, ent_k);
+        tm.mod_root(remove_range(lt_begin, lt_end))
+    );
+
+    // Checks whether a TreeMap is empty.
+    is_empty: [k: TreeMapKey, v: TreeMapValue] TreeMap k v -> Bool;
+    is_empty = |tm| (
+        tm.@root.is_empty
+    );
+
+    // Gets the number of entries.
+    get_size: [k: TreeMapKey, v: TreeMapValue] TreeMap k v -> I64;
+    get_size = |tm| (
+        tm.@root.get_size
+    );
+
+    // Checks whether a TreeMap contains a key.
+    contains_key: [k: TreeMapKey, v: TreeMapValue] k -> TreeMap k v -> Bool;
+    contains_key = |k, tm| (
+        tm.find(k).is_some
+    );
+
+    // Returns an iterator of keys in ascending order.
+    keys: [k: TreeMapKey, v: TreeMapValue] TreeMap k v -> Iterator k;
+    keys = |tm| (
+        tm.to_iter.map(|e| e.@0)
+    );
+
+    // Finds an element from a TreeMap.
+    find: [k: TreeMapKey, v: TreeMapValue] k -> TreeMap k v -> Option v;
+    find = |k, tm| (
+        let less_than = tm.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, k);
+        let lt_end   = |(ent_k,_)| !less_than(k, ent_k);
+        let iter = tm.@root.find_range(lt_begin, lt_end);
+        iter.get_first.map(|entry| entry.@1)
+    );
+
+    // `tm.find_range(begin, end)` finds all entries `(k,v)`
+    // where `!less_than(k, begin) && less_than(k, end)` is true.
+    // In default `LessThan` ordering, that condition is same as `begin <= k && k < end`.
+    find_range: [k: TreeMapKey, v: TreeMapValue] k -> k -> TreeMap k v -> Iterator (k, v);
+    find_range = |begin, end, tm| (
+        let less_than = tm.@key_less_than;
+        let lt_begin = |(ent_k,_)| less_than(ent_k, begin);
+        let lt_end   = |(ent_k,_)| less_than(ent_k, end);
+        tm.@root.find_range(lt_begin, lt_end)
+    );
+
+    // `tm.find_raw_range(lt_begin, lt_end)` finds all entries `(k,v)`
+    // where `!lt_begin((k, v)) && lt_end((k, v))` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `(k,v)`, `lt_begin((k,v))` is true then `lt_end((k,v))` must be true.
+    find_raw_range: [k: TreeMapKey, v: TreeMapValue] ((k,v) -> Bool) -> ((k,v) -> Bool) -> TreeMap k v -> Iterator (k, v);
+    find_raw_range = |lt_begin, lt_end, tm| (
+        tm.@root.find_range(lt_begin, lt_end)
+    );
+
+    // Converts a TreeMap into an iterator of key-value pairs in ascending order of keys.
+    to_iter: [k: TreeMapKey, v: TreeMapValue] TreeMap k v -> Iterator (k, v);
+    to_iter = |tm| (
+        tm.@root.to_iter
+    );
+
+    // Converts an iterator of key-value pairs into a TreeMap using specified ordering.
+    from_iter_lt: [k: TreeMapKey, v: TreeMapValue] (k -> k -> Bool) -> Iterator (k, v) -> TreeMap k v;
+    from_iter_lt = |key_less_than, iter| (
+        let tm = TreeMap::make_lt(key_less_than);
+        let root = RBNode::from_iter_lt(tm.@entry_less_than, iter);
+        tm.set_root(root)
+    );
+
+    // Converts an iterator of key-value pairs into a TreeMap using default `LessThan` ordering.
+    from_iter: [k: LessThan, k: TreeMapKey, v: TreeMapValue] Iterator (k, v) -> TreeMap k v;
+    from_iter = |iter| (
+        TreeMap::from_iter_lt(RBNode::_less_than, iter)
+    );
+}
+
+impl [k: TreeMapKey, v: TreeMapValue] TreeMap k v: ToString {
+    to_string = |tm| (
+        "TreeMap{" + tm.to_iter.map(to_string).join(",") + "}"
+    );
+}

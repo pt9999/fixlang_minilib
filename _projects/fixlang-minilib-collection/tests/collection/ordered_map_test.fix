@@ -1,0 +1,132 @@
+module OrderedMapTest;
+
+
+import Minilib.Collection.OrderedMap;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_contains_key: TestCase;
+test_contains_key = (
+    make_test("test_contains_key") $ |_|
+    let om: OrderedMap String String = OrderedMap::empty(100);
+    let om = om.insert("a", "a1");
+    let _ = *(assert_equal("should contain the key", true, om.contains_key("a")));
+    let _ = *(assert_equal("should not contain the key", false, om.contains_key("b")));
+    pure()
+);
+
+test_empty: TestCase;
+test_empty = (
+    make_test("test_stream_empty") $ |_|
+    let om: OrderedMap String String = OrderedMap::empty(100);
+    let _ = *(assert_equal("capacity", 128, om.get_capacity)); // power of two
+    let _ = *(assert_equal("size", 0, om.get_size));
+    pure()
+);
+
+test_erase: TestCase;
+test_erase = (
+    make_test("test_erase") $ |_|
+    let n = 10;
+    let erase_key = 5;
+    let iter = Iterator::count_up(0).take(n);
+    let om: OrderedMap I64 String = iter.fold(
+        OrderedMap::empty(0),
+        |m, i| m.insert(i, i.to_string));
+    let om = om.erase(erase_key);
+    let actual = om.to_iter.to_array;
+    let expected = iter.filter(|i| i != erase_key).map(|i| (i, i.to_string)).to_array;
+    let _ = *(assert_equal("should equal array", expected, actual));
+    pure()
+);
+
+test_find: TestCase;
+test_find = (
+    make_test("test_find") $ |_|
+    let om: OrderedMap String String = OrderedMap::empty(0);
+    let om = om.insert("a", "aa");
+    let _ = *(assert_equal("should contain the key", some("aa"), om.find("a")));
+    let _ = *(assert_equal("should not contain the key", none(), om.find("b")));
+    pure()
+);
+
+test_find_or: TestCase;
+test_find_or = (
+    make_test("test_find_or") $ |_|
+    let om: OrderedMap String String = OrderedMap::empty(0);
+    let om = om.insert("a", "aa");
+    let _ = *(assert_equal("existing key", "aa", om.find_or("a", "x")));
+    let _ = *(assert_equal("non-existing key", "x", om.find_or("b", "x")));
+    pure()
+);
+
+test_insert: TestCase;
+test_insert = (
+    make_test("test_insert") $ |_|
+    let om: OrderedMap String String = OrderedMap::empty(0);
+    let om = om.insert("c", "cc");
+    let om = om.insert("b", "bb");
+    let om = om.insert("c", "cc2");
+    let om = om.insert("a", "aa");
+    let om = om.insert("b", "bb2");
+    let array = om.to_iter.to_array;
+    let _ = *(assert_equal("first key", ("c", "cc2"), array.@(0)));
+    let _ = *(assert_equal("second key", ("a", "aa"), array.@(1)));
+    let _ = *(assert_equal("third key", ("b", "bb2"), array.@(2)));
+    pure()
+);
+
+test_to_iter: TestCase;
+test_to_iter = (
+    make_test("test_to_iter") $ |_|
+    let p = 17;
+    let iter = Iterator::count_up(0).take(p).map(|i| (i * 5) % p);
+    let om: OrderedMap I64 String = iter.fold(
+        OrderedMap::empty(0),
+        |m, i| m.insert(i, i.to_string));
+    let actual = om.to_iter.to_array;
+    let expected = iter.map(|i| (i, i.to_string)).to_array;
+    let _ = *(assert_equal("should equal array", expected, actual));
+    pure()
+);
+
+test_eq: TestCase;
+test_eq = (
+    make_test("test_eq") $ |_|
+    let p = 7;
+    let iter = Iterator::count_up(0).take(p);
+    let om1: OrderedMap I64 String = iter.map(|i| (i * 5) % p).fold(
+        OrderedMap::empty(0),
+        |m, i| m.insert(i, i.to_string));
+    let om2: OrderedMap I64 String = iter.map(|i| (i * 3) % p).fold(
+        OrderedMap::empty(0),
+        |m, i| m.insert(i, i.to_string));
+    let _ = *(assert_equal("should be equal even if different order", om1, om2));
+    let om1 = om1.insert(1, "1");
+    let _ = *(assert_equal("should be equal even if same key-value is insered", om1, om2));
+    let om2 = om2.insert(1, "1x");
+    let _ = *(assert_not_equal("should not be equal if the value is different", om1, om2));
+    let om1 = om1.erase(1);
+    let _ = *(assert_not_equal("should not be equal if the size is different", om1, om2));
+    let om2 = om2.erase(1);
+    let _ = *(assert_equal("should be equal if all key-value pairs are same", om1, om2));
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_contains_key,
+        test_empty,
+        test_erase,
+        test_find,
+        test_find_or,
+        test_insert,
+        test_to_iter,
+        test_eq,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+
+

@@ -1,15 +1,54 @@
 
-module Minilib.Net.Https.ResponseParser;
+module Minilib.Net.HttpClient.ResponseParser;
 
-import Debug;
 
 import Minilib.Common.DebugLog;
 import Minilib.Encoding.Binary;
 import Minilib.Net.Request;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
 // TODO: rewrite using Free monad or Coroutine monad
+
+type HttpClientResponse = unbox struct {
+    http_version: String,       // eg. "HTTP/1.1"
+    status: I64,                // HTTP status (eg. 404)
+    reason: String,             // reason phrase (eg. "Not Found")
+    headers: Headers,           // response headers
+    body: Array U8,
+};
+
+namespace HttpClientResponse {
+    empty: HttpClientResponse;
+    empty = HttpClientResponse {
+        http_version: "",
+        status: 0,
+        reason: "",
+        headers: Headers::empty,
+        body: [],
+    };
+
+    print_document_info: HttpClientResponse -> IO ();
+    print_document_info = |obj| (
+        eval *println(obj.@http_version + " " + obj.@status.to_string + " " + obj.@reason);
+        obj.@headers.to_iter.foreach_m(|(name, value)|
+            println(name + ": " + value)
+        )
+    );
+}
+
+impl HttpClientResponse: ToString {
+    to_string = |obj| (
+        "HttpClientResponse {" +
+        " http_version=" + obj.@http_version.to_string +
+        " status=" + obj.@status.to_string +
+        " reason=" + obj.@reason.to_string +
+        " headers=" + obj.@headers.to_string +
+        " body=(" + obj.@body.get_size.to_string + " bytes)" +
+        " }"
+    );
+}
 
 type ResponseParserState = unbox union {
     parsing_status_line: (),
@@ -43,11 +82,7 @@ type ResponseParser = unbox struct {
     state: ResponseParserState,
     array: Array U8,
     position: I64,
-    http_version: String,       // eg. "HTTP/1.1"
-    status: I64,                // HTTP status (eg. 404)
-    reason: String,             // reason phrase (eg. "Not Found")
-    headers: Headers,           // response headers
-    body: Array U8,
+    response: HttpClientResponse,
 };
 
 impl ResponseParser: ToString {
@@ -56,11 +91,7 @@ impl ResponseParser: ToString {
         " state=" + obj.@state.to_string +
         " array=(" + obj.@array.get_size.to_string + " bytes)" +
         " position=" + obj.@position.to_string +
-        " http_version=" + obj.@http_version.to_string +
-        " status=" + obj.@status.to_string +
-        " reason=" + obj.@reason.to_string +
-        " headers=" + obj.@headers.to_string +
-        " body=(" + obj.@body.get_size.to_string + " bytes)" +
+        " response=" + obj.@response.to_string +
         " }"
     );
 }
@@ -71,11 +102,7 @@ namespace ResponseParser {
         state: parsing_status_line(),
         array: [],
         position: 0,
-        http_version: "",
-        status: 0,
-        reason: "",
-        headers: Headers::empty,
-        body: [],
+        response: HttpClientResponse::empty,
     };
 
     add_data: Array U8 -> ResponseParser -> Result ErrMsg ResponseParser;
@@ -102,7 +129,7 @@ namespace ResponseParser {
         let body = parser.@array.subarray(start, end);
         eval log_debug((array_size, end).format("end_data: completed: array_size={} end={}"));
         pure $ parser
-            .set_body(body)
+            .mod_response(set_body(body))
             .set_position(end)
             .set_state(completed())
     );
@@ -134,10 +161,12 @@ namespace ResponseParser {
              err $ "Invalid status line: `" + line + "`"
         };
         let status: I64 = *status.from_string;
-        let parser = parser.set_http_version(http_version)
-                        .set_status(status)
-                        .set_reason(reason)
-                        .set_state(parsing_headers());
+        let parser = parser.mod_response(|response| response
+            .set_http_version(http_version)
+            .set_status(status)
+            .set_reason(reason)
+        );
+        let parser = parser.set_state(parsing_headers());
         parser._parse_headers   // run next state
     );
 
@@ -160,13 +189,13 @@ namespace ResponseParser {
     _parse_header = |line, parser| (
         let (field_name, field_value) = line.split_first(":");
         let field_value = field_value.strip_spaces;
-        let parser = parser.mod_headers(append(field_name, field_value));
+        let parser = parser.mod_response(mod_headers(append(field_name, field_value)));
         pure $ parser
     );
 
     _before_body: ResponseParser -> Result ErrMsg ResponseParser;
     _before_body = |parser| (
-        let transfer_encoding = parser.@headers.find("Transfer-Encoding");
+        let transfer_encoding = parser.@response.@headers.find("Transfer-Encoding");
         if transfer_encoding == some("chunked") {
             eval log_debug("Transfer-Encoding: chunked");
             let parser = parser.set_state(parsing_chunk_size());
@@ -174,7 +203,7 @@ namespace ResponseParser {
         };
 
         let content_length = *(
-            let opt = parser.@headers.find("Content-Length");
+            let opt = parser.@response.@headers.find("Content-Length");
             if opt.is_none { ok $ none() };
             let content_length: I64 = *from_string(opt.as_some);
             ok $ some $ content_length
@@ -195,7 +224,7 @@ namespace ResponseParser {
             pure $ parser   // wait for data
         };
         let body = parser.@array.subarray(start, end);
-        let parser = parser.set_body(body).set_position(end)
+        let parser = parser.mod_response(set_body(body)).set_position(end)
                         .set_state(completed());
         eval log_debug("_parse_body completed");
         pure $ parser       // mark completed and return
@@ -231,7 +260,7 @@ namespace ResponseParser {
         eval log_debug("chunk_data: " + (start, end).to_string);
         let chunk_data = parser.@array.subarray(start, end);
         let parser = parser
-                .mod_body(append(chunk_data))
+                .mod_response(mod_body(append(chunk_data)))
                 .set_position(end)
                 .set_state(parsing_chunk_end_crlf());
         parser._parse_chunk_end_crlf

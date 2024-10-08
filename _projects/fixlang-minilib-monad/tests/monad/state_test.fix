@@ -1,0 +1,167 @@
+module StateTest;
+
+
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_state_functor: TestCase;
+test_state_functor = (
+    make_test("test_state_functor") $ |_|
+    let sm = make_state_monad(|s| (s, 2));
+    let sm = sm.map(add(1));
+    let sm = sm.map(to_string);
+    assert_equal("eq", ("abc", "3"), sm.run_state("abc"))
+);
+
+test_state_monad: TestCase;
+test_state_monad = (
+    make_test("test_state_monad") $ |_|
+    let get_elt = |i| (
+        let a = *get_state;
+        pure $ a.@(i)
+    );
+    let set_elt = |i, elt| (
+        let a = *get_state;
+        let a = a.set(i, elt);
+        put_state(a)
+    );
+    let sm = do {
+        eval *set_elt(1, 4);
+        let x = *get_elt(0);
+        let y = *get_elt(1);
+        pure $ x + y
+    };
+    assert_equal("eq", ([2, 4], 6), sm.run_state([2, 3]))
+);
+
+test_eval_exec_state_t: TestCase;
+test_eval_exec_state_t = (
+    make_test("test_eval_exec_state_t") $ |_|
+    let sm: StateT String (Result ErrMsg) I64 = do {
+        let s = *get_state;
+        let a = s.get_size;
+        eval *put_state("end");
+        pure $ a
+    };
+    eval *assert_equal("eval_state_t", ok $ 5, sm.eval_state_t("start"));
+    eval *assert_equal("exec_state_t", ok $ "end", sm.exec_state_t("start"));
+    pure()
+);
+
+test_eval_exec_state: TestCase;
+test_eval_exec_state = (
+    make_test("test_eval_exec_state") $ |_|
+    let sm: State String I64 = do {
+        let s = *get_state;
+        let a = s.get_size;
+        eval *put_state("end");
+        pure $ a
+    };
+    eval *assert_equal("eval_state", 5, sm.eval_state("start"));
+    eval *assert_equal("exec_state", "end", sm.exec_state("start"));
+    pure()
+);
+
+test_state_result_error: TestCase;
+test_state_result_error = (
+    make_test("test_state_result_error") $ |_|
+    let sm: StateT I64 (Result ErrMsg) I64 = do {
+        let i = *get_state;
+        eval *put_state(i + 10);
+        if i == 1 { error $ "err1" };
+        if i == 2 { error $ "err2" };
+        pure(i + 20)
+    };
+    eval *assert_equal("err1", err $ "err1", sm.run_state_t(1));
+    eval *assert_equal("err2", err $ "err2", sm.run_state_t(2));
+    eval *assert_equal("ok3", ok $ (13, 23), sm.run_state_t(3));
+    let handler: String -> StateT I64 (Result ErrMsg) I64 = |errmsg| (
+        let i = *get_state;     // state is not modified when the error is caught
+        eval *put_state(i + 100);
+        if i == 1 { pure(999) };
+        error $ errmsg
+    );
+    eval *assert_equal("catch err1", ok $ (101, 999), sm.catch(handler).run_state_t(1));
+    eval *assert_equal("catch err2", err $ "err2", sm.catch(handler).run_state_t(2));
+    eval *assert_equal("catch ok3", ok $ (13, 23), sm.catch(handler).run_state_t(3));
+    pure()
+);
+
+test_state_iofail_error: TestCase;
+test_state_iofail_error = (
+    make_test("test_state_iofail_error") $ |_|
+    let sm: StateT (Array I64) IOFail I64 = do {
+        let arr: Array I64 = *get_state;
+        let arr = arr.push_back(2);
+        if arr.get_size != 2 { error $ "err" };
+        eval *put_state(arr);
+        pure $ arr.to_iter.sum
+    };
+    eval *assert_equal("eq1", ok $ ([1, 2], 3), *sm.run_state_t([1]).to_result.lift);
+    eval *assert_equal("eq2", err $ "err", *sm.run_state_t([1, 2]).to_result.lift);
+    let handler: String -> StateT (Array I64) IOFail I64 = |errmsg| (
+        let arr: Array I64 = *get_state; // state is not modified when the error is caught
+        eval *put_state(arr.push_back(99));
+        pure $ 99
+    );
+    let sm2 = do {
+        let i = *sm.catch(handler);
+        pure $ i + 100
+    };
+    eval *assert_equal("eq1", ok $ ([1, 2], 103), *sm2.run_state_t([1]).to_result.lift);
+    eval *assert_equal("eq2", ok $ ([1, 2, 99], 199), *sm2.run_state_t([1, 2]).to_result.lift);
+    pure()
+);
+
+test_state_io_lift_io: TestCase;
+test_state_io_lift_io = (
+    make_test("test_state_io_lift_io") $ |_|
+    let inner: IO I64 = pure $ 42;
+    let sm: StateT (Array I64) IO () = do {
+        mod_state(push_back(*inner.lift_io))
+    };
+    assert_equal("eq", ([1, 42], ()), *sm.run_state_t([1]).lift)
+);
+
+test_state_iofail_lift_io: TestCase;
+test_state_iofail_lift_io = (
+    make_test("test_state_iofail_lift_io") $ |_|
+    let inner_io: IO I64 = do {
+        //eval *println("inner_io");
+        pure $ 42
+    };
+    let inner_iofail: IOFail I64 = do {
+        //eval *println("inner_iofail").lift;
+        pure $ 57
+    };
+    let sm: StateT (Array I64) IOFail () = do {
+        mod_state(
+            // NOTE: `inner_io` is performed before `inner_iofail`.
+            // After that, function composition (`<<`) is calculated, so the result is 57 and 42.
+            push_back(*inner_io.lift_io) << push_back(*inner_iofail.lift_iofail)
+        )
+    };
+    assert_equal("eq", ok $ ([1, 57, 42], ()), *sm.run_state_t([1]).to_result.lift)
+);
+
+
+main: IO ();
+main = (
+    [
+        test_state_functor,
+        test_state_monad,
+        test_eval_exec_state_t,
+        test_eval_exec_state,
+        test_state_result_error,
+        test_state_iofail_error,
+        test_state_io_lift_io,
+        test_state_iofail_lift_io,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+
+

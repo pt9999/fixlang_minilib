@@ -1,0 +1,153 @@
+module ReaderTest;
+
+import HashMap;
+
+import Minilib.Monad.Reader;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_reader_functor: TestCase;
+test_reader_functor = (
+    make_test("test_reader_functor") $ |_|
+    let r = reader(|e| e.@(0));
+    let r = r.map(add(1));
+    let r = r.map(to_string);
+    assert_equal("eq", "3", r.run_reader([2]))
+);
+
+type Config = HashMap String String;
+
+test_reader_monad: TestCase;
+test_reader_monad = (
+    make_test("test_reader_monad") $ |_|
+    let get_config_value: String -> Reader Config String = |key| (
+        let config = *ask;
+        pure $ config.find(key).as_some_or("")
+    );
+    let r = do {
+        let value1 = *get_config_value("key1");
+        let value2 = *get_config_value("key2");
+        pure $ "value1=" + value1 + " value2=" + value2
+    };
+    let config = HashMap::empty(0).insert("key1", "a").insert("key2", "b");
+    eval *assert_equal("case1", "value1=a value2=b", r.run_reader(config));
+    let rr = r.local(insert("key2", "bb"));
+    eval *assert_equal("case2", "value1=a value2=bb", rr.run_reader(config));
+    eval *assert_equal("case3", "value1= value2=bb", rr.run_reader(HashMap::empty(0)));
+    pure()
+);
+
+test_sub_reader: TestCase;
+test_sub_reader = (
+    make_test("test_sub_reader") $ |_|
+    let r_sub2 = |p:I64, q:I64| reader $ |r:I64| (p,q,r).format("p={}, q={}, r={}");
+    let r_sub  = |p:I64| reader $ |q:I64| r_sub2(p,q);
+    let r_main  = reader $ |p:I64| r_sub(p);
+    let actual = r_main.run_reader(3).run_reader(4).run_reader(5);
+    assert_equal("eq", "p=3, q=4, r=5", actual)
+);
+
+test_reader_trans: TestCase;
+test_reader_trans = (
+    make_test("test_reader_trans") $ |_|
+    let iof: IOFail F64 = pure(123.45);
+    let r: ReaderT I64 IOFail F64 = iof.lift_t;
+    let expected = 123.45;
+    let actual = *r.run_reader_t(333);
+    assert_equal("eq", expected, actual)
+);
+
+test_reader_iofail_error: TestCase;
+test_reader_iofail_error = (
+    make_test("test_reader_iofail_error") $ |_|
+    let iof: I64 -> IOFail F64 = |i64| (
+        if i64 >= 100 { throw $ "err1" };
+        pure $ i64.to_F64 * 2.0
+    );
+    let r: ReaderT I64 IOFail F64 = do {
+        let i64 = *ask;
+        if i64 < 0 { error $ "err2" };
+        let f64 = *iof(i64).lift_t;
+        pure $ f64
+    };
+    eval *assert_equal("ok", ok(24.0), *r.run_reader_t(12).to_result.lift);
+    eval *assert_equal("err1", err("err1"), *r.run_reader_t(100).to_result.lift);
+    eval *assert_equal("err2", err("err2"), *r.run_reader_t(-1).to_result.lift);
+    let handler: ErrMsg -> ReaderT I64 IOFail F64 = |errmsg| (
+        if errmsg == "err1" { pure $ 999.0 };
+        error $ "rethrow: " + errmsg
+    );
+    let r2: ReaderT I64 IOFail String = do {
+        let f64 = *r.catch(handler);
+        pure $ f64.to_string
+    };
+    eval *assert_equal("catch ok", ok("24.000000"), *r2.run_reader_t(12).to_result.lift);
+    eval *assert_equal("catch err1", ok("999.000000"), *r2.run_reader_t(100).to_result.lift);
+    eval *assert_equal("catch err2", err("rethrow: err2"), *r2.run_reader_t(-1).to_result.lift);
+    pure()
+);
+
+test_map_reader_t: TestCase;
+test_map_reader_t = (
+    make_test("test_map_reader_t") $ |_|
+    let r: ReaderT I64 IO F64 = ask.map(to_F64);
+    let r: ReaderT I64 IOFail String = r.map_reader_t(lift >> map(to_string));
+    let expected = "123.000000";
+    let actual = *r.run_reader_t(123);
+    assert_equal("eq", expected, actual)
+);
+
+test_with_reader_t: TestCase;
+test_with_reader_t = (
+    make_test("test_with_reader_t") $ |_|
+    let r: ReaderT F64 IOFail String = ask.map(to_string);
+    let r: ReaderT I64 IOFail String = r.with_reader_t(to_F64);
+    let expected = "123.000000";
+    let actual = *r.run_reader_t(123);
+    assert_equal("eq", expected, actual)
+);
+
+test_lift_io: TestCase;
+test_lift_io = (
+    make_test("test_lift_io") $ |_|
+    let inner_io: IO I64 = do {
+        //eval *println("inner_io");
+        pure $ 42
+    };
+    let inner_iofail: IOFail I64 = do {
+        //eval *println("inner_iofail").lift;
+        pure $ 57
+    };
+    let r: ReaderT I64 IOFail (Array I64) = do {
+        pure $ [
+            *ask,
+            *inner_io.lift_io,
+            *inner_iofail.lift_iofail,
+        ]
+    };
+    let expected = [123, 42, 57];
+    let actual = *r.run_reader_t(123);
+    assert_equal("eq", expected, actual)
+);
+
+
+main: IO ();
+main = (
+    [
+        test_reader_functor,
+        test_reader_monad,
+        test_sub_reader,
+        test_reader_trans,
+        test_reader_iofail_error,
+        test_map_reader_t,
+        test_with_reader_t,
+        test_lift_io,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+
+

@@ -1,0 +1,55 @@
+module Minilib.Crypto.Tls.MemoryBytesIO;
+
+
+import Minilib.Monad.BytesIO;
+import Minilib.IO.Channel;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.FunctorM;
+
+type MemoryBytesIO = unbox struct {
+    input: Channel U8,
+    output: Channel U8
+};
+
+namespace MemoryBytesIO {
+    make: IO MemoryBytesIO;
+    make = (
+        let input = *Channel::make;
+        let output = *Channel::make;
+        pure $ MemoryBytesIO {
+            input: input,
+            output: output
+        }
+    );
+
+    swap: MemoryBytesIO -> MemoryBytesIO;
+    swap = |conn| MemoryBytesIO {
+        input: conn.@output,
+        output: conn.@input
+    };
+
+    pipe: IO (MemoryBytesIO, MemoryBytesIO);
+    pipe = (
+        let local_conn = *MemoryBytesIO::make;
+        let remote_conn = local_conn.swap;
+        pure $ (local_conn, remote_conn)
+    );
+}
+
+impl MemoryBytesIO: BytesIO {
+    send = |bytes, conn| (
+        let output = conn.@output;
+        eval *bytes.foreach_m(|b| output.send(b));
+        pure $ bytes.get_size
+    );
+    recv = |length, conn| (
+        let input = conn.@input;
+        Array::fill(length, input.recv).map_m(|x| x)
+    );
+}
+
+impl MemoryBytesIO: GetByteIO {
+    type BytesIOType MemoryBytesIO = MemoryBytesIO;
+    get_bytes_io = |a| a;
+}

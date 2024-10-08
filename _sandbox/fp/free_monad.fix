@@ -1,0 +1,265 @@
+module Main;
+
+
+import Minilib.Monad.Reader;
+import Minilib.Monad.Identity;
+import Minilib.Text.Hex;
+
+// Free Monad
+// https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
+// https://eed3si9n.com/herding-cats/ja/Free-monads.html
+type [f: *->*] Free f a = box union {
+    pure_f: a,
+    free_f: f (Free f a)
+};
+
+namespace Free {
+    lift_f: [f: Functor] f a -> Free f a;
+    lift_f = |command| free_f $ command.map(pure_f);
+}
+
+impl [f: Functor] Free f: Functor {
+    map = |g, ma| (
+        if ma.is_pure_f {
+            pure_f $ g(ma.as_pure_f)
+        };
+        let m = ma.as_free_f;
+        free_f $ m.map(map(g))
+    );
+}
+
+impl [f: Functor] Free f: Monad {
+    pure = pure_f;
+    bind = |g, ma| (
+        if ma.is_pure_f {
+            g(ma.as_pure_f)
+        };
+        let m = ma.as_free_f;
+        free_f $ m.map(bind(g))
+    );
+}
+
+//-------------------------------------------
+
+type Toy next = box union {
+    output: (String, next),
+    bell: next,
+    done: ()
+};
+
+impl Toy: Functor {
+    map = |f, toy| (
+        if toy.is_output {
+            let (x, next) = toy.as_output;
+            output $ (x, f(next))
+        };
+        if toy.is_bell {
+            bell $ f(toy.as_bell)
+        };
+        done()
+    );
+}
+
+test_toy_1: IO ();
+test_toy_1 = (
+    let toy1: Toy (Toy ()) = output $ ("A", done());
+    let toy2: Toy (Toy (Toy ()))  = bell $ output $ ("A", done());
+    pure()
+);
+
+impl [a: ToString] Free Toy a: ToString {
+    to_string = |ma| (
+        if ma.is_free_f {
+            let toy = ma.as_free_f;
+            if toy.is_output {
+                let (x, next) = toy.as_output;
+                "output " + x + "\n" + next.to_string
+            };
+            if toy.is_bell {
+                let next = toy.as_bell;
+                "bell\n" + next.to_string
+            };
+            "done\n"
+        };
+        let r = ma.as_pure_f;
+        "pure " + r.to_string + "\n"
+    );
+}
+
+foutput: String -> Free Toy ();
+foutput = |x| free_f $ output $ (x, pure());
+
+fbell: Free Toy ();
+fbell = free_f $ bell $ pure();
+
+fdone: Free Toy r;
+fdone = free_f $ done();
+
+output_: String -> next -> Toy next;
+output_ = |x, next| output $ (x, next);
+
+test_toy_free_f: IO ();
+test_toy_free_f = (
+    let toy = do {
+        eval *output_("A",()).lift_f;
+        eval *bell().lift_f;
+        eval *done().lift_f;
+        pure()
+    };
+    print(toy.to_string)
+);
+
+test_toy_free_f2: IO ();
+test_toy_free_f2 = (
+    let pretty = |x| (
+        eval *println("------------");
+        print << to_string $ x
+    );
+    eval *pretty(foutput("A"));
+    eval *pretty(pure("A").bind(foutput));
+    eval *pretty(foutput("A").bind(pure));
+    eval *pretty(do { eval *foutput("A"); foutput("B") });
+    eval *pretty(do { eval *foutput("A"); eval *fdone; foutput("B") });
+    pure()
+);
+
+//-------------------------------------------
+// Free monad as a coroutine
+
+type StrParser = Free (ReaderT String Identity);
+
+parse_text1: StrParser (Array String);
+parse_text1 = (
+    free_f $ reader $ |line| (
+        let lines = [line];
+        parse_text2 $ lines
+    )
+);
+
+parse_text2: Array String -> StrParser (Array String);
+parse_text2 = |lines| (
+    free_f $ reader $ |line| (
+        let lines = lines.push_back(line);
+        parse_text3 $ lines
+    )
+);
+
+parse_text3: Array String -> StrParser (Array String);
+parse_text3 = |lines| (
+    free_f $ reader $ |line| (
+        let lines = lines.push_back(line);
+        pure_f $ lines
+    )
+);
+
+test_str_parser: IO ();
+test_str_parser = (
+    let parser = parse_text1;
+    loop_m(
+        (parser, 0), |(parser, i)|
+        if parser.is_pure_f {
+            eval *println(parser.as_pure_f.to_string);
+            break_m $ ()
+        };
+        let parser = parser.as_free_f.run_reader(i.to_string);
+        continue_m $ (parser, i + 1)
+    )
+);
+
+//-------------------------------------------
+// Free monad as a effect
+
+trait [m: * -> *] m: MonadCommIF {
+    send_bytes: Array U8 -> m ();
+    recv_bytes: I64 -> m (Array U8);
+    gen_bytes: I64 -> m (Array U8);
+}
+
+trait MonadComm = Monad + MonadCommIF;
+
+type Comm next = box union {
+    comm_send_bytes: (Array U8, () -> next),
+    comm_recv_bytes: (I64, Array U8 -> next),
+    comm_gen_bytes: (I64, Array U8 -> next),
+};
+
+impl Comm: Functor {
+    map = |f, obj| (
+        if obj.is_comm_send_bytes { comm_send_bytes $ obj.as_comm_send_bytes.map(|g| g >> f) };
+        if obj.is_comm_recv_bytes { comm_recv_bytes $ obj.as_comm_recv_bytes.map(|g| g >> f) };
+        if obj.is_comm_gen_bytes { comm_gen_bytes $ obj.as_comm_gen_bytes.map(|g| g >> f) };
+        eval assert(|_| "invalid type", false);
+        undefined()
+    );
+}
+
+impl Free Comm: MonadCommIF {
+    send_bytes = |bytes| free_f $ comm_send_bytes $ (bytes, pure);
+    recv_bytes = |length| free_f $ comm_recv_bytes $ (length, pure);
+    gen_bytes = |length| free_f $ comm_gen_bytes $ (length, pure);
+}
+
+namespace FreeComm {
+    interpret: [m: MonadComm] Free Comm a -> m a;
+    interpret = |free| (
+        if free.is_pure_f { pure $ free.as_pure_f };
+        let comm = free.as_free_f;
+        if comm.is_comm_send_bytes {
+            let (bytes, cont) = comm.as_comm_send_bytes;
+            eval *send_bytes(bytes);
+            cont().interpret
+        };
+        if comm.is_comm_recv_bytes {
+            let (length, cont) = comm.as_comm_recv_bytes;
+            let bytes = *recv_bytes(length);
+            cont(bytes).interpret
+        };
+        if comm.is_comm_gen_bytes {
+            let (length, cont) = comm.as_comm_gen_bytes;
+            let bytes = *gen_bytes(length);
+            cont(bytes).interpret
+        };
+        eval assert(|_| "invalid type", false);
+        undefined()
+    );
+}
+
+impl IO: MonadCommIF {
+    send_bytes = |bytes| (
+        eval *println("send_bytes: " + bytes.to_string_hex);
+        pure()
+    );
+    recv_bytes = |length| (
+        let bytes = Array::from_map(length, |i| i.to_U8);
+        eval *println("recv_bytes: " + bytes.to_string_hex);
+        pure $ bytes
+    );
+    gen_bytes = |length| (
+        let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
+        eval *println("gen_bytes: " + bytes.to_string_hex);
+        pure $ bytes
+    );
+}
+
+monad_comm_1: [m: MonadComm] m ();
+monad_comm_1 = (
+    let size = 20;
+    let bytes = *gen_bytes(size);
+    eval *send_bytes(bytes);
+    let bytes = *recv_bytes(size);
+    eval *send_bytes(bytes);
+    pure()
+);
+
+test_monad_comm: IO ();
+test_monad_comm = (
+    // Record a computation as a free monad
+    let ma: Free Comm () = monad_comm_1;
+    // Interpret the free monad as an IO monad
+    ma.interpret
+);
+
+main: IO ();
+//main = test_toy_free_f2;
+//main = test_str_parser;
+main = test_monad_comm;

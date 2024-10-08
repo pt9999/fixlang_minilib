@@ -1,5 +1,5 @@
-#OPT_EXAMPLES = -O default
-OPT_EXAMPLES = -O separated
+#OPT_EXAMPLES = --opt-level default
+OPT_EXAMPLES = --opt-level separated
 
 SOURCES := $(wildcard *.fix)
 BINARIES := $(SOURCES:.fix=.out)
@@ -11,8 +11,8 @@ clean:
 	fix clean
 
 %.out: %.fix
-	../bin/fixautolink build -o $@ -L ../lib -f $< $(OPT_EXAMPLES)
+	../bin/fixautolink build -o $@ -I ../lib -f $< $(OPT_EXAMPLES)
 
 fractal_server.out: fractal_server.fix
-	-../bin/fixautolink build -o $@ -L ../lib -f $< $(OPT_EXAMPLES) -d png -d z
+	-../bin/fixautolink build -o $@ -I ../lib -f $< $(OPT_EXAMPLES) -d png -d z
 

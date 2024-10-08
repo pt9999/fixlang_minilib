@@ -1,10 +1,8 @@
-# future.fix
-
-## module Minilib.Thread.Future
+# Module Minilib.Thread.Future (future.fix)
 
 A computation that is performed in a TaskPool in parallel.
 
-### type Future
+### `type Future`
 
 A computation that is performed in a TaskPool in parallel.
 
@@ -14,18 +12,18 @@ type Future a = unbox struct {
     var_result: Var (Option a)      // the result of a future
 };
 ```
-#### make: TaskPool -> IO a -> IOFail (Future a);
+### `make: TaskPool -> IO a -> IOFail (Future a);`
 
 `Future::make(task_pool, io) creates a Future.
 `io` is performed in the task pool.
 If the task pool has been shutdown, an error is thrown.
 
-#### get: Future a -> IOFail a;
+### `get: Future a -> IOFail a;`
 
 Gets the result of the Future.
 It waits for future state to be either completed or canceled.
 
-### type FutureState
+### `type FutureState`
 
 A state of a future.
 
@@ -37,9 +35,9 @@ type FutureState = unbox union {
     canceled: ()
 };
 ```
-### namespace FutureToken
+## `namespace FutureToken`
 
-#### make: Var FutureState -> IO () -> FutureToken;
+### `make: Var FutureState -> IO () -> FutureToken;`
 
-#### set_state: FutureState -> FutureToken -> IO ();
+### `set_state: FutureState -> FutureToken -> IO ();`
 

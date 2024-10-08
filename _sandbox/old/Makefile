@@ -1,5 +1,5 @@
 FIXAUTOLINK = ../../bin/fixautolink
-LIBS = -L ../../lib -L .
+LIBS = -I ../../lib -I .
 
 %.out: %.fix
 	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $<

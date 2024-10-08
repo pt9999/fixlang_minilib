@@ -1,0 +1,82 @@
+// Mock-up implementation of CertApi.
+module Minilib.Crypto.Cert.CertApiMock;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Cert.CertApi;
+
+make_cert_api: a -> Result ErrMsg CertApi;
+make_cert_api = |_| MockCertApiImpl::make_api;
+
+namespace MockCertApiImpl {
+    make_api: Result ErrMsg CertApi;
+    make_api = (
+        pure $ CertApi {
+            read_cert_data_array_from_pem_string: |_| err $ "not supported",
+            load_ca_certificates: _load_ca_certificates,
+            add_to_ca_certificates: |_| throw $ "not supported",
+            get_now: _get_now,
+            build_cert_path: _build_cert_path,
+        }
+    );
+
+    _load_ca_certificates: IOFail CertApi;
+    _load_ca_certificates = (
+        eval *pure();
+        MockCertApiImpl::make_api.from_result
+    );
+
+    _get_now: IO CerTime;
+    _get_now = pure $ "20240705000000Z";
+
+    _build_cert_path: Array (Array U8) -> Result ErrMsg CertPathApi;
+    _build_cert_path = |cert_data_array| (
+        pure $ MockCertPathApiImpl::make_api(cert_data_array)
+    );
+}
+
+namespace MockCertPathApiImpl {
+    make_api: Array (Array U8) -> CertPathApi;
+    make_api = |cert_data_array| (
+        CertPathApi {
+            get_certificates: _get_certificates(cert_data_array),
+            validate_date: _validate_date,
+            validate_certificate_signatures: _validate_certificate_signatures,
+        }
+    );
+
+    _get_certificates: Array (Array U8) -> () -> Array CertificateApi;
+    _get_certificates = |cert_data_array, _| (
+        cert_data_array.map(|cert_data|
+            MockCertificateApiImpl::make_api
+        )
+    );
+
+    _validate_date: CerTime -> Result ErrMsg ();
+    _validate_date = |time| (
+        eval log_warn("WARNING: mock version of CertPathApi is used !!");
+        pure()
+    );
+
+    _validate_certificate_signatures: () -> Result ErrMsg ();
+    _validate_certificate_signatures = |_| (
+        eval log_warn("WARNING: mock version of CertPathApi is used !!");
+        pure()
+    );
+}
+
+namespace MockCertificateApiImpl {
+    make_api: CertificateApi;
+    make_api = (
+        CertificateApi {
+            verify_signature_by_subject_public_key: |message, scheme, signature| (
+                eval log_warn("WARNING: mock version of CertificateApi is used !!");
+                pure()
+            ),
+            verify_certificate_identity: |dns_name| (
+                eval log_warn("WARNING: mock version of CertificateApi is used !!");
+                pure()
+            ),
+        }
+    );
+}
+

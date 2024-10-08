@@ -1,7 +1,6 @@
 // Arbitrary-precision natural number. This is internal module of BigInt.
 module Minilib.Math.BigNat;
 
-import Debug;
 import Math;
 import Random;
 
@@ -165,7 +164,7 @@ _sub = |a0, a1| (
     let ((a2, offset2), sign2) = _signed_sub_with_offset((a0, 0), (a1, 0));
     if sign2 < 0 {
         eval debug_eprintln("error: sign2 < 0");
-        abort()
+        undefined()
     };
     a2
 );
@@ -192,7 +191,7 @@ _signed_sub_with_offset = |(a0, offset0), (a1, offset1)| (
             (0_U64, d0 - d1)
         } else {
             (1_U64, _base + d0 - d1)
-        };                
+        };
         let a2 = a2.push_back(d2.to_U32);
         continue $ (a2, i + 1, borrow)
     );
@@ -326,8 +325,8 @@ _divmod = |a, b| (
         let rem = rem._remove_last_zeros;
         let rem_sign = rem_sign * a_sign;
         let quo = if a_sign > 0 {
-            _add_with_offset1(quo, (q, qoff)) 
-        } else { 
+            _add_with_offset1(quo, (q, qoff))
+        } else {
             let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
             eval assert(|_| "quo subtraction underflow", sign > 0);
             quo
@@ -339,7 +338,7 @@ _divmod = |a, b| (
         //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
         continue $ (quo, rem, rem_sign)
     );
-    if rem_sign > 0 || rem == BigNat::_zero { 
+    if rem_sign > 0 || rem == BigNat::_zero {
         (quo, rem)
     } else {
         let quo = _sub(quo, [1_U32]);
@@ -519,7 +518,7 @@ _from_string_inner = |bytes, i, a| (
     _from_string_inner(bytes, i + 1, a)
 );
 
-_generate_bignat:  I64 -> Random -> (Array U32, Random); 
+_generate_bignat:  I64 -> Random -> (Random, Array U32);
 _generate_bignat = |bit_length, random| (
     eval assert(|_| "invalid bit_length", bit_length >= 0);
     let end = BigNat::_one._shift_left(bit_length.to_U64);
@@ -527,7 +526,7 @@ _generate_bignat = |bit_length, random| (
     _generate_bignat_range(begin, end, random)
 );
 
-_generate_bignat_range:  Array U32 -> Array U32 -> Random -> (Array U32, Random); 
+_generate_bignat_range:  Array U32 -> Array U32 -> Random -> (Random, Array U32);
 _generate_bignat_range = |begin, end, random| (
     if _cmp((begin, 0), (end, 0)) > 0 {
         _generate_bignat_range(end, begin, random)      // swap range and retry
@@ -536,27 +535,27 @@ _generate_bignat_range = |begin, end, random| (
     let n = n._remove_last_zeros;
     eval assert(|_| "invalid range", !n._is_zero);
     let size = n.get_size;
-    let (r, random) = loop(
-        ([], 0, random), |(nat, i, random)|
-        let (u64, random) = random.generate_U64;
+    let (random, r) = loop(
+        (random, [], 0), |(random, nat, i)|
+        let (random, u64) = random.generate_U64;
         if i == size - 1 {
             let m = n.@(size - 1).to_U64;
             // choose 0..m uniformly
             let u64 = u64 / (U64::maximum / (m + 1_U64));
             if u64 > m {
-                continue $ (nat, i, random)     // try again
+                continue $ (random, nat, i)     // try again
             };
             let nat = nat.push_back(u64.to_U32);
-            break $ (nat, random)
+            break $ (random, nat)
         };
         let (_, rem) = BigNat::_divmod_base(u64);
         let nat = nat.push_back(rem.to_U32);
-        continue $ (nat, i + 1, random)
+        continue $ (random, nat, i + 1)
     );
     if _cmp((r, 0), (n, 0)) >= 0 {
         _generate_bignat_range(begin, end, random)      // try again
     };
     let r = _add(begin, r);
-    (r, random)
+    (random, r)
 );
 

@@ -1,6 +1,4 @@
-# rbtree.fix
-
-## module Minilib.Collection.RBTree
+# Module Minilib.Collection.RBTree (rbtree.fix)
 
 Red-Black Tree.
 (This is an internal module of `TreeMap` and `TreeSet`.)
@@ -19,13 +17,13 @@ NOTE: `less_than()` function must meet following conditions.
 then `less_than(x,z)` must be true.
 
 
-### namespace RBNode
+## `namespace RBNode`
 
-### trait RBNodeElem = ToString;
+### `trait RBNodeElem = ToString;`
 
 A trait of the element. Currently `ToString` is required.
 
-### type RBNode
+### `type RBNode`
 
 A type of red-black tree node.
 
@@ -36,17 +34,17 @@ A type of red-black tree node.
         black: (RBNode a, a, RBNode a)
     };
 ```
-#### level_nonvalidate: [a: RBNodeElem] RBNode a -> I64;
+### `level_nonvalidate: [a: RBNodeElem] RBNode a -> I64;`
 
 Returns the level of this node (ie. the number of black nodes from this node to any leaf).
 This function does not validate, so an unbalanced node can be specified.
 
-#### level: [a: RBNodeElem] RBNode a -> I64;
+### `level: [a: RBNodeElem] RBNode a -> I64;`
 
 Returns the level of this node (ie. the number of black nodes from this node to any leaf).
 Panicks when the left and right nodes have different black count.
 
-#### validate: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (I64, Option a, Option a);
+### `validate: [a: RBNodeElem] (a -> a -> Bool) -> RBNode a -> (I64, Option a, Option a);`
 
 Validates that:
 - the left and right nodes have same black count
@@ -56,53 +54,53 @@ Validates that:
 Returns `(level, min, max)`.
 Panicks if validation failed.
 
-#### get_size: RBNode a -> I64;
+### `get_size: RBNode a -> I64;`
 
 Gets the number of elements.
 
-#### get_triplet: RBNode a -> (RBNode a, a, RBNode a);
+### `get_triplet: RBNode a -> (RBNode a, a, RBNode a);`
 
 If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.
 If the node is empty, it will abort.
 
-#### set_triplet: (RBNode a, a, RBNode a) -> RBNode a -> RBNode a;
+### `set_triplet: (RBNode a, a, RBNode a) -> RBNode a -> RBNode a;`
 
-#### get_color: RBNode a -> ((RBNode a, a, RBNode a) -> RBNode a);
+### `get_color: RBNode a -> ((RBNode a, a, RBNode a) -> RBNode a);`
 
-#### set_color: ((RBNode a, a, RBNode a) -> RBNode a) -> RBNode a -> RBNode a;
+### `set_color: ((RBNode a, a, RBNode a) -> RBNode a) -> RBNode a -> RBNode a;`
 
-#### get_left: RBNode a -> RBNode a;
+### `get_left: RBNode a -> RBNode a;`
 
-#### get_right: RBNode a -> RBNode a;
+### `get_right: RBNode a -> RBNode a;`
 
-#### find: a -> (a -> a -> Bool) -> RBNode a -> Option a;
+### `find: a -> (a -> a -> Bool) -> RBNode a -> Option a;`
 
 `node.find(x, less_than)` finds an element `elem` that is equivalent to `x`,
 ie. `!less_than(elem, x) && !less_than(x, elem)` is true.
 
-#### find_range: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;
+### `find_range: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;`
 
 `node.find_range(lt_begin, lt_end)` finds all elements `elem`
 such that `!elem.lt_begin && elem.lt_end` is true.
 NOTE: `lt_begin` and `lt_end` must meet following condition:
 for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
 
-#### find_range_descending: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;
+### `find_range_descending: (a -> Bool) -> (a -> Bool) -> RBNode a -> Iterator a;`
 
 `node.find_range(lt_begin, lt_end)` finds all elements `elem`
 such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
 NOTE: `lt_begin` and `lt_end` must meet following condition:
 for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
 
-#### get_first: RBNode a -> Option a;
+### `get_first: RBNode a -> Option a;`
 
 Gets the first element (that is, the smallest element) of the tree.
 
-#### get_last: RBNode a -> Option a;
+### `get_last: RBNode a -> Option a;`
 
 Gets the last element (that is, the largest element) of the tree.
 
-#### upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+### `upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> RBNode a;`
 
 `node.upsert_lt(x, less_than)` inserts or updates using `less_than` ordering.
 If `node` does not contain an element equivalent to `x`, `x` is inserted.
@@ -110,7 +108,7 @@ If `node` already contains an element `y` equivalent to `x`,
 ie. `!less_than(x,y) && !less_than(y,x)` is true,
 then `y` is updated with `updater(y)`.
 
-#### upsert: [a: LessThan, a: RBNodeElem] a -> (a -> a) -> RBNode a -> RBNode a;
+### `upsert: [a: LessThan, a: RBNodeElem] a -> (a -> a) -> RBNode a -> RBNode a;`
 
 `node.upsert(x, updater)` inserts or updates using default `LessThan` ordering.
 If `node` does not contain an element equivalent to `x`, `x` is inserted.
@@ -118,42 +116,42 @@ If `node` already contains an element `y` equivalent to `x`,
 ie. `!(x < y) && !(y < x)` is true,
 then `y` is updated with `updater(y)`.
 
-#### insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+### `insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;`
 
 `node.insert_lt(x, less_than)` inserts an element `x` using `less_than` ordering.
 If `node` already contains an element `y` equivalent to `x`,
 ie. `!less_than(x,y) && !less_than(y,x)` is true,
 then `y` is replaced with `x`.
 
-#### insert: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
+### `insert: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;`
 
 `node.insert(x)` inserts an element `x` using default `LessThan` ordering.
 If `node` already contains an element `y` equivalent to `x`,
 ie. `!(x < y) && !(y < x)` is true,
 then `y` is replaced with `x`.
 
-#### remove: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;
+### `remove: [a: LessThan, a: RBNodeElem] a -> RBNode a -> RBNode a;`
 
 `node.remove(x)` removes any element `y` equivalent to `x`,
 ie. `!(x < y) && !(y < x)` is true.
 
-#### remove_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;
+### `remove_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNode a -> RBNode a;`
 
 `node.remove_lt(x, less_than)` removes any element `y` equivalent to `x`,
 ie. ie. `!less_than(x,y) && !less_than(y,x)` is true.
 
-#### remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> RBNode a;
+### `remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBNode a -> RBNode a;`
 
 `node.remove_range(lt_begin, lt_end)` removes all elements `elem`
 where `!elem.lt_begin && elem.lt_end` is true.
 NOTE: `lt_begin` and `lt_end` must meet following condition:
 for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
 
-#### to_iter: [a: RBNodeElem] RBNode a -> Iterator a;
+### `to_iter: [a: RBNodeElem] RBNode a -> Iterator a;`
 
-#### from_iter_lt: [a: RBNodeElem] (a -> a -> Bool) -> Iterator a -> RBNode a;
+### `from_iter_lt: [a: RBNodeElem] (a -> a -> Bool) -> Iterator a -> RBNode a;`
 
-#### from_iter: [a: LessThan, a: RBNodeElem] Iterator a -> RBNode a;
+### `from_iter: [a: LessThan, a: RBNodeElem] Iterator a -> RBNode a;`
 
-#### `impl [a: RBNodeElem, a: ToString] RBNode a: ToString`
+### `impl [a: RBNodeElem, a: ToString] RBNode a: ToString`
 

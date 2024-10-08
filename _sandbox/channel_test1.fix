@@ -23,15 +23,20 @@ parallel_map_m = |pool, f, arr| (
     )
 );
 
-_usleep: I64 -> I64;
+_usleep: I64 -> ();
 _usleep = |usec| (
-    CALL_C[I32 usleep(U32), usec.to_U32].to_I64
+    let res = FFI_CALL[I32 usleep(U32), usec.to_U32].to_I64;
+    if res != 0 {
+        debug_eprintln("usleep failed: res=" + res.to_string)
+    } else {
+        ()
+    }
 );
 
 sleep_random: Var Random -> IO ();
 sleep_random = |rand_var| (
     let u64 = *rand_var.lock(|rand|
-        let (u64, rand) = rand.generate_U64;
+        let (rand, u64) = rand.generate_U64;
         let _ = *rand_var.Var::set(rand);
         pure $ u64
     );
@@ -46,7 +51,7 @@ sleep_random = |rand_var| (
 set_unbuffered_mode: IOHandle -> IO ();
 set_unbuffered_mode = |handle| (
     let _ = *pure();
-    eval CALL_C[() setbuf(Ptr, Ptr), handle._file_ptr, nullptr];
+    eval FFI_CALL[() setbuf(Ptr, Ptr), handle._file_ptr, nullptr];
     pure()
 );
 
@@ -59,7 +64,7 @@ test1 = (
         let arr: Array I64 = Iterator::range(0, 30).to_array;
         let f = |i| (
             let _ = *pure();
-            let thr = CALL_C[U32 pthread_self()];
+            let thr = FFI_CALL[U32 pthread_self()];
             let _ = *eprintln(thr.to_string + ": " + i.to_string + ": start");
             let _ = *sleep_random(rand_var);
             let _ = *eprintln(thr.to_string + ": " + i.to_string + ": end");

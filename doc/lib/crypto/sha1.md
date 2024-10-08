@@ -1,6 +1,4 @@
-# sha1.fix
-
-## module Minilib.Crypto.SHA1
+# Module Minilib.Crypto.SHA1 (sha1.fix)
 
 SHA-1 secure hash function.
 
@@ -13,11 +11,11 @@ FIPS 180-4 (2015):
 http://dx.doi.org/10.6028/NIST.FIPS.180-4
 
 
-#### digest: Array U8 -> Array U8;
+### `digest: Array U8 -> Array U8;`
 
 `SHA1::digest(bytes)` computes SHA-1 secure hash function of `bytes`.
 
-### type SHA1
+### `type SHA1`
 
 SHA-1 hasher.
 Usually it is sufficient to simply call `SHA1:digest(bytes)` without using this structure.
@@ -29,15 +27,15 @@ type SHA1 = unbox struct {
     msgbuf: Array U8
 };
 ```
-#### empty: SHA1;
+### `empty: SHA1;`
 
 An empty SHA-1 hasher.
 
-#### update: Array U8 -> SHA1 -> SHA1;
+### `update: Array U8 -> SHA1 -> SHA1;`
 
 `sha1.update(bytes)` processes `bytes`, and updates its internal state.
 
-#### finalize: SHA1 -> Array U8;
+### `finalize: SHA1 -> Array U8;`
 
 `sha1.finalize` retrieves a final SHA-1 hash value.
 

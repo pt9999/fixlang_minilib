@@ -1,0 +1,152 @@
+// dependency graph
+module Main;
+
+import Character;
+//import HashMap;
+//import HashSet;
+//import Subprocess;
+//import AsyncTask;
+
+import Minilib.Collection.OrderedMap;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Text.StringEx;
+import Minilib.Monad.FunctorM;
+import Minilib.Monad.Writer;
+
+// Matches against declarations, such as `module ModuleName`, `import ModuleName`
+matches_decl: String -> String -> Result ErrMsg String;
+matches_decl = |decl, line| (
+    let line = line.strip_spaces;
+    let (left, right) = line.split_first(" ");
+    if left != decl {
+        err $ "NotMatch"
+    };
+    let line = right.strip_spaces;
+    let name = line.get_bytes.pop_back.to_iter.take_while(
+        |c| c.is_alnum || c == '_' || c == '.'
+    ).to_array._unsafe_to_string;
+    if name == "" {
+        err $ "NotMatch"
+    };
+    ok $ name
+);
+
+// Module information
+type Module = unbox struct {
+    name: String,               // module name
+    path: String,               // module file path (*.fix)
+    imports: Array String       // imports
+};
+
+namespace Module {
+    // Read *.fix file and extract module information.
+    // NOTE: block comment(/*...*/) are partially supported.
+    read: String -> IOFail Module;
+    read = |path| (
+        let module = Module {
+            name: "",
+            path: path,
+            imports: []
+        };
+        let contents = *read_file_bytes(Path::parse(path).as_some);
+        let contents = contents._unsafe_to_string;
+        let (module, _) = *contents.split("\n").loop_iter_m(
+            (module, false), |(module, comment), line|
+            let line = line.strip_spaces;
+            if line == "" {
+                continue_m $ (module, comment)
+            };
+            let com_s = line.find("/*", 0);
+            let com_e = line.find("*/", 0);
+            if comment {
+                continue_m $ (module, com_e.is_none)
+            };
+            if com_s.is_some {
+                continue_m $ (module, com_e.is_none)
+            };
+            let is_line_comment = line.substring(0, 2) == "//";
+            if is_line_comment {
+                continue_m $ (module, comment)
+            };
+            let module_decl = matches_decl("module", line);
+            if module_decl.is_ok {
+                let module = module.set_name(module_decl.as_ok);
+                continue_m $ (module, comment)
+            };
+            let import_decl = matches_decl("import", line);
+            if import_decl.is_ok {
+                let module = module.mod_imports(push_back(import_decl.as_ok));
+                continue_m $ (module, comment)
+            };
+            break_m $ (module, comment)
+        );
+        if module.@name == "" {
+            throw $ "module declaration not found: " + path
+        };
+        pure $ module
+    );
+}
+
+// Application
+type App = unbox struct {
+    modules: OrderedMap String Module,
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        modules: OrderedMap::empty(10),
+    };
+
+    read_modules_from_dirs: Array String -> App -> IOFail App;
+    read_modules_from_dirs = |dirs, app| (
+        dirs.to_iter.fold_m(
+            app, |app, dir|
+            let file_paths = *find_files(dir);
+            app.read_modules_from_files(file_paths)
+        )
+    );
+
+    read_modules_from_files: Array String -> App -> IOFail App;
+    read_modules_from_files = |file_paths, app| (
+        file_paths.to_iter.fold_m(
+            app, |app, file_path|
+            if !file_path.ends_with(".fix") { pure $ app };
+            eval debug_eprintln("reading " + file_path);
+            let module = *Module::read(file_path);
+            let module = if module.@name != "Main" { module } else {
+                module.set_name(module.@name + "(" + basename(file_path) + ")")
+            };
+            pure $ app.mod_modules(insert(module.@name, module))
+        )
+    );
+
+    write_dependency_graph: App -> IOFail ();
+    write_dependency_graph = |app| (
+        let wm: Writer String () = do {
+            eval *tell("digraph \"deps\" {\n");
+            eval *tell("rankdir=TB;\n");
+            eval *tell("node [shape=box];\n");
+            eval *app.@modules.to_iter.foreach_m(
+                |(name, module)|
+                module.@imports.to_iter.foreach_m(
+                    |import: String|
+                    tell((module.@name, import).format("\"{}\" -> \"{}\" [];\n"))
+                )
+            );
+            eval *tell("}\n");
+            pure()
+        };
+        let (contents, _) = wm.run_writer;
+        println(contents).lift
+    );
+}
+
+main: IO ();
+main = do {
+    let app = App::empty;
+    let app = *app.read_modules_from_dirs(["lib", "examples"]);
+    eval *app.write_dependency_graph;
+    pure()
+}.try(eprintln);

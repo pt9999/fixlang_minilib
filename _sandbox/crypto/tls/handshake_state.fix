@@ -1,0 +1,590 @@
+// Handshake state management for TLS 1.3
+module Minilib.Crypto.Tls.HandshakeState;
+
+import AsyncTask;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.KeyAgreement;
+import Minilib.Crypto.Tls.KeyShare;
+import Minilib.Crypto.Tls.Extensions;
+import Minilib.Crypto.Tls.Protection;
+import Minilib.Crypto.Tls.HandshakeProtocol;
+import Minilib.Crypto.Tls.RecordProtocol;
+import Minilib.Crypto.Cert.CertApi;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Random;
+import Minilib.Monad.BytesIO;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+
+namespace TLSRecordHelper {
+    // Splits the contents of inner_plaintext to Array of (handshake, handshake_bytes).
+    split_handshakes: TLSInnerPlaintext -> Result ErrMsg (Array (Handshake, Array U8));
+    split_handshakes = |inner_plaintext| (
+        let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
+        loop_m(
+            ([], buf), |(handshakes, buf)|
+            if buf.get_position >= buf.get_size { break_m $ handshakes };
+            let start = buf.get_position;
+            let (handshake: Handshake, buf) = *buf.unmarshal;
+            let end = buf.get_position;
+            let handshake_bytes = buf.@array.subarray(start, end);
+            let handshakes = handshakes.push_back((handshake, handshake_bytes));
+            continue_m $ (handshakes, buf)
+        )
+    );
+}
+
+type HandshakeInitParam = box struct {
+    cipher_api: CipherApi,
+    cert_api: CertApi,
+    server_name: String,
+    session_start_time: CerTime,
+};
+
+type HandshakeState = unbox union {
+    before_client_hello: BeforeClientHello,
+    after_client_hello: AfterClientHello,
+    after_server_hello: AfterServerHello,
+    after_finished: AfterFinished,
+};
+
+impl HandshakeState: ToString {
+    to_string = |hstate| (
+        if hstate.is_before_client_hello { hstate.as_before_client_hello.to_string };
+        if hstate.is_after_client_hello { hstate.as_after_client_hello.to_string };
+        if hstate.is_after_server_hello { hstate.as_after_server_hello.to_string };
+        if hstate.is_after_finished { hstate.as_after_finished.to_string };
+        ""
+    );
+}
+
+namespace HandshakeState {
+    make: [m: Monad] m HandshakeState;
+    make = pure $ before_client_hello $ BeforeClientHello { dummy: () };
+
+    start_handshake: [m: MonadRandom, m: MonadError] HandshakeInitParam -> HandshakeState -> m HandshakeState;
+    start_handshake = |init_param, hstate| (
+        if hstate.is_before_client_hello { hstate.as_before_client_hello.start_handshake(init_param) };
+        error $ "start_handshake: wrong hstate"
+    );
+
+    // Pops records to send from the queue, then send the records via MonadBytesIO.
+    send_records: [m: MonadBytesIO] HandshakeState -> m HandshakeState;
+    send_records = |hstate| (
+        let (records, hstate) = *hstate.pop_records_to_send;
+        eval *TLSRecord::send_records(records);
+        pure $ hstate
+    );
+
+    // Pops records to send from the queue.
+    pop_records_to_send: [m: MonadError] HandshakeState -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |hstate| (
+        if hstate.is_after_client_hello {
+            hstate.as_after_client_hello.pop_records_to_send
+        };
+        if hstate.is_after_finished {
+            hstate.as_after_finished.pop_records_to_send
+        };
+        pure $ ([], hstate)
+    );
+
+    send_appdata: [m: MonadError] Array U8 -> HandshakeState -> m HandshakeState;
+    send_appdata = |appdata, hstate| (
+        if hstate.is_after_finished {
+            hstate.as_after_finished.send_appdata(appdata)
+        };
+        error $ "send_appdata: invalid state"
+    );
+
+    pop_appdata_received: [m: MonadError] HandshakeState -> m (Array U8, HandshakeState);
+    pop_appdata_received = |hstate| (
+        if hstate.is_after_finished {
+            hstate.as_after_finished.pop_appdata_received
+        };
+        pure $ ([], hstate)
+    );
+
+    recv_record: [m: MonadBytesIO] HandshakeState -> m HandshakeState;
+    recv_record = |hstate| (
+        let record: TLSRecord = *TLSRecord::recv_record;
+        hstate.on_recv_record(record)
+    );
+
+    on_recv_record: [m: MonadError] TLSRecord -> HandshakeState -> m HandshakeState;
+    on_recv_record = |record, hstate| (
+        if record.@content_type.is_alert {
+            error $ "received alert: " + record.@fragment.to_string_hex
+        };
+        if record.@content_type.is_change_cipher_spec {
+            eval log_debug("received change_cipher_spec");
+            pure $ hstate
+        };
+        if hstate.is_after_client_hello {
+            hstate.as_after_client_hello.on_recv_record(record)
+        };
+        if hstate.is_after_server_hello {
+            hstate.as_after_server_hello.on_recv_record(record)
+        };
+        if hstate.is_after_finished {
+            hstate.as_after_finished.on_recv_record(record)
+        };
+        pure $ hstate
+    );
+
+    get_certificates: HandshakeState -> Array (Array U8);
+    get_certificates = |hstate| (
+        if hstate.is_after_finished {
+            hstate.as_after_finished.get_certificates
+        };
+        []
+    );
+}
+
+type BeforeClientHello = unbox struct {
+    dummy: ()
+};
+
+impl BeforeClientHello: ToString {
+    to_string = |obj| "BeforeClientHello {}";
+}
+
+namespace BeforeClientHello {
+    start_handshake: [m: MonadError, m: MonadRandom] HandshakeInitParam -> BeforeClientHello -> m HandshakeState;
+    start_handshake = |init_param, _| (
+        let hello = ClientHello::empty;
+        let hello = hello.init_random(*generate_random_bytes(32));
+        // init server_name
+        let hello = hello.add_extension(Extension::server_name $
+            ServerNameList::make([
+                ServerName::make(init_param.@server_name)
+            ])
+        );
+        // init key_share
+        let key_agreements = *KeyAgreement::make_defaults(init_param.@cipher_api);
+        let ks: KeyShare = ks_client_hello $ KeyShareClientHello::make(
+            key_agreements.map(to_key_share_entry)
+        );
+        let hello = hello.add_extension(Extension::key_share $ ks);
+        // 9.2. Mandatory-to-Implement Extensions
+        // TODO: cookie
+        // TODO: signature_algorithms_cert
+
+        eval log_debug("client_hello: extensions=" + hello.@extensions.to_string);
+        let handshake: Handshake = Handshake::client_hello $ hello;
+        let handshake_bytes: Array U8 = marshal_to_bytes(handshake);
+        let client_hello_records: Array TLSRecord = TLSRecord::split_fragments(ContentType::handshake(), handshake_bytes);
+
+        pure $ after_client_hello $ AfterClientHello {
+            init_param: init_param,
+            client_hello_records: client_hello_records,
+            key_agreements: key_agreements,
+            records_to_send: client_hello_records,
+        }
+    );
+}
+
+
+type AfterClientHello = unbox struct {
+    init_param: HandshakeInitParam,
+    client_hello_records: Array TLSRecord,
+    key_agreements: Array KeyAgreement,
+    records_to_send: Array TLSRecord,
+};
+
+impl AfterClientHello: ToString {
+    to_string = |hello| (
+        "AfterClientHello {" +
+        " client_hello_records=" + hello.@client_hello_records.to_string +
+        " key_agreements=" + hello.@key_agreements.to_string +
+        "}"
+    );
+}
+
+namespace AfterClientHello {
+
+    pop_records_to_send: [m: MonadError] AfterClientHello -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |after_client_hello| (
+        pure $ (
+            after_client_hello.@records_to_send,
+            HandshakeState::after_client_hello $ after_client_hello.set_records_to_send([])
+        )
+    );
+
+    on_recv_record: [m: MonadError] TLSRecord -> AfterClientHello -> m HandshakeState;
+    on_recv_record = |record, after_client_hello| (
+        eval log_debug("AfterClientHello::on_recv_record");
+        let init_param = after_client_hello.@init_param;
+        if !record.@content_type.is_handshake {
+            error $ "after_client_hello: unexpected content type"
+        };
+        let client_hello_handshake_bytes = *after_client_hello.@client_hello_records.join_fragments;
+        let server_hello_handshake_bytes = record.@fragment;
+        let handshake: Handshake = *unmarshal_from_bytes(server_hello_handshake_bytes).from_result_t;
+        if !handshake.is_server_hello {
+            error $ "after_client_hello: unexpected handshake type"
+        };
+        let server_hello: ServerHello = handshake.as_server_hello;
+        eval log_debug("server_hello=" + server_hello.to_string);
+
+        // key agreement
+        let key_agreements = after_client_hello.@key_agreements;
+        let key_share_entry = *server_hello._find_key_share_entry;
+        let shared_secret: SharedSecret = *key_agreements.accept_server_share(key_share_entry).from_result_t;
+        eval log_debug("shared_secret=" + shared_secret.to_string_hex);
+
+        // construct protection
+        let cipher_suite = server_hello.@cipher_suite;
+        let protection = *Protection::make(cipher_suite).from_result_t;
+        let protection = protection.add_handshake_context(client_hello_handshake_bytes);
+        let protection = protection.add_handshake_context(server_hello_handshake_bytes);
+        let protection = *protection.init_handshake(shared_secret).from_result_t;
+
+        pure $ after_server_hello $ AfterServerHello {
+            init_param: init_param,
+            protection: protection,
+            server_hello: server_hello,
+            handshakes: [],
+        }
+    );
+
+    _find_key_share_entry: [m: MonadError] ServerHello -> m KeyShareEntry;
+    _find_key_share_entry = |hello| (
+        let opt = hello.@extensions.find(is_key_share).map(as_key_share);
+        if opt.is_none { error $ "key_share not found" };
+        let ks: KeyShare = opt.as_some;
+        if !ks.is_ks_server_hello { error $ "not ks_server_hello" };
+        let kse: KeyShareEntry = ks.as_ks_server_hello.@server_share;
+        pure $ kse
+    );
+}
+
+type AfterServerHello = unbox struct {
+    init_param: HandshakeInitParam,
+    protection: Protection,
+    server_hello: ServerHello,
+    handshakes: Array (Handshake, Array U8),
+};
+
+impl AfterServerHello: ToString {
+    to_string = |obj| "AfterServerHello {}";
+}
+
+namespace AfterServerHello {
+    on_recv_record: [m: MonadError] TLSRecord -> AfterServerHello -> m HandshakeState;
+    on_recv_record = |record, after_server_hello| (
+        eval log_debug("AfterServerHello::on_recv_record");
+        let init_param = after_server_hello.@init_param;
+        let protection = after_server_hello.@protection;
+        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
+        let after_server_hello = after_server_hello.set_protection(protection);
+
+        if !inner_plaintext.@content_type.is_handshake {
+            error $ "after_server_hello: unexpected content type"
+        };
+        let handshakes = *inner_plaintext.split_handshakes.from_result_t;
+        eval log_debug("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
+
+        // concat handshakes
+        let after_server_hello = after_server_hello.mod_handshakes(append(handshakes));
+        let handshakes = after_server_hello.@handshakes;
+
+        let have_finished = handshakes.map(@0).find_by(is_finished).is_some;
+        if !have_finished {
+            // continue receiving
+            pure $ HandshakeState::after_server_hello $ after_server_hello
+        };
+
+        // verify certificate
+        eval *_verify_certificate(handshakes, protection, init_param);
+
+        // check finished
+        eval *_check_handshakes_order(handshakes.map(@0));
+        eval *_verify_server_finished(handshakes, protection);
+        let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
+        //let protection = protection.mod_server_tk(increment_sequence_number);
+        let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
+        let asf: AfterFinished = *AfterFinished::make(init_param, protection, server_params);
+        pure $ HandshakeState::after_finished $ asf
+    );
+
+    _check_handshakes_order: [m: MonadError] Array Handshake -> m ();
+    _check_handshakes_order = |handshakes| (
+        let size = handshakes.get_size;
+        let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |i, _| i + 1);
+        let get_order: (Handshake -> Bool) -> I64 = |f| handshakes.find_by(f).as_some_or(-1);
+        let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
+        eval *(get_count(Handshake::is_encrypted_extensions) == 1).or_error;
+        eval *(get_count(Handshake::is_certificate_request) <= 1).or_error;
+        eval *(get_count(Handshake::is_certificate) == 1).or_error;
+        eval *(get_count(Handshake::is_certificate_verify) == 1).or_error;
+        eval *(get_count(Handshake::is_finished) == 1).or_error;
+        eval *(get_order(Handshake::is_encrypted_extensions) == 0).or_error;
+        eval *(get_order(Handshake::is_finished) == size - 1).or_error;
+        pure()
+    );
+
+    _update_handshake_context: Array (Handshake, Array U8) -> (I64, I64) -> Protection -> Protection;
+    _update_handshake_context = |handshakes, (start, end), protection| (
+        eval log_debug("_update_handshake_context: " +
+                handshakes.subarray(start, end).to_iter.map(|(h,_)| h.get_msg_type_as_string).join(", "));
+        handshakes.subarray(start, end).map(@1).to_iter.fold(
+            protection, |protection, handshake_bytes|
+            protection.add_handshake_context(handshake_bytes)
+        )
+    );
+
+    _verify_certificate: [m: MonadError] Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> m ();
+    _verify_certificate = |handshakes, protection, init_param| (
+        eval log_debug("_verify_certificate");
+        // find Certificate and CertificateVerify Handshake record
+        let opt_certificate = handshakes.find_by(|(h,_)| h.is_certificate);
+        let opt_certificate_verify = handshakes.find_by(|(h,_)| h.is_certificate_verify);
+        if opt_certificate.is_none || opt_certificate_verify.is_none {
+            error $ "Certificate or CerticateVerify not found"
+        };
+        let certificate = handshakes.@(opt_certificate.as_some).@0.as_certificate;
+        let cert_data_array: Array (Array U8) = certificate.@certificate_list.map(@cert_data);
+        if cert_data_array.get_size == 0 {
+            error $ "cert_data_array is empty"
+        };
+
+        let cipher_api = init_param.@cipher_api;
+        let cert_api = init_param.@cert_api;
+
+        eval log_debug("building cert_path");
+        let cert_path_api = *@build_cert_path(cert_api, cert_data_array).from_result_t;
+
+        eval log_debug("validating date");
+        eval *@validate_date(cert_path_api, init_param.@session_start_time).from_result_t;
+        eval log_debug("validating certificate signatures");
+        eval *@validate_certificate_signatures(cert_path_api, ()).from_result_t;
+
+        let cerficate_api_array = @get_certificates(cert_path_api, ());
+        if cerficate_api_array.get_size == 0 { error $ "cert_path is empty" };
+        let cerficate_api = cerficate_api_array.@(0);
+
+        eval log_debug("verifying signature of certificate_verify");
+        let CertificateVerify {
+            algorithm: sig_scheme,
+            signature: signature
+        } = handshakes.@(opt_certificate_verify.as_some).@0.as_certificate_verify;
+        let protection = _update_handshake_context(handshakes, (0, opt_certificate.as_some + 1), protection);
+        let content = *protection.calc_certificate_verify_content(TrafficKeyType::server_tk()).from_result_t;
+        let sig_scheme = SignatureScheme::_to_string(sig_scheme);
+        eval *@verify_signature_by_subject_public_key(cerficate_api, content, sig_scheme, signature).from_result_t;
+
+        eval log_debug("verifying certificate identity");
+        eval *@verify_certificate_identity(cerficate_api, init_param.@server_name);
+        pure()
+    ).from_result_t;
+
+    _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
+    _verify_server_finished = |handshakes, protection| (
+        let size = handshakes.get_size;
+        let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
+        let finished = handshakes.@(size - 1).@0.as_finished;
+        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_tk()).from_result_t;
+        eval log_debug("verify_data expected="+ verify_data.to_string_hex);
+        eval log_debug("verify_data actual  ="+ finished.@verify_data.to_string_hex);
+        if verify_data != finished.@verify_data {
+            error $ "verify_data mismatch"
+        };
+        pure $ ()
+    );
+}
+
+type ServerParams = unbox struct {
+    server_hello: ServerHello,
+    handshakes: Array Handshake, // EncryptedExceptions, [CertificateRequest], Certificate, CertificateVerify, Finished
+};
+
+namespace ServerParams {
+    make: ServerHello -> Array Handshake -> ServerParams;
+    make = |server_hello, handshakes| ServerParams {
+        server_hello: server_hello,
+        handshakes: handshakes
+    };
+
+    get_certificates: ServerParams -> Array (Array U8);
+    get_certificates = |params| (
+        let opt = params.@handshakes.to_iter.filter(is_certificate).get_first;
+        if opt.is_none { [] };
+        let cert: Certificate = opt.as_some.as_certificate;
+        cert.@certificate_list.map(@cert_data)
+    );
+}
+
+type AfterFinished = unbox struct {
+    init_param: HandshakeInitParam,
+    protection: Protection,
+    server_params: ServerParams,
+    records_to_send: Array TLSRecord,
+    appdata_received: Array U8,
+};
+
+impl AfterFinished: ToString {
+    to_string = |obj| "AfterFinished {}";
+}
+
+namespace AfterFinished {
+    make: [m: MonadError] HandshakeInitParam -> Protection -> ServerParams -> m AfterFinished;
+    make = |init_param, protection, server_params| (
+        let (client_finished_handshake_bytes, ciphertext, protection) = *_make_client_finished(protection).from_result_t;
+        let records_to_send = [
+            ciphertext.to_record
+        ];
+        // NOTE: now handshake_context = ClientHello...server Finished
+        let protection = *protection.init_appdata.from_result_t;
+
+        let protection = protection.add_handshake_context(client_finished_handshake_bytes);
+        // NOTE: now handshake_context = ClientHello...client Finished
+        let protection = *protection.init_after_client_finished.from_result_t;
+
+        pure $ AfterFinished {
+            init_param: init_param,
+            protection: protection,
+            server_params: server_params,
+            records_to_send: records_to_send,
+            appdata_received: [],
+        }
+    );
+
+    get_certificates: AfterFinished -> Array (Array U8);
+    get_certificates = @server_params >> get_certificates;
+
+    _make_client_finished: Protection -> Result ErrMsg (Array U8, TLSCiphertext, Protection);
+    _make_client_finished = |protection| (
+        let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::client_tk());
+        let client_finished = Finished { verify_data: verify_data };
+        let handshake = Handshake::finished $ client_finished;
+        let handshake_bytes = marshal_to_bytes(handshake);
+        // TODO: client Certificate, CerfiticateVerify?
+        let inner_plaintext = TLSInnerPlaintext::make(
+            handshake_bytes,
+            ContentType::handshake(),
+            0
+        );
+        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_tk());
+        pure $ (handshake_bytes, ciphertext, protection)
+    );
+
+    pop_records_to_send: [m: MonadError] AfterFinished -> m (Array TLSRecord, HandshakeState);
+    pop_records_to_send = |after_finished| (
+        pure $ (
+            after_finished.@records_to_send,
+            HandshakeState::after_finished $ after_finished.set_records_to_send([])
+        )
+    );
+
+    _push_record_to_send: [m: MonadError] Array U8 -> ContentType -> AfterFinished -> m HandshakeState;
+    _push_record_to_send = |content, content_type, after_finished| (
+        // TODO: need to split large records?
+        let inner_plaintext = TLSInnerPlaintext::make(
+            content,
+            content_type,
+            0
+        );
+        let protection = after_finished.@protection;
+        let (ciphertext, protection) = *protection.encrypt_record(inner_plaintext, TrafficKeyType::client_tk()).from_result_t;
+        let after_finished = after_finished.set_protection(protection);
+        let after_finished = after_finished.mod_records_to_send(push_back(
+            ciphertext.to_record
+        ));
+        pure $ HandshakeState::after_finished $ after_finished
+    );
+
+    send_appdata: [m: MonadError] Array U8 -> AfterFinished -> m HandshakeState;
+    send_appdata = |appdata, after_finished| (
+        after_finished._push_record_to_send(appdata, ContentType::application_data())
+    );
+
+    pop_appdata_received: [m: MonadError] AfterFinished -> m (Array U8, HandshakeState);
+    pop_appdata_received = |after_finished| (
+        pure $ (
+            after_finished.@appdata_received,
+            HandshakeState::after_finished $ after_finished.set_appdata_received([])
+        )
+    );
+
+    on_recv_record: [m: MonadError] TLSRecord -> AfterFinished -> m HandshakeState;
+    on_recv_record = |record, after_finished| (
+        eval log_debug("AfterFinished::on_recv_record");
+        let protection = after_finished.@protection;
+        let (inner_plaintext, protection) = *protection.decrypt_record(record.to_ciphertext, TrafficKeyType::server_tk()).from_result_t;
+        let after_finished = after_finished.set_protection(protection);
+        if inner_plaintext.@content_type.is_handshake {
+            let handshakes = *inner_plaintext.split_handshakes.from_result_t;
+            eval log_debug("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
+            let after_finished = *handshakes.to_iter.fold_m(after_finished,
+                |after_finished, (handshake, handshake_bytes)| after_finished._handle_handshake(handshake)
+            );
+            // TODO: support KeyUpdate
+            eval log_debug("AfterFinished::on_recv_record end");
+            pure $ HandshakeState::after_finished $ after_finished
+        };
+        if inner_plaintext.@content_type.is_application_data {
+            eval log_debug("received application_data");
+            let after_finished = after_finished.mod_appdata_received(
+                append(inner_plaintext.@content)
+            );
+            eval log_debug("AfterFinished::on_recv_record end");
+            pure $ HandshakeState::after_finished $ after_finished
+        };
+
+        eval log_debug("unsupported content_type: " + inner_plaintext.@content_type.to_string);
+        pure $ HandshakeState::after_finished $ after_finished
+    );
+
+    _handle_handshake: [m: MonadError] Handshake -> AfterFinished ->  m AfterFinished;
+    _handle_handshake = |handshake, after_finished| (
+        eval log_debug("AfterFinished::_handle_handshake");
+        if handshake.is_new_session_ticket {
+            after_finished._handle_new_session_ticket(handshake.as_new_session_ticket)
+        };
+        if handshake.is_key_update {
+            after_finished._handle_key_update(handshake.as_key_update)
+        };
+        if handshake.is_certificate_request {
+            error $ "unexpected_message"
+        };
+        error $ "unexpected_message"
+    );
+
+    _handle_new_session_ticket: [m: MonadError] NewSessionTicket -> AfterFinished -> m AfterFinished;
+    _handle_new_session_ticket = |new_session_ticket, after_finished| (
+        eval log_debug("AfterFinished::_handle_new_session_ticket");
+        pure $ after_finished
+    );
+
+    _handle_key_update: [m: MonadError] KeyUpdate -> AfterFinished -> m AfterFinished;
+    _handle_key_update = |key_update, after_finished| (
+        if key_update.is_update_requested {
+            // Send KeyUpdate::update_not_requested with the old key
+            let key_update = KeyUpdate::update_not_requested();
+            let handshake: Handshake = Handshake::key_update $ key_update;
+            let handshake_bytes = marshal_to_bytes(handshake);
+            let hstate = *after_finished._push_record_to_send(handshake_bytes, ContentType::handshake());
+            let after_finished = hstate.as_after_finished;  // FIXME
+
+            // update both the server and client key
+            let protection = after_finished.@protection;
+            let protection = *protection.handle_key_update(TrafficKeyType::server_tk()).from_result_t;
+            let protection = *protection.handle_key_update(TrafficKeyType::client_tk()).from_result_t;
+            let after_finished = after_finished.set_protection(protection);
+
+            pure $ after_finished
+        };
+
+        if key_update.is_update_not_requested {
+            // Currently we don't send KeyUpdate::update_requested
+            error $ "unexpected_message"
+        };
+        error $ "unexpected_message"
+    );
+}

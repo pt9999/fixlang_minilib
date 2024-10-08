@@ -1,6 +1,4 @@
-# regexp.fix
-
-## module Minilib.Text.RegExp
+# Module Minilib.Text.RegExp (regexp.fix)
 
 Simple regular expression.
 
@@ -21,7 +19,7 @@ Non-ASCII characters (U+0080..U+10FFFF) are encoded to two or more bytes in UTF-
 And the null character (U+0000) cannot be used in Fix strings.
 
 
-### type RegExp
+### `type RegExp`
 
 Type of a compiled regular expression.
 
@@ -31,15 +29,15 @@ type RegExp = unbox struct {
     nfa: NFA
 };
 ```
-### namespace RegExp
+## `namespace RegExp`
 
-#### compile: String -> String -> Result ErrMsg RegExp;
+### `compile: String -> String -> Result ErrMsg RegExp;`
 
 `RegExp::compile(pattern, flags)` compiles `pattern` into a regular expression.
 `flags` change behavior of regular expression matching.
 Currently only global flag (`"g"`) is supported.
 
-#### match: String -> RegExp -> Result ErrMsg (Array String);
+### `match: String -> RegExp -> Result ErrMsg (Array String);`
 
 `regexp.match(target)` matches `target` against `regexp`.
 
@@ -68,7 +66,7 @@ If the match against the regular expression fails, an error `"NotMatch"` is repo
 This function is similar to [String.match()](https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/String/match)
 function of JavaScript.
 
-#### match_all: String -> RegExp -> Array (Array String);
+### `match_all: String -> RegExp -> Array (Array String);`
 
 `regexp.match_all(target)` matches `target` against `regexp`.
 All matching results will be returned including captured groups.
@@ -78,7 +76,7 @@ If the match against the regular expression fails, an empty array is returned.
 This function is similar to [String.matchAll()](https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/String/matchAll)
 function of JavaScript.
 
-#### replace_all: String -> String -> RegExp -> String;
+### `replace_all: String -> String -> RegExp -> String;`
 
 `regexp.replace_all(target, replacement)` matches `target` against `regexp`,
 and replace all matching substrings with `replacement`.

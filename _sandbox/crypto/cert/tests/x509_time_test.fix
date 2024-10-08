@@ -1,0 +1,98 @@
+module Main;
+
+
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_get_now: TestCase;
+test_get_now = (
+    make_test("test_get_now") $ |_|
+    let now = *X509Time::get_now.lift;
+    eval *eprintln(now.to_string).lift;
+    pure()
+);
+
+test_from_generalized_time_string: TestCase;
+test_from_generalized_time_string = (
+    make_table_test("test_from_generalized_time_string",
+        [
+            ("20240701123456Z", ok $ "2024-07-01T12:34:56.000000000Z"),
+            ("00010101000000Z", ok $ "0001-01-01T00:00:00.000000000Z"),
+            ("99991231235959Z", ok $ "9999-12-31T23:59:59.000000000Z"),
+            ("20240701123456.000Z", err $ "from_generalized_time_string: length mismatch: 20240701123456.000Z"),
+            ("202407011234560", err $ "from_generalized_time_string: invalid format: 202407011234560"),
+        ],
+        |(str, expected)|
+        let res = from_generalized_time_string(str);
+        let actual = res.map(to_string);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_to_generalized_time_string: TestCase;
+test_to_generalized_time_string = (
+    make_table_test("test_to_generalized_time_string",
+        [
+            ("20240701123456Z",),
+            ("00010101000000Z",),
+            ("99991231235959Z",),
+        ],
+        |(str,)|
+        let time: X509Time = *from_generalized_time_string(str).from_result;
+        let actual = time.to_generalized_time_string;
+        assert_equal("eq", str, actual)
+    )
+);
+
+test_from_utc_time_string: TestCase;
+test_from_utc_time_string = (
+    make_table_test("test_from_utc_time_string",
+        [
+            ("240701123456Z", ok $ "2024-07-01T12:34:56.000000000Z"),
+            ("010101000000Z", ok $ "2001-01-01T00:00:00.000000000Z"),
+            ("991231235959Z", ok $ "1999-12-31T23:59:59.000000000Z"),
+            ("500101000000Z", ok $ "1950-01-01T00:00:00.000000000Z"),
+            ("491231235959Z", ok $ "2049-12-31T23:59:59.000000000Z"),
+            ("240701123456.000Z", err $ "from_utc_time_string: length mismatch: 240701123456.000Z"),
+            ("2407011234560", err $ "from_utc_time_string: invalid format: 2407011234560"),
+        ],
+        |(str, expected)|
+        let res = from_utc_time_string(str);
+        let actual = res.map(to_string);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_x509time_compare: TestCase;
+test_x509time_compare = (
+    make_table_test("test_x509time_compare",
+        [
+            ("20240701123456Z", "20240701123456Z", true, false, true),
+            ("20240701123456Z", "20240701123457Z", false, true, true),
+            ("20240701123456Z", "20240701123455Z", false, false, false),
+        ],
+        |(a, b, expected_eq, expected_lt, expected_le)|
+        let a = *from_generalized_time_string(a).from_result;
+        let b = *from_generalized_time_string(b).from_result;
+        let actual_eq = (a == b);
+        let actual_lt = (a < b);
+        let actual_le = (a <= b);
+        eval *assert_equal("eq", expected_eq, actual_eq);
+        eval *assert_equal("lt", expected_lt, actual_lt);
+        eval *assert_equal("le", expected_le, actual_le);
+        pure()
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_get_now,
+        test_from_generalized_time_string,
+        test_to_generalized_time_string,
+        test_from_utc_time_string,
+        test_x509time_compare,
+    ]
+    .run_test_driver
+);

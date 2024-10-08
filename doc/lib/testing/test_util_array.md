@@ -1,18 +1,16 @@
-# test_util_array.fix
-
-## module Minilib.Testing.TestUtilArray
+# Module Minilib.Testing.TestUtilArray (test_util_array.fix)
 
 Array utility functions for testing.
 
-#### shuffle_array: Random -> Array a -> (Array a, Random);
+### `shuffle_array: Random -> Array a -> (Random, Array a);`
 
 Shuffles an array.
 
-#### skip_array: I64 -> Array a -> Array a;
+### `skip_array: I64 -> Array a -> Array a;`
 
 Make a skip array.
 
-### type Reorder
+### `type Reorder`
 
 How to reorder the elements of an array.
 
@@ -24,9 +22,9 @@ type Reorder = unbox union {
     shuffle: I64        // shuffle elements (argument: random seed)
 };
 ```
-#### `impl Reorder: ToString`
+### `impl Reorder: ToString`
 
-#### reorder: Reorder -> Array a -> Array a;
+### `reorder: Reorder -> Array a -> Array a;`
 
 Changes the order of elements in an array.
 

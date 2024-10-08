@@ -1,0 +1,163 @@
+module Minilib.Crypto.Cipher.Rsa.RSAPrivateKey;
+
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.Asn1DerEncode;
+import Minilib.Crypto.Cert.Pem;
+import Minilib.Crypto.Cert.X509; // AlgorithmIdentifier
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.FunctorM;
+
+read_rsa_private_key_from_pem_string: String -> Result ErrMsg RSAPrivateKey;
+read_rsa_private_key_from_pem_string = |contents| (
+    let private_key_info: PrivateKeyInfo = *read_private_key_info_from_pem_string(contents);
+    let algorithm: AlgorithmIdentifier = private_key_info.@privateKeyAlgorithm;
+    if !algorithm.match_name("rsaEncryption") {
+        err $ "invalid algorithm: " + algorithm.to_string
+    };
+    decode_der_from_bytes(private_key_info.@privateKey.to_bytes)
+);
+
+read_private_key_info_from_pem_string: String -> Result ErrMsg PrivateKeyInfo;
+read_private_key_info_from_pem_string = |contents| (
+    let entries = *parse_pem_entries(contents);
+    if entries.get_size != 1 { err $ "Not a single PEM entry" };
+    let entry = entries.@(0);
+    if entry.@label != "PRIVATE KEY" { err $ "Not a PRIVATE KEY" };
+    decode_der_from_bytes(entries.@(0).@bytes)
+);
+
+// RFC5208 (PKCS#8) 5.  Private-Key Information Syntax
+type PrivateKeyInfo = unbox struct {
+    version: I64,
+    privateKeyAlgorithm: AlgorithmIdentifier,
+    privateKey: Asn1::OctetString,
+    //attributes: Array Attribute,  // TODO: currently not supported
+};
+
+impl PrivateKeyInfo: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let version: I64 = *decode_obj;
+            pure $ PrivateKeyInfo {
+                version: version,
+                privateKeyAlgorithm: *decode_obj,
+                privateKey: *decode_obj,
+            }
+        }
+    );
+}
+
+// ASN.1 type `RSAPrivateKey` specified in RFC8017 "A.1.2. RSA Private Key Syntax"
+type RSAPrivateKey = unbox struct {
+    version: I64,
+    modulus: BigInt,            // n
+    publicExponent: BigInt,     // e
+    privateExponent: BigInt,    // d
+    prime1: BigInt,             // p
+    prime2: BigInt,             // q
+    exponent1: BigInt,          // d mod (p-1)
+    exponent2: BigInt,          // d mod (q-1)
+    coefficient: BigInt,        // (inverse of q) mod p
+    otherPrimeInfos: Array OtherPrimeInfo,
+};
+
+impl RSAPrivateKey: ToString {
+    to_string = |obj| (
+        "RSAPrivateKey {" +
+        " version=" + obj.@version.to_string +
+        " modulus=" + obj.@modulus.to_string +
+        " publicExponent=" + obj.@publicExponent.to_string +
+        " privateExponent=" + obj.@privateExponent.to_string +
+        " prime1=" + obj.@prime1.to_string +
+        " prime2=" + obj.@prime2.to_string +
+        " exponent1=" + obj.@exponent1.to_string +
+        " exponent2=" + obj.@exponent2.to_string +
+        " coefficient=" + obj.@coefficient.to_string +
+        " otherPrimeInfos=" + obj.@otherPrimeInfos.to_string +
+        " }"
+    );
+}
+
+impl RSAPrivateKey: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let version: I64 = *decode_obj;
+            pure $ RSAPrivateKey {
+                version: version,
+                modulus: *decode_obj,
+                publicExponent: *decode_obj,
+                privateExponent: *decode_obj,
+                prime1: *decode_obj,
+                prime2: *decode_obj,
+                exponent1: *decode_obj,
+                exponent2: *decode_obj,
+                coefficient: *decode_obj,
+                otherPrimeInfos: *if version == 0 {
+                    pure $ []
+                } else {
+                    decode_sequence_of $ decode_obj
+                }
+            }
+        }
+    );
+}
+
+impl RSAPrivateKey: EncodeDer {
+    encode_obj = |obj| (
+        encode_sequence $ do {
+            eval *encode_obj(obj.@version);
+            eval *encode_obj(obj.@modulus);
+            eval *encode_obj(obj.@publicExponent);
+            eval *encode_obj(obj.@privateExponent);
+            eval *encode_obj(obj.@prime1);
+            eval *encode_obj(obj.@prime2);
+            eval *encode_obj(obj.@exponent1);
+            eval *encode_obj(obj.@exponent2);
+            eval *encode_obj(obj.@coefficient);
+            eval *if obj.@version == 0 {
+                pure()
+            } else {
+                encode_sequence_of $ obj.@otherPrimeInfos.foreach_m(encode_obj)
+            };
+            pure()
+        }
+    );
+}
+
+type OtherPrimeInfo = unbox struct {
+    prime: BigInt,              // ri
+    exponent: BigInt,           // di
+    coefficient: BigInt,        // ti
+};
+
+impl OtherPrimeInfo: ToString {
+    to_string = |obj| (
+        "OtherPrimeInfo {" +
+        " prime=" + obj.@prime.to_string +
+        " exponent=" + obj.@exponent.to_string +
+        " coefficient=" + obj.@coefficient.to_string +
+        "}"
+    );
+}
+
+impl OtherPrimeInfo: DecodeDer {
+    decode_obj = (
+        pure $ OtherPrimeInfo {
+            prime: *decode_obj,
+            exponent: *decode_obj,
+            coefficient: *decode_obj,
+        }
+    );
+}
+
+impl OtherPrimeInfo: EncodeDer {
+    encode_obj = |obj| (
+        eval *encode_obj(obj.@prime);
+        eval *encode_obj(obj.@exponent);
+        eval *encode_obj(obj.@coefficient);
+        pure()
+    );
+}

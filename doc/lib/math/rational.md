@@ -1,10 +1,8 @@
-# rational.fix
-
-## module Minilib.Math.Rational
+# Module Minilib.Math.Rational (rational.fix)
 
 Rational number arithmetic, for example `1/2 + 1/3 = 5/6`.
 
-### type Rational
+### `type Rational`
 
 Rational number
 
@@ -14,36 +12,36 @@ type Rational a = unbox struct {
     den: a      // denominator
 };
 ```
-### namespace Rational
+## `namespace Rational`
 
-#### make: [a: Euclid] a -> a -> Rational a;
+### `make: [a: Euclid] a -> a -> Rational a;`
 
 `make(num, den)` creates a rational number `(num/den)`.
 Aborts if `den` is zero.
 
-#### rational: [a: Euclid] a -> a -> Rational a;
+### `rational: [a: Euclid] a -> a -> Rational a;`
 
 Synonym for `make`.
 
-#### reduce: [a: Euclid] Rational a -> Rational a;
+### `reduce: [a: Euclid] Rational a -> Rational a;`
 
 Reduces a rational number.
 
-#### `impl [a: Euclid, a: ToString] Rational a: ToString`
+### `impl [a: Euclid, a: ToString] Rational a: ToString`
 
-#### `impl [a: Euclid] Rational a: Eq`
+### `impl [a: Euclid] Rational a: Eq`
 
-#### `impl [a: Euclid, a: One] Rational a: Zero`
+### `impl [a: Euclid, a: One] Rational a: Zero`
 
-#### `impl [a: Euclid, a: One] Rational a: One`
+### `impl [a: Euclid, a: One] Rational a: One`
 
-#### `impl [a: Euclid] Rational a: Neg`
+### `impl [a: Euclid] Rational a: Neg`
 
-#### `impl [a: Euclid] Rational a: Add`
+### `impl [a: Euclid] Rational a: Add`
 
-#### `impl [a: Euclid] Rational a: Sub`
+### `impl [a: Euclid] Rational a: Sub`
 
-#### `impl [a: Euclid] Rational a: Mul`
+### `impl [a: Euclid] Rational a: Mul`
 
-#### `impl [a: Euclid] Rational a: Div`
+### `impl [a: Euclid] Rational a: Div`
 

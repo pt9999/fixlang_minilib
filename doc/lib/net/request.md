@@ -1,13 +1,11 @@
-# request.fix
-
-## module Minilib.Net.Request
+# Module Minilib.Net.Request (request.fix)
 
 HTTP request and response.
 - Parses HTTP request headers and query strings, POST data
 (currently only `application/x-www-form-urlencoded` is supported)
 - Writes response back to client
 
-### type Header
+### `type Header`
 
 A type that represents a header. The header is a tuple of field name and field value.
 Note that the field name is case-insensitive (RFC9112).
@@ -15,7 +13,7 @@ Note that the field name is case-insensitive (RFC9112).
 ```
 type Header = (String, String);
 ```
-### type Headers
+### `type Headers`
 
 A collection of headers.
 
@@ -24,36 +22,36 @@ type Headers = unbox struct {
     iter: Iterator Header
 };
 ```
-#### `impl Headers: ToString`
+### `impl Headers: ToString`
 
-### namespace Headers
+## `namespace Headers`
 
-#### empty: Headers;
+### `empty: Headers;`
 
 An empty collection of headers.
 
-#### set: String -> String -> Headers -> Headers;
+### `set: String -> String -> Headers -> Headers;`
 
 `headers.set(name, value)` sets the value of the field named `name` to `value`.
 The field name is converted to lowercase.
 If a field with the same name already exists, it will be removed first.
 
-#### append: String -> String -> Headers -> Headers;
+### `append: String -> String -> Headers -> Headers;`
 
 `headers.append(name, value)` appends a new field `(name, value)` to the current headers collection.
 The field name is converted to lowercase.
 It will not be removed even if a field with the same name already exists,
 
-#### find: String -> Headers -> Option String;
+### `find: String -> Headers -> Option String;`
 
 `headers.find(name)` finds the field with name `name`.
 The field name is converted to lowercase.
 
-#### to_iter: Headers -> Iterator (String, String);
+### `to_iter: Headers -> Iterator (String, String);`
 
 `headers.to_iter` returns an iterator of headers.
 
-### type Request
+### `type Request`
 
 A type that represents an HTTP request.
 
@@ -70,17 +68,17 @@ type Request = unbox struct {
     body: Array U8              // The body of the request
 };
 ```
-#### `impl Request: ToString`
+### `impl Request: ToString`
 
-### namespace Request
+## `namespace Request`
 
-#### parse: IOHandle -> String -> IOFail Request;
+### `parse: IOHandle -> String -> IOFail Request;`
 
 `Request::parse(connection, remote_addr)` reads the HTTP request from `connection` and parse it.
 
-#### find_query: String -> Request -> Option String;
+### `find_query: String -> Request -> Option String;`
 
-### type Response
+### `type Response`
 
 A type that represents an HTTP response.
 
@@ -95,38 +93,38 @@ type Response = unbox struct {
     headersSent: Bool           // true iff response headers are sent
 };
 ```
-### namespace Response
+## `namespace Response`
 
-#### make: Request -> Response;
+### `make: Request -> Response;`
 
 `Response::make(request)` creates a basic HTTP response for an HTTP request.
 
-#### status: I64 -> Response -> Response;
+### `status: I64 -> Response -> Response;`
 
 `response.status(code)` sets the HTTP status code. (eg. 404)
 It will also set the reason phrase (eg. "Not Found") of the status.
 
-#### content_type: String -> Response -> Response;
+### `content_type: String -> Response -> Response;`
 
 `response.content_type(type)` sets the `Content-Type` header.
 You can specify an alias for the content type (e.g. "text", "json").
 See the definition of `_CONTENT_TYPE_ALIASES` for a list of available aliases.
 
-#### header: String -> String -> Response -> Response;
+### `header: String -> String -> Response -> Response;`
 
 `response.header(name, value)` sets a response header.
 
-#### write_str: String -> Response -> IOFail Response;
+### `write_str: String -> Response -> IOFail Response;`
 
 `response.write_str(str)` sends headers with a status line if they have not already been sent.
 Then it sends the specified string.
 
-#### write_bytes: Array U8 -> Response -> IOFail Response;
+### `write_bytes: Array U8 -> Response -> IOFail Response;`
 
 `response.write_bytes(bytes)` sends headers with a status line if they have not already been sent.
 Then it sends the specified bytes.
 
-#### end: Response -> IOFail Response;
+### `end: Response -> IOFail Response;`
 
 Sends headers with a status line if they have not already been sent.
 Then flush the connection.

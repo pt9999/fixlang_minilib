@@ -8,12 +8,12 @@ clean:
 
 -include .depend
 
-#OPT_TOOLS = -O default
-OPT_TOOLS = -O separated
+#OPT_TOOLS = --opt-level default
+OPT_TOOLS = --opt-level separated
 
-#OPT_TESTS = -O default
-OPT_TESTS = -O separated
-#OPT_TESTS = -O minimum
+#OPT_TESTS = --opt-level default
+OPT_TESTS = --opt-level separated
+#OPT_TESTS = --opt-level minimum
 
 TOOLS = bin/fixautolink bin/fixautotest bin/fixdoc
 tools: $(TOOLS)
@@ -24,13 +24,16 @@ bin/fixautolink: tools/fixautolink.fix lib/encoding/binary.fix lib/io/file_syste
 	fix build -o $@ -f $^ $(OPT_TOOLS)
 
 bin/fixautotest: bin/fixautolink
-	bin/fixautolink build -o $@ -L ./lib -f tools/fixautotest.fix $(OPT_TOOLS)
+	bin/fixautolink build -o $@ -I ./lib -f tools/fixautotest.fix $(OPT_TOOLS)
 
 bin/fixdoc: bin/fixautolink
-	bin/fixautolink build -o $@ -L ./lib -f tools/fixdoc.fix $(OPT_TOOLS)
+	bin/fixautolink build -o $@ -I ./lib -f tools/fixdoc.fix $(OPT_TOOLS)
 
 test: bin/fixautotest
-	bin/fixautotest -L ./lib -T ./tests -k $(OPT_TESTS)
+	bin/fixautotest -I ./lib -T ./tests -k $(OPT_TESTS)
+
+test-crypto: bin/fixautotest
+	make -C _sandbox/crypto test
 
 document: bin/fixdoc
 	bin/fixdoc -i lib -o doc

@@ -1,10 +1,12 @@
 module Main;
 
-import Debug;
 
 import Minilib.Crypto.SHA256;
 import Minilib.Crypto.SecureRandom;
 import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+import Minilib.Monad.FunctorM;
 import Minilib.Text.Hex;
 
 type LessSecureRandom = unbox struct {
@@ -81,14 +83,10 @@ test2 = do {
     let sr = *SecureRandom::make;
     let print_line: StateT SecureRandom IOFail () = do {
         let bytes = *make_state_t_monad(generate_bytes(40));
-        let _ = *println(bytes.to_string_hex).lift.lift_state;
-        pure()
+        println(bytes.to_string_hex).lift_io
     };
-    let print_lines = Iterator::range(0, 20).fold_m(
-        (), |_, i|
-        print_line
-    );
-    print_lines.run_state_t(sr).map(|_| ())
+    let print_lines = Iterator::range(0, 20).foreach_m(|i| print_line);
+    print_lines.eval_state_t(sr)
 }.try(eprintln);
 
 main: IO ();

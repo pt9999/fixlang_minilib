@@ -1,0 +1,591 @@
+module Main;
+
+import Random;
+
+import Minilib.Math.BigNat;
+import Minilib.Math.BigInt;
+import Minilib.Math.BigIntPrime;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Thread.Time;
+
+namespace Karatsuba {
+
+    _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
+    _get_sub_or_zero = |begin, end, a| (
+        eval assert(|_| "invalid range", begin < end);
+        let n = a.get_size;
+        if begin >= n { BigNat::_zero };
+        let end = min(end, n);
+        if begin == 0 && end == n { a };
+        a.get_sub(begin, end)
+    );
+
+    // Calculates `a * b`.
+    _mul_karatsuba: Array U32 -> Array U32 -> Array U32;
+    _mul_karatsuba = |a, b| (
+        let thresh = 64;
+        if a.get_size <= thresh && b.get_size <= thresh {
+            _mul(a,b)
+        };
+        let n = max(a.get_size, b.get_size);
+        let m = (n + 1) / 2;
+        let a0 = a._get_sub_or_zero(0, m);
+        let a1 = a._get_sub_or_zero(m, n);
+        let b0 = b._get_sub_or_zero(0, m);
+        let b1 = b._get_sub_or_zero(m, n);
+        let z0 = _mul_karatsuba(a0, b0);
+        let z2 = _mul_karatsuba(a1, b1);
+        let z3 = _mul_karatsuba(_add(a1, a0), _add(b1, b0));
+        let z1 = _sub(_sub(z3, z2), z0);
+        let z = _add_with_offset1(z0, (z1,m));
+        let z = _add_with_offset1(z, (z2,2*m));
+        z
+    );
+
+
+    mul_karatsuba: BigInt -> BigInt -> BigInt;
+    mul_karatsuba = |a, b| (
+        let nat = _mul_karatsuba(a.@nat, b.@nat);
+        let nat = nat._remove_last_zeros;
+        BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
+
+/*
+namespace BigNatEx {
+    _bit_length: Array U32 -> U64;
+    _bit_length = |a| (
+        let a = a._remove_last_zeros;
+        let n = a.get_size;
+        let bit_length = n.to_U64 * _log2_base;
+        let d = a.@(n-1).to_U64;
+        loop(
+            (bit_length, _log2_base.to_I64 - 1), |(bit_length, i)|
+            if i < 0 { break $ bit_length };
+            if d.bit_and(1_U64.shift_left(i.to_U64)) != 0_U64 {
+                break $ bit_length
+            };
+            continue $ (bit_length - 1_U64, i - 1)
+        )
+    );
+
+    // Calculates `a^n`.
+    _pow_by_U64: Array U32 -> U64 -> Array U32;
+    _pow_by_U64 = |a, n| (
+        loop(
+            ([1_U32], a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
+            };
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                _mul(prod, a)
+            } else { prod };
+            continue $ (prod, _mul(a,a), n.shift_right(1_U64))
+        )
+    );
+
+    _shift_left: U64 -> Array U32 -> Array U32;
+    _shift_left = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, 0), |(a, carry, i)|
+            if i >= n {
+                break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_right(_log2_base - shift);
+            let d = d.shift_left(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i + 1)
+        );
+        if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+    );
+
+    _shift_right: U64 -> Array U32 -> Array U32;
+    _shift_right = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let a = if off == 0_U64 { a }
+        else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+        else { [0_U32] };
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, n-1), |(a, carry, i)|
+            if i < 0 {
+                break $ a
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_left(_log2_base - shift);
+            let d = d.shift_right(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i - 1)
+        );
+        a._remove_last_zeros
+    );
+}
+*/
+
+namespace Goldschmidt {
+
+    _add_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _add_exp = |a0, exp0, a1, exp1| (
+        if exp1 < exp0 { _add_exp(a1, exp1, a0, exp0) };
+        let dexp1 = exp1 - exp0;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
+        let a1 = _mul_u32(1_U64.shift_left(dexp1.to_U64).to_U32, a1);
+        let a2 = _add_with_offset1(a0, (a1, off1));
+        let exp2 = exp0;
+        (a2, exp2)
+    );
+
+    _sub_exp: Array U32 -> I64 -> Array U32 -> I64 -> Result ErrMsg (Array U32, I64);
+    _sub_exp = |a0, exp0, a1, exp1| (
+        if exp1 < exp0 {
+            let dexp0 = (exp0 - exp1).to_U64;
+            let (off0, dexp0) = _divmod_log2_base(dexp0);
+            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);      // TODO: is it ok to use just _shift_left?
+            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));     // TODO: use _signed_sub_with_offset
+            let exp2 = exp1 + off2 * _log2_base.to_I64;
+            pure $ (a2, exp2)
+        };
+        let dexp1 = (exp1 - exp0).to_U64;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);          // TODO: is it ok to use just _shift_left?
+        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.to_I64));
+        let exp2 = exp0 + off2 * _log2_base.to_I64;
+        pure $ (a2, exp2)
+    );
+
+    _mul_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _mul_exp = |a0, exp0, a1, exp1| (
+        let a2 = _mul(a0, a1);
+        (a2, exp0 + exp1)
+    );
+
+    _truncate_exp: Array U32 -> I64 -> U64 -> (Array U32, I64);
+    _truncate_exp = |a0, exp0, bit_length| (
+        let a0_bit_length = a0._bit_length;
+        if a0_bit_length <= bit_length { (a0, exp0) };
+        let shift = a0_bit_length - bit_length;
+        let a0 = a0._shift_right(shift);
+        let exp0 = exp0 + shift.to_I64;
+        (a0, exp0)
+    );
+
+
+    _goldschmidt: Array U32 -> Array U32 -> Result ErrMsg (Array U32);
+    _goldschmidt = |a, b| (
+        let a_bit_length = a._bit_length;
+        let b_bit_length = b._bit_length;
+        // scale a and b such that 0.5 <= b < 1
+        let b_exp = -b._bit_length.to_I64;         // exponent of 2
+        let a_exp = b_exp;
+        let (a, a_exp, b, b_exp) = *loop_m(
+            (a, a_exp, b, b_exp, 0), |(a, a_exp, b, b_exp, i)|
+            //eval debug_eprintln((i, (a,a_exp),(b,b_exp)).format("{}: a={} b={}"));
+            if i >= 100 {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            let (f, f_exp) = *_sub_exp([2_U32], 0, b, b_exp);
+            //eval debug_eprintln((f, f_exp).format("f=({},{})"));
+            let (a1, a1_exp) = _mul_exp(a, a_exp, f, f_exp);
+            let (b1, b1_exp) = _mul_exp(b, b_exp, f, f_exp);
+            //eval debug_eprintln((i, (a1,a1_exp),(b1,b1_exp)).format("{}: a1={} b1={}"));
+            let (a1, a1_exp) = _truncate_exp(a1, a1_exp, a_bit_length);
+            let (b1, b1_exp) = _truncate_exp(b1, b1_exp, b_bit_length);
+            if (b, b_exp) == (b1, b1_exp) {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            continue_m $ (a1, a1_exp, b1, b1_exp, i + 1)
+        );
+        let a = if a_exp >= 0 { a._shift_left(a_exp.to_U64) }
+        else { a._shift_right((-a_exp).to_U64) };
+        //eval debug_eprintln((a).format("_goldschmidt: result a={}"));
+        pure $ a._remove_last_zeros
+    );
+
+    // Calculates `a0 - a1`.
+    // returns the result and the sign.
+    _signed_sub: Array U32 -> Array U32 -> (Array U32, I64);
+    _signed_sub = |a0, a1| (
+        let res = _sub_with_offset((a0, 0), (a1, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, 1)
+        };
+        let res = _sub_with_offset((a1, 0), (a0, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, -1)
+        };
+        eval debug_eprintln("error: " + res.as_err);
+        undefined()
+    );
+
+    _divmod2: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod2 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        let (quo, rem, rem_sign) = *loop_m(
+            ([0_U32], a, 1), |(quo, a, a_sign)|
+            let q = *_goldschmidt(a, b);
+            let (rem, rem_sign) = _signed_sub(a, _mul(b, q));
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 { _add(quo, q) } else { _sub(quo, q) };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break_m $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue_m $ (quo, rem, rem_sign)
+        );
+        let (quo, rem) = if rem_sign > 0 || rem == BigNat::_zero {
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        };
+        pure $ (quo, rem)
+    );
+}
+
+namespace DivMod3 {
+    // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
+    // Returns err if the result is negative.
+    _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
+    _sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        if _cmp((a0, offset0), (a1, offset1)) < 0 {
+            err $ "underflow"
+        };
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let (a2, borrow) = loop(
+            (a2, offset2, 0_U64), |(a2, i, borrow)|
+            if i >= n0 && i >= n1  {
+                break $ (a2, borrow)
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d0: U64 = d0.to_U64;
+            let d1: U64 = d1.to_U64 + borrow;
+            let (borrow, d2) = if d0 >= d1 {
+                (0_U64, d0 - d1)
+            } else {
+                (1_U64, _base + d0 - d1)
+            };
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            eval assert(|_| "should not reach here", false);
+            err $ "underflow"
+        };
+        ok $ (a2, offset2)
+    );
+
+    // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_log2_base-1)*a]`.
+    _make_shift_table: Array U32 -> Array (Array U32);
+    _make_shift_table = |a| (
+        Iterator::range(0, _log2_base.to_I64).map(|shift|
+            let u32 = 1_U32.shift_left(shift.to_U32);
+            _mul_u32(u32, a)
+        ).to_array
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod3: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod3 = |a0, a1| (
+        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        let _debug: Lazy String -> () = |_| ();
+
+        let a0 = a0._remove_last_zeros;
+        let a1 = a1._remove_last_zeros;
+        eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
+        if a1.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a0, a1.@(0));
+            (quo, [rem])
+        };
+        let a1_shift_table = _make_shift_table(a1);
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
+        if n0 < n1 {
+            ([0_U32], a0)
+        };
+        let n2 = n0;
+        let a2 = Array::fill(n2, 0_U32);
+
+        // a0 = numerator, a1 = denominator
+        // calc quotient(a2) and reminder(a0)
+        let (a0, a2) = loop(
+            (a0, a2, n2 - 1), |(a0, a2, i)|
+            let offset0 = 0;
+            let offset1 = i - (n1 - 1);
+            if offset1 < 0 {
+                break $ (a0, a2)
+            };
+            eval _debug(|_| "(i)="+(i).to_string);
+            eval _debug(|_| "(a0)="+(a0).to_string);
+            eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
+            eval _debug(|_| "(a2)="+(a2).to_string);
+            let (a0, a2) = loop(
+                (a0, a2, _log2_base.to_I64 - 1), |(a0, a2, shift)|
+                if shift < 0 {
+                    break $ (a0, a2)
+                };
+                let d2 = 1_U32.shift_left(shift.to_U32);
+                //let d2_mul_a1 = _mul_u32(d2, a1);
+                let d2_mul_a1 = a1_shift_table.@(shift);
+                let (a3, offset3) = (d2_mul_a1, offset1);
+                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
+                let res = _sub_with_offset((a0, offset0), (a3, offset3));
+                if res.is_ok {
+                    let (a0, _) = res.as_ok;
+                    eval _debug(|_| "success: (a0)=" + (a0).to_string);
+                    let a2 = a2.mod(offset1, |x| x + d2);
+                    continue $ (a0, a2, shift - 1)
+                };
+                eval _debug(|_| "fail: (a0)=" + (a0).to_string);
+                continue $ (a0, a2, shift - 1)
+            );
+            let a0 = a0._remove_last_zeros;
+            continue $ (a0, a2, i - 1)
+        );
+        let a2 = a2._remove_last_zeros;
+        (a2, a0)
+    );
+
+}
+
+test_probable_prime: IO ();
+test_probable_prime = (
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stderr._file_ptr, nullptr];
+    let time = FFI_CALL[I32 time(Ptr), nullptr];
+    //let random = Random::init_by_seed(time.to_U64);
+    let random = Random::init_by_seed(123_U64);
+    let prime_gen = *PrimeGen::make(random, true);
+    loop_m(
+        128, |bit_length|
+        if bit_length > 1024 { break_m $ () };
+        let _ = *println("Searching a probable prime of " + bit_length.to_string + " bits...");
+        let (n, time) = *consumed_realtime_while_io(
+            prime_gen.probable_prime(bit_length)
+        );
+        let _ = *println(n.to_string);
+        let _ = *println("time="+time.to_string);
+        continue_m $ bit_length + 128
+    )
+);
+
+test_karatsuba: IO ();
+test_karatsuba = (
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let time = FFI_CALL[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random,false);
+    let bits = 8192;   //1024;
+    let a = *prime_gen.generate_bigint(bits);
+    let b = *prime_gen.generate_bigint(bits);
+    let _ = *timeit("a*b", |_| a*b);
+    let _ = *timeit("mul_karatsuba(a,b)", |_| mul_karatsuba(a,b));
+    eval assert(|_| "not eq", a*b == mul_karatsuba(a,b));
+    pure()
+);
+
+test_divmod: IO ();
+test_divmod = (
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let time = FFI_CALL[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 512;
+    let prime_gen = *PrimeGen::make(random,false);
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
+    let _ = *timeit("divmod(a,b)", |_| divmod(a,b));
+    pure()
+);
+
+test_exp: IO ();
+test_exp = (
+    let _ = *pure();
+    let a = [1_U32];
+    let b = [1_U32];
+    let _ = *notimeit("_add_exp((a,2),(b,-1))", |_| _add_exp((a,2),(b,-1)));
+    let _ = *notimeit("_add_exp((a,2),(b,1))", |_| _add_exp((a,2),(b,1)));
+    let _ = *notimeit("_sub_exp((a,2),(b,-1))", |_| _sub_exp((a,2),(b,-1)));
+    let _ = *notimeit("_sub_exp((a,-1),(b,2))", |_| _sub_exp((a,-1),(b,2)));
+    pure()
+);
+
+test_shift_right: IO ();
+test_shift_right = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 128;
+    let iter = Iterator::generate(random, generate_bigint(bits) >> some).take(3);
+    iter.fold_m(
+        (), |_, a|
+        [1, 3, 31, 32, 33].map(I64::to_U64).to_iter.fold_m(
+            (), |_, shift|
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_left(shift));
+            let c = a * n;
+            let _ = *println(b.to_string).lift;
+            let _ = *assert_equal("left", c, b);
+
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_right(shift));
+            let c = a / n;
+            let _ = *println(b.to_string).lift;
+            let _ = *assert_equal("right", c, b);
+            pure()
+        )
+    ).try(eprintln)
+);
+
+test_divmod2: IO ();
+test_divmod2 = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
+    let bits = 256;
+    loop_m(
+        (random, 0), |(random, i)|
+        if i >= 10 { break_m $ () };
+        let a = *prime_gen.generate_bigint(2*bits).lift;
+        let b = *prime_gen.generate_bigint(bits).lift;
+        /*
+        let (quo1, rem1) = _divmod(a.@nat, b.@nat);
+        let (quo2, rem2) = *_divmod2(a.@nat, b.@nat).from_result;
+        let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
+        let _ = *println((quo2, rem2).format("quo2={} rem2={}")).lift;
+        */
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
+        let (quo2, rem2) = *timeit("(quo2, rem2)", |_| _divmod2(a.@nat, b.@nat).as_ok).lift;
+        let _ = *assert_equal("quo", quo1, quo2);
+        let _ = *assert_equal("rem", rem1, rem2);
+        continue_m $ (random, i + 1)
+    ).try(eprintln)
+);
+
+prof_divmod2: IO ();
+prof_divmod2 = (
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
+    let bits = 256;
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
+    let _ = loop(
+        0, |i|
+        if i >= 1000000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = _divmod2(a.@nat, b.@nat).as_ok;
+        continue $ i + 1
+    );
+    pure()
+);
+
+test_divmod3: IO ();
+test_divmod3 = (
+    let _ = *pure();
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
+    let bits = 256;
+    loop_m(
+        (random, 0), |(random, i)|
+        if i >= 10 { break_m $ () };
+        let a = *prime_gen.generate_bigint(2*bits).lift;
+        let b = *prime_gen.generate_bigint(bits).lift;
+        /*
+        let (quo1, rem1) = _divmod(a.@nat, b.@nat);
+        let (quo3, rem3) = *_divmod3(a.@nat, b.@nat).from_result;
+        let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
+        let _ = *println((quo3, rem3).format("quo3={} rem3={}")).lift;
+        */
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
+        let (quo3, rem3) = *timeit("(quo3, rem3)", |_| _divmod3(a.@nat, b.@nat)).lift;
+        let _ = *assert_equal("quo", quo1, quo3);
+        let _ = *assert_equal("rem", rem1, rem3);
+        continue_m $ (random, i + 1)
+    ).try(eprintln)
+);
+
+prof_divmod3: IO ();
+prof_divmod3 = (
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let prime_gen = *PrimeGen::make(random, false);
+    let bits = 256;
+    let a = *prime_gen.generate_bigint(2*bits);
+    let b = *prime_gen.generate_bigint(bits);
+    let _ = loop(
+        0, |i|
+        if i >= 1000000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = _divmod3(a.@nat, b.@nat);
+        continue $ i + 1
+    );
+    pure()
+);
+
+
+test_perf_div: IO ();
+test_perf_div = (
+    Iterator::range(0, 10).fold_m(
+        (), |_, i|
+        let prec10 = (i+1) * 1000;
+        let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let random = Random::init_by_seed(123_U64); // time.to_U64);
+        let prime_gen = *PrimeGen::make(random, false);
+        let a = *prime_gen.generate_bigint(2*bits);
+        let b = *prime_gen.generate_bigint(bits);
+        let _ = *timeit("_divmod: prec10="+prec10.to_string, |_|
+                    let c = _divmod(a.@nat, b.@nat);      // currently the cost of `_divmod` is O(n^3)
+                    ());
+        let _ = *timeit("_divmod2: prec10="+prec10.to_string, |_|
+                    let c = _divmod2(a.@nat, b.@nat);      // goldschmidt is about O(n^2)
+                    ());
+        pure()
+    )
+);
+
+test_perf_karatsuba: IO ();
+test_perf_karatsuba = (
+    Iterator::range(0, 50).fold_m(
+        (), |_, i|
+        let prec10 = (i+1) * 1000;
+        let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let random = Random::init_by_seed((321 + i * 13).to_U64); // time.to_U64);
+        let prime_gen = *PrimeGen::make(random, false);
+        let a = *prime_gen.generate_bigint(bits);
+        let b = *prime_gen.generate_bigint(bits);
+        let _ = *timeit("mul:           prec10="+prec10.to_string, |_|
+                    let c = mul(a, b);
+                    ());
+        let _ = *timeit("mul_karatsuba: prec10="+prec10.to_string, |_|
+                    let c = mul_karatsuba(a, b);
+                    ());
+        pure()
+    )
+);
+
+main: IO ();
+//main = test_probable_prime;
+main = test_karatsuba;
+

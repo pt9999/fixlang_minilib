@@ -1,22 +1,23 @@
 module Main;
 
-import Debug;
 import Random;
 
 help_message: String;
 help_message = (
     "A simple math game. A lot of numbers will appear on the screen. \r\n" +
     "Find a sequence of three numbers in the form `a + b = c mod 10` or `a = b + c mod 10`,\r\n" +
-    "move the cursor to the middle number and press the spacebar.\r\n" +
-    "For example, if you find the sequence of numbers `541`, move the cursor over `4` and press the space bar.\r\n" +
-    "To quit the game, type `Q`.\r\n" +
+    "move the cursor to the middle number and press the SPACE key.\r\n" +
+    "For example, if you find the sequence of numbers `541`, move the cursor over `4` and press the SPACE key.\r\n" +
+    "To move the cursor, press `H`, `J`, `K`, `L` keys (same as vi command).\r\n" +
+    "To quit the game, press `Q` key.\r\n" +
     "Press any key to start the game.\r\n" +
     "\r\n" +
     "シンプルな算数ゲームです。画面にたくさんの数字が表示されます。\r\n" +
     "3つの数字の並びで、`a + b = c mod 10` または `a = b + c mod 10`の形になっているものを探し、\r\n" +
     "中央の数字にカーソルを移動してスペースキーを押して下さい。\r\n" +
     "例えば、`541`という数字の並びを見つけた場合、`4`の上にカーソルを移動してスペースキーを押してください。\r\n" +
-    "ゲームを終了する場合は `Q` を入力してください。\r\n" +
+    "カーソルの移動には `H`, `J`, `K`, `L` キーを押してください(viコマンドと同じです)。\r\n" +
+    "ゲームを終了する場合は `Q` キーを押してください。\r\n" +
     "なにかキーを入力するとゲームが始まります。\r\n"
 );
 
@@ -33,7 +34,7 @@ type Board = unbox struct {
 namespace Board {
     make: I64 -> I64 -> Board;
     make = |width, height| (
-        let time = CALL_C[I32 time(Ptr), nullptr];
+        let time = FFI_CALL[I32 time(Ptr), nullptr];
         let random = Random::init_by_seed(time.to_U64);
         let data = Array::fill(width * height, '0');
         let board = Board {
@@ -55,10 +56,10 @@ namespace Board {
             if i >= board.@width * board.@height {
                 break $ board
             };
-            let (x, random) = board.@random.generate_U64;
+            let (random, x) = board.@random.generate_U64;
             let board = board.set_random(random);
             let c = '0' + (x % 10_U64).to_U8;
-            let board = board.mod_data(set(i, c)); 
+            let board = board.mod_data(set(i, c));
             continue $ (board, i + 1)
         )
     );
@@ -89,12 +90,12 @@ namespace Board {
     set_ch = |x, y, c, board| (
         board.mod_data(set(y * board.@width + x, c))
     );
-    
+
     sleep: F64 -> IO ();
     sleep = |sec| (
         let _ = *pure();
         let usec = (sec * 1000000.0).to_U32;
-        eval CALL_C[() usleep(U32), usec];
+        eval FFI_CALL[() usleep(U32), usec];
         pure()
     );
 
@@ -111,7 +112,7 @@ namespace Board {
             );
             print(line.push_back(0_U8)._unsafe_from_c_str)
         );
-        let _ = *println(Terminal::cursor(0, board.@height) + "Q:Quit HJKL:move SPC:bomb");
+        let _ = *println(Terminal::cursor(0, board.@height) + "Q:Quit HJKL:Move SPACE:Bomb");
         let _ = *println(Terminal::cursor(0, board.@height + 1) + "Score: " + board.@score.to_string);
         let _ = *print(Terminal::cursor(board.@px, board.@py));
         Terminal::flush
@@ -178,7 +179,7 @@ namespace Board {
             let _ = *board.show;
             let _ = *sleep(0.1);
             continue_m $ (board, y - 1)
-        ); 
+        );
         /*
         let board = board.set_random_ch(px - 1, 0)
                          .set_random_ch(px,     0)
@@ -208,8 +209,8 @@ namespace Terminal {
     flush: IO ();
     flush = (
         let _ = *pure();
-        let res = CALL_C[I32 fflush(Ptr), stdout._file_ptr];
-        pure() 
+        let res = FFI_CALL[I32 fflush(Ptr), stdout._file_ptr];
+        pure()
     );
 
     // `Terminal::input_keyboard` is an IOFail monad to input a character from the keyboard.
@@ -231,8 +232,8 @@ namespace Terminal {
     with_raw_mode: IO () -> IO ();
     with_raw_mode = |io| (
         let raw_mode = *RawMode::make;
-        let _ = *io;
-        eval raw_mode;
+        eval *io;
+        let _ = raw_mode;
         pure()
     );
 }
@@ -246,27 +247,27 @@ namespace RawMode {
     make:  IO RawMode;
     make = (
         let _ = *pure();
-        let stdin_fileno: I32 = 
-            CALL_C[I32 fileno(Ptr), IO::stdin._file_ptr];
+        let stdin_fileno: I32 =
+            FFI_CALL[I32 fileno(Ptr), IO::stdin._file_ptr];
         let _ = *eprintln("stdin_fileno="+stdin_fileno.to_string);
         let old_ios = Array::fill(120, 0_U8);
         let res = old_ios.borrow_ptr(|p_old_ios|
-             CALL_C[I32 tcgetattr(I32, Ptr), 0_I32, p_old_ios]
-        );        
-        eval assert(|_| "tcgetattr failed: res="+res.to_string, res == 0_I32); 
+             FFI_CALL[I32 tcgetattr(I32, Ptr), 0_I32, p_old_ios]
+        );
+        eval assert(|_| "tcgetattr failed: res="+res.to_string, res == 0_I32);
         let ios = Array::fill(120, 0_U8);
         let res = ios.borrow_ptr(|p_ios|
-             eval CALL_C[() cfmakeraw(Ptr), p_ios];
-             CALL_C[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_ios]
-        );        
+             eval FFI_CALL[() cfmakeraw(Ptr), p_ios];
+             FFI_CALL[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_ios]
+        );
         eval assert(|_| eval _perror("tcsetattr"); "tcsetattr failed: res="+res.to_string, res == 0_I32);
-        
+
         let dtor = Destructor::make((), |_|
             // eval debug_eprintln ("destructor is called");
             let res = old_ios.borrow_ptr(|p_old_ios|
-                 CALL_C[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_old_ios]
-            );        
-            eval assert(|_| "tcsetattr failed: res="+res.to_string, res == 0_I32); 
+                 FFI_CALL[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_old_ios]
+            );
+            eval assert(|_| "tcsetattr failed: res="+res.to_string, res == 0_I32);
             ()
         );
         pure $ RawMode { dtor: dtor }
@@ -275,7 +276,7 @@ namespace RawMode {
     _perror: String -> ();
     _perror = |name| (
         eval name.borrow_c_str(|p_name|
-            CALL_C[() perror(Ptr), p_name]
+            FFI_CALL[() perror(Ptr), p_name]
         );
         ()
     );

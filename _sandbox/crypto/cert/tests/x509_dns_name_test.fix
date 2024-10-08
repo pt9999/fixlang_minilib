@@ -1,0 +1,73 @@
+module Main;
+
+
+import Minilib.Crypto.Cert.X509DnsName;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_match_domain_name_component: TestCase;
+test_match_domain_name_component = (
+    make_table_test("test_match_dns_name",
+        [
+            ("", "", true),
+            ("", "a", false),
+            ("a", "", false),
+            ("a", "a", true),
+            ("ab", "a", false),
+            ("a", "ab", false),
+            ("ab", "ab", true),
+
+            ("*", "", true),
+            ("*", "a", true),
+            ("*", "ab", true),
+            ("ab", "*", false),
+
+            ("a*", "", false),
+            ("a*", "a", true),
+            ("a*", "abc", true),
+            ("a*", "bcd", false),
+
+            ("*abra", "abracadabra", true),
+            ("**ex**am***e***", "example", true),
+        ],
+        |(pattern, target, expected)|
+        let actual = match_domain_name_component(pattern, target);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_match_dns_name: TestCase;
+test_match_dns_name = (
+    make_table_test("test_match_dns_name",
+        [
+            ("", "", true),
+            ("", "a", false),
+            ("a", "a", true),
+            ("com", "a.com", false),
+            ("a.com", "a.com", true),
+            ("example.com", "example.com", true),
+            ("ex*.com", "example.com", true),
+            ("ex*ple.com", "example.com", true),
+            ("example.com", "EXAMPLE.COM", true),
+            ("example.com", "example..com", false),
+            ("example.com", "www.example.com", false),
+            ("example.com", "www.sub.example.com", false),
+            ("*.example.com", "www.example.com", true),
+            ("*.example.com", "www.sub.example.com", false),
+            ("*.*.example.com", "www.example.com", false),
+            ("*.*.example.com", "www.sub.example.com", true),
+        ],
+        |(pattern, target, expected)|
+        let actual = match_dns_name(pattern, target);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_match_domain_name_component,
+        test_match_dns_name,
+    ]
+    .run_test_driver
+);

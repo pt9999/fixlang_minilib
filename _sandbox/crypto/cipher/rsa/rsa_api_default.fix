@@ -1,0 +1,132 @@
+module Minilib.Crypto.Cipher.Rsa.RsaApiDefault;
+
+import Minilib.Crypto.Cipher.Rsa.RsaApi;
+import Minilib.Crypto.Cipher.Rsa.Pkcs1;
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Random;
+
+make_rsa_api: Result ErrMsg RsaApi;
+make_rsa_api = (
+    pure $ RsaApi {
+        rsassa_pss_sign: _rsassa_pss_sign,
+        rsassa_pss_verify: _rsassa_pss_verify,
+        rsassa_pkcs1_v1_5_sign: _rsassa_pkcs1_v1_5_sign,
+        rsassa_pkcs1_v1_5_verify: _rsassa_pkcs1_v1_5_verify,
+    }
+);
+
+_rsassa_pss_sign: RsaHashName -> RsaPrivateKey -> RsaSigMessage -> FreeRandom (Result ErrMsg (RsaSignature));
+_rsassa_pss_sign = |hash_name, private_key, sig_message| (
+    // Currently `FreeRandom (Result ErrMsg a)` is not a monad transformer,
+    // so we must handle Result monad here
+    let res = _find_emsa_pss_options(hash_name);
+    if res.is_err { pure $ err $ res.as_err };
+    let options = res.as_ok;
+    let salt = *generate_random_bytes(options.@sLen);
+    let res = do {
+        let (n, d) = *_decode_private_key(private_key);
+        rsassa_pss_sign((n, d), sig_message, salt, options)
+    };
+    pure $ res
+);
+
+_rsassa_pss_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+_rsassa_pss_verify = |hash_name, public_key, sig_message, signature| (
+    let (n, e) = *_decode_public_key(public_key);
+    let options = *_find_emsa_pss_options(hash_name);
+    rsassa_pss_verify((n, e), sig_message, signature, options)
+);
+
+_rsassa_pkcs1_v1_5_sign: RsaHashName -> RsaPrivateKey -> RsaSigMessage -> Result ErrMsg (RsaSignature);
+_rsassa_pkcs1_v1_5_sign = |hash_name, private_key, sig_message| (
+    let (n, d) = *_decode_private_key(private_key);
+    let options = *_find_emsa_pkcs1_options(hash_name);
+    rsassa_pkcs1_v1_5_sign((n, d), sig_message, options)
+);
+
+_rsassa_pkcs1_v1_5_verify: RsaHashName -> RsaPublicKey -> RsaSigMessage -> RsaSignature -> Result ErrMsg ();
+_rsassa_pkcs1_v1_5_verify = |hash_name, public_key, sig_message, signature| (
+    let (n, e) = *_decode_public_key(public_key);
+    let options = *_find_emsa_pkcs1_options(hash_name);
+    rsassa_pkcs1_v1_5_verify((n, e), sig_message, signature, options)
+);
+
+_decode_public_key: RsaPublicKey -> Result ErrMsg (BigInt, BigInt);
+_decode_public_key = |public_key| (
+    let sm = do {
+        // ASN.1 type `RSAPublicKey` specified in RFC8017 "A.1.1. RSA Public Key Syntax", in DER encoding.
+        decode_sequence $ do {
+            let n: BigInt = *decode_obj;
+            let e: BigInt = *decode_obj;
+            pure $ (n, e)
+        }
+    };
+    sm.eval_der_decoder(public_key)
+);
+
+_decode_private_key: RsaPrivateKey -> Result ErrMsg (BigInt, BigInt);
+_decode_private_key = |private_key| (
+    let sm = do {
+        // ASN.1 type `RSAPrivateKey` specified in RFC8017 "A.1.2. RSA Private Key Syntax", in DER encoding.
+        decode_sequence $ do {
+            let version: I64 = *decode_obj;
+            let modulus: BigInt = *decode_obj;              // n
+            let publicExponent: BigInt = *decode_obj;       // e
+            let privateExponent: BigInt = *decode_obj;      // d
+            let prime1: BigInt = *decode_obj;               // p
+            let prime2: BigInt = *decode_obj;               // q
+            let exponent1: BigInt = *decode_obj;            // d mod (p-1)
+            let exponent2: BigInt = *decode_obj;            // d mod (q-1)
+            let coefficient: BigInt = *decode_obj;          // (inverse of q) mod p
+            let otherPrimeInfos = *if version == 0 {
+                pure $ []
+            } else {
+                decode_sequence_of $ do {
+                    let prime: BigInt = *decode_obj;    // ri
+                    let exponent: BigInt = *decode_obj;    // di
+                    let coefficient: BigInt = *decode_obj;    // ti
+                    pure $ (prime, exponent, coefficient)
+                }
+            };
+
+            // Currently we only use (n, d).
+            pure $ (modulus, privateExponent)   // (n, d)
+        }
+    };
+    sm.eval_der_decoder(private_key)
+);
+
+_find_emsa_pss_options: RsaHashName -> Result ErrMsg EmsaPssOptions;
+_find_emsa_pss_options = |hash_name| (
+    if hash_name == "sha256" {
+        pure $ Pkcs1::emsa_pss_options_sha256
+    };
+    if hash_name == "sha384" {
+        pure $ Pkcs1::emsa_pss_options_sha384
+    };
+    if hash_name == "sha512" {
+        pure $ Pkcs1::emsa_pss_options_sha512
+    };
+    err $ "unsupported hash: " + hash_name
+);
+
+_find_emsa_pkcs1_options: RsaHashName -> Result ErrMsg EmsaPkcs1Options;
+_find_emsa_pkcs1_options = |hash_name| (
+    if hash_name == "sha1" {
+        pure $ Pkcs1::emsa_pkcs1_options_sha1
+    };
+    if hash_name == "sha256" {
+        pure $ Pkcs1::emsa_pkcs1_options_sha256
+    };
+    if hash_name == "sha384" {
+        pure $ Pkcs1::emsa_pkcs1_options_sha384
+    };
+    if hash_name == "sha512" {
+        pure $ Pkcs1::emsa_pkcs1_options_sha512
+    };
+    err $ "unsupported hash: " + hash_name
+);

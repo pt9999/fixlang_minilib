@@ -1,10 +1,8 @@
-# functor_m.fix
-
-## module Minilib.Monad.FunctorM
+# Module Minilib.Monad.FunctorM (functor_m.fix)
 
 `map_m`, `foreach_m` for Array and Iterator.
 
-### trait FunctorM
+### `trait FunctorM`
 
 ```
 trait [f : *->*] f : FunctorM {
@@ -12,7 +10,7 @@ trait [f : *->*] f : FunctorM {
     foreach_m : [m : Monad] (a -> m ()) -> f a -> m ();
 }
 ```
-#### `impl Array: FunctorM`
+### `impl Array: FunctorM`
 
-#### `impl Iterator: FunctorM`
+### `impl Iterator: FunctorM`
 

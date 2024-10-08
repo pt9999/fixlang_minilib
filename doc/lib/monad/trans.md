@@ -1,8 +1,8 @@
-# trans.fix
+# Module Minilib.Monad.Trans (trans.fix)
 
-## module Minilib.Monad.Trans
+Trait for a monad transformer.
 
-### trait MonadTrans
+### `trait MonadTrans`
 
 Trait for a monad transformer.
 

@@ -1,6 +1,4 @@
-# png.fix
-
-## module Minilib.Media.Png
+# Module Minilib.Media.Png (png.fix)
 
 PNG image I/O.
 
@@ -10,46 +8,46 @@ How to use:
 2. Add `-d png -d z` option to `fix run` and `fix build` arguments.
 
 
-#### write_png_file: String -> Image -> IOFail ();
+### `write_png_file: String -> Image -> IOFail ();`
 
-#### write_png_to_memory: Image -> IOFail (Array U8);
+### `write_png_to_memory: Image -> IOFail (Array U8);`
 
-### type PngImageIO
+### `type PngImageIO`
 
 ```
 type PngImageIO = unbox struct {
     data: ByteBuffer
 };
 ```
-### namespace PngImageIO
+## `namespace PngImageIO`
 
-#### empty: PngImageIO;
+### `empty: PngImageIO;`
 
-#### get_width: PngImageIO -> I64;
+### `get_width: PngImageIO -> I64;`
 
-#### get_height: PngImageIO -> I64;
+### `get_height: PngImageIO -> I64;`
 
-#### get_warning_or_error: PngImageIO -> I64;
+### `get_warning_or_error: PngImageIO -> I64;`
 
-#### get_message: PngImageIO -> String;
+### `get_message: PngImageIO -> String;`
 
-#### set_version: I64 -> PngImageIO -> PngImageIO;
+### `set_version: I64 -> PngImageIO -> PngImageIO;`
 
-#### set_width: I64 -> PngImageIO -> PngImageIO;
+### `set_width: I64 -> PngImageIO -> PngImageIO;`
 
-#### set_height: I64 -> PngImageIO -> PngImageIO;
+### `set_height: I64 -> PngImageIO -> PngImageIO;`
 
-#### set_format: I64 -> PngImageIO -> PngImageIO;
+### `set_format: I64 -> PngImageIO -> PngImageIO;`
 
-#### set_flags: I64 -> PngImageIO -> PngImageIO;
+### `set_flags: I64 -> PngImageIO -> PngImageIO;`
 
-#### write_to_file: String -> Bool -> Array U8 -> I64 -> PngImageIO -> IOFail ();
+### `write_to_file: String -> Bool -> Array U8 -> I64 -> PngImageIO -> IOFail ();`
 
-#### write_to_memory:  Bool -> Array U8 -> I64 -> PngImageIO -> IOFail (Array U8);
+### `write_to_memory:  Bool -> Array U8 -> I64 -> PngImageIO -> IOFail (Array U8);`
 
-#### parse_format: String -> I64;
+### `parse_format: String -> I64;`
 
-### type DefPngImage
+### `type DefPngImage`
 
 `png_image` structure layout
 

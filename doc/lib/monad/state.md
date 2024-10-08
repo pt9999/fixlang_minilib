@@ -1,14 +1,12 @@
-# state.fix
-
-## module Minilib.Monad.State
+# Module Minilib.Monad.State (state.fix)
 
 State Monad which maintains a mutable state.
 
-### trait MonadState = Monad + MonadStateIF;
+### `trait MonadState = Monad + MonadStateIF;`
 
 A trait for the interface of generic state monads.
 
-### trait MonadStateIF
+### `trait MonadStateIF`
 
 A trait for generic state monads that manages the internal state.
 
@@ -22,11 +20,11 @@ trait [sm: * -> *] sm: MonadStateIF {
     put_state: (StateType sm) -> sm ();
 }
 ```
-#### mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();
+### `mod_state: [sm: MonadState] (StateType sm -> StateType sm) -> sm ();`
 
 A monad that modifies the current state with the specified function.
 
-### type StateT
+### `type StateT`
 
 State monad wraps a function from a initial state to a pair of a value and a final state.
 
@@ -35,62 +33,62 @@ type [m: *->*] StateT s m a = unbox struct {
     data: s -> m (s, a)
 };
 ```
-### type State
+### `type State`
 
 ```
 type State s a = StateT s Identity a;
 ```
-#### make_state_t_monad: [m: Monad] (s -> m (s, a)) -> StateT s m a;
+### `make_state_t_monad: [m: Monad] (s -> m (s, a)) -> StateT s m a;`
 
 Creates a StateT monad from a function.
 
-#### make_state_monad: (s -> (s, a)) -> State s a;
+### `make_state_monad: (s -> (s, a)) -> State s a;`
 
 Creates a State monad from a function.
 
-#### run_state_t: [m: Monad] s -> StateT s m a -> m (s, a);
+### `run_state_t: [m: Monad] s -> StateT s m a -> m (s, a);`
 
 Runs a StateT monad with the supplied initial state.
 
-#### run_state: s -> State s a -> (s, a);
+### `run_state: s -> State s a -> (s, a);`
 
 Runs a State monad with the supplied initial state.
 
-#### eval_state_t: [m: Monad] s -> StateT s m a -> m a;
+### `eval_state_t: [m: Monad] s -> StateT s m a -> m a;`
 
 Runs a StateT monad with the supplied initial state and return the final value, discarding the final state.
 
-#### eval_state: s -> State s a -> a;
+### `eval_state: s -> State s a -> a;`
 
 Runs a State monad with the supplied initial state and return the final value, discarding the final state.
 
-#### exec_state_t: [m: Monad] s -> StateT s m a -> m s;
+### `exec_state_t: [m: Monad] s -> StateT s m a -> m s;`
 
 Runs a StateT monad with the supplied initial state and return the final state, discarding the final value.
 
-#### exec_state: s -> State s a -> s;
+### `exec_state: s -> State s a -> s;`
 
 Runs a State monad with the supplied initial state and return the final state, discarding the final value.
 
-#### lift_state: [m: Monad] m a -> StateT s m a;
+### `lift_state: [m: Monad] m a -> StateT s m a;`
 
 Converts an underlying monad to a StateT monad.
 
-#### map_state_t: [m: Monad, n: Monad] (m (s, a) -> n (s, a)) -> StateT s m a -> StateT s n b;
+### `map_state_t: [m: Monad, n: Monad] (m (s, a) -> n (s, a)) -> StateT s m a -> StateT s n b;`
 
 Maps both the return value and final state.
 
-#### `impl [m: Monad] StateT s m: Functor`
+### `impl [m: Monad] StateT s m: Functor`
 
-#### `impl [m: Monad] StateT s m: Monad`
+### `impl [m: Monad] StateT s m: Monad`
 
-#### `impl [m: Monad] StateT s m: MonadStateIF`
+### `impl [m: Monad] StateT s m: MonadStateIF`
 
-#### `impl StateT s: MonadTrans`
+### `impl StateT s: MonadTrans`
 
-#### `impl [m: MonadError] StateT s m: MonadErrorIF`
+### `impl [m: MonadError] StateT s m: MonadErrorIF`
 
-#### `impl [m: MonadIO] StateT s m: MonadIOIF`
+### `impl [m: MonadIO] StateT s m: MonadIOIF`
 
-#### `impl [m: MonadIOFail] StateT s m: MonadIOFailIF`
+### `impl [m: MonadIOFail] StateT s m: MonadIOFailIF`
 

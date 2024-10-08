@@ -1,0 +1,190 @@
+// Type definitions and common functions for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.Types;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+namespace Tuple2 {
+    // `tuple2.map_0(f)` maps 0-th element of `tuple2` using `f`.
+    map_0: (a -> b) -> (a, c) -> (b, c);
+    map_0 = |f, (a, c)| (f(a), c);
+
+    map_1: (b -> c) -> (a, b) -> (a, c);
+    map_1 = |f, (a, b)| (a, f(b));
+}
+
+namespace Result {
+    // `res.map_res_0(f)` maps 0-th element of tuple2 of the result using `f`.
+    map_res_0: (a -> b) -> Result e (a, c) -> Result e (b, c);
+    map_res_0 = map_0 >> map;
+}
+
+marshal_to_bytes: [a: Marshal] a -> Array U8;
+marshal_to_bytes = |obj| (
+    let buf = ByteBuffer::empty(0, big_endian());
+    let buf = buf.marshal(obj);
+    buf.@array
+);
+
+unmarshal_from_bytes: [a: Unmarshal] Array U8 -> Result ErrMsg a;
+unmarshal_from_bytes = |bytes| (
+    let buf = ByteBuffer::make(bytes, big_endian());
+    let (a, buf) = *buf.unmarshal;
+    if buf.get_position != buf.get_size {
+        eval log_warn $ [buf.get_position, buf.get_size].format("unmarshal_from_bytes: position mismatch: {}, {}");
+        ok $ a
+    };
+    ok $ a
+);
+
+to_string_hex_limit: I64 -> Array U8 -> String;
+to_string_hex_limit = |max_size, bytes| (
+    if bytes.get_size > max_size { bytes.subarray(0, max_size).to_string_hex + "..." }
+    else { bytes.to_string_hex }
+);
+
+// 3. Presentation Language
+
+// 3.3 Numbers
+
+type U24 = unbox struct {
+    v: U32
+};
+
+namespace U24 {
+    to_U24: U32 -> U24;
+    to_U24 = |v| U24 { v: v.bit_and(0xFFFFFF_U32) };
+
+    to_U32: U24 -> U32;
+    to_U32 = |u24| u24.@v.bit_and(0xFFFFFF_U32);
+
+    to_I64: U24 -> I64;
+    to_I64 = |u24| u24.to_U32.to_I64;
+
+    // Gets U24 from the byte buffer at position `i`.
+    get_u24: I64 -> ByteBuffer -> U24;
+    get_u24 = |i, buf| (
+        eval assert(|_| "only big endian is supported", buf.@byte_order.is_big_endian);
+        let array = buf.@array;
+        array.get_u8_be(i).to_U32.shift_left(16_U32).bit_or(
+            array.get_u16_be(i + 1).to_U32
+        )
+        .to_U24
+    );
+
+    // Sets U24 into the byte buffer at position `i`.
+    set_u24: I64 -> U24 -> ByteBuffer -> ByteBuffer;
+    set_u24 = |i, val, buf| (
+        eval assert(|_| "only big endian is supported", buf.@byte_order.is_big_endian);
+        buf.mod_array(|array|
+            let val = val.to_U32;
+            array.set_u8_be(i, val.shift_right(16_U32).to_U8)
+                .set_u16_be(i + 1, val.to_U16)
+        )
+    );
+}
+
+impl U24: Marshal {
+    marshal = |val, buf| buf._marshal(set_u24, 3, val);
+}
+
+impl U24: Unmarshal {
+    unmarshal = |buf| buf._unmarshal(get_u24, 3);
+}
+
+trait a: GetByteSize {
+    get_byte_size: a -> I64;
+}
+
+impl U8: GetByteSize {
+    get_byte_size = |_| 1;
+}
+
+impl U16: GetByteSize {
+    get_byte_size = |_| 2;
+}
+
+impl U24: GetByteSize {
+    get_byte_size = |_| 3;
+}
+
+impl U32: GetByteSize {
+    get_byte_size = |_| 4;
+}
+
+impl [a: GetByteSize] Array a: GetByteSize {
+    get_byte_size = |arr| (
+        arr.to_iter.map(get_byte_size).fold(0, add)
+    );
+}
+
+// 3.4 Vectors
+
+namespace Vector {
+    marshal_fixed: [a: Marshal] Array a -> ByteBuffer -> ByteBuffer;
+    marshal_fixed = |vector, buf| (
+        let n = vector.get_size;
+        loop(
+            (buf, 0), |(buf, i)|
+            if i >= n { break $ buf };
+            let buf = buf.marshal(vector.@(i));
+            continue $ (buf, i + 1)
+        )
+    );
+
+    marshal_var_size: [a: Marshal, sz: Marshal] Array a -> (I64 -> sz) -> ByteBuffer -> ByteBuffer;
+    marshal_var_size = |vector, to_size, buf| (
+        let size_pos = buf.get_position;
+        let buf = buf.marshal(0.to_size);
+        let begin_pos = buf.get_position;
+        let buf = buf.marshal_fixed(vector);
+        let end_pos = buf.get_position;
+        let buf = buf.set_position(size_pos);
+        let buf = buf.marshal((end_pos - begin_pos).to_size);
+        let buf = buf.set_position(end_pos);
+        buf
+    );
+
+    unmarshal_fixed: [a: Unmarshal] I64 -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
+    unmarshal_fixed = |byte_size, buf| (
+        //eval if byte_size >= 4096 { log_debug("unmarshal_fixed: byte_size=" + byte_size.to_string) } else { () };
+        let begin_pos = buf.get_position;
+        loop(
+            (buf, []), |(buf, vector)|
+            let pos = buf.get_position;
+            if pos - begin_pos >= byte_size { break $ ok $ (vector, buf) };
+            //let (val, buf) = *buf.unmarshal;
+            // workaround for a stack overflow, since `loop_m` and `bind()` prevents the tail recursion
+            let res = buf.unmarshal;
+            if res.is_err { break $ err $ res.as_err };
+            let (val, buf) = res.as_ok;
+            let vector = vector.push_back(val);
+            continue $ (buf, vector)
+        )
+    );
+
+    unmarshal_var_size: [a: Unmarshal, sz: Unmarshal] (sz -> I64) -> ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
+    unmarshal_var_size = |from_size, buf| (
+        let (size, buf) = *buf.unmarshal;
+        let byte_size = size.from_size;
+        buf.unmarshal_fixed(byte_size)
+    );
+}
+
+// 4.1.2 ClientHello
+type ProtocolVersion = U16;
+
+// 4.2.7 Supported Groups
+type NamedGroup = U16;
+
+// 4.2.8.2. ECDHE Parameters
+type UncompressedPointRepresentation = Array U8;
+
+// 7.4. (EC)DHE Shared Secret Calculation
+type SharedSecret = Array U8;

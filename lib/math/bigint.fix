@@ -1,12 +1,12 @@
 // Arbitrary-precision integer.
 module Minilib.Math.BigInt;
 
-import Debug;
 import Math;
 
 import Minilib.Math.BigNat;
 import Minilib.Math.Types;
 import Minilib.Text.StringEx;
+import Minilib.Encoding.Binary;
 
 // Arbitrary-precision integer.
 type BigInt = unbox struct {
@@ -107,6 +107,13 @@ _bitand_I64: I64 -> BigInt -> I64;
 _bitand_I64 = |i64, a| (
     eval assert(|_| "invalid i64", 0 < i64 && i64 < BigNat::_base.to_I64);
     a.@nat.@(0).to_I64.bit_and(i64)
+);
+
+// Returns the bit length of `a.@nat`, ie. one plus the bit position of most significant `1`.
+// Returns 0 if `a` is zero.
+bit_length: BigInt -> U64;
+bit_length = |a| (
+    a.@nat._bit_length
 );
 
 // BigInt constant representing 1.
@@ -240,3 +247,51 @@ impl BigInt: Rem {
         rem
     );
 }
+
+impl BigInt: FromBytes {
+    from_bytes = |bytes| (
+        let u8_len = bytes.get_size;
+        if u8_len == 0 { ok $ zero };
+        let u32_len = (u8_len + 3) / 4;
+        let bytes = if 4 * u32_len == u8_len { bytes }
+        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+        let nat = Array::from_map(u32_len, |i|
+            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+        );
+        ok $ BigInt::make(1, nat)
+    );
+}
+
+// NOTE: Unneeded zeros might be placed at the beginning
+impl BigInt: ToBytes {
+    to_bytes = |a| (
+        eval assert(|_| "invalid sign", a.@sign >= 0);
+        let u32_len = a.@nat.get_size;
+        let u8_len = u32_len * 4;
+        let bytes = Array::fill(u8_len, 0_U8);
+        let bytes = Iterator::range(0, u32_len).fold(
+            bytes, |bytes, i|
+            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))    // big endian
+        );
+        bytes
+    );
+}
+
+// `repeat_by_BigInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+// `op` is an associative binary operation.
+repeat_by_BigInt: (a -> a -> a) -> a -> a -> BigInt -> a;
+repeat_by_BigInt = |op, x, a, n| (
+    eval assert(|_| "invalid sign", n.@sign >= 0);
+    // Russian peasant method
+    // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+    loop(
+        (x, a, n), |(x, a, n)|
+        if n.is_zero {
+            break $ x
+        };
+        let x = if n.is_odd {
+            op(x, a)
+        } else { x };
+        continue $ (x, op(a, a), n.shift_right(1_U64))
+    )
+);

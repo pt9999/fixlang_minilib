@@ -1,7 +1,9 @@
-// TCP operation, such as:
+// IPv4 TCP Socket operations.
+//
+// Features:
 // - IP address, port number
 // - Resolves IP address from hostname
-// - IPv4 Socket address  
+// - IPv4 Socket address
 // - IPv4 TCP Socket
 //
 // Tested platform: x86_64-linux-gnu, aarch64-linux-gnu
@@ -9,7 +11,6 @@
 //
 module Minilib.Net.Tcp;
 
-import Debug;
 
 get_sub_ex: I64 -> I64 -> Array a -> Array a;
 get_sub_ex = |s, e, array| (
@@ -25,7 +26,7 @@ _perror: String -> IO ();
 _perror = |str| (
     let _ = *pure();    // make it lazy
     pure $ str.borrow_c_str(|ptr|
-        CALL_C[() perror(Ptr), ptr]
+        FFI_CALL[() perror(Ptr), ptr]
     )
 );
 
@@ -41,7 +42,7 @@ impl IpAddress: FromString {
         let host_split = host.split(".").to_array;
         if host_split.get_size != 4 {
             err $ "Invalid host format: " + host
-        }; 
+        };
         let addr: Array U8 = Array::fill(4, 0_U8);
         loop_m (
             (addr, 0), |(addr, i)|
@@ -61,7 +62,7 @@ impl IpAddress: FromString {
 impl IpAddress: ToString {
     to_string = |ipaddress| (
         let addr = ipaddress.@addr;
-        addr.@(0).to_string + "." + addr.@(1).to_string + "." + 
+        addr.@(0).to_string + "." + addr.@(1).to_string + "." +
         addr.@(2).to_string + "." + addr.@(3).to_string
     );
 }
@@ -80,7 +81,7 @@ namespace HostEnt {
     _get_I32 = |ptr, offset| (
         let a_i32 = Array::fill(1, 0_I32);
         let _ = a_i32.borrow_ptr(|p_i32|
-            CALL_C[Ptr memcpy(Ptr,Ptr,U64), p_i32, ptr.add_offset(offset), 4_U64]
+            FFI_CALL[Ptr memcpy(Ptr,Ptr,U64), p_i32, ptr.add_offset(offset), 4_U64]
         );
         a_i32.@(0)
     );
@@ -90,7 +91,7 @@ namespace HostEnt {
     _get_Ptr = |ptr, offset| (
         let a_ptr = Array::fill(1, nullptr);
         let _ = a_ptr.borrow_ptr(|p_ptr|
-            CALL_C[Ptr memcpy(Ptr,Ptr,U64), p_ptr, ptr.add_offset(offset), 8_U64]
+            FFI_CALL[Ptr memcpy(Ptr,Ptr,U64), p_ptr, ptr.add_offset(offset), 8_U64]
         );
         a_ptr.@(0)
     );
@@ -98,17 +99,17 @@ namespace HostEnt {
     _gethostbyname_r: String -> IOFail HostEnt;
     _gethostbyname_r = |host| (
         let _ = *pure();    // make it lazy
-        let ret: Array U8 = Array::fill(_hostent_size, 0_U8);    
+        let ret: Array U8 = Array::fill(_hostent_size, 0_U8);
         let buf: Array U8 = Array::fill(1024, 0_U8);
         let buflen = buf.get_size.to_U64;
         let result: Array Ptr = Array::fill(1, nullptr);
         let h_errornop: Array I32 = Array::fill(1, 0_I32);
-        let res = host.borrow_c_str(|p_host| 
+        let res = host.borrow_c_str(|p_host|
             ret.borrow_ptr(|p_ret|
                 buf.borrow_ptr(|p_buf|
                     result.borrow_ptr(|p_result|
                         h_errornop.borrow_ptr(|p_h_errornop|
-                            CALL_C[I32 gethostbyname_r(Ptr,Ptr,Ptr,U64,Ptr,Ptr),
+                            FFI_CALL[I32 gethostbyname_r(Ptr,Ptr,Ptr,U64,Ptr,Ptr),
                                 p_host, p_ret, p_buf, buflen, p_result, p_h_errornop]
                         )
                     )
@@ -155,7 +156,7 @@ namespace HostEnt {
 
         let addr = Array::fill(4, 0_U8);
         let _ = addr.borrow_ptr(|p_addr|
-            CALL_C[Ptr memcpy(Ptr,Ptr,U64), p_addr, h_addr, 4_U64]
+            FFI_CALL[Ptr memcpy(Ptr,Ptr,U64), p_addr, h_addr, 4_U64]
         );
         pure $ IpAddress { addr: addr }
     );
@@ -297,7 +298,7 @@ type Socket = unbox struct {
 impl Socket: ToString {
     to_string = |socket| (
         socket.@data.borrow (|fd| "Socket{fd:" + fd.to_string + "}")
-    );        
+    );
 }
 
 namespace Socket {
@@ -315,13 +316,13 @@ namespace Socket {
         Socket {
             data: Destructor::make(fd, |fd|
                 //eval debug_eprintln ("closing socket fd: " + fd.to_string);
-                let res = CALL_C[I32 close(I32), fd];
+                let res = FFI_CALL[I32 close(I32), fd];
                 if res != 0_I32 {
                     debug_eprintln("closing socket failed: res=" + res.to_string)
                 } else {
                     ()
                 }
-            )   
+            )
         }
     );
 
@@ -330,7 +331,7 @@ namespace Socket {
     make_tcp_socket: () -> IOFail Socket;
     make_tcp_socket = |_| (
         let _ = *pure();    // make it lazy
-        let sockfd = CALL_C[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
+        let sockfd = FFI_CALL[I32 socket(I32, I32, I32), _AF_INET, _SOCK_STREAM, 0.to_I32];
         if sockfd < 0_I32 {
             let _ = *_perror("socket").lift;
             throw $ "creating socket failed"
@@ -344,8 +345,8 @@ namespace Socket {
         let _ = *pure();    // make it lazy
         let addr = socket_address.@sockaddr_in;
         let ret = socket.@data.borrow (|fd|
-            addr.borrow_ptr(|p_addr| 
-                CALL_C[I32 bind(I32, Ptr, U32), fd, p_addr, addr.get_size.to_U32]
+            addr.borrow_ptr(|p_addr|
+                FFI_CALL[I32 bind(I32, Ptr, U32), fd, p_addr, addr.get_size.to_U32]
             )
         );
         if ret == -1_I32 {
@@ -361,7 +362,7 @@ namespace Socket {
     listen = |backlog, socket| (
         let _ = *pure();    // make it lazy
         let ret = socket.@data.borrow (|fd|
-            CALL_C[I32 listen(I32, I32), fd, backlog.to_I32]
+            FFI_CALL[I32 listen(I32, I32), fd, backlog.to_I32]
         );
         if ret == -1_I32 {
             let _ = *_perror("listen").lift;
@@ -388,7 +389,7 @@ namespace Socket {
         let fd = socket.@data.borrow(|sockfd|
             addr.borrow_ptr(|p_addr|
                 addrlen.borrow_ptr(|p_addrlen|
-                    CALL_C[I32 accept(I32, Ptr, Ptr), sockfd, p_addr, p_addrlen]
+                    FFI_CALL[I32 accept(I32, Ptr, Ptr), sockfd, p_addr, p_addrlen]
                 )
             )
         );
@@ -412,8 +413,8 @@ namespace Socket {
         let addr = remote_address.@sockaddr_in;
         let addrlen = addr.get_size;
         let ret = socket.@data.borrow(|fd|
-            addr.borrow_ptr(|p_addr| 
-                CALL_C[I32 connect(I32, Ptr, U32), fd.to_I32, p_addr, addrlen.to_U32]
+            addr.borrow_ptr(|p_addr|
+                FFI_CALL[I32 connect(I32, Ptr, U32), fd.to_I32, p_addr, addrlen.to_U32]
             )
         );
         if ret == -1_I32 {
@@ -432,8 +433,8 @@ namespace Socket {
         let size_to_send = bytes.get_size.to_U64;
         let flags = 0_I32;
         let size = socket.@data.borrow(|fd|
-            bytes.borrow_ptr(|p_bytes| 
-                CALL_C[I64 send(I32, Ptr, U64, I32), fd, p_bytes, size_to_send, flags]
+            bytes.borrow_ptr(|p_bytes|
+                FFI_CALL[I64 send(I32, Ptr, U64, I32), fd, p_bytes, size_to_send, flags]
             )
         );
         if size == -1 {
@@ -454,8 +455,8 @@ namespace Socket {
         let bytes = Array::fill(size_to_recv, 0_U8);
         let flags = 0_I32;
         let size = socket.@data.borrow(|fd|
-            bytes.borrow_ptr(|p_bytes| 
-                CALL_C[I64 recv(I32, Ptr, U64, I32), fd, p_bytes, size_to_recv.to_U64, flags]
+            bytes.borrow_ptr(|p_bytes|
+                FFI_CALL[I64 recv(I32, Ptr, U64, I32), fd, p_bytes, size_to_recv.to_U64, flags]
             )
         );
         if size == -1 {
@@ -521,7 +522,7 @@ namespace BufferedSocket {
         )
     );
 
-    // Reads out a line (ie. a string that ends with a newline) from the read buffer. 
+    // Reads out a line (ie. a string that ends with a newline) from the read buffer.
     // When the read buffer does not contain a newline, it will read some bytes upto
     // _BUFSIZE from the socket, and search for a newline again.
     // When the connection is closed, the return value may or may not contain a newline.

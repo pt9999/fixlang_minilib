@@ -1,0 +1,163 @@
+module Minilib.Crypto.Cert.X509Policy;
+
+// 4.2.1.4. Certificate Policies
+
+import Debug;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Text.Hex;
+
+find_certificate_policies: Certificate -> Option CertificatePolicies;
+find_certificate_policies = |cert| (
+    let extension = *cert.find_extension(match_name("id-ce-certificatePolicies"));
+    let extn_value = extension.@extn_value.to_bytes;
+    let res = decode_certificate_policies.eval_der_decoder(extn_value);
+    if res.is_err {
+        eval log_error(res.as_err);
+        none()
+    };
+    some $ res.as_ok
+);
+
+type CertificatePolicies = Array PolicyInformation;
+
+decode_certificate_policies: [m: MonadDerDecoder] m (Array PolicyInformation);
+decode_certificate_policies = (
+    decode_sequence_of(decode_obj)
+);
+
+// Policy information terms
+type PolicyInformation = unbox struct {
+    policy_identifier: CertPolicyId,
+    policy_qualifiers: Option (Array PolicyQualifierInfo),
+};
+
+impl PolicyInformation: ToString {
+    to_string = |obj| (
+        "PolicyInformation {" +
+        " policy_identifier=" + obj.@policy_identifier.to_string_with_name +
+        " policy_qualifiers=" + obj.@policy_qualifiers.to_string +
+        " }"
+    );
+}
+
+impl PolicyInformation: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ PolicyInformation {
+                policy_identifier: *decode_obj,
+                policy_qualifiers: *decode_sequence_of(decode_obj).if_exists,
+            }
+        }
+    );
+}
+
+type CertPolicyId = Asn1::ObjectIdentifier;
+
+type PolicyQualifierInfo = unbox struct {
+    policy_qualifier_id: PolicyQualifierId,
+    qualifier: Qualifier,
+};
+
+impl PolicyQualifierInfo: ToString {
+    to_string = |obj| (
+        "PolicyQualifierInfo {" +
+        " policy_qualifier_id=" + obj.@policy_qualifier_id.to_string_with_name +
+        " qualifier=" + obj.@qualifier.to_string +
+        " }"
+    );
+}
+
+impl PolicyQualifierInfo: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ PolicyQualifierInfo {
+                policy_qualifier_id: *decode_obj,
+                qualifier: *decode_obj,
+            }
+        }
+    );
+}
+
+type PolicyQualifierId = Asn1::ObjectIdentifier;    // ( id-qt-cps | id-qt-unotice )
+
+type Qualifier = unbox union {
+    cps_uri: CPSuri,
+    user_notice: UserNotice,
+};
+
+impl Qualifier: ToString {
+    to_string = |obj| (
+        if obj.is_cps_uri { obj.as_cps_uri.to_string };
+        if obj.is_user_notice { obj.as_user_notice.to_string };
+        eval assert(|_| "invalid qualifier", false);
+        ""
+    );
+}
+
+impl Qualifier: DecodeDer {
+    decode_obj = (
+        choice $ [
+            decode_obj.map(cps_uri),
+            decode_obj.map(user_notice),
+        ]
+    );
+}
+
+type CPSuri = Asn1::IA5String;
+
+type UserNotice = unbox struct {
+    notice_ref: Option NoticeReference,
+    explicit_text: Option DisplayText,
+};
+
+impl UserNotice: ToString {
+    to_string = |obj| (
+        "UserNotice {" +
+        " notice_ref=" + obj.@notice_ref.to_string +
+        " explicit_text=" + obj.@explicit_text.to_string +
+        " }"
+    );
+}
+
+impl UserNotice: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ UserNotice {
+                notice_ref: *decode_obj.if_exists,
+                explicit_text: *decode_obj.if_exists,
+            }
+        }
+    );
+}
+
+type NoticeReference = unbox struct {
+    organization: DisplayText,
+    notice_numbers: Array I64,
+};
+
+impl NoticeReference: ToString {
+    to_string = |obj| (
+        "NoticeReference {" +
+        " organization=" + obj.@organization.to_string +
+        " notice_numbers=" + obj.@notice_numbers.to_string +
+        " }"
+    );
+}
+
+impl NoticeReference: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ NoticeReference {
+                organization: *decode_obj,
+                notice_numbers: *decode_sequence_of(decode_obj),
+            }
+        }
+    );
+}
+
+type DisplayText = String; // IA5String | VisibleString | BMPString | UTF8String

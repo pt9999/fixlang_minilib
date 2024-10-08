@@ -1,22 +1,20 @@
-# json_encoder.fix
-
-## module Minilib.Encoding.Json.JsonEncoder
+# Module Minilib.Encoding.Json.JsonEncoder (json_encoder.fix)
 
 Encodes a JSON value to a string.
 
-#### encode: Json -> String;
+### `encode: Json -> String;`
 
 Encodes JSON and converts it to a string.
 
-#### encode_pretty: Json -> String;
+### `encode_pretty: Json -> String;`
 
 Encodes JSON and converts it to a string. (pretty-printing)
 
-#### encode_with_param: EncodeParam -> Json -> String;
+### `encode_with_param: EncodeParam -> Json -> String;`
 
 Encodes JSON and converts it to a string using the specified parameter.
 
-### type EncodeParam
+### `type EncodeParam`
 
 ```
 type EncodeParam = unbox struct {
@@ -27,11 +25,11 @@ type EncodeParam = unbox struct {
     number_prec: U8
 };
 ```
-### namespace EncodeParam
+## `namespace EncodeParam`
 
-#### default: EncodeParam;
+### `default: EncodeParam;`
 
-#### pretty_print: EncodeParam;
+### `pretty_print: EncodeParam;`
 
-#### increment_indent: EncodeParam -> EncodeParam;
+### `increment_indent: EncodeParam -> EncodeParam;`
 

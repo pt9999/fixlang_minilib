@@ -3,7 +3,6 @@
 // Currently only Linux is supported, because it uses `/dev/urandom` as a secure random source.
 module Minilib.Crypto.SecureRandom;
 
-import Debug;
 
 type SecureRandom = unbox struct {
     data: Destructor IOHandle
@@ -13,18 +12,18 @@ namespace SecureRandom {
     // Creates a SecureRandom instance.
     make: IOFail SecureRandom;
     make = (
-        let fh = *open_file(Path::parse("/dev/urandom").as_some, "r");
+        let handle = *open_file(Path::parse("/dev/urandom").as_some, "r");
         pure $ SecureRandom {
-            data: Destructor::make(fh, _unsafe_close)
+            data: Destructor::make(handle, _unsafe_close)
         }
     );
 
     // Generates a random byte array with specified size.
-    generate_bytes: I64 -> SecureRandom -> IOFail (Array U8, SecureRandom);
-    generate_bytes = |size, sr| (
+    generate_bytes: I64 -> SecureRandom -> IOFail (SecureRandom, Array U8);
+    generate_bytes = |size, secure_random| (
         eval assert(|_| "invalid size", size >= 0);
-        let bytes = *sr.@data.borrow(|fh| read_n_bytes(fh, size));
-        pure $ (bytes, sr)
+        let bytes = *secure_random.@data.borrow(|handle| read_n_bytes(handle, size));
+        pure $ (secure_random, bytes)
     );
 }
 

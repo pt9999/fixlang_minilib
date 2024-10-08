@@ -68,13 +68,11 @@
 | [Minilib.Net.Tcp](lib/net/tcp.md) | IPv4 TCP Socket operations. |
 | [Minilib.Net.URL](lib/net/url.md) | URL and URI parsing |
 | [Minilib.Testing.TestUtilArray](lib/testing/test_util_array.md) | Array utility functions for testing. |
-| [Minilib.Testing.UnitTest](lib/testing/unit_test.md) | Unit Test Framework |
 | [Minilib.Text.Hex](lib/text/hex.md) | Hexadecimal string conversion |
 | [Minilib.Text.RegExp.RegExpNFA](lib/text/regexp/regexp_nfa.md) | NFA (Nondeterministic Finite Automaton). This is internal module of `RegExp`. |
 | [Minilib.Text.RegExp.RegExpPattern](lib/text/regexp/regexp_pattern.md) | Character class and Pattern parser. This is internal module of `RegExp`. |
 | [Minilib.Text.RegExp](lib/text/regexp.md) | Simple regular expression. |
 | [Minilib.Text.SimpleParser](lib/text/simple_parser.md) | Simple text parser. Customizable by monadic operations. |
-| [Minilib.Text.StringEx](lib/text/string_ex.md) | String utility functions. |
 | [Minilib.Text.Unicode](lib/text/unicode.md) | Unicode conversions (UTF8 <-> UTF32 <-> UTF16) |
 | [Minilib.Thread.Future](lib/thread/future.md) | A computation that is performed in a TaskPool in parallel. |
 | [Minilib.Thread.TaskPool](lib/thread/task_pool.md) | A task pool that can be used parallel computation. |

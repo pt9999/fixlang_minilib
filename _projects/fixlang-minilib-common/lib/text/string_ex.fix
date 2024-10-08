@@ -1,0 +1,292 @@
+// String utility functions.
+//
+// Features:
+// - Array U8 -> String conversion
+// - Search, replace, split, comparison of String
+// - Format
+// - ToString extensions
+module Minilib.Text.StringEx;
+
+import HashMap;
+import Character;
+
+//---------------------------------
+// String utility functions
+//---------------------------------
+
+// Converts a byte array to a string. Specifically, it calls `String::_unsafe_to_string()`
+// after appending a null character to the end of the byte array.
+_unsafe_to_string: Array U8 -> String;
+_unsafe_to_string = |a| (
+    String::_unsafe_from_c_str (a.push_back(0_U8))
+);
+
+// Converts the specified string to lowercase.
+to_lower: String -> String;
+to_lower = |str| (
+    str.get_bytes.pop_back.map(Character::to_lower)._unsafe_to_string
+);
+
+// Converts the specified string to uppercase.
+to_upper: String -> String;
+to_upper = |str| (
+    str.get_bytes.pop_back.map(Character::to_upper)._unsafe_to_string
+);
+
+// Converts a byte (a character) to a string of length 1.
+byte_to_string: U8 -> String;
+byte_to_string = |c| (
+    Array::empty(2).push_back(c)._unsafe_to_string
+);
+
+// Searches for the specified byte from the beginning of a string.
+// If found, returns the index of that byte.
+find_byte: U8 -> String -> Option I64;
+find_byte = |c, str| (
+    let array = str.get_bytes;
+    let n = str.get_size;
+    loop(
+        0, |i|
+        if i >= n {
+            break $ none()
+        };
+        if array.@(i) == c {
+            break $ some $ i
+        };
+        continue $ i + 1
+    )
+);
+
+// Searches for the specified byte from the end of a string.
+// If found, returns the index of that byte.
+find_last_byte: U8 -> String -> Option I64;
+find_last_byte = |c, str| (
+    let array = str.get_bytes;
+    let n = str.get_size;
+    loop(
+        n - 1, |i|
+        if i < 0 {
+            break $ none()
+        };
+        if array.@(i) == c {
+            break $ some $ i
+        };
+        continue $ i - 1
+    )
+);
+
+// `input.replace_all(from, to)` replaces all occurrences of `from` in the input string with `to`.
+replace_all: String -> String -> String -> String;
+replace_all = |rep_from, rep_to, input| (
+    if rep_from.get_size <= 0 {
+        input
+    };
+    let output = Array::empty(input.get_size);
+    let begin = 0;
+    let end = input.get_size;
+    loop(
+        (output, begin), |(output, begin)|
+        let pos = input.find(rep_from, begin);
+        if pos.is_none {
+            let output = output._append_range(input.get_bytes, begin, end);
+            break $ output._unsafe_to_string
+        };
+        let pos = pos.as_some;
+        let output = output._append_range(input.get_bytes, begin, pos);
+        let output = output._append_range(rep_to.get_bytes, 0, rep_to.get_size);
+        let begin = pos + rep_from.get_size;
+        continue $ (output, begin)
+    )
+);
+
+_append_range: Array a -> I64 -> I64 -> Array a -> Array a;
+_append_range = |src_arr, src_begin, src_end, dest_arr| (
+    if src_begin >= src_end { dest_arr };
+    let dest_arr = dest_arr.push_back(src_arr.@(src_begin));
+    _append_range(src_arr, src_begin + 1, src_end, dest_arr)
+);
+
+// `str.replace_suffix(from, to)` replaces `from` at the end of `str` with `to`.
+// if `str` does not end with `from`, an error occurs.
+// Example:
+// ```
+// "test.txt".replace_suffix(".txt", ".tmp")  ==> ok("test.tmp")
+// "test.jpg".replace_suffix(".txt", ".tmp")  ==> err("suffix does not match: test.jpg")
+// ```
+replace_suffix: String -> String -> String -> Result ErrMsg String;
+replace_suffix = |from, to, str| (
+    if !str.ends_with(from) {
+        err $ "suffix does not match: " + str
+    };
+    let str = str.substring(0, str.get_size - from.get_size);
+    ok $ str + to
+);
+
+// `str.split_first(delim)` splits the string `str` into two parts with the delimiter `delim`.
+// Returns `(left, right)` where `left` is the left part of the delimiter, and
+// `right` is the right part of the delimiter.
+// Returns `(str, "")` if the delimiter is not found.
+split_first: String -> String -> (String, String);
+split_first = |delim, str| (
+    let pos = str.find(delim, 0);
+    if pos.is_none {
+        (str, "")
+    };
+    let pos = pos.as_some;
+    (str.substring(0, pos), str.substring(pos + delim.get_size, str.get_size))
+);
+
+// Same as Std::String::split, except that `"foo".split_ex(",")` returns a singleton iterator of "foo".
+split_ex: String -> String -> Iterator String;
+split_ex = |delim, str| (
+    if delim == "" {
+        Iterator::empty.push_front(str)
+    };
+    let pos = str.find(delim, 0);
+    if pos.is_none {
+        Iterator::empty.push_front(str)
+    };
+    str.split(delim)
+);
+
+// Splits a string by a function that checks whether a character is a delimiter or not.
+// The result will not contain any empty string.
+split_by: (U8 -> Bool) -> String -> Iterator String;
+split_by = |is_delim, str| (
+    let output = Array::empty(str.get_size);
+    let output = loop(
+        (output, 0, 0), |(output, start, i)|
+        if i >= str.get_size {
+            let output = if start < i { output.push_back(str.substring(start, i)) } else { output };
+            break $ output
+        };
+        let c = str.get_bytes.@(i);
+        if !is_delim(c) {
+            continue $ (output, start, i + 1)
+        };
+        let output = if start < i { output.push_back(str.substring(start, i)) } else { output };
+        continue $ (output, i + 1, i + 1)
+    );
+    output.to_iter
+);
+
+// Returns a substring extracted from a specified range from a string.
+// If the specified range exceeds the string, it will be truncated to fit within the string.
+substring: I64 -> I64 -> String -> String;
+substring = |s, e, str| (
+    let size = str.get_size;
+    let s = max(0, min(size, s));
+    let e = max(s, min(size, e));
+    if s == 0 && e == size { str };
+    str.get_sub(s, e)
+);
+
+// Returns a subarray extracted from a specified range from an array.
+// If the specified range exceeds the array, it will be truncated to fit within the array.
+subarray: I64 -> I64 -> Array a -> Array a;
+subarray = |s, e, arr| (
+    let size = arr.get_size;
+    let s = max(0, min(size, s));
+    let e = max(s, min(size, e));
+    if s == 0 && e == size { arr };
+    arr.get_sub(s, e)
+);
+
+// Checks if a string starts with the specified prefix.
+starts_with: String -> String -> Bool;
+starts_with = |prefix, str| (
+    str.substring(0, prefix.get_size) == prefix
+);
+
+// Checks if a string ends with the specified suffix.
+ends_with: String -> String -> Bool;
+ends_with = |suffix, str| (
+    str.substring(str.get_size - suffix.get_size, str.get_size) == suffix
+);
+
+//---------------------------------
+// Format
+//---------------------------------
+
+// `array.formatv(str)` replaces each occurence of `{}` in the format string `str`
+// with each element of `array`.
+// Currently only supports `{}`.
+formatv: String -> Array String -> String;
+formatv = |str, args| (
+    let from = "{}";
+    let output = Array::empty(args.get_size * 2);
+    let (output, tail) = args.to_iter.loop_iter(
+        (output, 0), |(output, find_start), to|
+        let pos = str.find(from, find_start);
+        if pos.is_none {
+            break $ (output, find_start)
+        };
+        let pos = pos.as_some;
+        let output = output
+            .push_back(str.substring(find_start, pos))
+            .push_back(to)
+        ;
+        let find_start = pos + from.get_size;
+        continue $ (output, find_start)
+    );
+    let output = output
+        .push_back(str.substring(tail, str.get_size));
+    output.to_iter.concat_iter
+);
+
+namespace Array {
+    // `array.format(str)` replaces each occurence of `{}` in the format string `str`
+    // with each element of `array`.
+    // Currently only supports `{}`.
+    format: [a: ToString] String -> Array a -> String;
+    format = |str, arr| arr.map(to_string).formatv(str);
+}
+
+namespace Tuple1 {
+    // `(a, ).format(str)` replaces an occurence of `{}` in the format string `str`
+    // with `a`.
+    format: [a: ToString] String -> (a,) -> String;
+    format = |str, (a,)| [a.to_string].formatv(str);
+}
+
+namespace Tuple2 {
+    // `(a, b).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`.
+    format: [a: ToString, b: ToString] String -> (a,b) -> String;
+    format = |str, (a,b)| [a.to_string, b.to_string].formatv(str);
+}
+
+namespace Tuple3 {
+    // `(a, b, c).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`, `c`.
+    format: [a: ToString, b: ToString, c:ToString] String -> (a,b,c) -> String;
+    format = |str, (a,b,c)| [a.to_string, b.to_string, c.to_string].formatv(str);
+}
+
+namespace Tuple4 {
+    // `(a, b, c, d).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`, `c`, `d`.
+    format: [a: ToString, b: ToString, c:ToString, d:ToString] String -> (a,b,c,d) -> String;
+    format = |str, (a,b,c,d)| [a.to_string, b.to_string, c.to_string, d.to_string].formatv(str);
+}
+
+namespace Tuple5 {
+    // `(a, b, c, d, e).format(str)` replaces each occurence of `{}` in the format string `str`
+    // with `a`, `b`, `c`, `d`, `e`.
+    format: [a: ToString, b: ToString, c:ToString, d:ToString, e:ToString] String -> (a,b,c,d,e) -> String;
+    format = |str, (a,b,c,d,e)| [a.to_string, b.to_string, c.to_string, d.to_string, e.to_string].formatv(str);
+}
+
+//---------------------------------
+// ToString extensions
+//---------------------------------
+
+namespace HashMap {
+    // Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
+    to_string_ex: [k: ToString, v: ToString] HashMap k v -> String;
+    to_string_ex = |h| (
+        "{" +
+        h.to_iter.map(|(k,v)| k.to_string + ":" + v.to_string).join(",")
+        + "}"
+    );
+}

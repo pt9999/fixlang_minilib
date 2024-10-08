@@ -1,0 +1,142 @@
+// Unit Test Framework
+module Minilib.Testing.UnitTest;
+
+import Time;
+
+// If _TEST_VERBOSE is false, only failed testcases will be reported.
+// If the environment variable `TEST_VERBOSE` is set to non-empty string, _TEST_VERBOSE becomes true.
+_TEST_VERBOSE: Bool;
+_TEST_VERBOSE = (
+    let name = "TEST_VERBOSE";
+    let p_value = name.borrow_c_str(|p_name|
+        FFI_CALL[Ptr getenv(Ptr), p_name]
+    );
+    let value = if p_value == nullptr { "" } else { String::_unsafe_from_c_str_ptr(p_value) };
+    if value != "" {
+        true
+    };
+    false
+);
+
+// TestCase is a type that counts the number of successful and failed tests.
+type TestCase = Lazy (IOFail (I64, I64));
+
+namespace TestCase {
+    // A test case where the number of successes and number of failures are both equal to 0.
+    // Can be used as a placeholder at the end of an array of test cases.
+    empty: TestCase;
+    empty = |_| pure $ (0, 0);
+}
+
+type TestSuite = Array (String, IO ()); 
+
+namespace TestSuite {
+    run: TestSuite -> IO ();
+    run = |testsuite| (
+        testsuite.to_iter.fold_m(
+            (), |_, (name, io)|
+            eval *println("=== " + name + " ===");
+            io
+        )
+    );
+}
+
+// Executes all test cases and prints the results (number of passes and number of failures).
+// Exit with exitcode=1 if any test failed or any error occured, exitcode=0 otherwise.
+run_test_driver: Array TestCase -> IO ();
+run_test_driver = |tests| (
+    do {
+        // make stdout & stderr unbuffered
+        eval FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+        eval FFI_CALL[() setbuf(Ptr, Ptr), IO::stderr._file_ptr, nullptr];
+
+        let _ = *eprintln ("Starting Test Driver").lift;
+        let start = *Time::get_now.lift;
+        let test: TestCase = tests.run_tests;
+        let (success, fail) = *(test());
+        let end = *Time::get_now.lift;
+        let time = (end.@sec.to_F64 - start.@sec.to_F64) +
+                   (end.@nanosec.to_F64 * 1.0e-9 - start.@nanosec.to_F64 * 1.0e-9);
+        let _ = *eprintln("SUCCESS: " + success.to_string + " FAIL: " + fail.to_string +
+                          " TIME: " + time.to_string_precision(3_U8) + " sec").lift;
+        pure $ if fail == 0 { 0 } else { 1 }
+    }.try(|err|
+        let _ = *eprintln("FATAL ERROR: " + err);
+        pure $ 1
+    )
+    .bind(|exitcode|
+        // workaround for IO::exit()
+        eval if exitcode != 0 { undefined() } else { () };
+        //IO::exit(exitcode)
+        pure()
+    )
+);
+
+// Executes all test cases and treat the results as one test case.
+run_tests: Array (TestCase) -> TestCase;
+run_tests = |tests, _| (
+    tests.to_iter.fold_m(
+        (0, 0), |(success_total, fail_total), test|
+        let (success, fail) = *(test());
+        pure $ (success_total + success, fail_total + fail)
+    )
+);
+
+// Creates a named test case from a lazy `IOFail ()`.
+make_test: String -> Lazy (IOFail ()) -> TestCase;
+make_test = |test_name, body, _| (
+    let verbose = |io| (
+        if _TEST_VERBOSE { io } else { pure() }
+    );
+    eval *(lift $ verbose $ eprintln("=== " + test_name + " ==="));
+    do {
+        let _ = *(body());
+        let _ = *(lift $ verbose $ eprintln("[SUCCESS] " + test_name));
+        pure $ (1, 0)
+    }.try(|err|
+        eval *(eprintln("error: " + err));
+        eval *(eprintln("[FAIL] " + test_name));
+        pure $ (0, 1)
+    ).lift
+);
+
+// Creates a set of test cases from parameters and a lazy `IOFail ()`.
+make_table_test: [a: ToString] String -> Array a -> (a -> IOFail ()) -> TestCase;
+make_table_test = |test_name, params, body| (
+    params.map(|param|
+        let test_name1 = test_name + ":" + param.to_string;
+        make_test(test_name1, |_| body(param))
+    ).run_tests
+);
+
+//-------------------------
+// Assertions for testcases
+//-------------------------
+
+// Verifies that the boolean value is true. If the boolean value is false, the test will fail with the specified message.
+assert_true : String -> Bool -> IOFail ();
+assert_true = |msg, b| (
+    if !b {
+        throw $ "assert_true: " + msg
+    };
+    pure()
+);
+
+// Verifies that two values are equal. If the values are different, the test will fail with the specified message.
+assert_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+assert_equal = |msg, lhs, rhs| (
+    if lhs != rhs {
+        throw $ "assert_equal: " + msg + ": lhs='" + lhs.to_string + "' rhs='" + rhs.to_string + "'"
+    };
+    pure()
+);
+
+// Verifies that two values are not equal. If the values are equal, the test will fail with the specified message.
+assert_not_equal : [a: Eq, a: ToString] String -> a -> a -> IOFail ();
+assert_not_equal = |msg, lhs, rhs| (
+    if lhs == rhs {
+        throw $ "assert_not_equal: " + msg + ": lhs='" + lhs.to_string + "' rhs='" + rhs.to_string + "'"
+    };
+    pure()
+);
+

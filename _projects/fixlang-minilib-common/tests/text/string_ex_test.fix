@@ -1,0 +1,358 @@
+module StringExTest;
+
+import Character;
+import HashMap;
+
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test__unsafe_to_string: TestCase;
+test__unsafe_to_string = (
+    let testname = "test__unsafe_to_string";
+    make_test(testname) $ |_|
+    let array = [ 'a', 'b', 'c' ];
+    let expected = "abc";
+    let actual = array._unsafe_to_string;
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_to_lower: TestCase;
+test_to_lower = (
+    let testname = "test_to_lower";
+    make_test(testname) $ |_|
+    let _ = *(assert_equal("eq", "", "".to_lower));
+    let _ = *(assert_equal("eq", " !0aa", " !0Aa".to_lower));
+    // a fraky test since the result varies by locale
+    //let _ = *(assert_equal("eq", " !0aaààππあア", " !0AaÀàΠπあア".to_lower));
+    pure()
+);
+
+test_to_upper: TestCase;
+test_to_upper = (
+    let testname = "test_to_upper";
+    make_test(testname) $ |_|
+    let _ = *(assert_equal("eq", "", "".to_lower));
+    let _ = *(assert_equal("eq", " !0AA", " !0Aa".to_upper));
+    // a fraky test since the result varies by locale
+    //let _ = *(assert_equal("eq", " !0AAÀÀΠΠあア", " !0AaÀàΠπあア".to_upper));
+    pure()
+);
+
+test_find_byte_ok: (String, U8, Option I64) -> TestCase;
+test_find_byte_ok = |(str, byte, expected)| (
+    let testname = "test_find_byte_ok (" + str + "," + byte.to_string + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.find_byte(byte);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_find_byte: TestCase;
+test_find_byte = (
+    [
+        test_find_byte_ok $ ("", 'a', none()),
+        test_find_byte_ok $ ("a", 'a', some(0)),
+        test_find_byte_ok $ ("a", 'b', none()),
+        test_find_byte_ok $ ("abab", 'a', some(0)),
+        test_find_byte_ok $ ("abab", 'b', some(1)),
+        test_find_byte_ok $ ("abab", 'c', none()),
+        TestCase::empty
+    ].run_tests
+);
+
+test_find_last_byte_ok: (String, U8, Option I64) -> TestCase;
+test_find_last_byte_ok = |(str, byte, expected)| (
+    let testname = "test_find_last_byte_ok (" + str + "," + byte.to_string + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.find_last_byte(byte);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_find_last_byte: TestCase;
+test_find_last_byte = (
+    [
+        test_find_last_byte_ok $ ("", 'a', none()),
+        test_find_last_byte_ok $ ("a", 'a', some(0)),
+        test_find_last_byte_ok $ ("a", 'b', none()),
+        test_find_last_byte_ok $ ("abab", 'a', some(2)),
+        test_find_last_byte_ok $ ("abab", 'b', some(3)),
+        test_find_last_byte_ok $ ("abab", 'c', none()),
+        TestCase::empty
+    ].run_tests
+);
+
+test_replace_all_ok: (String, String, String, String) -> TestCase;
+test_replace_all_ok = |(str, from, to, expected)| (
+    let testname = "test_replace_all_ok (" + str + "," + from + "," + to + "," + expected + ")";
+    make_test(testname) $ |_|
+    let actual = str.replace_all(from, to);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_replace_all: TestCase;
+test_replace_all = (
+    [
+        // if `str` is empty, return empty.
+        test_replace_all_ok $ ("", "abc", "xyz", ""),
+        // if `from` is empty, return `str`.
+        test_replace_all_ok $ ("abc", "", "xyz", "abc"),
+        // if `from` is not found, return `str`.
+        test_replace_all_ok $ ("abc", "uvw", "xyz", "abc"),
+        // `from` can be entire `str`
+        test_replace_all_ok $ ("abc", "abc", "xyz", "xyz"),
+        // `from` may be a single character
+        test_replace_all_ok $ ("a", "a", "b", "b"),
+        // replacement is not recursive
+        test_replace_all_ok $ ("aaabca", "a", "aa", "aaaaaabcaa"),
+        test_replace_all_ok $ ("aaaa", "aa", "bc", "bcbc"),
+        // `to` can be empty
+        test_replace_all_ok $ ("abcdabcd", "bc", "", "adad"),
+        // `to` can be longer than `from`
+        test_replace_all_ok $ ("abcdabcd", "bc", "xyz", "axyzdaxyzd"),
+        TestCase::empty
+    ].run_tests
+);
+
+test_replace_suffix_ok: (String, String, String, Result ErrMsg String) -> TestCase;
+test_replace_suffix_ok = |(str, from, to, expected)| (
+    let testname = "test_replace_suffix_ok (" + str + "," + from + "," + to + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.replace_suffix(from, to);
+    let _ = *if expected.is_ok {
+        let _ = *(assert_true("ok", actual.is_ok));
+        assert_equal("eq", expected.as_ok, actual.as_ok)
+    } else {
+        let _ = *(assert_true("ok", actual.is_err));
+        assert_equal("eq", expected.as_err, actual.as_err)
+    };
+    pure()
+);
+
+test_replace_suffix: TestCase;
+test_replace_suffix = (
+    [
+        // if `str` ends with `from`, replace `from` with `to`.
+        test_replace_suffix_ok $ ("test.txt", ".txt", ".log", ok("test.log")),
+        // if `str` does not end with `from`, an error occurs.
+        test_replace_suffix_ok $ ("test.jpg", ".txt", ".log", err("suffix does not match: test.jpg")),
+        // if `from` is empty, `to` is appended to `str`.
+        test_replace_suffix_ok $ ("test.txt", "", ".new", ok("test.txt.new")),
+        // if `to` is empty, `from` is removed from `str`.
+        test_replace_suffix_ok $ ("test.txt", ".txt", "", ok("test")),
+        // `from` can be entire `str`
+        test_replace_suffix_ok $ ("test.txt", "test.txt", "xyz", ok("xyz")),
+        TestCase::empty
+    ].run_tests
+);
+
+
+test_split_first_ok: (String, String, (String, String)) -> TestCase;
+test_split_first_ok = |(str,delim,expected)| (
+    let testname = "test_split_first_ok (" + str + "," + delim + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.split_first(delim);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_split_first: TestCase;
+test_split_first = (
+    [
+        test_split_first_ok $ ("", "", ("", "")),
+        test_split_first_ok $ ("", "a", ("", "")),
+        test_split_first_ok $ ("a", "", ("", "a")),
+        test_split_first_ok $ ("a", "a", ("", "")),
+        test_split_first_ok $ ("abcde", "", ("", "abcde")),
+        test_split_first_ok $ ("abcde", "xy", ("abcde", "")),
+        test_split_first_ok $ ("abcde", "bc", ("a", "de")),
+        test_split_first_ok $ ("abcde", "de", ("abc", "")),
+        test_split_first_ok $ ("abcde", "ab", ("", "cde")),
+        test_split_first_ok $ ("abcde", "abcde", ("", "")),
+        TestCase::empty
+    ].run_tests
+);
+
+test_split_ex_ok: (String, String, Array String) -> TestCase;
+test_split_ex_ok = |(str,delim,expected)| (
+    let testname = "test_split_ex_ok (" + str + "," + delim + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.split_ex(delim).to_array;
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_split_ex: TestCase;
+test_split_ex = (
+    [
+        test_split_ex_ok $ ("", "", [""]),
+        test_split_ex_ok $ ("", "a", [""]),
+        test_split_ex_ok $ ("a", "", ["a"]),
+        test_split_ex_ok $ ("a", "b", ["a"]),
+        test_split_ex_ok $ ("a", "a", ["", ""]),
+        test_split_ex_ok $ ("ababa", "a", ["", "b", "b", ""]),
+        test_split_ex_ok $ ("ababa", "b", ["a", "a", "a"]),
+        test_split_ex_ok $ ("ababa", "aba", ["", "ba"]),
+        test_split_ex_ok $ ("ababa", "ababa", ["", ""]),
+        test_split_ex_ok $ ("ababa", "abcba", ["ababa"]),
+        TestCase::empty
+    ].run_tests
+);
+
+test_split_by_ok: (String, (U8 -> Bool), Array String) -> TestCase;
+test_split_by_ok = |(str,is_delim,expected)| (
+    let testname = "test_split_by_ok (" + str + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.split_by(is_delim).to_array;
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_split_by: TestCase;
+test_split_by = (
+    [
+        test_split_by_ok $ ("", is_space, []),
+        test_split_by_ok $ ("a", is_alpha, []),
+        test_split_by_ok $ ("a", is_space, ["a"]),
+        test_split_by_ok $ ("aa  bb  12", is_space, ["aa", "bb", "12"]),
+        test_split_by_ok $ ("  aa bb  12 ", is_space, ["aa", "bb", "12"]),
+        test_split_by_ok $ ("  aa bb  12 ", |c| false, ["  aa bb  12 "]),
+        test_split_by_ok $ ("  aa bb  12 ", |c| true, []),
+        TestCase::empty
+    ].run_tests
+);
+
+test_substring_ok: (String, I64, I64, String) -> TestCase;
+test_substring_ok = |(str,s,e,expected)| (
+    let testname = "test_substring_ok (" + str + "," + s.to_string + "," + e.to_string + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.substring(s,e);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_substring: TestCase;
+test_substring = (
+    [
+        test_substring_ok $ ("", 0, 0, ""),
+        test_substring_ok $ ("", -1, 1, ""),
+        test_substring_ok $ ("abc", 0, 3, "abc"),
+        test_substring_ok $ ("abc", 0, 0, ""),
+        test_substring_ok $ ("abc", 0, 1, "a"),
+        test_substring_ok $ ("abc", 1, 2, "b"),
+        test_substring_ok $ ("abc", 2, 1, ""),
+        test_substring_ok $ ("abc", 3, 3, ""),
+        test_substring_ok $ ("abc", -1, 1, "a"),
+        test_substring_ok $ ("abc", 2, 4, "c"),
+        test_substring_ok $ ("abc", 5, 6, ""),
+        TestCase::empty
+    ].run_tests
+);
+
+test_starts_with_ok: (String, String, Bool) -> TestCase;
+test_starts_with_ok = |(str, prefix, expected)| (
+    let testname = "test_starts_with_ok (" + str + "," + prefix + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.starts_with(prefix);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_starts_with: TestCase;
+test_starts_with = (
+    [
+        test_starts_with_ok $ ("", "", true),
+        test_starts_with_ok $ ("", "a", false),
+        test_starts_with_ok $ ("a", "", true),
+        test_starts_with_ok $ ("a", "a", true),
+        test_starts_with_ok $ ("a", "b", false),
+        test_starts_with_ok $ ("a", "aa", false),
+        test_starts_with_ok $ ("aa", "", true),
+        test_starts_with_ok $ ("aa", "a", true),
+        test_starts_with_ok $ ("aa", "b", false),
+        test_starts_with_ok $ ("aa", "aa", true),
+        test_starts_with_ok $ ("aa", "aaa", false),
+        test_starts_with_ok $ ("ab", "a", true),
+        test_starts_with_ok $ ("ab", "ab", true),
+        test_starts_with_ok $ ("ab", "b", false),
+        test_starts_with_ok $ ("abc", "ab", true),
+        TestCase::empty
+    ].run_tests
+);
+
+test_ends_with_ok: (String, String, Bool) -> TestCase;
+test_ends_with_ok = |(str, prefix, expected)| (
+    let testname = "test_ends_with_ok (" + str + "," + prefix + "," + expected.to_string + ")";
+    make_test(testname) $ |_|
+    let actual = str.ends_with(prefix);
+    let _ = *(assert_equal("eq", expected, actual));
+    pure()
+);
+
+test_ends_with: TestCase;
+test_ends_with = (
+    [
+        test_ends_with_ok $ ("", "", true),
+        test_ends_with_ok $ ("", "a", false),
+        test_ends_with_ok $ ("a", "", true),
+        test_ends_with_ok $ ("a", "a", true),
+        test_ends_with_ok $ ("a", "b", false),
+        test_ends_with_ok $ ("a", "aa", false),
+        test_ends_with_ok $ ("aa", "", true),
+        test_ends_with_ok $ ("aa", "a", true),
+        test_ends_with_ok $ ("aa", "b", false),
+        test_ends_with_ok $ ("aa", "aa", true),
+        test_ends_with_ok $ ("aa", "aaa", false),
+        test_ends_with_ok $ ("ab", "b", true),
+        test_ends_with_ok $ ("ab", "ab", true),
+        test_ends_with_ok $ ("ab", "a", false),
+        test_ends_with_ok $ ("abc", "bc", true),
+        TestCase::empty
+    ].run_tests
+);
+
+// `format()` has many overloads that cannot be resolved with type variables.
+// So I simply used `assert_equal()`.
+test_format: TestCase;
+test_format = (
+    make_test("test_format") $ |_|
+    //let _ = *assert_equal("no args", [].format(""), "");      // cannot determine array type
+    let _ = *assert_equal("one arg", ["abc"].format("{}"), "abc");
+    let _ = *assert_equal("two args",["abc", "def"].format("{}{}"), "abcdef");
+    let _ = *assert_equal("too many args", ["abc", "def", "ghi"].format("{}{}"), "abcdef");
+    let _ = *assert_equal("too few args", ["abc"].format("{}{}"), "abc{}");
+    let _ = *assert_equal("tuple1", (2.1_F32,).format("num={}"), "num=2.100000");
+    let _ = *assert_equal("tuple2", (2.1, "hello").format("num={} str={}"), "num=2.100000 str=hello");
+    let _ = *assert_equal("tuple3", (some(1_U16), [2,3,4], ()).format("option={} array={} unit={}"), "option=some(1) array=[2, 3, 4] unit=()");
+    let _ = *assert_equal("tuple4", ('A', ['B', 'C'], [[1, 2]], ('D', "E")).format("u8={} array_u8={} array_array_i64={} tuple2={}"),
+                                    "u8=65 array_u8=[66, 67] array_array_i64=[[1, 2]] tuple2=(68, E)");
+    let _ = *assert_equal("tuple5", (1, 2.2, none(): Option I64, []: Array I64, (4,)).format("i64={} f64={} option={} array={} tuple1={}"),
+                                    "i64=1 f64=2.200000 option=none() array=[] tuple1=(4,)");
+    let _ = *assert_equal("cannot inject placeholder", ["dummy={}", "abc"].format("{}={}"), "dummy={}=abc");
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test__unsafe_to_string,
+        test_to_lower,
+        test_to_upper,
+        test_find_byte,
+        test_find_last_byte,
+        test_replace_all,
+        test_replace_suffix,
+        test_split_first,
+        test_split_ex,
+        test_split_by,
+        test_substring,
+        test_starts_with,
+        test_ends_with,
+        test_format,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

@@ -1,0 +1,59 @@
+// update test files
+module Main;
+
+import Character;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+
+to_module_name: String -> IOFail String;
+to_module_name = |input_file| (
+    let base_name = basename(input_file);
+    let base_name = *base_name.replace_suffix(".fix", "").from_result;
+    let module_name = base_name.split_ex("_").map(|name|
+        let bytes = name.get_bytes.pop_back;
+        let bytes = Array::from_map(bytes.get_size, |i|
+            if i == 0 { Character::to_upper(bytes.@(i)) } else { bytes.@(i) }
+        );
+        bytes._unsafe_to_string
+    ).concat_iter;
+    pure $ module_name
+);
+
+update_file: String -> IOFail ();
+update_file = |input_file| (
+    //eval *println(input_file).lift;
+    let module_name = *to_module_name(input_file);
+    //eval *println(input_file + " -> " + module_name).lift;
+    eval debug_println(input_file + " -> " + module_name);
+    let input_path = Path::parse(input_file).as_some;
+    let output_file = input_file + ".new.tmp";
+    let output_path = Path::parse(output_file).as_some;
+    let contents = *read_file_string(input_path);
+    let lines = contents.split_ex("\n");
+    let lines = lines.zip(count_up(0)).to_array.map(|(line, lno)|
+        if line.strip_spaces != "module Main;" {
+            line
+        };
+        eval debug_println("...found " + lno.to_string);
+        "module " + module_name + ";"
+    );
+    let contents = lines.to_iter.map(|line| line + "\n").concat_iter;
+    eval *write_file_string(output_path, contents);
+    pure()
+);
+
+update_files: String -> IOFail ();
+update_files = |base_dir| (
+    let file_paths = *find_files(base_dir);
+    file_paths.to_iter.foreach_m(update_file)
+);
+
+main: IO ();
+main = (
+    do {
+        update_files("tests")
+    }
+    .try(eprintln)
+);

@@ -1,0 +1,297 @@
+// Arbitrary-precision integer.
+module Minilib.Math.BigInt;
+
+import Math;
+
+import Minilib.Math.BigNat;
+import Minilib.Math.Types;
+import Minilib.Text.StringEx;
+//import Minilib.Encoding.Binary;
+
+// Arbitrary-precision integer.
+type BigInt = unbox struct {
+    sign: I64,          // sign
+    nat: Array U32      // natural number (>= 0)
+};
+
+// `BigInt::make(sign, nat)` creates new BigInt object.
+make: I64 -> Array U32 -> BigInt;
+make = |sign, nat| (
+    eval assert(|_| "invalid nat", nat.get_size > 0);
+    let nat = nat._remove_last_zeros;
+    let sign = if sign < 0 { 
+        if nat._is_zero { 1 };
+        -1
+    } else { 
+        1
+    };
+    BigInt {
+        sign: sign,
+        nat: nat
+    }
+);
+
+// `a.abs` returns the absolute value of `a`.
+abs: BigInt -> BigInt;
+abs = |a| a.set_sign(1);
+
+// `BigInt::from_U64(u64)` creates new BigInt object from `u64`.
+from_U64: U64 -> BigInt;
+from_U64 = |u64| (
+    BigInt::make(1, BigNat::_from_u64(u64))
+);
+
+// `BigInt::from_I64(i64)` creates new BigInt object from `i64`.
+from_I64: I64 -> BigInt;
+from_I64 = |i64| (
+    let (sign, u64) = if i64 < 0 { 
+        (-1, (-i64).to_U64)     // TODO: it is ok if I64::minimum?
+    } else { 
+        (1, i64.to_U64)
+    };
+    BigInt::make(sign, BigNat::_from_u64(u64))
+);
+
+// Converts BigInt to I64. If overflow, it produces unexpected result.
+to_I64: BigInt -> I64;
+to_I64 = |a| (
+    let u64 = a.@nat._to_u64;
+    u64.to_I64 * a.@sign
+);
+
+// `BigInt::cmp(a,b)` returns 1 if `a > b`, -1 if `a < b`, 0 if `a == b`.
+cmp: BigInt -> BigInt -> I64;
+cmp = |a, b| (
+    let c = a - b;
+    if c.@sign > 0 {
+        if c.@nat == BigNat::_zero { 0 } else { 1 }
+    } else {
+        -1
+    }
+);
+
+// `BigInt::divmod(a,b)` returns `(a/b, a%b)`.
+// NOTE: -8 / 3 == -2 and -8 % 3 == -2, as with the Fix language.
+divmod: BigInt -> BigInt -> (BigInt, BigInt);
+divmod = |a, b| (
+    let (quo, rem) = BigNat::_divmod(a.@nat, b.@nat);
+    let quo = BigInt::make(a.@sign * b.@sign, quo);
+    let rem = BigInt::make(a.@sign, rem);
+    (quo, rem)
+);
+
+// `BigInt::divmod_by_two(a)` returns `(a/2, a%2)`.
+divmod_by_two: BigInt -> (BigInt, BigInt);
+divmod_by_two = |a| (
+    let (quo, rem) = BigNat::_divmod_by_two(a.@nat);
+    let quo = BigInt::make(a.@sign, quo);
+    let rem = BigInt::make(a.@sign, rem);
+    (quo, rem)
+);
+
+// Shifts `@nat` to left. NOTE `@sign` does not affect at all.
+shift_left: U64 -> BigInt -> BigInt;
+shift_left = |shift, a| (
+    a.mod_nat(_shift_left(shift))
+);
+
+// Shifts `@nat` to right. NOTE `@sign` does not affect at all.
+shift_right: U64 -> BigInt -> BigInt;
+shift_right = |shift, a| (
+    a.mod_nat(_shift_right(shift))
+);
+
+// `a._bitand_I64(i64)` returns bitwise-AND of `a` and `i64`.
+// `i64` must be a positive number and less than BigNat::_base.
+_bitand_I64: I64 -> BigInt -> I64;
+_bitand_I64 = |i64, a| (
+    eval assert(|_| "invalid i64", 0 < i64 && i64 < BigNat::_base.to_I64);
+    a.@nat.@(0).to_I64.bit_and(i64)
+);
+
+// Returns the bit length of `a.@nat`, ie. one plus the bit position of most significant `1`.
+// Returns 0 if `a` is zero.
+bit_length: BigInt -> U64;
+bit_length = |a| (
+    a.@nat._bit_length
+);
+
+// BigInt constant representing 1.
+//one: BigInt;
+//one = BigInt::make(1, BigNat::_one);
+
+// BigInt constant representing 2.
+two: BigInt;
+two = BigInt::make(1, BigNat::_two);
+
+// `a.is_zero` returns true iff `a` is zero.
+is_zero: BigInt -> Bool;
+is_zero = |a| (
+    a.@nat._is_zero
+);
+
+// `a.is_positive` returns true iff `a` is a positive number.
+is_positive: BigInt -> Bool;
+is_positive = |a| (
+    a.@sign > 0 && !a.@nat._is_zero
+);
+
+// `a.is_negative` returns true iff `a` is a negative number.
+is_negative: BigInt -> Bool;
+is_negative = |a| (
+    a.@sign < 0
+);
+
+// `a.is_even` returns true iff `a` is an even number.
+is_even: BigInt -> Bool;
+is_even = |a| (
+    a.@nat.@(0).bit_and(1_U32) == 0_U32
+);
+
+// `a.is_odd` returns true iff `a` is an odd number.
+is_odd: BigInt -> Bool;
+is_odd = |a| (
+    !a.is_even
+);
+
+// Converts BigInt from a decimal string.
+impl BigInt: FromString {
+    from_string = |str| (
+        if str == "" { err $ "empty string" };
+        let bytes = str.get_bytes.pop_back;
+        let (bytes, sign) = if bytes.get_size >= 2 && bytes.@(0) == '-' {
+            (bytes.get_sub(1, bytes.get_size), -1)
+        } else { (bytes, 1) };
+        let nat = *BigNat::_from_string_inner(bytes, 0, BigNat::_zero);
+        ok $ BigInt::make(sign, nat)
+    );
+}
+
+// Converts BigInt to a decimal string.
+impl BigInt: ToString {
+    to_string = |a| (
+        let sign = if a.@sign < 0 { "-" } else { "" };
+        sign + a.@nat._to_string
+    );
+}
+
+// Checks two BigInts are equal.
+impl BigInt: Eq {
+    eq = |a, b| (a.@sign == b.@sign && a.@nat == b.@nat);
+}
+
+// Compares two BigInts.
+impl BigInt: LessThan {
+    less_than = |a, b| BigInt::cmp(a, b) < 0;
+}
+
+// Compares two BigInts.
+impl BigInt: LessThanOrEq {
+    less_than_or_eq = |a, b| BigInt::cmp(a, b) <= 0;
+}
+
+impl BigInt: Zero {
+    zero = BigInt::make(1, BigNat::_zero);
+}
+
+impl BigInt: One {
+    one = BigInt::make(1, BigNat::_one);
+}
+
+impl BigInt: Neg {
+    neg = |a| BigInt::make(-a.@sign, a.@nat);
+}
+
+impl BigInt: Add {
+    add = |a, b| (
+        if a.@sign == b.@sign {
+            let nat = BigNat::_add(a.@nat, b.@nat);
+            BigInt::make(a.@sign, nat) 
+        };
+        let cmp = BigNat::_cmp((a.@nat,0), (b.@nat,0));
+        if cmp > 0 {
+            let nat = BigNat::_sub(a.@nat, b.@nat);
+            BigInt::make(a.@sign, nat)
+        };
+        if cmp < 0 {
+            let nat = BigNat::_sub(b.@nat, a.@nat);
+            BigInt::make(b.@sign, nat)
+        };
+        zero
+    );
+}
+
+impl BigInt: Sub {
+    sub = |a, b| add(a, neg(b));
+}
+
+impl BigInt: Mul {
+    mul = |a, b| (
+        let nat = BigNat::_mul(a.@nat, b.@nat);
+        BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
+
+// NOTE: -8 / 3 == -2, as with the Fix language.
+impl BigInt: Div {
+    div = |a, b| (
+        let (quo, rem) = BigInt::divmod(a, b);
+        quo
+    );
+}
+
+// NOTE: -8 % 3 == -2, as with the Fix language.
+impl BigInt: Rem {
+    rem = |a, b| (
+        let (quo, rem) = BigInt::divmod(a, b);
+        rem
+    );
+}
+
+impl BigInt: FromBytes {
+    from_bytes = |bytes| (
+        let u8_len = bytes.get_size;
+        if u8_len == 0 { ok $ zero };
+        let u32_len = (u8_len + 3) / 4;
+        let bytes = if 4 * u32_len == u8_len { bytes }
+        else { Array::fill(4 * u32_len - u8_len, 0_U8).append(bytes) };
+        let nat = Array::from_map(u32_len, |i|
+            bytes.get_u32_be(4 * (u32_len - 1 - i))     // big endian
+        );
+        ok $ BigInt::make(1, nat)
+    );
+}
+
+// NOTE: Unneeded zeros might be placed at the beginning
+impl BigInt: ToBytes {
+    to_bytes = |a| (
+        eval assert(|_| "invalid sign", a.@sign >= 0);
+        let u32_len = a.@nat.get_size;
+        let u8_len = u32_len * 4;
+        let bytes = Array::fill(u8_len, 0_U8);
+        let bytes = Iterator::range(0, u32_len).fold(
+            bytes, |bytes, i|
+            bytes.set_u32_be(4 * (u32_len - 1 - i), a.@nat.@(i))    // big endian
+        );
+        bytes
+    );
+}
+
+// `repeat_by_BigInt(op, x, a, n)` calculates `x.op(a).op(a)...` for `n` times.
+// `op` is an associative binary operation.
+repeat_by_BigInt: (a -> a -> a) -> a -> a -> BigInt -> a;
+repeat_by_BigInt = |op, x, a, n| (
+    eval assert(|_| "invalid sign", n.@sign >= 0);
+    // Russian peasant method
+    // https://en.wikipedia.org/wiki/Ancient_Egyptian_multiplication#Russian_peasant_multiplication
+    loop(
+        (x, a, n), |(x, a, n)|
+        if n.is_zero {
+            break $ x
+        };
+        let x = if n.is_odd {
+            op(x, a)
+        } else { x };
+        continue $ (x, op(a, a), n.shift_right(1_U64))
+    )
+);

@@ -1,0 +1,369 @@
+module BignatTest;
+
+import Math;
+import Random;
+
+import Minilib.Math.BigNat;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+// TODO: add tests
+
+test_remove_last_zeros: TestCase;
+test_remove_last_zeros = (
+    make_table_test("test_remove_last_zeros",
+        [
+            ([1_U32, 2_U32, 3_U32], [1_U32, 2_U32, 3_U32]),
+            ([1_U32, 2_U32, 0_U32], [1_U32, 2_U32]),
+            ([1_U32, 0_U32, 0_U32], [1_U32]),
+            ([0_U32, 0_U32, 0_U32], [0_U32]),
+            ([0_U32], [0_U32]),
+            ([], [])      // note: `[]` is invalid as a BigNat
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._remove_last_zeros)
+    )
+);
+
+test_from_u64: TestCase;
+test_from_u64 = (
+    make_table_test("test_from_u64",
+        [
+            (0x200000001_U64, [0x1_U32, 0x2_U32]),
+            (0xFFFFFFFFFFFFFFFF_U64, [0xFFFFFFFF_U32, 0xFFFFFFFF_U32]),
+            (0x1FFFFFFFF_U64, [0xFFFFFFFF_U32, 0x1_U32]),
+            (0xABCD_U64, [0xABCD_U32]),
+            (0_U64, [0_U32])
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._from_u64)
+    )
+);
+
+test_is_zero: TestCase;
+test_is_zero = (
+    make_table_test("test_is_zero",
+        [
+            ([0_U32, 0_U32, 0_U32], true),
+            ([1_U32, 0_U32, 0_U32], false),
+            ([0_U32], true),
+            ([], true)      // note: `[]` is invalid as a BigNat
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._is_zero)
+    )
+);
+
+test_to_u64: TestCase;
+test_to_u64 = (
+    make_table_test("test_to_u64",
+        [
+            ([0x1_U32, 0x2_U32, 0x3_U32], 0x200000001_U64), // overflow
+            ([0xFFFFFFFF_U32, 0xFFFFFFFF_U32], 0xFFFFFFFFFFFFFFFF_U64),
+            ([0xFFFFFFFF_U32, 0x1_U32], 0x1FFFFFFFF_U64),
+            ([0xABCD_U32], 0xABCD_U64),
+            ([0_U32], 0_U64)
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._to_u64)
+    )
+);
+        
+test_cmp: TestCase;
+test_cmp = (
+    make_table_test("test_cmp",
+        [
+            (([0_U32], 0), ([0_U32, 0_U32], 0), 0),
+            (([1_U32], 0), ([0_U32, 0_U32], 0), 1),
+            (([0_U32], 0), ([1_U32, 0_U32], 0), -1),
+            (([0_U32, 2_U32], 0), ([2_U32], 1), 0),
+            (([1_U32, 2_U32], 0), ([2_U32], 1), 1),
+            (([1_U32], 0), ([2_U32], 2), -1),
+            (([1_U32], 0), ([0_U32], 2), 1),
+            (([1_U32], 2), ([2_U32], 1), 1),
+            (([1_U32], 2), ([2_U32], 2), -1),
+            (([0_U32], 3), ([0_U32, 0_U32], 2), 0)
+        ],
+        |((a0, offset0), (a1, offset1), expect)|
+        let actual = _cmp((a0, offset0), (a1, offset1));
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_add: TestCase;
+test_add = (
+    let s = |i| i.I64::shift_left(28);
+    make_table_test("test_add",
+        [
+            ([1, 2, 3], [10, 20], [11, 22, 3]),
+            ([10, 20], [1, 2, 3], [11, 22, 3]),
+            // 8 + 9 = 17 = 0x11 so result=s(1) and carry=1
+            ([s(8) + 10, s(8) + 20], [s(9) + 100, s(9) + 200],
+             [s(1) + 110, s(1) + 221, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], [s(9) + 100, s(9) + 200],
+             [s(1) + 110, s(1) + 221, s(8) + 31]),
+            ([s(8) + 10, s(8) + 20], [s(9) + 100, s(9) + 200, s(9) + 300],
+             [s(1) + 110, s(1) + 221, s(9) + 301]),
+            ([0], [1, 0], [1]),
+            ([0], [0, 0, 0], [0])
+        ],
+        |(a0, a1, expect)|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _add(a0, a1);
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_add_with_offset1: TestCase;
+test_add_with_offset1 = (
+    let s = |i| i.I64::shift_left(28);
+    make_table_test("test_add_with_offset1",
+        [
+            ([1, 2, 3], ([10, 20], 0), [11, 22, 3]),
+            ([1, 2, 3], ([10, 20], 2), [1, 2, 13, 20]),
+            ([1, 2, 3], ([10, 20], 3), [1, 2, 3, 10, 20]),
+            ([1, 2, 3], ([10, 20], 4), [1, 2, 3, 0, 10, 20]),
+            // 8 + 9 = 17 = 0x11 so result=s(1) and carry=1
+            ([s(8) + 10, s(8) + 20], ([s(9) + 100, s(9) + 200], 0), 
+             [s(1) + 110, s(1) + 221, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 0), 
+             [s(1) + 110, s(1) + 221, s(8) + 31]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 1), 
+             [s(8) + 10, s(1) + 120, s(1) + 231, 1]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 2), 
+             [s(8) + 10, s(8) + 20, s(1) + 130, s(9) + 201]),
+            ([s(8) + 10, s(8) + 20, s(8) + 30], ([s(9) + 100, s(9) + 200], 3), 
+             [s(8) + 10, s(8) + 20, s(8) + 30, s(9) + 100, s(9) + 200]),
+            ([0], ([1], 2), [0, 0, 1]),
+            ([0], ([0], 2), [0])
+        ],
+        |(a0, (a1, offset1), expect)|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _add_with_offset1(a0, (a1, offset1));
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_signed_sub_with_offset: TestCase;
+test_signed_sub_with_offset = (
+    make_table_test("test_signed_sub_with_offset",
+        [
+            (([11, 22, 33], 0), ([1, 2, 3], 0), (([10, 20, 30], 0), 1)),
+            (([1, 2, 3], 0), ([11, 22, 33], 0), (([10, 20, 30], 0), -1)),
+            (([0, 0, 1], 0), ([4], 0), (([0xfffffffc, 0xffffffff], 0), 1)),
+            (([0, 0, 2], 0), ([8, 4], 0), (([0xfffffff8, 0xfffffffb, 1], 0), 1)),
+            (([0, 0, 0], 0), ([8, 4], 0), (([8, 4], 0), -1)),
+            (([0, 0, 0, 0, 2], 0), ([8, 4], 2), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), 1)),
+            (([8, 4], 2), ([0, 0, 0, 0, 2], 0), (([0, 0, 0xfffffff8, 0xfffffffb, 1], 0), -1)),
+            (([0, 0, 0, 0, 2], 0), ([8, 4], 3), (([0, 0, 0, 8, 2], 0), -1)),
+            (([0], 2), ([0], 2), (([0], 2), 1))
+        ],
+        |((a0, offset0), (a1, offset1), ((expect, ex_offset), ex_sign))|
+        let a0 = a0.map(to_U32);
+        let a1 = a1.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = _signed_sub_with_offset((a0, offset0), (a1, offset1));
+        assert_equal("eq", ((expect, ex_offset), ex_sign), actual)
+    )
+);
+
+test_add_sub_random: TestCase;
+test_add_sub_random = (
+    make_table_test("test_add_sub_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((123 + bit_length1*551 + bit_length2*661).to_U64);
+        let (random, a) = BigNat::_generate_bignat(bit_length1, random);
+        let (random, b) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _add(a, b);
+        let d = _sub(c, b);
+        let _ = *assert_equal("d", a, d);
+        pure()        
+    )
+);
+
+test_add_sub_with_offset_random: TestCase;
+test_add_sub_with_offset_random = (
+    make_table_test("test_add_sub_with_offset_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((123 + bit_length1*551 + bit_length2*661).to_U64);
+        let (random, a) = BigNat::_generate_bignat(bit_length1, random);
+        let (random, b) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _add_with_offset1(a, (b, 0));
+        let ((d, doff), dsign) = _signed_sub_with_offset((c, 0), (b, 0));
+        let _ = *assert_equal("d", a, d);
+        let _ = *assert_equal("doff", 0, doff);
+        let _ = *assert_equal("dsign", 1, dsign);
+        pure()        
+    )
+);
+
+test_mul_div_random: TestCase;
+test_mul_div_random = (
+    make_table_test("test_mul_div_random",
+        do {
+            let bit_length1 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            let bit_length2 = *[2, 16, 32, 33, 64, 65, 128, 130];
+            pure $ (bit_length1, bit_length2)
+        },
+        |(bit_length1, bit_length2)|
+        let random = Random::init_by_seed((12345 + bit_length1*331 + bit_length2*441).to_U64);
+        let (random, a) = BigNat::_generate_bignat(bit_length1, random);
+        let (random, b) = BigNat::_generate_bignat(bit_length2, random);
+        let c = _mul(a, b);
+        let (quo, rem) = _divmod(c, b);
+        let _ = *assert_equal("quo", a, quo);
+        let _ = *assert_equal("rem", BigNat::_zero, rem);
+        let (quo2, rem2) = _divmod(a, b);
+        let d = _add(_mul(quo2, b), rem2);
+        //let _ = *println("(a,b,c,d)="+(a,b,c,d).to_string).lift;
+        let _ = *assert_equal("d", a, d);
+        pure()        
+    )
+);
+
+test_neg: TestCase;
+test_neg = (
+    make_table_test("test_neg",
+        [
+            ([0xaaaaaaaa], [0x55555556]),
+            ([1, 2, 3], [0xffffffff, 0xfffffffd, 0xfffffffc]),
+            ([0, 0, 0], [0, 0, 0])
+        ],
+        |(a0, expect)|
+        let a0 = a0.map(to_U32);
+        let expect = expect.map(to_U32);
+        let actual = a0._neg;
+        assert_equal("eq", expect, actual)
+    )
+);
+
+test_bit_length: TestCase;
+test_bit_length = (
+    make_table_test("test_bit_length",
+        [
+            ([0x76543210_U32, 0x00000a98_U32], 44_U64),
+            ([0x01010101_U32, 4_U32], 35_U64),
+            ([0xabababab_U32, 1_U32], 33_U64),
+            ([0xcdcdcdcd_U32, 0_U32], 32_U64),
+            ([0_U32, 0_U32], 0_U64),
+            ([1_U32], 1_U64),
+            ([0_U32], 0_U64)
+        ],
+        |(a, expect)|
+        assert_equal("eq", expect, a._bit_length)
+    )
+);
+
+test_shift_left: TestCase;
+test_shift_left = (
+    make_table_test("test_shift_left",
+        [
+            ([0x1234_U32, 0xabcd_U32], 56_U64, [0_U32, 0x34000000_U32, 0xcd000012_U32, 0xab_U32]),
+            ([0x1234_U32, 0xabcd_U32], 32_U64, [0_U32, 0x1234_U32, 0xabcd_U32]),
+            ([0x1234_U32, 0xabcd_U32], 4_U64,  [0x12340_U32, 0xabcd0_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 1_U64, [0xeca86420_U32, 0xfdb97530_U32, 0x1_U32]),
+            ([0x1234_U32, 0_U32], 36_U64, [0_U32, 0x12340_U32, 0_U32]),
+            ([0x1234_U32, 0_U32], 32_U64, [0_U32, 0x1234_U32, 0_U32]),
+            ([0x1234_U32, 0_U32], 4_U64, [0x12340_U32, 0_U32]),
+            ([0_U32], 0_U64, [0_U32])
+        ],
+        |(a, shift, expect)|
+        assert_equal("eq", expect, a._shift_left(shift))
+    )
+);
+
+test_shift_right: TestCase;
+test_shift_right = (
+    make_table_test("test_shift_right",
+        [
+            ([0x76543210_U32, 0xfedcba98_U32], 1_U64, [0x3b2a1908_U32, 0x7f6e5d4c_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 4_U64, [0x87654321_U32, 0x0fedcba9_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 32_U64, [0xfedcba98_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 36_U64, [0x0fedcba9_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 64_U64, [0_U32]),
+            ([0x76543210_U32, 0xfedcba98_U32], 65_U64, [0_U32]),
+            ([0x1234_U32, 0_U32], 32_U64, [0_U32]),
+            ([0x1234_U32, 0_U32], 16_U64, [0_U32]),
+            ([0_U32], 0_U64, [0_U32])
+        ],
+        |(a, shift, expect)|
+        assert_equal("eq", expect, a._shift_right(shift))
+    )
+);
+
+test_shift_left_right_random: TestCase;
+test_shift_left_right_random = (
+    make_table_test("test_shift_left_right_random",
+        do {
+            let bit_length = *[1, 2, 32, 33, 64, 65, 128, 130];
+            let shift = *[0, 1, 31, 32, 33, 63, 64, 65, 127, 128, 129];
+            pure $ (bit_length, shift)
+        },
+        |(bit_length, shift)|
+        let random = Random::init_by_seed((1234 + bit_length*31 + shift*41).to_U64);
+        let (random, a) = BigNat::_generate_bignat(bit_length, random);
+        let b = a._shift_left(shift.to_U64)._shift_right(shift.to_U64);
+        assert_equal("eq", a, b)
+    )
+);
+
+test_divmod_by_power_of_two: TestCase;
+test_divmod_by_power_of_two = (
+    make_table_test("test_divmod_by_power_of_two",
+        [
+            ([0x76543210_U32, 0xfedcba98_U32], 0_U64,  ([0x76543210_U32, 0xfedcba98_U32], [0x00_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 8_U64,  ([0x98765432_U32, 0x00fedcba_U32], [0x10_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 16_U64, ([0xba987654_U32, 0x0000fedc_U32], [0x3210_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 32_U64, ([0xfedcba98_U32], [0x76543210_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 36_U64, ([0x0fedcba9_U32], [0x76543210_U32, 0x08_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32, 0x4321_U32], 36_U64, ([0x1fedcba9_U32, 0x432_U32], [0x76543210_U32, 0x08_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 64_U64, ([0_U32], [0x76543210_U32, 0xfedcba98_U32])),
+            ([0x76543210_U32, 0xfedcba98_U32], 65_U64, ([0_U32], [0x76543210_U32, 0xfedcba98_U32])),
+            ([0xfedcba98_U32], 16_U64, ([0xfedc_U32], [0xba98_U32])),
+            ([0x1234_U32, 0_U32], 32_U64, ([0_U32], [0x1234_U32])),
+            ([0_U32], 0_U64, ([0_U32], [0_U32]))
+        ],
+        |(a, exp, expect)|
+        assert_equal("eq", expect, _divmod_by_power_of_two(a, exp))
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_remove_last_zeros,
+        test_from_u64,
+        test_is_zero,
+        test_to_u64,
+        test_cmp,
+        test_add,
+        test_add_with_offset1,
+        test_signed_sub_with_offset,
+        test_add_sub_random,
+        test_add_sub_with_offset_random,
+        test_mul_div_random,
+        test_neg,
+        test_bit_length,
+        test_shift_left,
+        test_shift_right,
+        test_shift_left_right_random,
+        test_divmod_by_power_of_two,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+

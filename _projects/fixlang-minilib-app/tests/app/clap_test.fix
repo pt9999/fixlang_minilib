@@ -1,0 +1,296 @@
+module ClapTest;
+
+import HashMap;
+
+import Minilib.App.Clap;
+import Minilib.Testing.UnitTest;
+
+empty_command: Command;
+empty_command = (
+    Command::new("cmd")
+);
+
+typical_command: Command;
+typical_command = (
+    Command::new("typical_tool")
+    .bin_name("typical")
+    .display_name("TypicalTool")
+    .version("1.0.0")
+    .author("somebody <somebody@example.com>")
+    .arg(Arg::new("count").short('n').long("count").help("How many times to iterate")
+        .takes_value.value_name("NUMBER").default_value("100"))
+    .arg(Arg::new("output").short('o').long("output").help("An output file")
+        .takes_value.value_name("OUTFILE"))
+    .arg(Arg::new("force").short('f'))
+    .arg(Arg::new("verbose").long("verbose").help("Verbose mode"))
+    .arg(Arg::new("TARGET").help("Target").takes_value.required)
+    .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+);
+
+rich_command: Command;
+rich_command = (
+    Command::new("rich_tool")
+    .bin_name("rich")
+    .display_name("RichTool")
+    .version("1.0.0")
+    .author("somebody <somebody@example.com>")
+    .subcommand(
+        Command::new("run")
+        .display_name("rich run")
+        .about("Run a program")
+        .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+        .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
+    )
+    .subcommand(
+        Command::new("build")
+        .display_name("rich build")
+        .about("Build an executable")
+        .arg(Arg::new("FILE").help("Input files").takes_multiple_values)
+        .arg(Arg::new("dynamic_lib").short('d').help("Dynamic library").takes_value.value_name("LIB"))
+        .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
+    )
+);
+
+test_help_empty: TestCase;
+test_help_empty = make_test("test_help_empty") $ |_| (
+    let command = empty_command;
+    let expected = (
+        "cmd\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    cmd [OPTIONS]\n" + 
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n"
+    );
+    let res = command.get_matches_from(["cmd", "-h"]);
+    let _ = *(assert_true("err", res.is_err));
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_typical: TestCase;
+test_help_typical = make_test("test_help_typical") $ |_| (
+    let command = typical_command;
+    let expected = (
+        "TypicalTool 1.0.0\n" +
+        "somebody <somebody@example.com>\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    typical [OPTIONS] <TARGET> [FILE]...\n" + 
+        "\n" +
+        "ARGS:\n" +
+        "    <TARGET>   Target\n" +
+        "    [FILE]...  Input files\n" +
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "    -n, --count <NUMBER>        How many times to iterate (default: 100)\n" +
+        "    -o, --output <OUTFILE>      An output file\n" +
+        "    -f                          \n" +
+        "        --verbose               Verbose mode\n"
+    );
+    let res = command.get_matches_from(["typical", "--help"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich: TestCase;
+test_help_rich = make_test("test_help_rich") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "RichTool 1.0.0\n" +
+        "somebody <somebody@example.com>\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich [OPTIONS] [SUBCOMMAND]\n" + 
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "\n" +
+        "SUBCOMMANDS:\n" +
+        "    run        Run a program\n" +
+        "    build      Build an executable\n"
+    );
+    let res = command.get_matches_from(["rich"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich_run: TestCase;
+test_help_rich_run = make_test("test_help_rich_run") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "rich run\n" +
+        "Run a program\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich run [OPTIONS] [FILE]...\n" + 
+        "\n" +
+        "ARGS:\n" +
+        "    [FILE]...  Input files\n" +
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "    -v                          Increment verbose level\n"
+    );
+    let res = command.get_matches_from(["rich", "run", "--help"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_help_rich_build: TestCase;
+test_help_rich_build = make_test("test_help_rich_build") $ |_| (
+    let command = rich_command;
+    let expected = (
+        "rich build\n" +
+        "Build an executable\n" +
+        "\n" +
+        "USAGE:\n" +
+        "    rich build [OPTIONS] [FILE]...\n" + 
+        "\n" +
+        "ARGS:\n" +
+        "    [FILE]...  Input files\n" +
+        "\n" +
+        "OPTIONS:\n" +
+        "    -h, --help                  Print help information\n" +
+        "    -V, --version               Print version information\n" +
+        "    -d   <LIB>                  Dynamic library\n" +
+        "    -v                          Increment verbose level\n"
+    );
+    let res = command.get_matches_from(["rich", "build", "--help"]);
+    let _ = *(assert_true("err", res.is_err));
+    //let _ = *write_file_string(Path::parse(",1").as_some, expected);
+    //let _ = *write_file_string(Path::parse(",2").as_some, res.as_err);
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_version_typical: TestCase;
+test_version_typical = make_test("test_version_typical") $ |_| (
+    let command = typical_command;
+    let expected = (
+        "TypicalTool 1.0.0\n"
+    );
+    let res = command.get_matches_from(["typical", "--version"]);
+    let _ = *(assert_true("err", res.is_err));
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_matches_typical: TestCase;
+test_matches_typical = make_test("test_matches_typical") $ |_| (
+    let command = typical_command;
+    let inputs = "typical -n 3 --output out.txt mytarget in.txt -- -in2.txt".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let _ = *(assert_equal("count", some("3"), matches.get_one("count")));
+    let _ = *(assert_equal("output", some("out.txt"), matches.get_one("output")));
+    let _ = *(assert_equal("TARGET", some("mytarget"), matches.get_one("TARGET")));
+    let _ = *(assert_equal("FILE", some(["in.txt", "-in2.txt"]), matches.get_many("FILE")));
+    let _ = *(assert_equal("force", none(), matches.get_one("force")));
+    let _ = *(assert_equal("verbose", none(), matches.get_one("verbose")));
+    let _ = *(assert_equal("no-such-arg", none(), matches.get_one("no-such-arg")));
+    pure()
+);
+
+test_matches_typical2: TestCase;
+test_matches_typical2 = make_test("test_matches_typical2") $ |_| (
+    let command = typical_command;
+    let inputs = "typical mytarget -f --verbose".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let _ = *(assert_equal("count", some("100"), matches.get_one("count")));
+    let _ = *(assert_equal("output", none(), matches.get_one("output")));
+    let _ = *(assert_equal("TARGET", some("mytarget"), matches.get_one("TARGET")));
+    let _ = *(assert_equal("FILE", none(), matches.get_many("FILE")));
+    let _ = *(assert_equal("force", some("true"), matches.get_one("force")));
+    let _ = *(assert_equal("verbose", some("true"), matches.get_one("verbose")));
+    let _ = *(assert_equal("no-such-arg", none(), matches.get_one("no-such-arg")));
+    pure()
+);
+
+test_matches_rich_run: TestCase;
+test_matches_rich_run = make_test("test_matches_rich_run") $ |_| (
+    let command = rich_command;
+    let inputs = "rich run in1.txt".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let opt = matches.subcommand;
+    let _ = *(assert_true("subcommand", opt.is_some));
+    let (name, submatches) = opt.as_some;
+    let _ = *(assert_equal("name", "run", name));
+    let _ = *(assert_equal("FILE", some(["in1.txt"]), submatches.get_many("FILE")));
+    let _ = *(assert_equal("verbose", none(), submatches.get_one("verbose")));
+    pure()
+);
+
+test_matches_rich_build: TestCase;
+test_matches_rich_build = make_test("test_matches_rich_build") $ |_| (
+    let command = rich_command;
+    let inputs = "rich build in1.txt in2.txt -v -d mylib -v".split(" ").to_array;
+    let matches = *command.get_matches_from(inputs).from_result;
+    let opt = matches.subcommand;
+    let _ = *(assert_true("subcommand", opt.is_some));
+    let (name, submatches) = opt.as_some;
+    let _ = *(assert_equal("name", "build", name));
+    let _ = *(assert_equal("FILE", some(["in1.txt", "in2.txt"]), submatches.get_many("FILE")));
+    let _ = *(assert_equal("dynamic_lib", some("mylib"), submatches.get_one("dynamic_lib")));
+    let _ = *(assert_equal("verbose", some("2"), submatches.get_one("verbose")));
+    pure()
+);
+
+test_error: Command -> String -> String -> TestCase;
+test_error = |command, cmdline, expected| (
+    let testname = "test_error(" + cmdline + ")";
+    make_test(testname) $ |_|
+    let inputs = cmdline.split(" ").to_array;
+    let res = command.get_matches_from(inputs);
+    let _ = *(assert_true("err", res.is_err));
+    let _ = *(assert_equal("err", expected, res.as_err));
+    pure()
+);
+
+test_errors: TestCase;
+test_errors = (
+    [
+        test_error(empty_command, "cmd junk", "Found argument 'junk' which wasn't expected, or isn't valid in this context"),
+        test_error(typical_command, "typical -X", "Found argument '-X' which wasn't expected, or isn't valid in this context"),
+        test_error(typical_command, "typical --no-such", "Found argument '--no-such' which wasn't expected, or isn't valid in this context"),
+        test_error(typical_command, "typical", "The following required arguments were not provided:\n    <TARGET>\n"),
+        test_error(typical_command, "typical -n", "The argument '-n' requires a value but none was supplied"),
+        TestCase::empty
+    ]
+    .run_tests
+);
+
+main: IO ();
+main = (
+    [
+        test_help_empty,
+        test_help_typical,
+        test_help_rich,
+        test_help_rich_run,
+        test_help_rich_build,
+        test_version_typical,
+        test_matches_typical,
+        test_matches_typical2,
+        test_matches_rich_run,
+        test_matches_rich_build,
+        test_errors,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+
+

@@ -1,0 +1,718 @@
+// Command line argument parser.
+// Inspired by [`clap` crate of Rust](https://docs.rs/clap/3.2.0/clap/index.html).
+module Minilib.App.Clap;
+
+import HashMap;
+
+import Minilib.Text.StringEx;
+
+//----------------------------------------------
+//  ArgAction
+//----------------------------------------------
+
+namespace ArgAction {
+
+    // The action taken when the argument is parsed.
+    type ArgAction = unbox union {
+        set: (),        // Sets next input to the single argument value.
+        append: (),     // Appends next input to the array of argument values.
+        set_true: (),   // Sets "true" as the single argument value.
+        set_false: (),  // Sets "false" as the single argument value.
+        increment: (),  // Increment the argument value as an integer.
+        help: (),       // Displays help for the command.
+        version: ()     // Displays the version of the command.
+    };
+}
+
+//----------------------------------------------
+//  Arg
+//----------------------------------------------
+
+// A structure that defines arguments.
+// Arguments can be either optional or positional arguments.
+// If either `short` or `long` is set, it becomes an optional argument. 
+// Otherwise, it is a positional argument.
+type Arg = unbox struct {
+    id: String,             // A unique ID that identifies the argument.
+    short: U8,              // A one-hypen option, eg. `-n`
+    long: String,           // A two-hypen option, eg. `--count`
+    required: Bool,         // Whether the argument is required or not.
+    takes_value: Bool,      // Whether the argument takes some value.
+    multiple_values: Bool,  // Whether the argument value(s) is singule or multiple.
+    default_value: Option String,   // A default value of the argument.
+    value_name: String,     // The name of the argument value which is displayed in help message.
+    help: String,           // The help message of the argument.
+    action: ArgAction       // The action taken when the argument is parsed.
+};
+
+namespace Arg {
+    // Creates new argument.
+    new: String -> Arg;
+    new = |id| (
+        Arg {
+            id: id,
+            short: 0_U8,
+            long: "",
+            required: false,
+            takes_value: false,
+            multiple_values: false,
+            default_value: none(),
+            value_name: "VALUE",
+            help: "",
+            action: ArgAction::set_true()
+        }
+    );
+
+    // Sets `@short`.
+    short: U8 -> Arg -> Arg;
+    short = set_short;
+
+    // Sets `@long`.
+    long: String -> Arg -> Arg;
+    long = set_long;
+
+    // Sets `@required` to true.
+    required: Arg -> Arg;
+    required = set_required(true);
+
+    // Sets `@takes_value` to true, and `@action` to `set()`.
+    takes_value: Arg -> Arg;
+    takes_value = |arg| (
+        arg.set_takes_value(true).set_action(ArgAction::set())
+    );
+
+    // Sets `@takes_value` to true, `@multiple_values` to true, and `@action` to `append()`.
+    takes_multiple_values: Arg -> Arg;
+    takes_multiple_values = |arg| (
+        arg.set_takes_value(true).set_multiple_values(true).set_action(ArgAction::append())
+    );
+    
+    // Sets `@default_value`.
+    default_value: String -> Arg -> Arg;
+    default_value = |str| set_default_value(some(str));
+
+    // Sets `@value_name`.
+    value_name: String -> Arg -> Arg;
+    value_name = set_value_name;
+
+    // Sets `@help`.
+    help: String -> Arg -> Arg;
+    help = set_help;
+
+    _is_positional: Arg -> Bool;
+    _is_positional = |arg| (
+        arg.@short == 0_U8 && arg.@long == ""
+    );
+
+    _is_option: Arg -> Bool;
+    _is_option = |arg| !arg._is_positional;
+
+    _short_to_string: Arg -> String;
+    _short_to_string = |arg| (
+        ['-', arg.@short]._unsafe_to_string
+    );
+
+    _long_to_string: Arg -> String;
+    _long_to_string = |arg| (
+        "--" + arg.@long
+    );
+
+    _positional_to_string: Arg -> String;
+    _positional_to_string = |arg| (
+        let multi = if arg.@multiple_values { "..." } else { "" };
+        if arg.@required { 
+            "<" + arg.@id + ">" + multi
+        } else {
+            "[" + arg.@id + "]" + multi
+        }
+    );
+
+    _option_matches: String -> Arg -> Bool;
+    _option_matches = |input, arg| (
+        if arg.@short != 0_U8 && arg._short_to_string == input {
+            true
+        };
+        if arg.@long != "" && arg._long_to_string == input {
+            true
+        };
+        false
+    );
+}
+
+impl Arg: ToString {
+    to_string = |arg| (
+        if arg.@short != 0_U8 {
+            arg._short_to_string    
+        };
+        if arg.@long != "" {
+            arg._long_to_string
+        };
+        arg._positional_to_string
+    );
+}
+
+// ---------------------------------
+//  Command
+// ---------------------------------
+
+// A structure representing a command (ie. application).
+type Command = box struct {
+    name: String,           // The name of the command.
+    bin_name: String,       // The name of the executable binary of the command.
+    display_name: String,   // The display name of the command.
+    subcommand_path: String, // The subcommands that invokes this command.
+    version: String,        // The version of the command.
+    author: String,         // Author of the command.
+    about: String,          // Description about the command.
+    subcommands: Array Command, // Array of subcommands.
+    args: Array Arg,        // Argument definitions of the command.
+    help_template: HelpTemplate,    // A help template of the command.
+    version_template: HelpTemplate  // A version template of the command.
+};
+
+namespace Command {
+    // Creates a command structure by specifying the command name.
+    new: String -> Command;
+    new = |name| (
+        Command {
+            name: name,
+            bin_name: name,
+            display_name: name,
+            subcommand_path: "",
+            version: "",
+            author: "",
+            about: "",
+            subcommands: [],
+            args: _default_args,
+            help_template: HelpTemplate::_default_help,
+            version_template: HelpTemplate::_default_version
+        }
+    );
+
+    // Sets the name of the command.
+    name: String -> Command -> Command;
+    name = set_name;
+
+    // Sets the name of the executable binary of the command.
+    bin_name: String -> Command -> Command;
+    bin_name = set_bin_name;
+
+    // Sets the display name of the command.
+    display_name: String -> Command -> Command;
+    display_name = set_display_name;
+
+    // Sets the version of the command.
+    version: String -> Command -> Command;
+    version = set_version;
+
+    // Sets the author of the command.
+    author: String -> Command -> Command;
+    author = set_author;
+
+    // Sets the description about the command.
+    about: String -> Command -> Command;
+    about = set_about;
+
+    _default_args: Array Arg;
+    _default_args = (
+        Array::empty(100)
+        .push_back(Arg::new("help")
+            .set_short('h').set_long("help")
+            .set_help("Print help information")
+            .set_action(ArgAction::help())
+        )
+        .push_back(Arg::new("version")
+            .set_short('V').set_long("version")
+            .set_help("Print version information")
+            .set_action(ArgAction::version())
+        )
+    );
+
+    // Add an argument definition to the command.
+    arg: Arg -> Command -> Command;
+    arg = |arg, command| (
+        command.mod_args(|args| args.push_back(arg))
+    );
+
+    // Add a subcommand to the command.
+    subcommand: Command -> Command -> Command;
+    subcommand = |subcommand, command| (
+        let subcommand = subcommand.set_bin_name(command.@bin_name);
+        let subcommand = subcommand.set_subcommand_path(
+            command.@subcommand_path + " " + subcommand.@name
+        );
+        command.mod_subcommands(push_back(subcommand))
+    );
+
+    // Generates a help string based on the help template.
+    render_help: Command -> String;
+    render_help = |command| (
+        command.@help_template.format(command)
+    );
+
+    // Generates a version string based on the version template.
+    render_version: Command -> String;
+    render_version = |command| (
+        command.@version_template.format(command)
+    );
+
+    // Parse command line arguments based on `IO::get_args`.
+    // If `--help` or `--version` is specified, the help string or version string will be returned as `throw`.
+    get_matches: Command -> IOFail ArgMatches;
+    get_matches = |command| (
+        let inputs = *IO::get_args.lift;
+        command.get_matches_from(inputs).from_result
+    );
+
+    // Parses command line arguments based on the specified input array.
+    // If `--help` or `--version` is specified, the help string or version string will be returned as the error message.
+    get_matches_from: Array String -> Command -> Result ErrMsg ArgMatches;
+    get_matches_from = |inputs, command| (
+        if command.@subcommands.get_size > 0 {
+            let (name, submatches) = *command._get_submatches_from(inputs);
+            let matches = ArgMatches::empty.set_subcommand(some $ (name, submatches));
+            ok $ matches
+        };
+        let parser = ArgParser::make(inputs, command);
+        let parser = *parser.parse_args;
+        let parser = *parser.check_required_args_present;
+        let parser = *parser.set_default_if_not_present;
+        ok $ parser.@matches
+    );
+
+    _get_submatches_from: Array String -> Command -> Result ErrMsg (String, ArgMatches);
+    _get_submatches_from = |inputs, command| (
+        // drop first argument as it is the executable name
+        let inputs = inputs.to_iter.get_tail.map_or(Iterator::empty, |a|a).to_array;
+        if inputs.get_size == 0 {
+            err $ command.render_help
+        };
+        let subcommand_name = inputs.@(0);
+        let subcommand = command.@subcommands.to_iter
+            .filter(|subcommand| subcommand.@name == subcommand_name)
+            .get_first;
+        if subcommand.is_none {
+            err $ command.render_help
+        };
+        let subcommand = subcommand.as_some;
+        let submatches = *subcommand.get_matches_from(inputs);
+        ok $ (subcommand.@name, submatches)
+    );
+}
+
+// ---------------------------------
+//  ArgParser
+// ---------------------------------
+namespace ArgParser
+{
+    type ArgParser = unbox struct {
+        command: Command,
+        remaining_args: Iterator Arg,
+        matches: ArgMatches,
+        inputs: Iterator String,
+        positional_only: Bool
+    };
+
+    // Creates an `ArgParser` based on the input array and command.
+    make: Array String -> Command -> ArgParser;
+    make = |inputs, command| (
+        // drop first argument as it is the executable name (or subcommand name)
+        let inputs = inputs.to_iter.get_tail.map_or(Iterator::empty, |a|a);
+        ArgParser {
+            command: command,
+            remaining_args: command.@args.to_iter,
+            matches: ArgMatches::empty,
+            inputs: inputs,
+            positional_only: false
+        }
+    );
+
+    // Returns True if there are no more inputs. Returns False if there is more input.
+    no_inputs: ArgParser -> Bool;
+    no_inputs = |parser| (
+        parser.@inputs.is_empty
+    );
+
+    // Proceed to next input.
+    advance: ArgParser -> Result ErrMsg (String, ArgParser);
+    advance = |parser| (
+        parser.@inputs.advance.map_or(
+            err $ "No inputs",
+            |(input, next)| ok $ (input, parser.set_inputs(next))
+        )
+    );
+
+    // Get the current input.
+    get_input: ArgParser -> Result ErrMsg String;
+    get_input = |parser| (
+        let (input, _) = *parser.advance;
+        ok $ input
+    );
+
+    // Parse the actual command line argument array and set the value of `Arg`.
+    parse_args : ArgParser -> Result ErrMsg ArgParser;
+    parse_args = |parser| (
+        loop_m(
+            parser, |parser|
+            if parser.no_inputs {
+                break_m $ parser
+            };
+            let input = *parser.get_input;
+            if parser.@positional_only {
+                continue_m $ *parser._process_positional_arg
+            };
+            if input == "--" {
+                let parser = parser.set_positional_only(true);
+                let (_, parser) = *parser.advance;
+                continue_m $ parser
+            };
+            if input.substring(0, 1) == "-" {
+                continue_m $ *parser._process_option_arg
+            };
+            continue_m $ *parser._process_positional_arg
+        )
+    );
+    
+    // Treats the current input as an optional argument.
+    _process_option_arg: ArgParser -> Result ErrMsg ArgParser;
+    _process_option_arg = |parser| (
+        let (input, parser) = *parser.advance;
+        let remaining_option_args = parser.@remaining_args.filter(_is_option);
+        let matched_args = remaining_option_args.filter(_option_matches(input));
+        if matched_args.is_empty {
+            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
+        };
+        let arg = matched_args.get_first.as_some;
+        let parser = *parser._perform_action(arg);
+        let parser = if arg.@multiple_values || arg.@action.is_increment { parser } else { parser._remove_arg(arg) };
+        ok $ parser 
+    );
+
+    // Treats the current input as a positional argument.
+    _process_positional_arg: ArgParser -> Result ErrMsg ArgParser;
+    _process_positional_arg = |parser| (
+        let input = *parser.get_input;
+        let remaining_positional_args = parser.@remaining_args.filter(_is_positional);
+        if remaining_positional_args.is_empty {
+            err $ "Found argument '" + input + "' which wasn't expected, or isn't valid in this context"
+        };
+        let arg = remaining_positional_args.get_first.as_some;
+        let parser = *parser._perform_action(arg);
+        let parser = if arg.@multiple_values { parser } else { parser._remove_arg(arg) };
+        ok $ parser
+    ); 
+
+    // Remove `arg` from the remaining args.
+    _remove_arg: Arg -> ArgParser -> ArgParser;
+    _remove_arg = |arg, parser| (
+        parser.mod_remaining_args(filter(|a| a.@id != arg.@id))
+    );
+
+    // Performs the action set in `arg`.
+    _perform_action: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _perform_action = |arg, parser| (
+        let action = arg.@action;
+        if action.is_help {
+            err $ parser.@command.render_help
+        };
+        if action.is_version {
+            err $ parser.@command.render_version
+        };
+        if action.is_set_true || action.is_set_false {
+            let value = if action.is_set_true { "true" } else { "false" };
+            let parser = parser.set_value(arg, value);
+            ok $ parser
+        };
+        if action.is_set || action.is_append {
+            parser._set_or_append_value(arg)
+        };
+        if action.is_increment {
+            parser._increment_value(arg)
+        };
+        eval assert(|_| "unknown action: arg="+arg.to_string, false);
+        err $ "error"
+    );
+
+    // Takes the current input as a value and performs a `set` or `append` action.
+    _set_or_append_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _set_or_append_value = |arg, parser| (
+        if parser.no_inputs {
+            err $ "The argument '" + arg.to_string + "' requires a value but none was supplied"
+        };
+        let (value, parser) = *parser.advance;
+        let parser = if arg.@action.is_set {
+            parser.set_value(arg, value)
+        } else {
+            parser.append_value(arg, value)
+        };
+        ok $ parser
+    );
+    
+    // Set the value to `arg`.
+    set_value: Arg -> String -> ArgParser -> ArgParser;
+    set_value = |arg, value, parser| (
+        parser.mod_matches(|matches|
+            matches._set_values(arg.@id,
+                [value]
+            )
+        )
+    );
+
+    // Adds a value to the array of values in `arg`.
+    append_value: Arg -> String -> ArgParser -> ArgParser;
+    append_value = |arg, value, parser| (
+        parser.mod_matches(|matches|
+            matches._mod_values(arg.@id, |values|
+                values.push_back(value)
+            )
+        )
+    );
+
+    // Increments the value as an integer.
+    _increment_value: Arg -> ArgParser -> Result ErrMsg ArgParser;
+    _increment_value = |arg, parser| (
+        ok $ parser.mod_matches(|matches|
+            matches._mod_values(arg.@id, |values|
+                if values.get_size != 1 { ["1"] };
+                values.mod(0, |value|
+                    let res: Result ErrMsg I64 = value.from_string;
+                    if res.is_err { "1" };
+                    (res.as_ok + 1).to_string
+                )
+            )
+        )
+    );
+
+    // Check whether the required argument values are set. Reports an error if the value is not set.
+    check_required_args_present: ArgParser -> Result ErrMsg ArgParser;
+    check_required_args_present = |parser| (
+        let missing_args: Iterator Arg = 
+            parser.@command.@args.to_iter
+            .filter(|arg| arg.@required)
+            .filter(|arg| !parser.@matches.@map.contains_key(arg.@id));
+        if missing_args.is_empty {
+            ok $ parser
+        };
+        err $ "The following required arguments were not provided:\n" +
+        missing_args.map(|arg| "    " + arg.to_string + "\n")
+        .concat_iter
+    );
+
+    // If no value is set for the argument, set the default value.
+    set_default_if_not_present: ArgParser -> Result ErrMsg ArgParser;
+    set_default_if_not_present = |parser| (
+        pure $ parser.@command.@args.to_iter.fold(
+            parser,
+            |parser, arg|
+            if arg.@default_value.is_none {
+                parser
+            };
+            if parser.@matches.@map.contains_key(arg.@id) {
+                parser
+            };
+            parser.set_value(arg, arg.@default_value.as_some)
+        )
+    );
+}
+
+// ---------------------------------
+//  ArgMatches
+// ---------------------------------
+
+// A structure representing the result of parsing command line arguments.
+type ArgMatches = box struct {
+    subcommand: Option (String, ArgMatches),
+    map: HashMap String (Array String)
+};
+
+namespace ArgMatches {
+    // An empty `ArgMatches` structure.
+    empty: ArgMatches;
+    empty = ArgMatches {
+        subcommand: none(),
+        map: HashMap::empty(0) 
+    };
+
+    subcommand: ArgMatches -> Option (String, ArgMatches);
+    subcommand = |matches| (
+        matches.@subcommand
+    );
+
+    // Gets the array of argument values with the specified ID.
+    get_many: String -> ArgMatches -> Option (Array String);
+    get_many = |id, matches| (
+        matches.@map.find(id)
+    );
+
+    // Gets the value of the argument with the specified ID.
+    get_one: String -> ArgMatches -> Option String;
+    get_one = |id, matches| (
+        let array = *matches.get_many(id);
+        if array.get_size == 0 { none() };
+        some(array.@(0))
+    );
+
+    _set_values: String -> Array String -> ArgMatches -> ArgMatches;
+    _set_values = |id, values, matches| (
+        matches.mod_map(|map| map.insert(id, values))
+    );
+
+    _mod_values: String -> (Array String -> Array String) -> ArgMatches -> ArgMatches;
+    _mod_values = |id, f, matches| (
+        let values = matches.@map.find(id).as_some_or(Array::empty(0));
+        let values = f(values);
+        matches.mod_map(|map| map.insert(id, values))
+    );
+}
+
+// ---------------------------------
+//  HelpTemplate
+// ---------------------------------
+
+type HelpTemplate = unbox struct { 
+    data: String 
+};
+namespace HelpTemplate {
+    new: String -> HelpTemplate;
+    new = |str| HelpTemplate { data: str };
+
+    _default_help: HelpTemplate;
+    _default_help = HelpTemplate { 
+        data: (
+            "{name-version}\n" +
+            "{author-with-newline}" +
+            "{about-with-newline}" +
+            "\n" + 
+            "{usage}\n" +
+            "{all-args}"
+        )
+    };
+
+    _default_version: HelpTemplate;
+    _default_version = HelpTemplate {
+        data: (
+            "{name-version}\n"
+        )
+    };
+
+    format: Command -> HelpTemplate -> String;
+    format = |command, help_template| (
+        let help = help_template.@data;
+        let help = help.replace_all("{name-version}", command.@display_name + 
+            if command.@version == "" { "" } else { " " + command.@version });
+        let help = help.replace_all("{author-with-newline}", 
+            if command.@author == "" { "" } else { command.@author + "\n" }
+        );
+        let help = help.replace_all("{about-with-newline}", 
+            if command.@about == "" { "" } else { command.@about + "\n" }
+        );
+        let help = help.replace_all("{usage}", 
+            help_template._format_usage(command)
+        );
+        let help = help.replace_all("{all-args}", 
+            help_template._format_all_args(command)
+        );
+        help
+    );
+
+    _format_usage: Command -> HelpTemplate -> String;
+    _format_usage = |command, help_template| (
+        let args = command.@args.to_iter.filter(_is_positional).to_array;
+        let options = command.@args.to_iter.filter(_is_option).to_array;
+        let subcommands = command.@subcommands;
+        let usage = "USAGE:\n";
+        let usage = usage + (
+            "    " + command.@bin_name + command.@subcommand_path
+        );
+        let usage = usage + (
+            if options.get_size == 0 { "" } else { " [OPTIONS]" }
+        );
+        let usage = usage + (
+            if args.get_size == 0 { "" } else {
+                args.to_iter.map(|arg| " " + arg.to_string).concat_iter
+            }
+        );
+        let usage = usage + (
+            if subcommands.get_size == 0 { "" } else { " [SUBCOMMAND]" }
+        );
+        usage + "\n"
+    );
+
+    _format_all_args: Command -> HelpTemplate -> String;
+    _format_all_args = |command, help_template| (
+        let args = command.@args.to_iter.filter(_is_positional).to_array;
+        let options = command.@args.to_iter.filter(_is_option).to_array;
+        let subcommands = command.@subcommands;
+
+        let output: Array String = Array::empty(3);
+        let output = if args.get_size == 0 { output } else {
+            output.push_back(
+                "ARGS:\n" +
+                args.to_iter.map(_format_arg).concat_iter
+            )
+        };
+        let output = if options.get_size == 0 { output } else {
+            output.push_back(
+                "OPTIONS:\n" +
+                options.to_iter.map(_format_option).concat_iter
+            )
+        };
+        let output = if subcommands.get_size == 0 { output } else {
+            output.push_back(
+                "SUBCOMMANDS:\n" +
+                subcommands.to_iter.map(_format_subcommand).concat_iter
+            )
+        };
+        output.to_iter.join("\n")
+    );
+
+    _format_arg: Arg -> String;
+    _format_arg = |arg| (
+        let line = "    " + arg.to_string;
+        let line = if line.get_size >= 14 { line } else {
+            line + Array::fill(14 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + " " + arg.@help;
+        line + "\n"
+    );
+
+    _format_option: Arg -> String;
+    _format_option = |arg| (
+        let line = "    ";
+        let line = line + (
+            if arg.@short == 0_U8 { "    " } else {
+                arg._short_to_string + (
+                    if arg.@long == "" { "  " } else { ", " }
+                )
+            }
+        );
+        let line = line + (
+            if arg.@long == "" { " " } else {
+                arg._long_to_string + " "
+            }
+        );
+        let line = line + (
+            if !arg.@takes_value { "" } else {
+                "<" + arg.@value_name + ">"
+            }
+        );
+        let line = if line.get_size >= 32 { line } else {
+            line + Array::fill(32 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + arg.@help;
+        let line = if arg.@default_value.is_none { line } else {
+            line + " (default: " + arg.@default_value.as_some + ")"
+        };
+        line + "\n"
+    );
+
+    _format_subcommand: Command -> String;
+    _format_subcommand = |command| (
+        let line = "    " + command.@name;
+        let line = if line.get_size >= 15 { line } else {
+            line + Array::fill(15 - line.get_size, ' ')._unsafe_to_string
+        };
+        let line = line + command.@about;
+        line + "\n"
+    );
+}

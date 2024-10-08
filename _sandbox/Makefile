@@ -49,7 +49,7 @@ svg_test1:
 	../bin/fixautolink run -I ../lib -I . -f svg_test1.fix --opt-level minimum
 
 msgpack:
-	../bin/fixautolink run -L ../lib -L . -f msgpack.fix -O separated
+	../bin/fixautolink run -L ../lib -L . -f msgpack.fix --opt-level separated
 clean:
 	rm -f *.out
 	rm -f .depend

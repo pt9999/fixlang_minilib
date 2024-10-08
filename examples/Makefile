@@ -1,5 +1,5 @@
-#OPT_EXAMPLES = -O default
-OPT_EXAMPLES = -O separated
+#OPT_EXAMPLES = --opt-level default
+OPT_EXAMPLES = --opt-level separated
 
 SOURCES := $(wildcard *.fix)
 BINARIES := $(SOURCES:.fix=.out)

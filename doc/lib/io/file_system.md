@@ -102,6 +102,11 @@ NOTE: When a fix program is invoked by `run_with_stream()`,
 then the stdout and stderr becomes not a TTY but a file stream.
 So the stdout becomes block-buffered. The stderr also seems to be block-buffered.
 
+### `realpath: String -> IOFail String;`
+
+Returns the canonicalized absolute pathname.
+For detials, see Linux manual page for [realpath()](https://man7.org/linux/man-pages/man3/realpath.3.html).
+
 ### `creat: String -> U32 -> IOFail I32;`
 
 Creates a new file or rewrites an existing one.

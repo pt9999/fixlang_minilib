@@ -1,8 +1,8 @@
 %.out: %.fix
-	../bin/fixautolink build -o $@ -I ../lib -I . -f $<
+	cd .. && bin/fixautolink build -o _sandbox/$@ -I lib -I _sandbox -f _sandbox/$<
 
 %.run: %.fix
-	../bin/fixautolink run -o $@ -I ../lib -I . -f $< -O separated
+	cd .. && bin/fixautolink run -o _sandbox/$@ -I lib -I _sandbox -f _sandbox/$< --opt-level separated
 
 all:
 
@@ -13,10 +13,10 @@ ndarray:
 	../bin/fixautolink run -I ../lib -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
 ndarray_calc:
-	../bin/fixautolink run -I ../lib -f ndarray_calc.fix ndarray.fix -d readline -O separated
+	../bin/fixautolink run -I ../lib -f ndarray_calc.fix ndarray.fix -d readline --opt-level separated
 
 ndarray_calc.out:
-	../bin/fixautolink build -o $@ -I ../lib -f ndarray_calc.fix ndarray.fix -d readline -O separated
+	../bin/fixautolink build -o $@ -I ../lib -f ndarray_calc.fix ndarray.fix -d readline --opt-level separated
 
 png: 
 	../bin/fixautolink run -I ../lib -I . -f png_test.fix -d png -d z
@@ -25,7 +25,7 @@ png.out:
 	../bin/fixautolink build -o $@ -I ../lib -I . -f png_test.fix -d png -d z
 
 obj_test:
-	../bin/fixautolink run -I ../lib -I . -f obj_test.fix -O minimum
+	../bin/fixautolink run -I ../lib -I . -f obj_test.fix --opt-level minimum
 
 mandelbrot: 
 	../bin/fixautolink run -I ../lib -I . -f mandelbrot.fix -d png -d z
@@ -43,10 +43,10 @@ algebra_test1:
 	../bin/fixautolink run -I ../lib -I . -f algebra_test1.fix
 
 xml_test1:
-	../bin/fixautolink run -I ../lib -I . -f xml_test1.fix -O minimum
+	../bin/fixautolink run -I ../lib -I . -f xml_test1.fix --opt-level minimum
 
 svg_test1:
-	../bin/fixautolink run -I ../lib -I . -f svg_test1.fix -O minimum
+	../bin/fixautolink run -I ../lib -I . -f svg_test1.fix --opt-level minimum
 
 clean:
 	rm -f *.out

@@ -1,0 +1,139 @@
+// Hexadecimal string conversion
+module Minilib.Text.Hex;
+
+import Character;
+
+import Minilib.Text.StringEx;
+
+// Converts a 4bit number (0..15) to a hex character ('0'..'9', 'a'..'f').
+encode_hex_char: U8 -> U8;
+encode_hex_char =
+    let hex_chars = "0123456789abcdef".get_bytes.pop_back
+    in |c| hex_chars.@(c.bit_and(15_U8).to_I64);
+
+// Converts a hex character ('0'..'9', 'A'..'F' or 'a'..'f') to a 4bit number (0..15).
+decode_hex_char: U8 -> Result ErrMsg U8;
+decode_hex_char = |c| (
+    if '0' <= c && c <= '9' { ok $ c - '0' };
+    if 'A' <= c && c <= 'F' { ok $ c - 'A' + 10_U8 };
+    if 'a' <= c && c <= 'f' { ok $ c - 'a' + 10_U8 };
+    err $ "Not a hexadecimal character: '" + byte_to_string(c) + "'"
+);
+
+
+// `input._from_string_hex(n)` converts a hex string of `1..n` characters
+// to a 64bit number.
+_from_string_hex: I64 -> String -> Result ErrMsg U64;
+_from_string_hex = |n, input| (
+    if input.get_size == 0 {
+        err $ "Empty string"
+    };
+    if input.get_size > n {
+        err $ "Too long string"
+    };
+    let input = input.get_bytes.pop_back;
+    input.to_iter.fold_m(
+        0_U64, |output, c|
+        let c = *decode_hex_char(c);
+        pure $ output.shift_left(4_U64).bit_or(c.to_U64)
+    )
+);
+
+// `input._array_from_string_hex(n)` splits the input string
+// to `n` characters each, then converts each component to numbers.
+// Whitespaces are ignored.
+_array_from_string_hex: [a: FromStringHex] I64 -> String -> Result ErrMsg (Array a);
+_array_from_string_hex = |n, input| (
+    let input = input.get_bytes.pop_back.to_iter.filter(|c| !is_space(c)).to_array._unsafe_to_string;
+    let count = (input.get_size + n - 1) / n;
+    loop_m(
+        (Array::empty(count), 0), |(array, i)|
+        if i >= count { break_m $ array };
+        let hex_str = input.substring(i * n, (i + 1) * n);
+        let value = *hex_str.from_string_hex;
+        let array = array.push_back(value);
+        continue_m $ (array, i + 1)
+    )
+);
+
+
+trait a: FromStringHex {
+    from_string_hex: String -> Result ErrMsg a;
+}
+
+// Converts a hex string of 1..2 characters to U8.
+impl U8: FromStringHex {
+    from_string_hex = _from_string_hex(2) >> map(to_U8);
+}
+
+// Converts a hex string of 1..4 characters to U16.
+impl U16: FromStringHex {
+    from_string_hex = _from_string_hex(4) >> map(to_U16);
+}
+
+// Converts a hex string of 1..8 characters to U32.
+impl U32: FromStringHex {
+    from_string_hex = _from_string_hex(8) >> map(to_U32);
+}
+
+// Converts a hex string of 1..16 characters to U64.
+impl U64: FromStringHex {
+    from_string_hex = _from_string_hex(16);
+}
+
+// Converts a byte array from a hex string.
+// For example, `"a5b6".from_string_hex == ok $ [ 0xa5_U8, 0xb6_U8 ]`.
+// Whitespaces are ignored.
+impl Array U8: FromStringHex {
+    from_string_hex = _array_from_string_hex(2);
+}
+
+// `input._to_string_hex(n)` converts least significant `4 * n` bits of `input`
+// to a hex string of `n` characters.
+_to_string_hex: I64 -> U64 -> String;
+_to_string_hex = |n, input| (
+    loop(
+        (Array::empty(n + 1), 0), |(output, i)|
+        if i >= n {
+            break $ output._unsafe_to_string
+        };
+        let shift = (4 * (n - 1 - i)).to_U64;
+        let h = input.shift_right(shift).bit_and(15_U64).to_U8;
+        let output = output.push_back(encode_hex_char(h));
+        continue $ (output, i + 1)
+    )
+);
+
+trait a: ToStringHex {
+    to_string_hex: a -> String;
+}
+
+// Converts U8 to a hex string of 2 characters.
+// For example, `0x03_U8.to_hex_string == "03"`.
+impl U8: ToStringHex {
+    to_string_hex = |a| a.to_U64._to_string_hex(2);
+}
+
+// Converts U16 to a hex string of 4 characters.
+// For example, `0x0a1b_U16.to_hex_string == "0a1b"`.
+impl U16: ToStringHex {
+    to_string_hex = |a| a.to_U64._to_string_hex(4);
+}
+
+// Converts U32 to a hex string of 8 characters.
+// For example, `0xdeadbeef_U32.to_hex_string == "deadbeef"`.
+impl U32: ToStringHex {
+    to_string_hex = |a| a.to_U64._to_string_hex(8);
+}
+
+// Converts U64 to a hex string of 16 characters.
+// For example, `0xa5b6_U64.to_hex_string == "000000000000a5b6"`.
+impl U64: ToStringHex {
+    to_string_hex = |a| a._to_string_hex(16);
+}
+
+// Converts an array to a hex string by concatenation.
+// For example, `[ 0xa5_U8, 0xb6_U8 ].to_hex_string == "a5b6"`.
+impl [a: ToStringHex] Array a: ToStringHex {
+    to_string_hex = |a| a.to_iter.map(to_string_hex).concat_iter;
+}

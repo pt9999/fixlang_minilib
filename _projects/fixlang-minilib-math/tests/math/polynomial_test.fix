@@ -129,29 +129,38 @@ test_divmod_F64 = (
 
 gen_polynomial_F64: I64 -> Random -> (Random, Polynomial F64);
 gen_polynomial_F64 = |max_degree, random| (
-    do {
-        let degree = *make_state_monad(generate_I64_range(1, max_degree + 1));
-        let coeff = Array::fill(degree + 1, 0.0);
-        let coeff = *make_state_monad(
-            generate_array(degree + 1, generate_F64)
-        );
-        let coeff = coeff.map(|r| r * 2.0 - 1.0);
-        pure $ Polynomial::make(coeff)
-    }.run_state(random)
+    let (random, degree) = random.generate_I64_range(1, max_degree + 1);
+    let (random, coeff) = loop(
+        (random, []), |(random, coeff)|
+        if coeff.get_size >= degree + 1 {
+            break $ (random, coeff)
+        };
+        let (random, r) = random.generate_F64;
+        let r = r * 2.0 - 1.0;
+        continue $ (random, coeff.push_back(r))
+    );
+    (random, Polynomial::make(coeff))
 );
 
 test_divmod_F64_random: TestCase;
 test_divmod_F64_random = (
     make_table_test("test_divmod_F64_random",
-        Iterator::range(0, 10).fold_m(
-            [], |table, i|
-            let num = *make_state_monad(gen_polynomial_F64(5));
-            let den = *make_state_monad(gen_polynomial_F64(3));
-            pure $ table.push_back((num, den))
-        ).eval_state(Random::init_by_seed(123_U64)),
+        Iterator::range(0, 20).to_array.map(|i|
+            let random = Random::init_by_seed(123_U64 + i.to_U64);
+            let (random, num) = random.gen_polynomial_F64(7);
+            let (random, den) = random.gen_polynomial_F64(5);
+            (num, den)
+        ),
         |(num, den)|
         let (quo, rem) = divmod(num, den);
-        //assert_equal("num", expected, num)
+        /*
+        eval debug_println(
+            "num=" + num.to_string
+            + " den=" + den.to_string
+            + " quo=" + quo.to_string
+            + " rem=" + rem.to_string
+        );
+        */
         let residue = num - (den * quo + rem);
         let residue_abs = residue.@coeff.to_iter.map(abs).fold(0.0, add);
         assert_true("residue_abs=" + residue_abs.to_string_exp,

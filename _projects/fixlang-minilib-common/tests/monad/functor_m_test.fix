@@ -1,0 +1,56 @@
+module FunctorMTest;
+
+import Minilib.Monad.FunctorM;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+iofail_pure: a -> IOFail a;
+iofail_pure = pure;
+
+test_map_m: TestCase;
+test_map_m = (
+    make_test("test_map_m") $ |_|
+    let array = [1,2,3];
+    let actual = *array.map_m(|i| iofail_pure(i.to_string));
+    let expected = ["1", "2", "3"];
+    let _ = *assert_equal("array", expected, actual);
+
+    let iter = [4,5,6].to_iter;
+    let actual = *iter.map_m(|i| iofail_pure(i.to_string));
+    let expected = ["4", "5", "6"];
+    let _ = *assert_equal("iter", expected, actual.to_array);
+
+    pure()
+);
+
+test_foreach_m: TestCase;
+test_foreach_m = (
+    make_test("test_foreach_m") $ |_|
+    let filepath = Path::parse(".fixlang/test_foreach_m.tmp").as_some;
+
+    eval *with_file(filepath, "w", |handle|
+        let array = [1,2,3];
+        array.foreach_m(|i| write_string(handle, i.to_string))
+    );
+    let actual = *read_file_string(filepath);
+    let expected = "123";
+    eval *assert_equal("array", expected, actual);
+
+    eval *with_file(filepath, "w", |handle|
+        let iter = [4,5,6].to_iter;
+        iter.foreach_m(|i| write_string(handle, i.to_string))
+    );
+    let actual = *read_file_string(filepath);
+    let expected = "456";
+    let _ = *assert_equal("iter", expected, actual);
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_map_m,
+        test_foreach_m
+    ]
+    .run_test_driver
+);

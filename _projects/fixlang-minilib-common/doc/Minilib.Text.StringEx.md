@@ -6,7 +6,6 @@ Features:
 - Array U8 -> String conversion
 - Search, replace, split, comparison of String
 - Format
-- ToString extensions
 
 # Types and aliases
 
@@ -108,12 +107,6 @@ Converts the specified string to uppercase.
 `array.format(str)` replaces each occurence of `{}` in the format string `str`
 with each element of `array`.
 Currently only supports `{}`.
-
-## `namespace Minilib.Text.StringEx::HashMap`
-
-### `to_string_ex : [k : Std::ToString, v : Std::ToString] HashMap::HashMap k v -> Std::String`
-
-Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
 
 ## `namespace Minilib.Text.StringEx::Tuple1`
 

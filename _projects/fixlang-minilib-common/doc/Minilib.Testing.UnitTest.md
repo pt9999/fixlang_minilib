@@ -10,6 +10,8 @@ Unit Test Framework
 
 TestCase is a type that counts the number of successful and failed tests.
 
+### `type TestSuite = Std::Array (Std::String, Std::IO ())`
+
 # Traits and aliases
 
 # Trait implementations
@@ -58,3 +60,7 @@ Executes all test cases and treat the results as one test case.
 
 A test case where the number of successes and number of failures are both equal to 0.
 Can be used as a placeholder at the end of an array of test cases.
+
+## `namespace Minilib.Testing.UnitTest::TestSuite`
+
+### `run : Std::Array (Std::String, Std::IO ()) -> Std::IO ()`

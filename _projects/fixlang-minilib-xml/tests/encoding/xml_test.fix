@@ -1,0 +1,551 @@
+module XmlTest;
+
+import Minilib.Encoding.Xml;
+import Minilib.Testing.UnitTest;
+import Minilib.Text.StringEx;
+
+//=======================================================================
+// tests for XmlDocument
+//=======================================================================
+
+_default_xml_decl: String;
+_default_xml_decl = "<?xml version=\"1.1\" encoding=\"utf-8\"?>";
+
+test_xmldocument_empty: TestCase;
+test_xmldocument_empty = (
+    make_test("test_xmldocument_empty") $ |_|
+    let doc = XmlDocument::empty;
+    eval *assert_equal("xml_decl", _default_xml_decl, doc.@xml_decl.to_string);
+    eval *assert_equal("prolog", [], doc.@prolog);
+    eval *assert_equal("document_element", "root", doc.@document_element.@tag_name);
+    eval *assert_equal("epilog", [], doc.@epilog);
+    pure()
+);
+
+test_xmldocument_make: TestCase;
+test_xmldocument_make = (
+    make_test("test_xmldocument_empty") $ |_|
+    let element = XmlElement::make("element1");
+    let doc = XmlDocument::make(element);
+    eval *assert_equal("xml_decl", _default_xml_decl, doc.@xml_decl.to_string);
+    eval *assert_equal("prolog", [], doc.@prolog);
+    eval *assert_equal("document_element", "element1", doc.@document_element.@tag_name);
+    eval *assert_equal("epilog", [], doc.@epilog);
+    pure()
+);
+
+// TODO: test add_to_prolog
+// TODO: test add_to_epilog
+// TODO: test eq
+
+test_xmldocument_to_string: TestCase;
+test_xmldocument_to_string = (
+    make_test("test_xmldocument_to_string") $ |_|
+    let element = XmlElement::make("element1").text("this is content");
+    let doc = XmlDocument::make(element);
+    let doc = doc.add_to_prolog(text_node $ XmlText::make("this is prolog"));
+    let doc = doc.add_to_epilog(text_node $ XmlText::make("this is epilog"));
+    let expected = _default_xml_decl + "this is prolog<element1>this is content</element1>this is epilog";
+    let actual = doc.to_string;
+    assert_equal("eq", expected, actual)
+);
+
+//=======================================================================
+// tests for XmlDeclaration
+//=======================================================================
+
+test_xmldeclaration_default: TestCase;
+test_xmldeclaration_default = (
+    make_test("test_xmldeclaration_default") $ |_|
+    let decl = XmlDeclaration::default;
+    eval *assert_equal("version", "1.1", decl.@version);
+    eval *assert_equal("encoding", some("utf-8"), decl.@encoding);
+    eval *assert_equal("standalone", none(), decl.@standalone);
+    pure()
+);
+
+test_xmldeclaration_eq: TestCase;
+test_xmldeclaration_eq = (
+    make_test("test_xmldeclaration_eq") $ |_|
+    let decl1 = XmlDeclaration::default;
+    let decl2 = XmlDeclaration::default;
+    eval *assert_equal("default", decl1, decl2);
+    eval *assert_not_equal("version", decl1, decl2.set_version("1.0"));
+    eval *assert_not_equal("encoding", decl1, decl2.set_encoding(none()));
+    eval *assert_not_equal("standalone", decl1, decl2.set_standalone(some("yes")));
+    pure()
+);
+
+test_xmldeclaration_to_string: TestCase;
+test_xmldeclaration_to_string = (
+    make_test("test_xmldeclaration_to_string") $ |_|
+    let decl = XmlDeclaration::default;
+    eval *assert_equal("default", "<?xml version=\"1.1\" encoding=\"utf-8\"?>", decl.to_string);
+    eval *assert_equal("version", "<?xml version=\"1.0\" encoding=\"utf-8\"?>", decl.set_version("1.0").to_string);
+    eval *assert_equal("encoding", "<?xml version=\"1.1\"?>", decl.set_encoding(none()).to_string);
+    eval *assert_equal("standalone", "<?xml version=\"1.1\" encoding=\"utf-8\" standalone=\"yes\"?>", decl.set_standalone(some("yes")).to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlNode
+//=======================================================================
+
+test_xmlnode_eq: TestCase;
+test_xmlnode_eq = (
+    make_test("test_xmlnode_eq") $ |_|
+    let table = [
+        element_node $ XmlElement::make("element1"),
+        element_node $ XmlElement::make("element2"),
+        attribute_node $ XmlAttribute::make("attr", "value1"),
+        attribute_node $ XmlAttribute::make("attr", "value2"),
+        text_node $ XmlText::make("text1"),
+        text_node $ XmlText::make("text2"),
+        cdata_section $ XmlCDATASection::make("cdata1"),
+        cdata_section $ XmlCDATASection::make("cdata2"),
+        processing_instruction $ XmlProcessingInstruction::make("pi1"),
+        processing_instruction $ XmlProcessingInstruction::make("pi2"),
+        comment_node $ XmlComment::make("comment1"),
+        comment_node $ XmlComment::make("comment2"),
+        document_node $ XmlDocument::make(XmlElement::make("doc1")),
+        document_node $ XmlDocument::make(XmlElement::make("doc2"))
+    ];
+    let n = table.get_size;
+    Iterator::range(0, n).fold_m(
+        (), |_, i|
+        eval *assert_equal("eq" + i.to_string, table.@(i), table.@(i));
+        eval *assert_not_equal("neq" + i.to_string, table.@(i), table.@((i+1) % n));
+        pure()
+    )
+);
+
+_assert_node_to_string: [a: ToString] String -> (a -> XmlNode) -> a -> IOFail ();
+_assert_node_to_string = |label, to_node, data| (
+    assert_equal(label, data.to_string, (to_node $ data).to_string)
+);
+
+test_xmlnode_to_string: TestCase;
+test_xmlnode_to_string = (
+    make_test("test_xmlnode_to_string") $ |_|
+    eval *_assert_node_to_string("element", element_node, XmlElement::make("element1"));
+    eval *_assert_node_to_string("attr", attribute_node, XmlAttribute::make("attr", "value1"));
+    eval *_assert_node_to_string("text", text_node, XmlText::make("text1"));
+    eval *_assert_node_to_string("cdata", cdata_section, XmlCDATASection::make("cdata1"));
+    eval *_assert_node_to_string("pi", processing_instruction, XmlProcessingInstruction::make("pi1"));
+    eval *_assert_node_to_string("comment", comment_node, XmlComment::make("comment1"));
+    eval *_assert_node_to_string("doc", document_node, XmlDocument::make(XmlElement::make("doc1")));
+    pure()
+);
+
+//=======================================================================
+// tests for XmlElement
+//=======================================================================
+
+test_xmlelement_make: TestCase;
+test_xmlelement_make = (
+    make_test("test_xmlelement_make") $ |_|
+    let element = XmlElement::make("element1");
+    eval *assert_equal("tag_name", "element1", element.@tag_name);
+    eval *assert_equal("attributes", [], element.@attributes);
+    eval *assert_equal("children", [], element.@children);
+    pure()
+);
+
+test_xmlelement_get_attribute: TestCase;
+test_xmlelement_get_attribute = (
+    make_test("test_xmlelement_get_attribute") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.set_attributes([
+        XmlAttribute::make("attr1", "value1"),
+        XmlAttribute::make("attr2", "value2")
+    ]);
+    eval *assert_equal("attr1", some("value1"), element.get_attribute("attr1"));
+    eval *assert_equal("attr2", some("value2"), element.get_attribute("attr2"));
+    eval *assert_equal("attr3", none(), element.get_attribute("attr3"));
+    pure()
+);
+
+test_xmlelement_set_attribute: TestCase;
+test_xmlelement_set_attribute = (
+    make_test("test_xmlelement_set_attribute") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.set_attribute("attr1", "value1");
+    let element = element.set_attribute("attr2", "value2");
+    let element = element.set_attribute("attr1", "value1-1");
+    assert_equal("attributes", [
+        XmlAttribute::make("attr1", "value1-1"),
+        XmlAttribute::make("attr2", "value2")
+    ], element.@attributes)
+);
+
+test_xmlelement_remove_attribute: TestCase;
+test_xmlelement_remove_attribute = (
+    make_test("test_xmlelement_remove_attribute") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.set_attributes([
+        XmlAttribute::make("attr1", "value1"),
+        XmlAttribute::make("attr2", "value2")
+    ]);
+    let element = element.remove_attribute("attr1");
+    let element = element.remove_attribute("attr3");
+    assert_equal("attributes", [
+        XmlAttribute::make("attr2", "value2")
+    ], element.@attributes)
+);
+
+test_xmlelement_append_child: TestCase;
+test_xmlelement_append_child = (
+    make_test("test_xmlelement_append_child") $ |_|
+    let element = XmlElement::make("element1");
+    let comment = XmlComment::make("comment");
+    let element = element.append_child(comment_node $ comment);
+    assert_equal("children", [comment_node $ comment], element.@children)
+);
+
+test_xmlelement_add: TestCase;
+test_xmlelement_add = (
+    make_test("test_xmlelement_add") $ |_|
+    let element = XmlElement::make("element1");
+    let child1 = XmlElement::make("child1");
+    let child2 = XmlElement::make("child2");
+    let element = element.add(child1).add(child2);
+    assert_equal("children", [
+        element_node $ child1,
+        element_node $ child2
+    ], element.@children)
+);
+
+test_xmlelement_addF: TestCase;
+test_xmlelement_addF = (
+    make_test("test_xmlelement_addF") $ |_|
+    let parent = XmlElement::make("parent");
+    let child = XmlElement::make("child");
+    let grandchild = XmlElement::make("grandchild");
+    let parent = parent.addF $ child.addF $ grandchild;
+    let child_and_grandchild = child.add(grandchild);
+    assert_equal("child", [element_node $ child_and_grandchild], parent.@children)
+);
+
+test_xmlelement_text: TestCase;
+test_xmlelement_text = (
+    make_test("test_xmlelement_text") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.text("text1");
+    let element = element.text("text2");
+    assert_equal("children", [
+        text_node $ XmlText::make("text1"),
+        text_node $ XmlText::make("text2")
+    ], element.@children)
+);
+
+test_xmlelement_concat_text_nodes: TestCase;
+test_xmlelement_concat_text_nodes = (
+    make_test("test_xmlelement_concat_text_nodes") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.text("text1");
+    let element = element.text("text2");
+    let element = element.add_node(comment_node $ XmlComment::make("comment"));
+    let element = element.text("text3");
+    let element = element.concat_text_nodes;
+    assert_equal("children", [
+        text_node $ XmlText::make("text1text2"),
+        comment_node $ XmlComment::make("comment"),
+        text_node $ XmlText::make("text3")
+    ], element.@children)
+);
+
+test_xmlelement_eq: TestCase;
+test_xmlelement_eq = (
+    make_test("test_xmlelement_eq") $ |_|
+    let element1 = XmlElement::make("element");
+    let element2 = XmlElement::make("element");
+    eval *assert_equal("plain", element1, element2);
+    eval *assert_not_equal("attr1", element1, element2.attr("attr1", "value1"));
+    eval *assert_equal("attr2", element1.attr("attr1", "value1"), element2.attr("attr1", "value1"));
+    eval *assert_not_equal("attr3", element1.attr("attr1", "value1"), element2.attr("attr1", "value2"));
+    eval *assert_not_equal("children1", element1, element2.add(XmlElement::make("child1")));
+    eval *assert_equal("children2", element1.add(XmlElement::make("child1")), element2.add(XmlElement::make("child1")));
+    eval *assert_not_equal("children3", element1.add(XmlElement::make("child1")), element2.add(XmlElement::make("child2")));
+    pure()
+);
+
+test_xmlelement_to_string: TestCase;
+test_xmlelement_to_string = (
+    make_test("test_xmlelement_to_string") $ |_|
+    let element1 = XmlElement::make("element1");
+    let element1 = element1.attr("attr2", "value2");
+    let element1 = element1.attr("attr1", "value1");
+    let element1 = element1.text("text1");
+    let element1 = element1.add_node(comment_node $ XmlComment::make("comment"));
+    let element1 = element1.add(XmlElement::make("child1").text("text2"));
+    let expected = "<element1 attr2=\"value2\" attr1=\"value1\">"
+                    + "text1"
+                    + "<!--comment-->"
+                    + "<child1>text2</child1>"
+                    + "</element1>";
+    let actual = element1.to_string;
+    assert_equal("to_string", expected, actual)
+);
+
+//=======================================================================
+// tests for XmlAttribute
+//=======================================================================
+
+test_xmlattribute_make: TestCase;
+test_xmlattribute_make = (
+    make_test("test_xmlattribute_make") $ |_|
+    let attr = XmlAttribute::make("attr1", "value1");
+    eval *assert_equal("name", "attr1", attr.@name);
+    eval *assert_equal("value", "value1", attr.@value);
+    let attr = XmlAttribute::make(":AZ_az-.09あ漢", "<&>");
+    eval *assert_equal("name", ":AZ_az-.09あ漢", attr.@name);
+    eval *assert_equal("value", "<&>", attr.@value);
+    pure()
+);
+
+test_xmlattribute_eq: TestCase;
+test_xmlattribute_eq = (
+    make_test("test_xmlattribute_eq") $ |_|
+    let attr1 = XmlAttribute::make("attr", "value");
+    let attr2 = XmlAttribute::make("attr", "value");
+    eval *assert_equal("plain", attr1, attr2);
+    eval *assert_not_equal("name", attr1, attr2.set_name("attr2"));
+    eval *assert_not_equal("value", attr1, attr2.set_value("value2"));
+    pure()
+);
+
+test_xmlattribute_to_string: TestCase;
+test_xmlattribute_to_string = (
+    make_test("test_xmlattribute_to_string") $ |_|
+    let attr = XmlAttribute::make("attr1", "value1");
+    eval *assert_equal("to_string", "attr1=\"value1\"", attr.to_string);
+    let attr = XmlAttribute::make(":AZ_az-.09あ漢", "<&>'\"\\\n");
+    eval *assert_equal("to_string2", ":AZ_az-.09あ漢=\"&lt;&amp;&gt;&#039;&quot;\\\n\"", attr.to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlText
+//=======================================================================
+
+test_xmltext_make: TestCase;
+test_xmltext_make = (
+    make_test("test_xmltext_make") $ |_|
+    let text = XmlText::make("text1");
+    eval *assert_equal("text1", "text1", text.@content);
+    let text = XmlText::make("<&>  \n");
+    eval *assert_equal("text2", "<&>  \n", text.@content);
+    pure()
+);
+
+test_xmltext_eq: TestCase;
+test_xmltext_eq = (
+    make_test("test_xmltext_eq") $ |_|
+    let text1 = XmlText::make("text");
+    let text2 = XmlText::make("text");
+    eval *assert_equal("eq", text1, text2);
+    eval *assert_not_equal("neq", text1, text2.set_content("xyz"));
+    pure()
+);
+
+test_xmltext_to_string: TestCase;
+test_xmltext_to_string = (
+    make_test("test_xmltext_to_string") $ |_|
+    let text1 = XmlText::make("AZaz09-.あ漢");
+    let text2 = XmlText::make("  <&>'\"\\\n ");
+    eval *assert_equal("to_string", "AZaz09-.あ漢", text1.to_string);
+    eval *assert_equal("to_string2", "  &lt;&amp;&gt;&#039;&quot;\\\n ", text2.to_string);
+    pure()
+);
+
+test_xmltext_add: TestCase;
+test_xmltext_add = (
+    make_test("test_xmltext_add") $ |_|
+    let text1 = XmlText::make("text1");
+    let text2 = XmlText::make("  text2");
+    assert_equal("eq", "text1  text2", (text1 + text2).@content)
+);
+
+//=======================================================================
+// tests for XmlCDATASection
+//=======================================================================
+
+test_xmlcdatasection_make: TestCase;
+test_xmlcdatasection_make = (
+    make_test("test_xmlcdatasection_make") $ |_|
+    let cdata = XmlCDATASection::make("cdata1");
+    eval *assert_equal("cdata1", "cdata1", cdata.@content);
+    pure()
+);
+
+test_xmlcdatasection_eq: TestCase;
+test_xmlcdatasection_eq = (
+    make_test("test_xmlcdatasection_eq") $ |_|
+    let cdata1 = XmlCDATASection::make("cdata");
+    let cdata2 = XmlCDATASection::make("cdata");
+    eval *assert_equal("eq", cdata1, cdata2);
+    eval *assert_not_equal("neq", cdata1, cdata2.set_content("xyz"));
+    pure()
+);
+
+test_xmlcdatasection_to_string: TestCase;
+test_xmlcdatasection_to_string = (
+    make_test("test_xmlcdatasection_to_string") $ |_|
+    let cdata1 = XmlCDATASection::make("AZaz09-.あ漢");
+    let cdata2 = XmlCDATASection::make("  <&>'\"\\\n ");
+    eval *assert_equal("to_string", "<![CDATA[AZaz09-.あ漢]]>", cdata1.to_string);
+    eval *assert_equal("to_string2", "<![CDATA[  <&>'\"\\\n ]]>", cdata2.to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlComment
+//=======================================================================
+
+test_xmlcomment_make: TestCase;
+test_xmlcomment_make = (
+    make_test("test_xmlcomment_make") $ |_|
+    let comment = XmlComment::make("comment1");
+    eval *assert_equal("comment1", "comment1", comment.@content);
+    pure()
+);
+
+test_xmlcomment_eq: TestCase;
+test_xmlcomment_eq = (
+    make_test("test_xmlcomment_eq") $ |_|
+    let comment1 = XmlComment::make("comment");
+    let comment2 = XmlComment::make("comment");
+    eval *assert_equal("eq", comment1, comment2);
+    eval *assert_not_equal("neq", comment1, comment2.set_content("xyz"));
+    pure()
+);
+
+test_xmlcomment_to_string: TestCase;
+test_xmlcomment_to_string = (
+    make_test("test_xmlcomment_to_string") $ |_|
+    let comment1 = XmlComment::make("AZaz09-.あ漢");
+    let comment2 = XmlComment::make("  <&>'\"\\\n ");
+    eval *assert_equal("to_string", "<!--AZaz09-.あ漢-->", comment1.to_string);
+    eval *assert_equal("to_string2", "<!--  <&>'\"\\\n -->", comment2.to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlProcessingInstruction
+//=======================================================================
+
+test_xmlprocessinginstruction_make: TestCase;
+test_xmlprocessinginstruction_make = (
+    make_test("test_xmlprocessinginstruction_make") $ |_|
+    let pi = XmlProcessingInstruction::make("pi1");
+    eval *assert_equal("pi1", "pi1", pi.@content);
+    pure()
+);
+
+test_xmlprocessinginstruction_eq: TestCase;
+test_xmlprocessinginstruction_eq = (
+    make_test("test_xmlprocessinginstruction_eq") $ |_|
+    let pi1 = XmlProcessingInstruction::make("pi");
+    let pi2 = XmlProcessingInstruction::make("pi");
+    eval *assert_equal("eq", pi1, pi2);
+    eval *assert_not_equal("neq", pi1, pi2.set_content("xyz"));
+    pure()
+);
+
+test_xmlprocessinginstruction_to_string: TestCase;
+test_xmlprocessinginstruction_to_string = (
+    make_test("test_xmlprocessinginstruction_to_string") $ |_|
+    let pi1 = XmlProcessingInstruction::make("AZaz09-.あ漢");
+    let pi2 = XmlProcessingInstruction::make("  <&>'\"\\\n ");
+    eval *assert_equal("to_string", "<?AZaz09-.あ漢?>", pi1.to_string);
+    eval *assert_equal("to_string2", "<?  <&>'\"\\\n ?>", pi2.to_string);
+    pure()
+);
+
+//=======================================================================
+// tests for XmlHelpers
+//=======================================================================
+// NOTE: duplicates of xml_helpers_test.fix
+
+test_escape_special: TestCase;
+test_escape_special = (
+    make_table_test("test_escape_special",
+        [
+            ("abc012", "abc012"),
+            ("&<>\"'", "&amp;&lt;&gt;&quot;&#039;"),
+            ("&amp;&lt;&gt;&quot;&#039;","&amp;amp;&amp;lt;&amp;gt;&amp;quot;&amp;#039;"),
+            ("", "")
+        ],
+        |(str, expected)|
+        assert_equal("eq", expected, str.escape_special)
+    )
+);
+
+test_unescape_special: TestCase;
+test_unescape_special = (
+    make_table_test("test_unescape_special",
+        [
+            ("abc012", "abc012"),
+            ("&amp;&lt;&gt;&quot;&#039;&#12354;&#x6F22;abc", "&<>\"'あ漢abc"),
+            ("&amp;amp;&amp;lt;&amp;gt;&amp;quot;&amp;#039;abc", "&amp;&lt;&gt;&quot;&#039;abc"),
+            ("", "")
+        ],
+        |(str, expected)|
+        assert_equal("eq", expected, str.unescape_special)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_xmldocument_empty,
+        test_xmldocument_make,
+        test_xmldocument_to_string,
+
+        test_xmldeclaration_default,
+        test_xmldeclaration_eq,
+        test_xmldeclaration_to_string,
+
+        test_xmlnode_eq,
+        test_xmlnode_to_string,
+
+        test_xmlelement_make,
+        test_xmlelement_get_attribute,
+        test_xmlelement_set_attribute,
+        test_xmlelement_remove_attribute,
+        test_xmlelement_append_child,
+        test_xmlelement_add,
+        test_xmlelement_addF,
+        test_xmlelement_text,
+        test_xmlelement_concat_text_nodes,
+        test_xmlelement_eq,
+        test_xmlelement_to_string,
+
+        test_xmlattribute_make,
+        test_xmlattribute_eq,
+        test_xmlattribute_to_string,
+
+        test_xmltext_make,
+        test_xmltext_eq,
+        test_xmltext_to_string,
+        test_xmltext_add,
+
+        test_xmlcdatasection_make,
+        test_xmlcdatasection_eq,
+        test_xmlcdatasection_to_string,
+
+        test_xmlcomment_make,
+        test_xmlcomment_eq,
+        test_xmlcomment_to_string,
+
+        test_xmlprocessinginstruction_make,
+        test_xmlprocessinginstruction_eq,
+        test_xmlprocessinginstruction_to_string,
+
+        test_escape_special,
+        test_unescape_special,
+
+        TestCase::empty
+    ].run_test_driver
+);
+

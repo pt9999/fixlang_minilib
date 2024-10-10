@@ -1,0 +1,94 @@
+// XML helpers, such as escaping/unescaping special characters.
+module Minilib.Encoding.Xml.XmlHelpers;
+
+import Character;
+
+import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
+import Minilib.Text.Hex;
+
+// Escapes XML special characters.
+// eg. `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
+escape_special: String -> String;
+escape_special = |str| (
+    str.replace_all("&", "&amp;")
+        .replace_all("<", "&lt;")
+        .replace_all(">", "&gt;")
+        .replace_all("\"", "&quot;")
+        .replace_all("'", "&#039;")
+);
+
+// Unescapes XML special characters.
+// eg. `&amp;` -> `&`, `&lt;` -> `<`, `&gt;` -> `>`, `&quot;` -> `\"`, `&#039;` -> `'`.
+// NOTE: Other character references is also converted.
+unescape_special: String -> String;
+unescape_special = |str| (
+    let input = str.get_bytes.pop_back;
+    let output: Array U8 = Array::empty(input.get_size);
+    let output = loop(
+        (output, 0), |(output, i)|
+        if i >= input.get_size {
+            break $ output
+        };
+        let c = input.@(i);
+        if c != '&' {
+            continue $ (output.push_back(c), i + 1)
+        };
+        if str.substring(i, i + 5) == "&amp;" {
+            continue $ (output.push_back('&'), i + 5)
+        };
+        if str.substring(i, i + 4) == "&lt;" {
+            continue $ (output.push_back('<'), i + 4)
+        };
+        if str.substring(i, i + 4) == "&gt;" {
+            continue $ (output.push_back('>'), i + 4)
+        };
+        if str.substring(i, i + 6) == "&quot;" {
+            continue $ (output.push_back("\"".get_bytes.@(0)), i + 6)
+        };
+        if str.substring(i, i + 6) == "&apos;" {
+            continue $ (output.push_back('\''), i + 6)
+        };
+        let opt = _match_char_reference(input, i);
+        if opt.is_some {
+            let (codepoint, i) = opt.as_some;
+            let output = encode_code_point_to_utf8(codepoint, output);
+            continue $ (output, i)
+        };
+        continue $ (output.push_back(c), i + 1)
+    );
+    output._unsafe_to_string
+);
+
+_match_char_reference: Array U8 -> I64 -> Option (U32, I64);
+_match_char_reference = |input, i| (
+    let n = input.get_size;
+    if !(i < n && input.@(i) == '&') { none() };
+    let i = i + 1;
+    if !(i < n && input.@(i) == '#') { none() };
+    let i = i + 1;
+    let hex_digit = (i < n && input.@(i) == 'x');
+    let is_digit_or_xdigit = if hex_digit { Character::is_xdigit } else { Character::is_digit };
+    let i = if hex_digit { i + 1 } else { i };
+    let start = i;
+    let i = loop(
+        i, |i|
+        if !(i < n && input.@(i).is_digit_or_xdigit) {
+            break $ i
+        };
+        continue $ i + 1
+    );
+    let end = i;
+    if end == start { none() };
+    let digit_str = input.get_sub(start, end)._unsafe_to_string;
+    if !(i < n && input.@(i) == ';') { none() };
+    let i = i + 1;
+    let codepoint: Result ErrMsg U32 = if hex_digit {
+        from_string_hex(digit_str)
+    } else {
+        from_string(digit_str)
+    };
+    if codepoint.is_err { none() };
+
+    some $ (codepoint.as_ok, i)
+);

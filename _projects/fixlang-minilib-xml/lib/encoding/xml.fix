@@ -1,0 +1,481 @@
+// Simple XML Model.
+//
+// This module is intended to support
+// [Extensible Markup Language (XML) 1.1 (Second Edition)](https://www.w3.org/TR/2006/REC-xml11-20060816/),
+// but it is not fully supported at this time.
+//
+// This module is not intended to support DOM API.
+//
+// This module does not support XML namespace (xmlns).
+module Minilib.Encoding.Xml;
+
+import Character;
+
+import Minilib.Encoding.Xml.XmlHelpers;
+import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
+
+//=======================================================================
+// XmlDocument
+//=======================================================================
+
+// A type that represents an XML document.
+type XmlDocument = box struct {
+    xml_decl: XmlDeclaration,
+    prolog: Array XmlNode,
+    document_element: XmlElement,
+    epilog: Array XmlNode
+};
+
+namespace XmlDocument {
+    // An empty XML document.
+    empty: XmlDocument;
+    empty = (
+        XmlDocument {
+            xml_decl: XmlDeclaration::default,
+            prolog: [],
+            document_element: XmlElement::make("root"),
+            epilog: []
+        }
+    );
+
+    // Creates a XML document with the specified document element.
+    make: XmlElement -> XmlDocument;
+    make = |document_element| (
+        XmlDocument::empty.set_document_element(document_element)
+    );
+
+    // Adds a child node to the prolog of the document.
+    add_to_prolog: XmlNode -> XmlDocument -> XmlDocument;
+    add_to_prolog = |child, doc| (
+        doc.mod_prolog(push_back(child))
+    );
+
+    // Adds a child node to the epilog of the document.
+    add_to_epilog: XmlNode -> XmlDocument -> XmlDocument;
+    add_to_epilog = |child, doc| (
+        doc.mod_epilog(push_back(child))
+    );
+}
+
+impl XmlDocument: Eq {
+    eq = |a, b| (
+        a.@xml_decl == b.@xml_decl &&
+        a.@prolog == b.@prolog &&
+        a.@document_element == b.@document_element &&
+        a.@epilog == b.@epilog
+    );
+}
+
+impl XmlDocument: ToString {
+    to_string = |doc| (
+       doc.@xml_decl.to_string
+        + doc.@prolog.to_iter.map(to_string).concat_iter
+        + doc.@document_element.to_string
+        + doc.@epilog.to_iter.map(to_string).concat_iter
+    );
+}
+
+//=======================================================================
+// XmlDeclaration
+//=======================================================================
+
+// A type that represents an XML declaration.
+type XmlDeclaration = unbox struct {
+    version: String,
+    encoding: Option String,
+    standalone: Option String
+};
+
+namespace XmlDeclaration {
+    // A default XML declaration with version="1.1", encoding="utf-8".
+    default: XmlDeclaration;
+    default = XmlDeclaration {
+        version: "1.1",
+        encoding: some("utf-8"),
+        standalone: none()
+    };
+}
+
+impl XmlDeclaration: Eq {
+    eq = |a, b| (
+        a.@version == b.@version &&
+        a.@encoding == b.@encoding &&
+        a.@standalone == b.@standalone
+    );
+}
+
+impl XmlDeclaration: ToString {
+    to_string = |decl| (
+       "<?xml version=\"" + decl.@version + "\"" +
+       decl.@encoding.map_or("", |s| " encoding=\"" + s + "\"") +
+       decl.@standalone.map_or("", |s| " standalone=\"" + s + "\"") +
+       "?>"
+    );
+}
+
+//=======================================================================
+// XmlNode
+//=======================================================================
+
+// A type that represents an XML node.
+// cf. [DOM: 4.4. Interface Node](https://dom.spec.whatwg.org/#node)
+type XmlNode = box union {
+    element_node: XmlElement,      // element node(1)
+    attribute_node: XmlAttribute, // attribute node(2)
+    text_node: XmlText,            // text node(3)
+    cdata_section: XmlCDATASection, // cdata section node(4)
+    processing_instruction: XmlProcessingInstruction,    // processing instruction node(7)
+    comment_node: XmlComment,      // comment node(8)
+    document_node: XmlDocument     // document node(9)
+    // TODO: document type node(10)
+    // TODO: document fragment node(11)
+};
+
+impl XmlNode: Eq {
+    eq = |a, b| (
+        if a.is_element_node && b.is_element_node { a.as_element_node == b.as_element_node };
+        if a.is_attribute_node && b.is_attribute_node { a.as_attribute_node == b.as_attribute_node };
+        if a.is_text_node && b.is_text_node { a.as_text_node == b.as_text_node };
+        if a.is_cdata_section && b.is_cdata_section { a.as_cdata_section == b.as_cdata_section };
+        if a.is_processing_instruction && b.is_processing_instruction {
+            a.as_processing_instruction == b.as_processing_instruction
+        };
+        if a.is_comment_node && b.is_comment_node { a.as_comment_node == b.as_comment_node };
+        if a.is_document_node && b.is_document_node { a.as_document_node == b.as_document_node };
+        false
+    );
+}
+
+impl XmlNode: ToString {
+    to_string = |node| (
+        if node.is_element_node {
+            node.as_element_node.to_string
+        } else if node.is_attribute_node {
+            node.as_attribute_node.to_string
+        } else if node.is_text_node {
+            node.as_text_node.to_string
+        } else if node.is_cdata_section {
+            node.as_cdata_section.to_string
+        } else if node.is_processing_instruction {
+            node.as_processing_instruction.to_string
+        } else if node.is_comment_node {
+            node.as_comment_node.to_string
+        } else if node.is_document_node {
+            node.as_document_node.to_string
+        } else {
+            eval assert(|_|"invalid node", false);
+            ""
+        }
+    );
+}
+
+//=======================================================================
+// XmlElement
+//=======================================================================
+
+// A type that represents an XML element.
+type XmlElement = unbox struct {
+    tag_name: String,                   // tag name
+    attributes: Array XmlAttribute,     // attributes
+    children: Array XmlNode             // child nodes
+};
+
+namespace XmlElement {
+    // `XmlElement::make(tag_name)` creates an empty element with the specified tag name.
+    make: String -> XmlElement;
+    make = |tag_name| (
+        XmlElement {
+            tag_name: tag_name,
+            attributes: Array::empty(0),
+            children: Array::empty(0)
+        }
+    );
+
+    // Synonym for `XmlElement::make`.
+    element: String -> XmlElement;
+    element = make;
+
+    // `element.get_attribute(name)` gets the value of a specified attribute
+    // on the element.
+    get_attribute: String -> XmlElement -> Option String;
+    get_attribute = |name, element| (
+        element.@attributes.to_iter.filter(|attr| attr.@name == name).get_first.map(@value)
+    );
+
+    // `element.set_attribute(name,value)` sets the value of an attribute
+    // on the element.
+    // If an attribute of same name exists, it will be replaced.
+    // NOTE: validity of attribute names are not checked.
+    set_attribute: String -> String -> XmlElement -> XmlElement;
+    set_attribute = |name, value, element| (
+        let attr = XmlAttribute::make(name, value);
+        element.mod_attributes(|attributes|
+            let index = attributes.find_by(|attr2| attr2.@name == attr.@name);
+            if index.is_some {
+                attributes.set(index.as_some, attr)
+            } else {
+                attributes.push_back(attr)
+            }
+        )
+    );
+
+    // `element.remove_attribute(name)` removes the attribute with the specified name
+    // from the element. If the specified attribute does not exist, this function does nothing.
+    remove_attribute: String -> XmlElement -> XmlElement;
+    remove_attribute = |name, element| (
+        element.mod_attributes(to_iter >> filter(|attr| attr.@name != name) >> to_array)
+    );
+
+    // `attr` is synonym for `set_attribute`.
+    attr: String -> String -> XmlElement -> XmlElement;
+    attr = set_attribute;
+
+    // `parent.append_child(child_node)` adds a child node to `parent`.
+    append_child: XmlNode -> XmlElement -> XmlElement;
+    append_child = |child_node, parent| (
+        parent.mod_children(push_back(child_node))
+    );
+
+    // `add_node` is synonym for `append_child`.
+    add_node: XmlNode -> XmlElement -> XmlElement;
+    add_node = append_child;
+
+    // `parent.add(child)` adds a child element to `parent`.
+    add: XmlElement -> XmlElement -> XmlElement;
+    add = |child, parent| (
+        parent.mod_children(push_back(element_node(child)))
+    );
+
+    // `parent.addF $ child` adds a child element to `parent`.
+    // This is a flipped version of `add`.
+    addF: XmlElement -> XmlElement -> XmlElement;
+    addF = |parent, child| (
+        parent.mod_children(push_back(element_node(child)))
+    );
+
+    // `element.text(content)` adds a text node to `element`.
+    text: String -> XmlElement -> XmlElement;
+    text = |content, element| (
+        element.mod_children(push_back(text_node $ XmlText::make(content)))
+    );
+
+    // `element.concat_text_nodes` concats adjuscent text nodes.
+    concat_text_nodes: XmlElement -> XmlElement;
+    concat_text_nodes = |element| (
+        let concat_or_push_back: Array XmlNode -> XmlNode -> Array XmlNode =
+            |children, child| (
+                if children.is_empty {
+                    children.push_back(child)
+                };
+                if !child.is_text_node {
+                    children.push_back(child)
+                };
+                let last = children.get_last.as_some;
+                if !last.is_text_node {
+                    children.push_back(child)
+                };
+                children.pop_back.push_back(text_node $ last.as_text_node + child.as_text_node)
+            );
+        element.mod_children(|children|
+            children.to_iter.fold(
+                [], concat_or_push_back
+            )
+        )
+    );
+}
+
+impl XmlElement: Eq {
+    eq = |a, b| (
+        a.@tag_name == b.@tag_name &&
+        a.@attributes._sort_by_name == b.@attributes._sort_by_name &&
+        a.@children == b.@children
+    );
+}
+
+impl XmlElement: ToString {
+    to_string = |el| (
+        let output = "<" + el.@tag_name;
+        let output = output + el.@attributes.to_iter.map(|attr| " " + attr.to_string).concat_iter;
+        if el.@children.is_empty {
+            output + "/>"
+        };
+        let output = output + ">";
+        //let child_sep = if el.@children.get_size >= 1 { "\n" } else { "" };
+        let child_sep = "";
+        let output = output + child_sep;
+        let output = el.@children.to_iter.fold(
+            output, |output, node|
+            output + node.to_string + child_sep
+        );
+        let output = output + "</" + el.@tag_name + ">";
+        output
+    );
+}
+
+//=======================================================================
+// XmlAttribute
+//=======================================================================
+
+// A type that represents name and value of an attribute.
+type XmlAttribute = unbox struct {
+    name: String,
+    value: String
+};
+
+namespace XmlAttribute {
+    // `XmlAttribute::make(name, value)` creates an attribute with the specified name and value.
+    make: String -> String -> XmlAttribute;
+    make = |name, value| (
+        // TODO: check name safety
+        XmlAttribute { name: name, value: value }
+    );
+
+    // `attributes._sort_by_name` sorts an array of attributes by the name.
+    _sort_by_name: Array XmlAttribute -> Array XmlAttribute;
+    _sort_by_name = |attributes| (
+        attributes.sort_by(|(a, b)| a.@name < b.@name)
+    );
+}
+
+impl XmlAttribute: Eq {
+    eq = |a, b| a.@name == b.@name && a.@value == b.@value;
+}
+
+impl XmlAttribute: ToString {
+    to_string = |attr| (
+        XmlHelpers::escape_special(attr.@name)      // for security
+        + "=\""
+        + XmlHelpers::escape_special(attr.@value)
+        + "\""
+    );
+}
+
+//=======================================================================
+// XmlText
+//=======================================================================
+
+// A type that represents a text node.
+type XmlText = unbox struct {
+    content: String
+};
+
+namespace XmlText {
+    // `XmlText::make(content)` creates a text node with the specified content.
+    make: String -> XmlText;
+    make = |content| XmlText { content: content };
+}
+
+impl XmlText: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlText: ToString {
+    to_string = |text| XmlHelpers::escape_special(text.@content);
+}
+
+impl XmlText: Add {
+    add = |a, b| XmlText::make(a.@content + b.@content);
+}
+
+//=======================================================================
+// XmlCDATASection
+//=======================================================================
+
+// A type that represents a CDATA section.
+type XmlCDATASection = unbox struct {
+    content: String
+};
+
+namespace XmlCDATASection {
+    // `XmlCDATASection::make(content)` creates a CDATA section with the specified content.
+    // If `content` contains the end marker of CDATA section(`"]]>"`), this function panics.
+    make: String -> XmlCDATASection;
+    make = |content| (
+        eval assert(|_| "XmlCDATASection::make: the content contains the end marker of CDATA section",
+            content.find("]]>", 0).is_none
+        );
+        XmlCDATASection { content: content }
+    );
+}
+
+impl XmlCDATASection: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlCDATASection: ToString {
+    to_string = |cdata_section| (
+        "<![CDATA[" + cdata_section.@content + "]]>"
+    );
+}
+
+//=======================================================================
+// XmlComment
+//=======================================================================
+
+// A type that represents a comment node.
+type XmlComment = unbox struct {
+    content: String
+};
+
+namespace XmlComment {
+    // `XmlComment::make(content)` creates a comment node with the specified content.
+    // If `content` contains a double-hyphen(`"--"`), this function panics.
+    make: String -> XmlComment;
+    make = |content| (
+        eval assert(|_| "XmlComment::make: the content contains a double-hyphen",
+            content.find("--", 0).is_none
+        );
+        XmlComment { content: content }
+    );
+}
+
+impl XmlComment: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlComment: ToString {
+    to_string = |comment| (
+        "<!--" + comment.@content + "-->"
+    );
+}
+
+//=======================================================================
+// XmlProcessingInstruction
+//=======================================================================
+
+// A type that represents a processing instruction.
+type XmlProcessingInstruction = unbox struct {
+    content: String
+};
+
+namespace XmlProcessingInstruction {
+    // `XmlProcessingInstruction::make(content)` creates a processing instruction with the specified content.
+    make: String -> XmlProcessingInstruction;
+    make = |content| XmlProcessingInstruction { content: content };
+}
+
+impl XmlProcessingInstruction: Eq {
+    eq = |a, b| a.@content == b.@content;
+}
+
+impl XmlProcessingInstruction: ToString {
+    to_string = |pi| (
+        "<?" + pi.@content + "?>"
+    );
+}
+
+//=======================================================================
+// XmlHelpers
+//=======================================================================
+
+// Escapes XML special characters.
+// eg. `&` -> `&amp;`, `<` -> `&lt;`, `>` -> `&gt;`, `\"` -> `&quot;`, `'` -> `&#039;`
+escape_special: String -> String;
+escape_special = XmlHelpers::escape_special;
+
+// Unescapes XML special characters.
+// eg. `&amp;` -> `&`, `&lt;` -> `<`, `&gt;` -> `>`, `&quot;` -> `\"`, `&#039;` -> `'`.
+// NOTE: Other character references is also converted.
+unescape_special: String -> String;
+unescape_special = XmlHelpers::unescape_special;

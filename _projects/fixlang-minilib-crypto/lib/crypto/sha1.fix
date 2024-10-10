@@ -1,0 +1,201 @@
+// SHA-1 secure hash function.
+//
+// Implemented from specification of FIPS PUB 180-4:
+// https://csrc.nist.gov/files/pubs/fips/180-4/final/docs/fips180-4.pdf
+//
+// NOTE: FIPS 180-4 (2012) is superseded by FIPS 180-4 (2015), with the only change being
+// made in the Applicability Clause. There are no changes to the technical specifications.
+// FIPS 180-4 (2015):
+// http://dx.doi.org/10.6028/NIST.FIPS.180-4
+//
+module Minilib.Crypto.SHA1;
+
+
+import Minilib.Encoding.Binary;
+
+// `SHA1::digest(bytes)` computes SHA-1 secure hash function of `bytes`.
+digest: Array U8 -> Array U8;
+digest = |bytes| (
+    SHA1::empty.update(bytes).finalize
+);
+
+// SHA-1 hasher.
+// Usually it is sufficient to simply call `SHA1:digest(bytes)` without using this structure.
+type SHA1 = unbox struct {
+    hash: Array U32,
+    msglen: U64,
+    msgbuf: Array U8
+};
+
+// An empty SHA-1 hasher.
+empty: SHA1;
+empty = SHA1 {
+    hash: _init_hash,
+    msglen: 0_U64,
+    msgbuf: Array::empty(64)
+};
+
+// `sha1.update(bytes)` processes `bytes`, and updates its internal state.
+update: Array U8 -> SHA1 -> SHA1;
+update = |bytes, sha1| (
+    sha1._update_inner(bytes, bytes.get_size.to_U64)
+);
+
+// `sha1._update_inner(input, msglen_inc)` updates the message buffer with input.
+// And it increments the message length by `msglen_inc`.
+// When the message buffer is full (64 bytes), it updates hash with the message
+// and clears the messsage buffer.
+_update_inner: Array U8 -> U64 -> SHA1 -> SHA1;
+_update_inner = |input, msglen_inc, sha1| (
+    let n_input = input.get_size;
+    let n_msgbuf = 64;
+    let sha1 = loop(
+        (sha1, 0), |(sha1, i_input)|
+        if i_input >= n_input {
+            break $ sha1
+        };
+        let sha1 = sha1.mod_msgbuf(push_back(input.@(i_input)));
+        let i_input = i_input + 1;
+        if sha1.@msgbuf.get_size < n_msgbuf {
+            continue $ (sha1, i_input)
+        };
+        let message = ByteBuffer::make(sha1.@msgbuf, ByteOrder::big_endian()).to_u32_array;
+        //let message = U32_U8::convert(sha1.@msgbuf, ByteOrder::big_endian());
+        let sha1 = sha1.mod_hash(_update_hash(message));
+        let sha1 = sha1.mod_msgbuf(truncate(0));
+        continue $ (sha1, i_input)    
+    );
+    let sha1 = sha1.mod_msglen(|len| len + msglen_inc);
+    sha1
+);
+
+// `sha1.finalize` retrieves a final SHA-1 hash value.
+finalize: SHA1 -> Array U8;
+finalize = |sha1| (
+    // 5.1 Padding the Message 
+    let sha1 = sha1._update_inner([0x80_U8], 0_U64);
+    let sha1 = loop(
+        sha1, |sha1|
+        if sha1.@msgbuf.get_size == 448/8 {
+            break $ sha1
+        };
+        continue $ sha1._update_inner([0x00_U8], 0_U64)
+    );
+    let msglen_bits: U64 = sha1.@msglen * 8_U64;
+    let buf = ByteBuffer::fill(8, 0_U8, ByteOrder::big_endian());
+    let buf = buf.set_u64(0, msglen_bits);
+    let sha1 = sha1._update_inner(buf.to_u8_array, 0_U64);
+
+    eval assert(|_| "padding failed", sha1.@msgbuf.get_size == 0);
+
+    let digest = ByteBuffer::from_u32_array(sha1.@hash, ByteOrder::big_endian()).to_u8_array;
+    //let digest = U8_U32::convert(sha1.@hash, ByteOrder::big_endian());
+    digest
+);
+
+//---------------------------------------------------------------
+// implementation details
+//---------------------------------------------------------------
+
+// 2.2.2 Symbols and Operations 
+// bitwise complement
+_bit_not: U32 -> U32;
+_bit_not = |x| x.bit_xor(0xFFFFFFFF_U32);
+
+// rotate left
+_rotl: U32 -> U32 -> U32;
+_rotl = |n, x| (
+    x.shift_left(n).bit_or(x.shift_right(32_U32 - n))
+);
+
+// rotate right
+_rotr: U32 -> U32 -> U32;
+_rotr = |n, x| (
+    x.shift_right(n).bit_or(x.shift_left(32_U32 - n))
+);
+
+// shift right
+_shr: U32 -> U32 -> U32;
+_shr = |n, x| (
+    x.shift_right(n)
+);
+
+// 4.1.1 SHA-1 Functions
+_f: I64 -> U32 -> U32 -> U32 -> U32;
+_f = |t, x, y, z| (
+    if t < 20 { // ch(x,y,z): choose y or z by x
+        x.bit_and(y).bit_xor(x._bit_not.bit_and(z)) 
+    };
+    if t < 40 { // parity(x,y,z): calc parity of x, y, z
+        x.bit_xor(y).bit_xor(z)
+    };
+    if t < 60 { // maj(x,y,z): majority
+        x.bit_and(y).bit_xor(x.bit_and(z)).bit_xor(y.bit_and(z))
+    };
+    // parity
+    x.bit_xor(y).bit_xor(z)
+);
+
+// 4.2.1 SHA-1 Constants 
+_k: I64 -> U32;
+_k = |t| (
+    if t < 20 { 0x5a827999_U32 };
+    if t < 40 { 0x6ed9eba1_U32 };
+    if t < 60 { 0x8f1bbcdc_U32 };
+    0xca62c1d6_U32
+);
+
+// 5.3 Setting the Initial Hash Value (H(0))
+// 5.3.1 SHA-1
+_init_hash: Array U32;
+_init_hash = (
+    Array::empty(5)
+        .push_back(0x67452301_U32)
+        .push_back(0xefcdab89_U32)
+        .push_back(0x98badcfe_U32)
+        .push_back(0x10325476_U32)
+        .push_back(0xc3d2e1f0_U32)
+);
+
+// 6.1.2 SHA-1 Hash Computation
+_update_hash: Array U32 -> Array U32 -> Array U32;
+_update_hash = |message, hash| (
+    eval assert (|_| "invalid size: message", message.get_size == 16);
+    eval assert (|_| "invalid size: hash", hash.get_size == 5);
+
+    let w = Array::empty(80);
+    let w = loop(
+        (w, 0), |(w, t)|
+        if t >= 80 { 
+            break $ w
+        };
+        if t < 16 { 
+            let w = w.push_back(message.@(t));
+            continue $ (w, t + 1)
+        };
+        let tmp = w.@(t-3).bit_xor(w.@(t-8)).bit_xor(w.@(t-14)).bit_xor(w.@(t-16));
+        let w = w.push_back(tmp._rotl(1_U32));
+        continue $ (w, t + 1)
+    );
+    let (a,b,c,d,e) = loop(
+        (hash.@(0), hash.@(1), hash.@(2), hash.@(3), hash.@(4), 0), 
+        |(a, b, c, d, e, t)|
+        if t >= 80 {
+            break $ (a, b, c, d, e)
+        };
+        let tmp = a._rotl(5_U32) + _f(t, b, c, d) + e + _k(t) + w.@(t);
+        let e = d;
+        let d = c;
+        let c = b._rotl(30_U32);
+        let b = a;
+        let a = tmp;
+        continue $ (a, b, c, d, e, t + 1)
+    );
+    let hash = hash
+        .set(0, a + hash.@(0))
+        .set(1, b + hash.@(1))
+        .set(2, c + hash.@(2))
+        .set(3, d + hash.@(3))
+        .set(4, e + hash.@(4));
+    hash
+);

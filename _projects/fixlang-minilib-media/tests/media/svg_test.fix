@@ -1,0 +1,273 @@
+module SvgTest;
+
+import Minilib.Encoding.Xml;
+import Minilib.Media.Svg;
+import Minilib.Testing.UnitTest;
+import Minilib.Text.StringEx;
+
+//=======================================================================
+// tests for SvgNum
+//=======================================================================
+
+test_svgnum: TestCase;
+test_svgnum = (
+    make_test("test_svgnum") $ |_|
+    eval *assert_equal("bool", "1", true.to_attr_value);
+    eval *assert_equal("bool", "0", false.to_attr_value);
+    eval *assert_equal("I64", "100", 100.to_attr_value);
+    eval *assert_equal("F64", "123.45", 123.45.to_attr_value);
+    eval *assert_equal("F64", "100", 100.00.to_attr_value);
+    eval *assert_equal("(I64, I64)", "123 100", (123, 100).to_attr_value);
+    eval *assert_equal("(F64, F64)", "123.45 100", (123.45, 100.00).to_attr_value);
+    eval *assert_equal("Array (I64, I64)", "123, 234, 345", [123, 234, 345].to_attr_value);
+    eval *assert_equal("Array (I64, I64)", "123 100, 234 200", [(123, 100), (234,200)].to_attr_value);
+    eval *assert_equal("Array (F64, F64)", "123.45 100, 234.56 200.22", [(123.45, 100.00), (234.56,200.22)].to_attr_value);
+    pure()
+);
+
+//=======================================================================
+// tests for PathData
+//=======================================================================
+
+test_pathdata_empty_newpath: TestCase;
+test_pathdata_empty_newpath = (
+    make_test("test_pathdata_empty_newpath") $ |_|
+    eval *assert_equal("empty", "", PathData::empty.@data);
+    eval *assert_equal("newpath", "", PathData::newpath.@data);
+    pure()
+);
+
+test_pathdata_moveto_rmoveto_lineto_rlineto: TestCase;
+test_pathdata_moveto_rmoveto_lineto_rlineto = (
+    make_test("test_pathdata_moveto_rmoveto_lineto_rlineto") $ |_|
+    let path = PathData::newpath;
+    let path = path.moveto(10, 11).rmoveto(20, 21).lineto(30, 31).rlineto(40, 41);
+    assert_equal("data", "M 10 11 m 20 21 L 30 31 l 40 41", path.@data)
+);
+
+test_pathdata_curveto_scurveto_closepath: TestCase;
+test_pathdata_curveto_scurveto_closepath = (
+    make_test("test_pathdata_curveto_scurveto_closepath") $ |_|
+    let path = PathData::newpath;
+    let path = path.curveto(10, 11, 20, 21, 30, 31);
+    let path = path.scurveto(40, 41, 50, 51);
+    let path = path.closepath;
+    assert_equal("data", "C 10 11, 20 21, 30 31 S 40 41, 50 51 Z", path.@data)
+);
+
+test_pathdata_quadto_squadto_arcto: TestCase;
+test_pathdata_quadto_squadto_arcto = (
+    make_test("test_pathdata_quadto_squadto_arcto") $ |_|
+    let path = PathData::newpath;
+    let path = path.quadto(10, 11, 20, 21);
+    let path = path.squadto(30, 31);
+    let path = path.arcto(40, 41, 23.4, true, true, 50, 51);
+    assert_equal("data", "Q 10 11, 20 21 T 30 31 A 40 41 23.4 1 1 50 51", path.@data)
+);
+
+//=======================================================================
+// tests for Svg
+//=======================================================================
+
+_assert_tag_name: String -> XmlElement -> IOFail ();
+_assert_tag_name = |tag_name, element| (
+    assert_equal(tag_name, tag_name, element.@tag_name)
+);
+
+_assert_attr: String -> String -> XmlElement -> IOFail ();
+_assert_attr = |name, value, element| (
+    assert_equal(name, some(value), element.get_attribute(name))
+);
+
+test_svg_svg: TestCase;
+test_svg_svg = (
+    make_test("test_svg_svg") $ |_|
+    let element = Svg::svg(100, 200);
+    eval *element._assert_tag_name("svg");
+    eval *element._assert_attr("version", "1.1");
+    eval *element._assert_attr("xmlns", "http://www.w3.org/2000/svg");
+    eval *element._assert_attr("width", "100");
+    eval *element._assert_attr("height", "200");
+    pure()
+);
+
+test_svg_attr_num: TestCase;
+test_svg_attr_num = (
+    make_test("test_svg_attr_num") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.attr_num("attr1", 123);
+    let element = element.attr_num("attr2", 456.78);
+    eval *element._assert_attr("attr1", "123");
+    eval *element._assert_attr("attr2", "456.78");
+    pure()
+);
+
+test_svg_view_box: TestCase;
+test_svg_view_box = (
+    make_test("test_svg_view_box") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.view_box(10, 11, 20, 21);
+    eval *element._assert_attr("viewBox", "10, 11, 20, 21");
+    pure()
+);
+
+test_svg_stroke_stroke_width_fill: TestCase;
+test_svg_stroke_stroke_width_fill = (
+    make_test("test_svg_stroke_stroke_width_fill") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.stroke("black");
+    let element = element.stroke_width(5.5);
+    let element = element.fill_("red");
+    eval *element._assert_attr("stroke", "black");
+    eval *element._assert_attr("stroke-width", "5.5");
+    eval *element._assert_attr("fill", "red");
+    pure()
+);
+
+test_svg_font: TestCase;
+test_svg_font = (
+    make_test("test_svg_font") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.font_family("SansSerif");
+    let element = element.font_size(10);
+    eval *element._assert_attr("font-family", "SansSerif");
+    eval *element._assert_attr("font-size", "10");
+    pure()
+);
+
+test_svg_xy: TestCase;
+test_svg_xy = (
+    make_test("test_svg_xy") $ |_|
+    let element = XmlElement::make("element1");
+    let element = element.xy(100, 200);
+    eval *element._assert_attr("x", "100");
+    eval *element._assert_attr("y", "200");
+    pure()
+);
+
+test_svg_group: TestCase;
+test_svg_group = (
+    make_test("test_svg_group") $ |_|
+    let element = Svg::group;
+    eval *element._assert_tag_name("g");
+    pure()
+);
+
+test_svg_rect: TestCase;
+test_svg_rect = (
+    make_test("test_svg_rect") $ |_|
+    let element = Svg::rect(10, 20, 30, 40);
+    eval *element._assert_tag_name("rect");
+    eval *element._assert_attr("x", "10");
+    eval *element._assert_attr("y", "20");
+    eval *element._assert_attr("width", "30");
+    eval *element._assert_attr("height", "40");
+    pure()
+);
+
+test_svg_circle: TestCase;
+test_svg_circle = (
+    make_test("test_svg_circle") $ |_|
+    let element = Svg::circle(10, 20, 30);
+    eval *element._assert_tag_name("circle");
+    eval *element._assert_attr("cx", "10");
+    eval *element._assert_attr("cy", "20");
+    eval *element._assert_attr("r", "30");
+    pure()
+);
+
+test_svg_ellipse: TestCase;
+test_svg_ellipse = (
+    make_test("test_svg_ellipse") $ |_|
+    let element = Svg::ellipse(10, 20, 30, 40);
+    eval *element._assert_tag_name("ellipse");
+    eval *element._assert_attr("cx", "10");
+    eval *element._assert_attr("cy", "20");
+    eval *element._assert_attr("rx", "30");
+    eval *element._assert_attr("ry", "40");
+    pure()
+);
+
+test_svg_line: TestCase;
+test_svg_line = (
+    make_test("test_svg_line") $ |_|
+    let element = Svg::line(10, 20, 30, 40);
+    eval *element._assert_tag_name("line");
+    eval *element._assert_attr("x1", "10");
+    eval *element._assert_attr("y1", "20");
+    eval *element._assert_attr("x2", "30");
+    eval *element._assert_attr("y2", "40");
+    pure()
+);
+
+test_svg_polyline: TestCase;
+test_svg_polyline = (
+    make_test("test_svg_polyline") $ |_|
+    let element = Svg::polyline([(10, 20), (30, 40), (50, 60)]);
+    eval *element._assert_tag_name("polyline");
+    eval *element._assert_attr("points", "10 20, 30 40, 50 60");
+    pure()
+);
+
+test_svg_polygon: TestCase;
+test_svg_polygon = (
+    make_test("test_svg_polygon") $ |_|
+    let element = Svg::polygon([(10, 20), (30, 40), (50, 60)]);
+    eval *element._assert_tag_name("polygon");
+    eval *element._assert_attr("points", "10 20, 30 40, 50 60");
+    pure()
+);
+
+test_svg_path: TestCase;
+test_svg_path = (
+    make_test("test_svg_path") $ |_|
+    let pathdata = newpath.moveto(10, 20).lineto(30, 40);
+    let element = Svg::path(pathdata);
+    eval *element._assert_tag_name("path");
+    eval *element._assert_attr("d", "M 10 20 L 30 40");
+    pure()
+);
+
+test_svg_text: TestCase;
+test_svg_text = (
+    make_test("test_svg_text") $ |_|
+    let element = Svg::text("hello");
+    eval *element._assert_tag_name("text");
+    eval *assert_equal("text", [
+        text_node $ XmlText::make("hello")
+    ], element.@children);
+    pure()
+);
+
+// TODO: add tests
+
+main: IO ();
+main = (
+    [
+        test_svgnum,
+
+        test_pathdata_empty_newpath,
+        test_pathdata_moveto_rmoveto_lineto_rlineto,
+        test_pathdata_curveto_scurveto_closepath,
+        test_pathdata_quadto_squadto_arcto,
+
+        test_svg_svg,
+        test_svg_attr_num,
+        test_svg_view_box,
+        test_svg_stroke_stroke_width_fill,
+        test_svg_font,
+        test_svg_xy,
+        test_svg_group,
+        test_svg_rect,
+        test_svg_circle,
+        test_svg_ellipse,
+        test_svg_line,
+        test_svg_polyline,
+        test_svg_polygon,
+        test_svg_path,
+        test_svg_text,
+
+        TestCase::empty
+    ].run_test_driver
+);
+

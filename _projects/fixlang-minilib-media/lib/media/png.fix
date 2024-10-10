@@ -1,0 +1,202 @@
+//  PNG image I/O.
+//
+//  How to use:
+//  1. Install PNG library. For example, run the command below.
+//     `$ sudo apt install libpng-dev`
+//  2. Add `-d png -d z` option to `fix run` and `fix build` arguments.
+//
+module Minilib.Media.Png;
+
+
+import Minilib.Encoding.Binary;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Platform;
+import Minilib.Media.Image;
+
+write_png_file: String -> Image -> IOFail ();
+write_png_file = |filepath, image| (
+    let imgio = image._to_png_imageio;
+    let row_stride = image.@width * image.@channels;
+    imgio.write_to_file(filepath, false, image.@data, row_stride)
+);
+
+write_png_to_memory: Image -> IOFail (Array U8);
+write_png_to_memory = |image| (
+    let imgio = image._to_png_imageio;
+    let row_stride = image.@width * image.@channels;
+    imgio.write_to_memory(false, image.@data, row_stride)
+);
+
+_to_png_imageio: Image -> PngImageIO;
+_to_png_imageio = |image| (
+    let imgio = PngImageIO::empty;
+    let imgio = imgio.set_width(image.@width);
+    let imgio = imgio.set_height(image.@height);
+    let imgio = imgio.set_format(PngImageIO::parse_format(image.@format));
+    imgio
+);
+
+
+type PngImageIO = unbox struct {
+    data: ByteBuffer
+};
+
+namespace PngImageIO {
+
+    empty: PngImageIO;
+    empty = (
+        let data = ByteBuffer::fill(_def_png_image.@sizeof_png_image, 0_U8, Platform::byte_order);
+        let img = PngImageIO {
+            data: data
+        };
+        img.set_version(1)
+    );
+
+    get_width: PngImageIO -> I64;
+    get_width = |img| img.@data.get_u32(_def_png_image.@offsetof_width).to_I64;
+
+    get_height: PngImageIO -> I64;
+    get_height = |img| img.@data.get_u32(_def_png_image.@offsetof_height).to_I64;
+
+    get_warning_or_error: PngImageIO -> I64;
+    get_warning_or_error = |img| img.@data.get_u32(_def_png_image.@offsetof_warning_or_error).to_I64;
+
+    get_message: PngImageIO -> String;
+    get_message = |img| (
+        img.@data.borrow_ptr(|ptr|
+            String::_unsafe_from_c_str_ptr(ptr.add_offset(_def_png_image.@offsetof_message))
+        )
+    );
+
+    set_version: I64 -> PngImageIO -> PngImageIO;
+    set_version = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_version, n.to_U32));
+
+    set_width: I64 -> PngImageIO -> PngImageIO;
+    set_width = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_width, n.to_U32));
+
+    set_height: I64 -> PngImageIO -> PngImageIO;
+    set_height = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_height, n.to_U32));
+
+    set_format: I64 -> PngImageIO -> PngImageIO;
+    set_format = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_format, n.to_U32));
+
+    set_flags: I64 -> PngImageIO -> PngImageIO;
+    set_flags = |n, img| img.mod_data(set_u32(_def_png_image.@offsetof_flags, n.to_U32));
+
+    write_to_file: String -> Bool -> Array U8 -> I64 -> PngImageIO -> IOFail ();
+    write_to_file = |filepath, convert_to_8bit, buffer, row_stride, png_imageio| (
+        let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
+        let colormap = nullptr;
+        let res =
+            png_imageio.@data.borrow_ptr(|p_png_imageio|
+              filepath.borrow_c_str(|p_filepath|
+                buffer.borrow_ptr(|p_buffer|
+                    FFI_CALL[I32 png_image_write_to_file(Ptr, Ptr, I32, Ptr, I32, Ptr),
+                        p_png_imageio, p_filepath, convert_to_8bit,
+                        p_buffer, row_stride.to_I32, colormap]
+                )
+              )
+            );
+        png_imageio._check_warning_or_error("write_to_file", res)
+    );
+
+    _check_warning_or_error: String -> I32 -> PngImageIO -> IOFail ();
+    _check_warning_or_error = |func_name, res, png_imageio| (
+        let result = "PngImageIO::" + func_name + ": res=" + res.to_string;
+        let warning_or_error = png_imageio.get_warning_or_error;
+        let message = png_imageio.get_message;
+        if warning_or_error == 2 {  // error
+            throw $ result + " ERROR: " + message
+        };
+        if warning_or_error == 1 {  // warning
+            eprintln(result + " WARNING: " + message).lift
+        } else if res == 1_I32 {
+            // png_image_write_to_file() returns 1 on success
+            pure()
+        } else {
+            // something is wrong, but no message
+            throw $ result
+        }
+    );
+
+    write_to_memory:  Bool -> Array U8 -> I64 -> PngImageIO -> IOFail (Array U8);
+    write_to_memory = |convert_to_8bit, buffer, row_stride, png_imageio| (
+        let output = Array::fill(buffer.get_size * 2, 0_U8); // TODO: is it ok?
+        let output_size = Array::fill(1, output.get_size.to_U32);
+        let convert_to_8bit = if convert_to_8bit { 1_I32 } else { 0_I32 };
+        let colormap = nullptr;
+        let res =
+            png_imageio.@data.borrow_ptr(|p_png_imageio|
+              output.borrow_ptr(|p_output|
+                output_size.borrow_ptr(|p_output_size|
+                  buffer.borrow_ptr(|p_buffer|
+                    FFI_CALL[I32 png_image_write_to_memory(Ptr, Ptr, Ptr, I32, Ptr, I32, Ptr),
+                        p_png_imageio, p_output, p_output_size, convert_to_8bit,
+                        p_buffer, row_stride.to_I32, colormap]
+                  )
+                )
+              )
+            );
+        let _ = *png_imageio._check_warning_or_error("write_to_memory", res);
+        pure $ output.get_sub(0, output_size.@(0).to_I64)
+    );
+
+    _PNG_FORMAT_FLAG_ALPHA: I64;
+    _PNG_FORMAT_FLAG_ALPHA = 1; /* format with an alpha channel */
+    _PNG_FORMAT_FLAG_COLOR: I64;
+    _PNG_FORMAT_FLAG_COLOR = 2; /* color format: otherwise grayscale */
+    _PNG_FORMAT_FLAG_LINEAR: I64;
+    _PNG_FORMAT_FLAG_LINEAR = 4; /* 2-byte channels else 1-byte */
+    _PNG_FORMAT_FLAG_COLORMAP: I64;
+    _PNG_FORMAT_FLAG_COLORMAP = 8; /* image data is color-mapped */
+    _PNG_FORMAT_FLAG_BGR: I64;
+    _PNG_FORMAT_FLAG_BGR = 16; /* BGR colors, else order is RGB */
+    _PNG_FORMAT_FLAG_AFIRST: I64;
+    _PNG_FORMAT_FLAG_AFIRST = 32; /* alpha channel comes first */
+    _PNG_FORMAT_FLAG_ASSOCIATED_ALPHA: I64;
+    _PNG_FORMAT_FLAG_ASSOCIATED_ALPHA = 64; /* alpha channel is associated */
+
+    parse_format: String -> I64;
+    parse_format = |str| (
+        if str == "GRAY" { 0 };
+        if str == "GA" { _PNG_FORMAT_FLAG_ALPHA };
+        if str == "AG" { _PNG_FORMAT_FLAG_ALPHA.bit_or $ _PNG_FORMAT_FLAG_AFIRST };
+        if str == "RGB" { _PNG_FORMAT_FLAG_COLOR };
+        if str == "BGR" { _PNG_FORMAT_FLAG_COLOR.bit_or $ _PNG_FORMAT_FLAG_BGR };
+        if str == "RGBA" { _PNG_FORMAT_FLAG_COLOR.bit_or $ _PNG_FORMAT_FLAG_ALPHA };
+        if str == "ARGB" { _PNG_FORMAT_FLAG_COLOR.bit_or $ _PNG_FORMAT_FLAG_ALPHA.bit_or $ _PNG_FORMAT_FLAG_AFIRST };
+        if str == "BGRA" { _PNG_FORMAT_FLAG_COLOR.bit_or $ _PNG_FORMAT_FLAG_BGR.bit_or $ _PNG_FORMAT_FLAG_ALPHA };
+        if str == "ABGR" { _PNG_FORMAT_FLAG_COLOR.bit_or $ _PNG_FORMAT_FLAG_BGR.bit_or $ _PNG_FORMAT_FLAG_ALPHA.bit_or $ _PNG_FORMAT_FLAG_AFIRST };
+        eval debug_eprintln ("invalid format: " + str);
+        0
+    );
+
+    // `png_image` structure layout
+    type DefPngImage = unbox struct {
+        offsetof_opaque: I64,
+        offsetof_version: I64,
+        offsetof_width: I64,
+        offsetof_height: I64,
+        offsetof_format: I64,
+        offsetof_flags: I64,
+        offsetof_colormap_entries: I64,
+        offsetof_warning_or_error: I64,
+        offsetof_message: I64,
+        sizeof_png_image: I64
+    };
+
+    _def_png_image: DefPngImage;
+    _def_png_image = DefPngImage {
+        offsetof_opaque: 0,
+        offsetof_version: 8,
+        offsetof_width: 12,
+        offsetof_height: 16,
+        offsetof_format: 20,
+        offsetof_flags: 24,
+        offsetof_colormap_entries: 28,
+        offsetof_warning_or_error: 32,
+        offsetof_message: 36,
+        sizeof_png_image: 104
+    };
+}
+

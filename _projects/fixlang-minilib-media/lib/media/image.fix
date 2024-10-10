@@ -1,0 +1,62 @@
+// Basic image definitions.
+module Minilib.Media.Image;
+
+
+type Image = unbox struct {
+    width: I64,
+    height: I64,
+    channels: I64,
+    format: String,
+    data: Array U8
+};
+
+make: I64 -> I64 -> String -> Image;
+make = |width, height, format| (
+    let channels = calc_channels_by_format(format);
+    Image {
+        width: width,
+        height: height,
+        channels: channels,
+        format: format,
+        data: Array::fill(width * height * channels, 0_U8)
+    }
+);
+
+calc_channels_by_format: String -> I64;
+calc_channels_by_format = |format| (
+    if format == "GRAY" { 1 };
+    if format == "GA" || format == "AG" { 2 };
+    if format == "RGB" || format == "GBR" { 3 };
+    if format == "RGBA" || format == "ARGB" || format == "BGRA" || format == "ABGR" { 4 };
+    eval debug_eprintln ("unknown format: " + format);
+    1 
+);
+
+calc_index: I64 -> I64 -> I64 -> Image -> I64;
+calc_index = |x, y, c, image| (
+    (y * image.@width + x) * image.@channels + c
+);
+
+get: I64 -> Image -> U8;
+get = |index, image| (
+    image.@data.@(index)
+);
+
+set: I64 -> U8 -> Image -> Image;
+set = |index, value, image| (
+    image.mod_data(set(i, value))
+);
+
+get_rgb: I64 -> Image -> (U8, U8, U8);
+get_rgb = |index, image| (
+    let data = image.@data;
+    (data.@(index), data.@(index + 1), data.@(index + 2))
+);
+
+set_rgb: I64 -> (U8, U8, U8) -> Image -> Image;
+set_rgb = |index, color, image| (
+    image.mod_data(|data|
+        data.set(index, color.@0)
+            .set(index + 1, color.@1)
+            .set(index + 2, color.@2))
+);

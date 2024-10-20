@@ -34,6 +34,7 @@ module Minilib.Collection.RBTree;
 // - 推移性:   任意の `x, y, z` について、もし `less_than(x,y)` が true かつ `less_than(y,z)` が true であるなら、
 //             `less_than(x,z)` は true でなければならない。
 
+import Minilib.Common.Common;
 
 namespace RBNode {
     // A trait of the element. Currently `ToString` is required.
@@ -81,14 +82,14 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         let left_level = left.level;
         let right_level = right.level;
-        eval assert (|_| "The number of black nodes below the left and right nodes is different:"
+        assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
                 + " left=" + left_level.to_string
                 + " right=" + right_level.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
             left_level == right_level
-        );
-        eval assert (|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red)));
+        ) $ |_|
+        assert_lazy(|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red))) $ |_|
         left_level + this_count
     );
 
@@ -106,24 +107,24 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         let (left_level, left_min, left_max) = left.validate(less_than);
         let (right_level, right_min, right_max) = right.validate(less_than);
-        eval assert (|_| "The number of black nodes below the left and right nodes is different:"
+        assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
                 + " left=" + left_level.to_string
                 + " right=" + right_level.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
             left_level == right_level
-        );
-        eval assert (|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red)));
-        eval assert (|_| "not left_max < elem"
+        ) $ |_|
+        assert_lazy(|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red))) $ |_|
+        assert_lazy(|_| "not left_max < elem"
                 + "\nleft_max="+left_max.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            left_max.is_none || less_than(left_max.as_some, elem));
-        eval assert (|_| "not elem < right_min"
+            left_max.is_none || less_than(left_max.as_some, elem)) $ |_|
+        assert_lazy(|_| "not elem < right_min"
                 + "\nright_min="+right_min.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            right_min.is_none || less_than(elem, right_min.as_some));
+            right_min.is_none || less_than(elem, right_min.as_some)) $ |_|
 
         let level = left_level + this_count;
         let min = if left_min.is_some { left_min } else { some(elem) };
@@ -471,7 +472,7 @@ namespace RBNode {
     _remove_max: [a: RBNodeElem] RBNode a -> (Bool, RBNode a, a);
     _remove_max = |node| (
         eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
-        eval assert (|_| "_remove_max: !node.is_empty", !node.is_empty);
+        assert_lazy(|_| "_remove_max: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = node.get_triplet;
         if !right.is_empty {
             let (active, right, max) = right._remove_max;
@@ -492,7 +493,7 @@ namespace RBNode {
     _remove_min: [a: RBNodeElem] RBNode a -> (Bool, RBNode a, a);
     _remove_min = |node| (
         eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
-        eval assert (|_| "_remove_min: !node.is_empty", !node.is_empty);
+        assert_lazy(|_| "_remove_min: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = node.get_triplet;
         if !left.is_empty {
             let (active, left, min) = left._remove_min;
@@ -506,18 +507,19 @@ namespace RBNode {
         (active, right, min)
     );
 
-    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNode a -> String -> RBNode a -> I64 -> ();
-    _debug_assert_level_diff = |prefix, name1, node1, name2, node2, diff| (
-        if !_Debug { () };
+    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNode a -> String -> RBNode a -> I64 -> Lazy b -> b;
+    _debug_assert_level_diff = |prefix, name1, node1, name2, node2, diff, lazy| (
+        if !_Debug { lazy() };
         let level1 = node1.level_nonvalidate;
         let level2 = node2.level_nonvalidate;
-        assert (|_| prefix + ": " +
-            name1 + ".level(" + level1.to_string + ") + " + diff.to_string + " != " +
-            name2 + ".level(" + level2.to_string + ")\n" +
-            name1 + " = " + node1.to_string + "\n" +
-            name2 + " = " + node2.to_string
-            ,
-            level1 + diff == level2)
+        if !(level1 + diff == level2) {
+            undefined(prefix + ": " +
+                name1 + ".level(" + level1.to_string + ") + " + diff.to_string + " != " +
+                name2 + ".level(" + level2.to_string + ")\n" +
+                name1 + " = " + node1.to_string + "\n" +
+                name2 + " = " + node2.to_string)
+        };
+        lazy()
     );
 
     // Called when `node.left.level == node.right.level - 1`.
@@ -530,10 +532,10 @@ namespace RBNode {
             (active, fixed)
         };
         let (left, elem, right) = node.get_triplet;
-        eval _debug_assert_level_diff("_remove_fix_left postcheck",
+        _debug_assert_level_diff("_remove_fix_left postcheck",
             "fixed", fixed, "node", node,
             if active { 1 } else { 0 }
-        );
+        ) $ |_|
         eval _debug_eprintln_lazy(|_| "_remove_fix_left done: active="+active.to_string + " fixed="+fixed.to_string);
         (active, fixed)
     );
@@ -549,15 +551,15 @@ namespace RBNode {
         let u_was_black = u.is_black;
         let u_color = u.get_color;
         let (t1, u_elem, v) = u.get_triplet;
-        eval assert (|_| "v is empty", !v.is_empty);
-        eval _debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1);
+        assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
+        _debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1) $ |_|
         if v.is_black {
             if v.get_left.is_red {
                 // pattern L1
                 let (w, v_elem, t4) = v.get_triplet;
                 let (t2, w_elem, t3) = w.get_triplet;
-                eval _debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0);
-                eval _debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0);
+                _debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0) $ |_|
+                _debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0) $ |_|
                 let u = black $ (t1, u_elem, t2);
                 let v = black $ (t3, v_elem, t4);
                 let w = u_color $ (u, w_elem, v);
@@ -567,8 +569,8 @@ namespace RBNode {
                 // pattern L2
                 let (t2, v_elem, w) = v.get_triplet;
                 let (t3, w_elem, t4) = w.get_triplet;
-                eval _debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0);
-                eval _debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0);
+                _debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0) $ |_|
+                _debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0) $ |_|
                 let u = black $ (t1, u_elem, t2);
                 let w = black $ (t3, w_elem, t4);
                 let v = u_color $ (u, v_elem, w);
@@ -578,19 +580,19 @@ namespace RBNode {
                 // pattern L3
                 let (t2, v_elem, t3) = v.get_triplet;
                 let v = red $ (t2, v_elem, t3);
-                eval _debug_assert_level_diff("L3", "t1", t1, "v", v, 0);
+                _debug_assert_level_diff("L3", "t1", t1, "v", v, 0) $ |_|
                 let u = black $ (t1, u_elem, v);
                 let active = u_was_black;
                 (active, u)
             }
         } else {    // v.is_red
             // pattern L4
-            eval assert (|_| "L4: u_was_black", u_was_black);
+            assert_lazy(|_| "L4: u_was_black", u_was_black) $ |_|
             let (t2, v_elem, t3) = v.get_triplet;
             let u = red $ (t1, u_elem, t2);
             let active = true;
             let (active, u) = _remove_fix_left $ (active, u);
-            eval _debug_assert_level_diff("L4", "u", u, "t3", t3, 0);
+            _debug_assert_level_diff("L4", "u", u, "t3", t3, 0) $ |_|
             let v = black $ (u, v_elem, t3);
             (active, v)
         }
@@ -606,10 +608,10 @@ namespace RBNode {
             (active, fixed)
         };
         let (left, elem, right) = node.get_triplet;
-        eval _debug_assert_level_diff("_remove_fix_right postcheck",
+        _debug_assert_level_diff("_remove_fix_right postcheck",
             "fixed", fixed, "node", node,
             if active { 1 } else { 0 }
-        );
+        ) $ |_|
         (active, fixed)
     );
 
@@ -624,16 +626,16 @@ namespace RBNode {
         let u_was_black = u.is_black;
         let u_color = u.get_color;
         let (v, u_elem, t4) = u.get_triplet;
-        eval assert (|_| "v is empty", !v.is_empty);
-        eval _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1);
+        assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
+        _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1) $ |_|
         if v.is_black {
             if v.get_right.is_red {
                 eval _debug_eprintln_lazy(|_| "R1");
                 // pattern R1
                 let (t1, v_elem, w) = v.get_triplet;
                 let (t2, w_elem, t3) = w.get_triplet;
-                eval _debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0);
-                eval _debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0);
+                _debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0) $ |_|
+                _debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0) $ |_|
                 let v = black $ (t1, v_elem, t2);
                 let u = black $ (t3, u_elem, t4);
                 let w = u_color $ (v, w_elem, u);
@@ -644,8 +646,8 @@ namespace RBNode {
                 // pattern R2
                 let (w, v_elem, t3) = v.get_triplet;
                 let (t1, w_elem, t2) = w.get_triplet;
-                eval _debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0);
-                eval _debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0);
+                _debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0) $ |_|
+                _debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0) $ |_|
                 let w = black $ (t1, w_elem, t2);
                 let u = black $ (t3, u_elem, t4);
                 let v = u_color $ (w, v_elem, u);
@@ -657,7 +659,7 @@ namespace RBNode {
                 let (t1, v_elem, t2) = v.get_triplet;
                 let t3 = t4;
                 let v = red $ (t1, v_elem, t2);
-                eval _debug_assert_level_diff("R3", "v", v, "t3", t3, 0);
+                _debug_assert_level_diff("R3", "v", v, "t3", t3, 0) $ |_|
                 let u = black $ (v, u_elem, t3);
                 let active = u_was_black;
                 (active, u)
@@ -665,13 +667,13 @@ namespace RBNode {
         } else {    // v.is_red
             eval _debug_eprintln_lazy(|_| "R4");
             // pattern R4
-            eval assert (|_| "R4: u_was_black", u_was_black);
+            assert_lazy(|_| "R4: u_was_black", u_was_black) $ |_|
             let (t1, v_elem, t2) = v.get_triplet;
             let t3 = t4;
             let u = red $ (t2, u_elem, t3);
             let active = true;
             let (active, u) = _remove_fix_right $ (active, u);
-            eval _debug_assert_level_diff("R4", "t1", t1, "u", u, 0);
+            _debug_assert_level_diff("R4", "t1", t1, "u", u, 0) $ |_|
             let v = black $ (t1, v_elem, u);
             (active, v)
         }

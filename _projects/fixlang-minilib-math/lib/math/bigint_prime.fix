@@ -20,6 +20,7 @@ module Minilib.Math.BigIntPrime;
 import AsyncTask;
 import Random;
 
+import Minilib.Common.Common;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 import Minilib.Math.Types;
@@ -68,13 +69,13 @@ namespace PrimeGen {
         // Create futures for each computation.
         let task_pool = *prime_gen.@task_pool_var.get;
         let futures = *iter.map_m(|io| Future::make(task_pool, io)).to_result;
-        eval assert(|_| "Future::make failed: " + futures.as_err, futures.is_ok);
+        assert_lazy(|_| "Future::make failed: " + futures.as_err, futures.is_ok) $ |_|
 
         // Wait for futures and stop at the first result that meets the condition.
         let result = *futures.as_ok.loop_iter_m(
             default, |result, future|
             let a = *future.get.to_result;
-            eval assert(|_| "future.get failed: " + a.as_err, a.is_ok);
+            assert_lazy(|_| "future.get failed: " + a.as_err, a.is_ok) $ |_|
             let a = a.as_ok;
             if f(a) {
                 break_m $ a
@@ -155,7 +156,7 @@ namespace PrimeGen {
     // Generates random BigInt `r` of specified bit length.
     generate_bigint:  I64 -> PrimeGen -> IO BigInt;
     generate_bigint = |bit_length, prime_gen| (
-        eval assert(|_| "invalid bit_length", bit_length >= 0);
+        assert_lazy(|_| "invalid bit_length", bit_length >= 0) $ |_|
         let end = pow_by_U64(BigInt::two, bit_length.to_U64);
         let (begin, _) = end.divmod_by_two;
         prime_gen.generate_bigint_range(begin, end)
@@ -177,7 +178,7 @@ namespace PrimeGen {
             prime_gen.generate_bigint_range(end, begin)      // swap range and retry
         };
         let n = end - begin;
-        eval assert(|_| "invalid range", n > zero);
+        assert_lazy(|_| "invalid range", n > zero) $ |_|
         let size = n.@nat.get_size;
         let nat = *loop_m(
             ([], 0), |(nat, i)|
@@ -374,7 +375,7 @@ gcd = |m, n| (
 // see: https://en.wikipedia.org/wiki/Jacobi_symbol
 jacobi_symbol: BigInt -> BigInt -> I64;
 jacobi_symbol = |m, n| (
-    eval assert(|_| "invalid `n`", n.is_positive && n.is_odd);
+    assert_lazy(|_| "invalid `n`", n.is_positive && n.is_odd) $ |_|
     let g = gcd(m, n);
     if g != one {
         0

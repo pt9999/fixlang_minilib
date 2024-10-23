@@ -4,6 +4,7 @@ module Minilib.Math.BigNat;
 import Math;
 import Random;
 
+import Minilib.Common.Common;
 import Minilib.Text.StringEx;
 import Minilib.Text.Hex;
 
@@ -25,8 +26,8 @@ _log2_log2_base = 5_U64;
 
 _dummy: ();
 _dummy = (
-    eval assert(|_|"invalid _log2_base", _log2_base == 1_U64.shift_left(_log2_log2_base));
-    eval assert(|_|"invalid _base", _base == 1_U64.shift_left(_log2_base));
+    assert_lazy(|_|"invalid _log2_base", _log2_base == 1_U64.shift_left(_log2_log2_base)) $ |_|
+    assert_lazy(|_|"invalid _base", _base == 1_U64.shift_left(_log2_base)) $ |_|
     ()
 );
 
@@ -163,8 +164,7 @@ _sub: Array U32 -> Array U32 -> Array U32;
 _sub = |a0, a1| (
     let ((a2, offset2), sign2) = _signed_sub_with_offset((a0, 0), (a1, 0));
     if sign2 < 0 {
-        eval debug_eprintln("error: sign2 < 0");
-        undefined()
+        undefined("BitNat::_sub: underflow")
     };
     a2
 );
@@ -293,7 +293,7 @@ _divmod: Array U32 -> Array U32 -> (Array U32, Array U32);
 _divmod = |a, b| (
     let a = a._remove_last_zeros;
     let b = b._remove_last_zeros;
-    eval assert(|_| "Divide by zero", b != BigNat::_zero);
+    assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
     if b.get_size == 1 {
         let (quo, rem) = _divmod_u32(a, b.@(0));
         (quo, [rem])
@@ -328,7 +328,7 @@ _divmod = |a, b| (
             _add_with_offset1(quo, (q, qoff))
         } else {
             let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
-            eval assert(|_| "quo subtraction underflow", sign > 0);
+            assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
             quo
         };
         let quo = quo._remove_last_zeros;
@@ -350,7 +350,7 @@ _divmod = |a, b| (
 // Calculates `(a0 / d1, a0 % d1)`.
 _divmod_u32: Array U32 -> U32 -> (Array U32, U32);
 _divmod_u32 = |a0, d1| (
-    eval assert(|_| "Divide by zero", d1 != 0_U32);
+    assert_lazy(|_| "Divide by zero", d1 != 0_U32) $ |_|
     let d1 = d1.to_U64;
     let n0 = a0.get_size;
     let (quo, rem) = loop(
@@ -358,7 +358,7 @@ _divmod_u32 = |a0, d1| (
         if i < 0 { break $ (a0, rem) };
         let dividend = rem * _base + a0.@(i).to_U64;
         let q = dividend / d1;
-        eval assert(|_| "q overflow", q < _base);
+        assert_lazy(|_| "q overflow", q < _base) $ |_|
         let rem = dividend % d1;
         let a0 = a0.set(i, q.to_U32);
         continue $ (a0, rem, i - 1)
@@ -375,7 +375,7 @@ _bit_length = |a| (
     let n = a.get_size;
     let last_digit = a.@(n-1);
     if last_digit == 0_U32 {
-        eval assert(|_| "_remove_last_zeros did not remove last zero", n == 1);
+        assert_lazy(|_| "_remove_last_zeros did not remove last zero", n == 1) $ |_|
         0_U64
     };
     let last_bit_length = loop(
@@ -384,7 +384,7 @@ _bit_length = |a| (
             break $ bit + 1_U32
         };
         if bit == 0_U32 {
-            eval assert(|_| "should not reach here", false);
+            assert_lazy(|_| "should not reach here", false) $ |_|
             break $ 0_U32
         };
         continue $ bit - 1_U32
@@ -460,7 +460,7 @@ _divmod_by_power_of_two = |a0, exp| (
         (BigNat::_zero, a0)
     };
     let (exp_quo, exp_rem) = _divmod_log2_base(exp);
-    eval assert(|_| "exp_quo too big", exp_quo < a0.get_size.to_U64);
+    assert_lazy(|_| "exp_quo too big", exp_quo < a0.get_size.to_U64) $ |_|
     let quo = a0._shift_right(exp);
     let rem = a0.get_sub(0, exp_quo.to_I64);
     let rem = if exp_rem == 0_U64 { rem }
@@ -520,7 +520,7 @@ _from_string_inner = |bytes, i, a| (
 
 _generate_bignat:  I64 -> Random -> (Random, Array U32);
 _generate_bignat = |bit_length, random| (
-    eval assert(|_| "invalid bit_length", bit_length >= 0);
+    assert_lazy(|_| "invalid bit_length", bit_length >= 0) $ |_|
     let end = BigNat::_one._shift_left(bit_length.to_U64);
     let begin = end._shift_right(1_U64);
     _generate_bignat_range(begin, end, random)
@@ -533,7 +533,7 @@ _generate_bignat_range = |begin, end, random| (
     };
     let n = _sub(end, begin);
     let n = n._remove_last_zeros;
-    eval assert(|_| "invalid range", !n._is_zero);
+    assert_lazy(|_| "invalid range", !n._is_zero) $ |_|
     let size = n.get_size;
     let (random, r) = loop(
         (random, [], 0), |(random, nat, i)|

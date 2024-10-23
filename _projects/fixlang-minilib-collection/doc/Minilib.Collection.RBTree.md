@@ -46,7 +46,7 @@ Debug flag. If set to true, a lot of debug messages will be printed and various 
 
 ### `_balance : Minilib.Collection.RBTree::RBNode::RBNode a -> Minilib.Collection.RBTree::RBNode::RBNode a`
 
-### `_debug_assert_level_diff : [a : Minilib.Collection.RBTree::RBNode::RBNodeElem] Std::String -> Std::String -> Minilib.Collection.RBTree::RBNode::RBNode a -> Std::String -> Minilib.Collection.RBTree::RBNode::RBNode a -> Std::I64 -> ()`
+### `_debug_assert_level_diff : [a : Minilib.Collection.RBTree::RBNode::RBNodeElem] Std::String -> Std::String -> Minilib.Collection.RBTree::RBNode::RBNode a -> Std::String -> Minilib.Collection.RBTree::RBNode::RBNode a -> Std::I64 -> (() -> b) -> b`
 
 ### `_debug_eprintln_lazy : (() -> Std::String) -> ()`
 

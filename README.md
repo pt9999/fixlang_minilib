@@ -4,6 +4,8 @@ Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
 This library is still in alpha stage.
 
+NOTE: This library is currently undergoing major changes.  I plan to split the library into multiple projects.
+
 ## Tested Platform
 - x86_64-linux-gnu
 - aarch64-linux-gnu

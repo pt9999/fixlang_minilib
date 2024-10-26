@@ -1,0 +1,100 @@
+module Main;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Text.StringEx;
+import Minilib.Monad.Error;
+
+
+// Application
+type App = unbox struct {
+    deps: Array (String, String),
+    proj_name: String,
+    section: String,
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        deps: [],
+        proj_name: "",
+        section: "",
+    };
+
+    read_deps_from_base_dir: String -> App -> IOFail App;
+    read_deps_from_base_dir = |base_dir, app| (
+        let files = *list_dir(base_dir);
+        files.to_iter.fold_m(
+            app, |app, file|
+            if !file.starts_with("fixlang-minilib-") {
+                pure $ app
+            };
+            let proj_dir = Path::join_paths([base_dir, file]);
+            app.read_deps_from_project_dir(proj_dir)
+            .catch(|err| 
+                eval *eprintln("WARNING: " + err).lift;
+                pure $ app
+            )
+        )
+    );
+
+    read_deps_from_project_dir: String -> App -> IOFail App;
+    read_deps_from_project_dir = |proj_dir, app| (
+        let proj_file = Path::join_paths([proj_dir, "fixproj.toml"]);
+        let contents = *read_file_string(Path::parse(proj_file).as_some);
+        let app = app.set_proj_name("").set_section("");
+        contents.split_ex("\n").loop_iter_m(
+            app, |app, line|
+            let line = line.strip_spaces;
+            if line.starts_with("[") {
+                let app = app.set_section(line);
+                continue_m $ app
+            };
+            let (key, value) = line.split_first("=");
+            let key = key.strip_spaces;
+            let value = value.strip_spaces;
+            if key == "name" {
+                let value = value.strip_first_bytes(|c| c == 0x22_U8).strip_last_bytes(|c| c == 0x22_U8);
+                if app.@section == "[general]" {
+                    let app = app.set_proj_name(value);
+                    continue_m $ app
+                };
+                if app.@section == "[[dependencies]]" {
+                    let app = app.mod_deps(push_back((app.@proj_name, value)));
+                    continue_m $ app
+                };
+                continue_m $ app
+            };
+            continue_m $ app
+       )
+    );
+
+    write_dependency_graph: App -> IOFail ();
+    write_dependency_graph = |app| (
+        let output_file = "tmp.dot";
+        eval *with_file(Path::parse(output_file).as_some, "w", |fh|
+            let write = |line| write_string(fh, line + "\n");
+            eval *write("digraph \"deps\" {");
+            eval *write("rankdir=TB;");
+            eval *write("node [shape=box];");
+            eval *app.@deps.to_iter.fold_m(
+                (), |_, (parent, child)|
+                write((parent, child).format("\"{}\" -> \"{}\" [];"))
+            );
+            eval *write("}");
+            pure()
+        );
+        println("Wrote " + output_file).lift
+    );
+}
+
+main: IO ();
+main = do {
+    let app = App::empty;
+    let app = *app.read_deps_from_base_dir("..");
+    eval *app.write_dependency_graph;
+    pure()
+}.try(eprintln);
+
+
+

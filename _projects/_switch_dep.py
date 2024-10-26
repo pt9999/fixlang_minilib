@@ -13,16 +13,19 @@
 #    python3 _switch_dep.py fixlang-minilib-math -n "common|binary" -t git 
 
 import os
+import os.path
 import argparse
 import re
 
-def to_local_path(name):
-    return "../fixlang-" + name
+def to_local_path(name, project_dir):
+    path = os.path.relpath(os.curdir, start=project_dir)
+    path = os.path.join(path, "fixlang-" + name)
+    return path
 
 def to_git_url(name):
     return "https://github.com/pt9999/fixlang-" + name + ".git"
 
-def update_fixproj_toml(args, input_lines):
+def update_fixproj_toml(args, project_dir: str, input_lines: list[str]) -> list[str]:
     output = []
     dep_section = False
     dep_name = ""
@@ -55,7 +58,7 @@ def update_fixproj_toml(args, input_lines):
         if key == "path" or key == "git":
             if dep_source == False:
                 key = ("" if args.type == 'path' else "# ") + "path"
-                value = '"' + to_local_path(dep_name) + '"'
+                value = '"' + to_local_path(dep_name, project_dir) + '"'
                 output.append(key + " = " + value + "\n")
                 key = ("" if args.type == 'git' else "# ") + "git"
                 git_url = to_git_url(dep_name)
@@ -75,7 +78,7 @@ def update_project(args, project_dir):
         return
     with open(fixproj_path, "r") as f:
         input_lines = list(f)
-    output_lines = update_fixproj_toml(args, input_lines)
+    output_lines = update_fixproj_toml(args, project_dir, input_lines)
     with open(fixproj_path + ".new", "w") as f:
         f.write("".join(output_lines))
     os.rename(fixproj_path, fixproj_path + ".bak")

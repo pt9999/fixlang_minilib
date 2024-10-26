@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 
-# switch `path` and `git` for all dependencies with name "fixlang-minilib-*" 
-# python3 _change_dep.py --path
-# python3 _change_dep.py --git
+# switch `path` and `git` for dependencies with matching name.
+#
+# 指定したプロジェクトの fixproj.toml を更新する。
+# 具体的には、fixproj.tomlに記載された依存先プロジェクトのうち、
+# `name` が指定したパターンにマッチするものについて、
+# ソース(`path` または `git`) の種別を更新する。
+#
+# Usage: 
+#    python3 _switch_dep.py [-h] [-n NAME] [-t TYPE] [projects ...]
+# Example:
+#    python3 _switch_dep.py fixlang-minilib-math -n "common|binary" -t git 
 
 import os
 import argparse

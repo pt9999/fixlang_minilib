@@ -35,6 +35,8 @@ for n in $projects; do
         echo "=== $n ==="
         set -ex
         #split_push $n
+        #git rm -r _projects/$n
+        #git submodule add https://github.com/pt9999/$n _projects/$n
     )
 done
 git checkout $dev

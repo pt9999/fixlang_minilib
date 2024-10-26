@@ -4,76 +4,47 @@ Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 
 This library is still in alpha stage.
 
-NOTE: This library is currently undergoing major changes.  I plan to split the library into multiple projects.
+NOTE: This library is currently undergoing major changes. 
 
 ## Tested Platform
 - x86_64-linux-gnu
 - aarch64-linux-gnu
 - NOTE: Currently MacOS is not supported.
 
-## Features
+## Subprojects
 
-- Application
-  - Command Line Argument Parser
-- Collections
-  - Ordered map
-  - Double-ended queue
-  - Tree map
-  - Tree set
-  - Red-Black tree
-- Cryptography
-  - Block cipher (AES)
-  - Secure hash function (MD5/SHA-1/SHA-256/SHA-512)
-  - Message authentication code (HMAC)
-- Encoding
-  - BASE64
-  - Binary
-  - JSON
-  - XML
-- IO
-  - File system
-  - Platform information
-  - Channel
-- Math
-  - Complex number
-  - BigInt
-  - BigFloat (currently not well tested)
-  - Prime generator using BigInt
-  - Rational number
-  - Algebra (Ring, Field, Euclid, Modular, Polynomial)
-- Media
-  - Image
-  - PNG (requires libpng)
-  - SVG
-- Monad
-  - State / Reader / Writer Monad
-  - Error / Except / Continuation Monad
-  - Functor for Monad (map_m, foreach_m)
-- Networking
-  - TCP/IP Socket (IPv4 only)
-  - URL, URI
-  - Simple HTTP Server
-- Testing
-  - Unit test
-- Text
-  - Simple parser
-  - String extension
-  - Regular expression
-  - Unicode (UTF8/UTF16/UTF32) conversion
-- Thread
-  - Task Pool
-  - Future
-  - Time
-- Trait
-  - Semigroup
-  - Monoid
-  - Comonad
+Minilib is split to several subprojects.
+They are referenced as Git submodules under `_projects` directory.
+
+For details, see `_projects/fixlang-minilib-*`.
+
+![Project dependencies](_projects/dependencies.png)
+
+| Name   | Description |
+|--------|-------------|
+|minilib-common| Common modules (StringEx, UnitTest etc.)|
+|minilib-text| Text handling (SimpleParser, Unicode etc.)|
+|minilib-binary| Binary handling|
+|minilib-io| IO operations (File System, Platform Info)|
+|minilib-collections| Collections  (Red-Black tree, Double-ended queue etc.)|
+|minilib-monad| Monads (State/Reader/Writer monad, Monad transformer etc.)|
+|minilib-comonad| Comonads (Env/Traced comonad etc.)|
+|minilib-thread| Multithreading (Task pool etc.) |
+|minilib-net| Networks (TCP/IP, HTTP etc.) |
+|minilib-math| Math (Complex number, BigInt, BigFloat, Algebra etc.)|
+|minilib-crypto| Cryptography  (AES, SHA-1, SHA-256, HMAC etc.)|
+|minilib-app| Application Support (CommandLine parser etc.) |
+|minilib-media| Multimedia (PNG image etc.) |
+|minilib-json| JSON encoder/decoder |
+|minilib-xml| XML encoder/decoder |
+|--------|-------------|
+|minilib-examples| Example programs|
 
 ## How to use
 
-To build example programs, type `make examples`.
+To run test codes and build example programs, type `cd _projects && make test`.
 
-To run test codes, type `make test`. It has been mainly tested in the following environment.
+It has been mainly tested in the following environment.
 
 - Ubuntu-22.04 on WSL 2
 - gcc 11.4.0
@@ -86,19 +57,15 @@ To run test codes, type `make test`. It has been mainly tested in the following 
 ## Directory structure
 
 ```
+/_projects  ... Subprojects
 /_sandbox   ... Experimental source code (Not included in the library itself)
-/bin        ... Tools executable
-/doc        ... Library Reference documentation
-/examples   ... Example code using this library
-/lib        ... Library code
-/tests      ... Test code
 /tools      ... Tools code
 ```
 
 ## Library Reference
 
-See [Library Reference](doc/index.md).
+See `_projects/fixlang-minilib-*/doc` directory.
 
 ## Example programs
 
-See [examples/README.md](examples/README.md).
+See [_projects/fixlang-minilib-examples/README.md](_projects/fixlang-minilib-examples/README.md).

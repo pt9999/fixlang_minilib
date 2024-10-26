@@ -1,11 +1,11 @@
 module Sandbox.NdArray;
 
-
+import Minilib.Common.Assert;
 import Minilib.Text.StringEx;
 
 modulo: I64 -> I64 -> I64;
 modulo = |i, n| (
-    eval assert (|_|"modulo: out of range", n > 0);
+    assert_lazy (|_|"modulo: out of range", n > 0) $ |_|
     let i = i % n;
     if i < 0 { i + n } else { i }
 );
@@ -215,10 +215,10 @@ namespace NdArray {
     get_dim = |ndarray| ndarray.@shape.get_size;
 
     // Checks whether the dimension matches
-    _assert_dim_equals: I64 -> NdArray a -> ();
-    _assert_dim_equals = |dim, ndarray| (
-        assert (|_| "dimension mismatch: " + dim.to_string + " != " + ndarray.get_dim.to_string,
-                     dim == ndarray.get_dim)
+    _assert_dim_equals_lazy: I64 -> NdArray a -> Lazy b -> b;
+    _assert_dim_equals_lazy = |dim, ndarray, lazy| (
+        assert_lazy (|_| "dimension mismatch: " + dim.to_string + " != " + ndarray.get_dim.to_string,
+                     dim == ndarray.get_dim) $ lazy
     );
 
     // `shape._calc_size_and_stride` calculates the size and the strides of ndarray.
@@ -236,7 +236,7 @@ namespace NdArray {
 
     _calc_offset: Array I64 -> NdArray a -> I64;
     _calc_offset = |idx, ndarray| (
-        eval ndarray._assert_dim_equals(idx.get_size);
+        ndarray._assert_dim_equals_lazy(idx.get_size) $ |_|
         loop(
             (0, ndarray.@offset), |(d, offset)|
             if d >= ndarray.@strides.get_size {
@@ -292,7 +292,7 @@ namespace NdArray {
     get_sub: [r: ToNdRange] r -> NdArray a -> NdArray a;
     get_sub = |range, ndarray| (
         let range: Array (I64, I64) = range.to_nd_range;
-        eval ndarray._assert_dim_equals(range.get_size);
+        ndarray._assert_dim_equals_lazy(range.get_size) $ |_|
         let range = ndarray.clamp_range(range);
         let shape = range.map(|(begin, end)| end - begin);
         let index = range.map(|(begin, end)| begin);
@@ -307,8 +307,8 @@ namespace NdArray {
         let src = sub;
         let dest = ndarray;
         let range = range.to_nd_range;
-        eval src._assert_dim_equals(range.get_size);
-        eval dest._assert_dim_equals(range.get_size);
+        src._assert_dim_equals_lazy(range.get_size) $ |_|
+        dest._assert_dim_equals_lazy(range.get_size) $ |_|
         let range = dest.clamp_range(range);
         let dest_shape: Array I64 = range.map(|(begin, end)| end - begin);
         let dest_offset: I64 = dest._calc_offset(range.map(|(begin, end)| begin));
@@ -470,7 +470,7 @@ namespace NdArray {
             if a.get_dim > b.get_dim { continue $ (a, b.expand_dims(0)) };
             break $ (a, b)
         );
-        eval assert(|_|"", a.get_dim == b.get_dim);
+        assert_lazy(|_|"", a.get_dim == b.get_dim) $ |_|
         let dest_shape = _array_zip(a.@shape, b.@shape).map(|(a,b)| max(a, b));
         let a_positions = a.get_positions(dest_shape);
         let b_positions = b.get_positions(dest_shape);
@@ -489,11 +489,12 @@ namespace NdArray {
         if ndarray.@offset != 0 {
             ndarray.ravel.reshape(shape)
         };
-        eval assert(|_|"shape is empty", shape.get_size > 0);
+        assert_lazy(|_|"shape is empty", shape.get_size > 0) $ |_|
         // check that shape.@(i) >= 0 except for i == 0
         eval shape.set(0, 0).to_iter.fold (
             (), |_, n|
-            assert(|_|"invalid shape: " + n.to_string, n >= 0)
+            assert_lazy(|_|"invalid shape: " + n.to_string, n >= 0) $ |_|
+            ()
         );
         // if first element of shape is negative, calculate it automatically
         let shape = if shape.@(0) >= 0 { shape } else {
@@ -503,9 +504,9 @@ namespace NdArray {
         };
         let (size, strides) = _calc_size_and_stride(shape);
         let old_size = ndarray.@data.get_size;
-        eval assert(|_| "reshape failed: size overflow: " + 
+        assert_lazy(|_| "reshape failed: size overflow: " + 
                     old_size.to_string + " < " + size.to_string,
-                    old_size >= size);
+                    old_size >= size) $ |_|
         let offset = 0;
         NdArray {
             data: ndarray.@data,
@@ -519,7 +520,7 @@ namespace NdArray {
     _array_insert: I64 -> a -> Array a -> Array a;
     _array_insert = |i, v, array| (
         let n = array.get_size;
-        eval assert(|_| "_array_insert: index out of range", 0 <= i && i <= n);
+        assert_lazy(|_| "_array_insert: index out of range", 0 <= i && i <= n) $ |_|
         let output = Array::empty(n + 1);
         loop(
             (output, 0), |(output, j)|
@@ -536,7 +537,7 @@ namespace NdArray {
     _array_remove: I64 -> Array a -> Array a;
     _array_remove = |i, array| (
         let n = array.get_size;
-        eval assert(|_| "_array_remove: index out of range", 0 <= i && i < n);
+        assert_lazy(|_| "_array_remove: index out of range", 0 <= i && i < n) $ |_|
         let output = Array::empty(n - 1);
         loop(
             (output, 0), |(output, j)|
@@ -583,14 +584,14 @@ namespace NdArray {
     // Removes specified axis of length one from an NdArray.
     squeeze: I64 -> NdArray a -> NdArray a;
     squeeze = |axis, ndarray| (
-        eval assert(|_| "squeeze: not length one", ndarray.@shape.@(axis) == 1);
+        assert_lazy(|_| "squeeze: not length one", ndarray.@shape.@(axis) == 1) $ |_|
         ndarray.shrink_dims(axis)
     );
 
     // Transposes an NdArray.
     transpose: NdArray a -> NdArray a;
     transpose = |ndarray| (
-        eval assert (|_| "transpose: dimension mismatch", ndarray.get_dim >= 2);
+        assert_lazy (|_| "transpose: dimension mismatch", ndarray.get_dim >= 2) $ |_|
         ndarray.swapaxes(0, 1)
     );
 
@@ -616,9 +617,10 @@ namespace NdArray {
         eval Iterator::range(1, child_count).fold(
             (), |_, i|
             let child = children.@(i);
-            assert (|_| "stack: shapes of children must be same", child_shape == child.@shape)
+            assert_lazy (|_| "stack: shapes of children must be same", child_shape == child.@shape) $ |_|
+            ()
         );
-        eval assert(|_| "axis out of range", 0 <= axis && axis <= child_shape.get_size);
+        assert_lazy(|_| "axis out of range", 0 <= axis && axis <= child_shape.get_size) $ |_|
         let parent_shape = child_shape._array_insert(axis, child_count);
         let (parent_size, parent_stride) = _calc_size_and_stride(parent_shape);
         if parent_size == 0 {
@@ -796,15 +798,15 @@ dot = |b, a| (
     let b_shape = b.@shape;
     let a_dim = a_shape.get_size;
     let b_dim = b_shape.get_size;
-    eval assert(|_| "invalid a_shape", a_dim > 0);
-    eval assert(|_| "invalid b_shape", b_dim > 0);
+    assert_lazy(|_| "invalid a_shape", a_dim > 0) $ |_|
+    assert_lazy(|_| "invalid b_shape", b_dim > 0) $ |_|
     let b = if b_dim == 1 {
         b 
     } else { 
         b.swapaxes(b_dim - 2, b_dim - 1)
     };
     let b_shape = b.@shape;
-    eval assert(|_| "vec_len mismatch",  a_shape.get_last == b_shape.get_last);
+    assert_lazy(|_| "vec_len mismatch",  a_shape.get_last == b_shape.get_last) $ |_|
     let vec_len = a_shape.get_last.as_some;
     let a_shape1 = a_shape.pop_back;
     let b_shape1 = b_shape.pop_back;

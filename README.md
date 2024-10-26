@@ -6,7 +6,7 @@ This library is still in alpha stage.
 
 NOTE: This library is currently undergoing major changes. 
 
-## Tested Platform
+## Target Platform
 
 - x86_64-linux-gnu
 - aarch64-linux-gnu
@@ -26,8 +26,8 @@ It has been mainly tested in the following environment.
 
 Minilib is split to several FixLang subprojects with whose name starts with `minilib-`.
 
-Each subproject is managed under other GitHub repository. For example, `minilib-common` is managed under
-https://github.com/pt9999/fixlang-minilib-common repository.
+Each subproject is managed under a standanlone GitHub repository. 
+For example, `minilib-common` is managed under [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common).
 
 ### List of subprojects
 
@@ -48,12 +48,16 @@ https://github.com/pt9999/fixlang-minilib-common repository.
 |[minilib-media](https://github.com/pt9999/fixlang-minilib-media)| Multimedia (PNG image etc.) |
 |[minilib-json](https://github.com/pt9999/fixlang-minilib-json)| JSON encoder/decoder |
 |[minilib-xml](https://github.com/pt9999/fixlang-minilib-xml)| XML encoder/decoder |
-|--------|-------------|
-|[minilib-examples](https://github.com/pt9999/fixlang-minilib-examples)| Example programs|
 
-### Project dependencies
+### Subproject dependency diagram
 
-![Project dependencies](_projects/dependencies.png)
+![Subproject dependencies](_projects/dependencies.png)
+
+### Example programs
+
+Minilib's Example programs are managed in another repository.
+
+For details, see [fixlang-minilib-examples](https://github.com/pt9999/fixlang-minilib-examples).
 
 ### Registy File
 
@@ -71,7 +75,9 @@ For example:
 $ fix deps add minilib-common minilib-binary
 ```
 
-## Directory structure
+## Development
+
+### Directory structure
 
 ```
 /_projects  ... Git submodules are stored here
@@ -79,7 +85,7 @@ $ fix deps add minilib-common minilib-binary
 /tools      ... Tools code
 ```
 
-## Git submodules
+### Git submodules
 
 The subprojects are referenced as Git submodules.
 
@@ -92,10 +98,3 @@ $ git submodule update
 To run test codes and build example programs, type `cd _projects && make test`.
 
 
-### Library Reference
-
-See `_projects/fixlang-minilib-*/doc` directory.
-
-### Example programs
-
-See [_projects/fixlang-minilib-examples/README.md](_projects/fixlang-minilib-examples/README.md).

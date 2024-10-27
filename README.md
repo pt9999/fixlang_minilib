@@ -24,9 +24,9 @@ It has been mainly tested in the following environment.
 
 ## Subprojects
 
-Minilib is split to several FixLang subprojects with whose name starts with `minilib-`.
+Minilib is split into several FixLang subprojects whose names start with `minilib-`.
 
-Each subproject is managed under a standanlone GitHub repository. 
+Each subproject is managed under a standalone GitHub repository.
 For example, `minilib-common` is managed under [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common).
 
 ### List of subprojects
@@ -63,7 +63,7 @@ For details, see [fixlang-minilib-examples](https://github.com/pt9999/fixlang-mi
 
 You might want to add [registry.toml](registry.toml) to your `${HOME}/.fixproj.toml`.
 For example:
-```
+```toml:~/.fixproj.toml
 registries = [
     "https://raw.githubusercontent.com/pt9999/fixlang_minilib/refs/heads/main/registry.toml"
 ]
@@ -71,30 +71,40 @@ registries = [
 
 Then, you can specify the names of subprojects in `fix deps add` command.
 For example:
-```
-$ fix deps add minilib-common minilib-binary
+```bash
+fix deps add minilib-common minilib-binary
 ```
 
-## Development
+## Minilib Development
 
 ### Directory structure
 
 ```
-/_projects  ... Git submodules are stored here
+/_projects  ... Minilib subprojects are placed here as Git submodules
 /_sandbox   ... Experimental source code (Not included in the library itself)
 /tools      ... Tools code
 ```
 
-### Git submodules
+### Fetch Git submodules
 
-The subprojects are referenced as Git submodules.
+During Minilib development, Minilib subprojects are placed as Git submodules under the `_projects` directory.
 
-To update Git submodules, run the commands below. They are cloned from GitHub repositories, and stored under `_projects` directory.
+To fetch all Git submodules from GitHub repositories, execute the following command:
+```bash
+git submodule update --init
 ```
-$ git submodule init
-$ git submodule update
+This will clone the Git submodules from their respective GitHub repositories and place them in the `_projects` directory.
+
+### Run test codes
+
+To run test codes for all subprojects, navigate to the `_projects` directory and execute the following command:
+```bash
+make test
 ```
 
-To run test codes and build example programs, type `cd _projects && make test`.
+### Build example programs
 
-
+To build example programs, navigate to the `_projects` directory and execute the following command:
+```bash
+make examples
+```

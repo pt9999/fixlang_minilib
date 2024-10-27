@@ -17,6 +17,11 @@ clean:
 document:
 	bash _gendoc.sh
 
+# Generate a dependency graph (using `dot` program from `graphviz` package).
+dep-graph:
+	cd _depgraph && fix run
+	dot -T png -o dependencies.png < _depgraph/tmp.dot
+
 # Update dependencies all subprojects and examples.
 # Note that the subprojects will be committed and pushed to remote repositories.
 update-deps-publish:

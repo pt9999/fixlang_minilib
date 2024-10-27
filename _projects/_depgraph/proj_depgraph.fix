@@ -8,6 +8,7 @@ import Minilib.Monad.Error;
 
 // Application
 type App = unbox struct {
+    projects: Array String,
     deps: Array (String, String),
     proj_name: String,
     section: String,
@@ -16,6 +17,7 @@ type App = unbox struct {
 namespace App {
     empty: App;
     empty = App {
+        projects: [],
         deps: [],
         proj_name: "",
         section: "",
@@ -56,7 +58,9 @@ namespace App {
             if key == "name" {
                 let value = value.strip_first_bytes(|c| c == 0x22_U8).strip_last_bytes(|c| c == 0x22_U8);
                 if app.@section == "[general]" {
-                    let app = app.set_proj_name(value);
+                    let proj_name = value;
+                    let app = app.mod_projects(push_back(proj_name));
+                    let app = app.set_proj_name(proj_name);
                     continue_m $ app
                 };
                 if app.@section == "[[dependencies]]" {
@@ -76,7 +80,11 @@ namespace App {
             let write = |line| write_string(fh, line + "\n");
             eval *write("digraph \"deps\" {");
             eval *write("rankdir=TB;");
-            eval *write("node [shape=box];");
+            eval *write("node [shape=box, style=filled];");
+            eval *app.@projects.to_iter.fold_m(
+                (), |_, proj_name|
+                write((proj_name, ).format("\"{}\" [fillcolor=\"#ccffff\"];"))
+            );
             eval *app.@deps.to_iter.fold_m(
                 (), |_, (parent, child)|
                 write((parent, child).format("\"{}\" -> \"{}\" [];"))

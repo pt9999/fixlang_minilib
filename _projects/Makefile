@@ -1,30 +1,36 @@
 all:
 
+# Test all subprojects (except examples).
 test:
-	for d in $(SUBPROJECTS); do (cd $$d && if [ -f fixproj.toml ]; then fix clean && fix test; fi); done
+	set -e; for d in $(SUBPROJECTS); do (cd $$d && fix clean && fix test); done
+
+# Build all examples.
+examples:
 	$(MAKE) -C fixlang-minilib-examples clean all
 
+# Clean all subprojects and examples.
 clean:
 	for d in $(SUBPROJECTS); do (cd $$d && if [ -f fixproj.toml ]; then fix clean; fi); done
 	$(MAKE) -C fixlang-minilib-examples clean
 
-update:
-	for d in $(SUBPROJECTS); do (cd $$d && if [ -f fixproj.toml ]; then fix deps update; fi); done
-	$(MAKE) -C fixlang-minilib-examples update
+# Generate documents for all subprojects.
+document:
+	bash _gendoc.sh
 
-update-push:
-	for d in $(SUBPROJECTS); do (cd $$d && if [ -f fixproj.toml ]; then \
+# Update dependencies all subprojects and examples.
+# Note that the subprojects will be committed and pushed to remote repositories.
+update-deps-publish:
+	set -e; for d in $(SUBPROJECTS); do (
+		cd $$d && \
 		git checkout main && \
 		fix deps update && \
 		(git add fixdeps.lock && \
 		git commit -m 'update deps' && \
-		git push) || true; \
-	fi); done
+		git push) || true \
+	); done
 	#$(MAKE) -C fixlang-minilib-examples update
 
-document:
-	bash _gendoc.sh
-
+# The subprojects in dependency order
 SUBPROJECTS = \
 	fixlang-minilib-common \
 	fixlang-minilib-binary \

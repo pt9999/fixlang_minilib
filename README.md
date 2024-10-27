@@ -1,33 +1,17 @@
 ## Overview
 
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
-
+The latest Fix program (2024/10/26) is required.
 This library is still in alpha stage.
 
-NOTE: This library is currently undergoing major changes. 
-
-## Target Platform
-
-- x86_64-linux-gnu
-- aarch64-linux-gnu
-- NOTE: Currently MacOS is not supported.
-
-It has been mainly tested in the following environment.
-
-- Ubuntu-22.04 on WSL 2
-- gcc 11.4.0
-- GNU make 4.3
-- rustup 1.26.0
-- rustc 1.72.1
-- llvm 12.0.1
-- latest Fix program (2024/10/24)
+Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
 
 ## Subprojects
 
 Minilib is split into several FixLang subprojects whose names start with `minilib-`.
 
-Each subproject is managed under a standalone GitHub repository.
-For example, `minilib-common` is managed under [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common).
+Each subproject is managed under a standalone GitHub repository whose names start with `fixlang-minilib-`.
+For example, `minilib-common` is managed under [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common) repository.
 
 ### List of subprojects
 
@@ -75,7 +59,25 @@ For example:
 fix deps add minilib-common minilib-binary
 ```
 
+## Target Platform
+
+- x86_64-linux-gnu
+- aarch64-linux-gnu
+- NOTE: Currently MacOS is not supported.
+
+It has been mainly tested in the following environment.
+
+- Ubuntu-22.04 on WSL 2
+- gcc 11.4.0
+- GNU make 4.3
+- rustup 1.26.0
+- rustc 1.72.1
+- llvm 12.0.1
+- latest Fix program (2024/10/26)
+
 ## Minilib Development
+
+This section describes how to develop Minilib.  If you are a Minilib user, you do not need to read this section.
 
 ### Directory structure
 

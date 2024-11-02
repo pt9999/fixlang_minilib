@@ -93,7 +93,7 @@ namespace Board {
 
     sleep: F64 -> IO ();
     sleep = |sec| (
-        let _ = *pure();
+        pure();; // make it lazy
         let usec = (sec * 1000000.0).to_U32;
         eval FFI_CALL[() usleep(U32), usec];
         pure()
@@ -102,19 +102,19 @@ namespace Board {
     show: Board -> IO ();
     show = |board| (
         let line = Array::fill(board.@width, ' ');
-        let _ = *print(Terminal::clear);
-        let _ = *Iterator::range(0, board.@height).fold_m(
+        print(Terminal::clear);;
+        Iterator::range(0, board.@height).fold_m(
             (), |_, y|
-            let _ = *print(Terminal::cursor(0, y));
+            print(Terminal::cursor(0, y));;
             let line = Iterator::range(0, board.@width).fold(
                 line, |line, x|
                 line.set(x, board.@data.@(y * board.@width + x))
             );
             print(line.push_back(0_U8)._unsafe_from_c_str)
-        );
-        let _ = *println(Terminal::cursor(0, board.@height) + "Q:Quit HJKL:Move SPACE:Bomb");
-        let _ = *println(Terminal::cursor(0, board.@height + 1) + "Score: " + board.@score.to_string);
-        let _ = *print(Terminal::cursor(board.@px, board.@py));
+        );;
+        println(Terminal::cursor(0, board.@height) + "Q:Quit HJKL:Move SPACE:Bomb");;
+        println(Terminal::cursor(0, board.@height + 1) + "Score: " + board.@score.to_string);;
+        print(Terminal::cursor(board.@px, board.@py));;
         Terminal::flush
     );
 
@@ -145,9 +145,9 @@ namespace Board {
             pure $ board
         };
         let board = board.set_px(px).set_py(py);
-        let _ = *print(Terminal::cursor(px, py));
-        let _ = *Terminal::flush;
-        //let _ = *println("px="+px.to_string+" py="+py.to_string);
+        print(Terminal::cursor(px, py));;
+        Terminal::flush;;
+        //println("px="+px.to_string+" py="+py.to_string);;
         pure $ board
     );
 
@@ -176,8 +176,8 @@ namespace Board {
             let board = board.set_ch(px - 1, y, ' ')
                              .set_ch(px    , y, ' ')
                              .set_ch(px + 1, y, ' ');
-            let _ = *board.show;
-            let _ = *sleep(0.1);
+            board.show;;
+            sleep(0.1);;
             continue_m $ (board, y - 1)
         );
         /*
@@ -185,7 +185,7 @@ namespace Board {
                          .set_random_ch(px,     0)
                          .set_random_ch(px + 1, 0);
         */
-        let _ = *board.show;
+        board.show;;
         pure $ board
     );
 }
@@ -208,7 +208,7 @@ namespace Terminal {
     // `Terminal::flush` is an IO monad of flushing the standard output.
     flush: IO ();
     flush = (
-        let _ = *pure();
+        pure();; // make it lazy
         let res = FFI_CALL[I32 fflush(Ptr), stdout._file_ptr];
         pure()
     );
@@ -217,7 +217,7 @@ namespace Terminal {
     // If EOF is reached, `none()` is returned.
     input_keyboard: IOFail (Option U8);
     input_keyboard = do {
-        let _ = *pure();
+        pure();; // make it lazy
         let ch = *read_n_bytes(stdin, 1);
         if ch.get_size == 0 {
             pure $ none()
@@ -246,21 +246,21 @@ type RawMode = unbox struct {
 namespace RawMode {
     make:  IO RawMode;
     make = (
-        let _ = *pure();
+        pure();; // make it lazy
         let stdin_fileno: I32 =
             FFI_CALL[I32 fileno(Ptr), IO::stdin._file_ptr];
-        let _ = *eprintln("stdin_fileno="+stdin_fileno.to_string);
+        eprintln("stdin_fileno="+stdin_fileno.to_string);;
         let old_ios = Array::fill(120, 0_U8);
         let res = old_ios.borrow_ptr(|p_old_ios|
              FFI_CALL[I32 tcgetattr(I32, Ptr), 0_I32, p_old_ios]
         );
-        eval assert(|_| "tcgetattr failed: res="+res.to_string, res == 0_I32);
+        assert(|_| "tcgetattr failed: res="+res.to_string, res == 0_I32);;
         let ios = Array::fill(120, 0_U8);
         let res = ios.borrow_ptr(|p_ios|
              eval FFI_CALL[() cfmakeraw(Ptr), p_ios];
              FFI_CALL[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_ios]
         );
-        eval assert(|_| eval _perror("tcsetattr"); "tcsetattr failed: res="+res.to_string, res == 0_I32);
+        assert(|_| eval _perror("tcsetattr"); "tcsetattr failed: res="+res.to_string, res == 0_I32);;
 
         let dtor = Destructor::make((), |_|
             // eval debug_eprintln ("destructor is called");
@@ -286,20 +286,20 @@ namespace RawMode {
 
 show_help: IO ();
 show_help = (
-    let _ = *println(Terminal::clear + Terminal::cursor(0,0));
-    let _ = *println(help_message);
-    let _ = *Terminal::input_keyboard.to_result;
-    let _ = *println(Terminal::clear + Terminal::cursor(0,0));
+    println(Terminal::clear + Terminal::cursor(0,0));;
+    println(help_message);;
+    Terminal::input_keyboard.to_result;;
+    println(Terminal::clear + Terminal::cursor(0,0));;
     pure()
 );
 
 main: IO ();
 main = (
     Terminal::with_raw_mode $ do {
-        let _ = *show_help;
+        show_help;;
         let board = Board::make(60,20);
-        let _ = *board.show;
-        let _ = *loop_m(
+        board.show;;
+        loop_m(
             board, |board|
             let ch = *Terminal::input_keyboard;
             if ch.is_none {
@@ -311,9 +311,8 @@ main = (
             };
             let board = *board.handle_key(ch).lift;
             continue_m $ board
-        ).try(eprintln);
-        let _ = *println(Terminal::clear + Terminal::cursor(0,0));
+        ).try(eprintln);;
+        println(Terminal::clear + Terminal::cursor(0,0));;
         pure()
     }
 );
-

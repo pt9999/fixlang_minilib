@@ -25,7 +25,7 @@ dep-graph:
 # Update dependencies all subprojects and examples.
 # Note that the subprojects will be committed and pushed to remote repositories.
 update-deps-publish:
-	set -e; for d in $(SUBPROJECTS); do (
+	set -e; for d in $(SUBPROJECTS); do ( \
 		cd $$d && \
 		git checkout main && \
 		fix deps update && \
@@ -33,7 +33,7 @@ update-deps-publish:
 		git commit -m 'update deps' && \
 		git push) || true \
 	); done
-	#$(MAKE) -C fixlang-minilib-examples update
+	$(MAKE) -C fixlang-minilib-examples update
 
 # The subprojects in dependency order
 SUBPROJECTS = \

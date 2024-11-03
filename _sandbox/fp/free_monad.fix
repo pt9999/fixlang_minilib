@@ -3,7 +3,7 @@ module Main;
 
 import Minilib.Monad.Reader;
 import Minilib.Monad.Identity;
-import Minilib.Text.Hex;
+//import Minilib.Text.Hex;
 
 // Free Monad
 // https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
@@ -46,6 +46,9 @@ type Toy next = box union {
     bell: next,
     done: ()
 };
+
+done_: Toy ();
+done_ = done();
 
 impl Toy: Functor {
     map = |f, toy| (
@@ -92,7 +95,7 @@ foutput = |x| free_f $ output $ (x, pure());
 fbell: Free Toy ();
 fbell = free_f $ bell $ pure();
 
-fdone: Free Toy r;
+fdone: Free Toy ();
 fdone = free_f $ done();
 
 output_: String -> next -> Toy next;
@@ -100,10 +103,11 @@ output_ = |x, next| output $ (x, next);
 
 test_toy_free_f: IO ();
 test_toy_free_f = (
+    println("=== test_toy_free_f ===");;
     let toy = do {
-        eval *output_("A",()).lift_f;
-        eval *bell().lift_f;
-        eval *done().lift_f;
+        output_("A",()).lift_f;;
+        bell().lift_f;;
+        done_.lift_f;;
         pure()
     };
     print(toy.to_string)
@@ -111,15 +115,16 @@ test_toy_free_f = (
 
 test_toy_free_f2: IO ();
 test_toy_free_f2 = (
+    println("=== test_toy_free_f2 ===");;
     let pretty = |x| (
-        eval *println("------------");
-        print << to_string $ x
+        println("------------");;
+        print(x.to_string)
     );
-    eval *pretty(foutput("A"));
-    eval *pretty(pure("A").bind(foutput));
-    eval *pretty(foutput("A").bind(pure));
-    eval *pretty(do { eval *foutput("A"); foutput("B") });
-    eval *pretty(do { eval *foutput("A"); eval *fdone; foutput("B") });
+    pretty(foutput("A"));;
+    pretty(pure("A").bind(foutput));;
+    pretty(foutput("A").bind(pure));;
+    pretty(foutput("A");; foutput("B"));;
+    pretty(foutput("A");; fdone;; foutput("B"));;
     pure()
 );
 
@@ -154,11 +159,12 @@ parse_text3 = |lines| (
 
 test_str_parser: IO ();
 test_str_parser = (
+    println("=== test_str_parser ===");;
     let parser = parse_text1;
     loop_m(
         (parser, 0), |(parser, i)|
         if parser.is_pure_f {
-            eval *println(parser.as_pure_f.to_string);
+            println(parser.as_pure_f.to_string);;
             break_m $ ()
         };
         let parser = parser.as_free_f.run_reader(i.to_string);
@@ -188,8 +194,7 @@ impl Comm: Functor {
         if obj.is_comm_send_bytes { comm_send_bytes $ obj.as_comm_send_bytes.map(|g| g >> f) };
         if obj.is_comm_recv_bytes { comm_recv_bytes $ obj.as_comm_recv_bytes.map(|g| g >> f) };
         if obj.is_comm_gen_bytes { comm_gen_bytes $ obj.as_comm_gen_bytes.map(|g| g >> f) };
-        eval assert(|_| "invalid type", false);
-        undefined()
+        undefined("Comm::map: invalid type")
     );
 }
 
@@ -206,7 +211,7 @@ namespace FreeComm {
         let comm = free.as_free_f;
         if comm.is_comm_send_bytes {
             let (bytes, cont) = comm.as_comm_send_bytes;
-            eval *send_bytes(bytes);
+            send_bytes(bytes);;
             cont().interpret
         };
         if comm.is_comm_recv_bytes {
@@ -219,24 +224,23 @@ namespace FreeComm {
             let bytes = *gen_bytes(length);
             cont(bytes).interpret
         };
-        eval assert(|_| "invalid type", false);
-        undefined()
+        undefined("FreeComm::interpret: invalid type")
     );
 }
 
 impl IO: MonadCommIF {
     send_bytes = |bytes| (
-        eval *println("send_bytes: " + bytes.to_string_hex);
+        println("send_bytes: " + bytes.to_string);;
         pure()
     );
     recv_bytes = |length| (
         let bytes = Array::from_map(length, |i| i.to_U8);
-        eval *println("recv_bytes: " + bytes.to_string_hex);
+        println("recv_bytes: " + bytes.to_string);;
         pure $ bytes
     );
     gen_bytes = |length| (
         let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
-        eval *println("gen_bytes: " + bytes.to_string_hex);
+        println("gen_bytes: " + bytes.to_string);;
         pure $ bytes
     );
 }
@@ -245,14 +249,15 @@ monad_comm_1: [m: MonadComm] m ();
 monad_comm_1 = (
     let size = 20;
     let bytes = *gen_bytes(size);
-    eval *send_bytes(bytes);
+    send_bytes(bytes);;
     let bytes = *recv_bytes(size);
-    eval *send_bytes(bytes);
+    send_bytes(bytes);;
     pure()
 );
 
 test_monad_comm: IO ();
 test_monad_comm = (
+    println("=== test_monad_comm ===");;
     // Record a computation as a free monad
     let ma: Free Comm () = monad_comm_1;
     // Interpret the free monad as an IO monad
@@ -260,6 +265,10 @@ test_monad_comm = (
 );
 
 main: IO ();
-//main = test_toy_free_f2;
-//main = test_str_parser;
-main = test_monad_comm;
+main = (
+    test_toy_free_f;;
+    test_toy_free_f2;;
+    test_str_parser;;
+    test_monad_comm;;
+    pure()
+);

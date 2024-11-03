@@ -10,8 +10,8 @@ Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
 
 Minilib is split into several FixLang subprojects whose names start with `minilib-`.
 
-Each subproject is managed under a standalone GitHub repository whose names start with `fixlang-minilib-`.
-For example, `minilib-common` is managed under [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common) repository.
+Each subproject is stored in a separated GitHub repository whose names start with `fixlang-minilib-`.
+For example, `minilib-common` is stored in [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common) repository.
 
 ### List of subprojects
 
@@ -39,9 +39,9 @@ For example, `minilib-common` is managed under [fixlang-minilib-common](https://
 
 ### Example programs
 
-Minilib's Example programs are managed in another repository.
+Minilib's Example programs are stored in a separated repository.
 
-For details, see [fixlang-minilib-examples](https://github.com/pt9999/fixlang-minilib-examples).
+For details, see README.md in [fixlang-minilib-examples](https://github.com/pt9999/fixlang-minilib-examples).
 
 ### Registy File
 

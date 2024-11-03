@@ -35,7 +35,7 @@ update-deps-publish-subprojects:
 		git checkout main && \
 		fix deps update && \
 		(git add fixdeps.lock && \
-		git commit -m 'update deps' && \
+		(git diff-index --quiet --cached HEAD || git commit -m 'update deps') && \
 		git push) || true \
 	); done
 
@@ -44,7 +44,7 @@ update-deps-publish-examples:
 
 commit-git-submodules:
 	git add $(SUBPROJECTS) $(EXAMPLES)
-	git commit -m 'update submodules'
+	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
 
 # The subprojects in dependency order
 SUBPROJECTS = \

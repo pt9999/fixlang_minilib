@@ -15,7 +15,7 @@ clean:
 
 # Generate documents for all subprojects.
 document:
-	bash _gendoc.sh
+	bash _gendoc.sh $(SUBPROJECTS)
 
 # Generate a dependency graph (using `dot` program from `graphviz` package).
 dep-graph:
@@ -23,7 +23,7 @@ dep-graph:
 	dot -T png -o dependencies.png < _depgraph/tmp.dot
 
 # Update dependencies all subprojects and examples.
-# Note that the subprojects will be committed and pushed to remote repositories.
+# Note that the subprojects and examples will be committed and pushed to remote repositories.
 update-deps-publish:
 	set -e; for d in $(SUBPROJECTS); do ( \
 		cd $$d && \
@@ -33,7 +33,7 @@ update-deps-publish:
 		git commit -m 'update deps' && \
 		git push) || true \
 	); done
-	$(MAKE) -C fixlang-minilib-examples update
+	$(MAKE) -C fixlang-minilib-examples update-deps-publish
 
 # The subprojects in dependency order
 SUBPROJECTS = \

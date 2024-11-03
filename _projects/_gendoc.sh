@@ -18,6 +18,6 @@ function gendoc () {
     )
 }
 
-for dir in fixlang-minilib-*; do
+for dir in "$@"; do
     gendoc $dir
 done

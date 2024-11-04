@@ -46,6 +46,9 @@ commit-git-submodules:
 	git add $(SUBPROJECTS) $(EXAMPLES)
 	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
 
+publish: update-deps-publish test examples
+	git push origin
+
 # The subprojects in dependency order
 SUBPROJECTS = \
 	fixlang-minilib-common \

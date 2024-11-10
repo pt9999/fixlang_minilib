@@ -101,12 +101,12 @@ This will clone the Git submodules from their respective GitHub repositories and
 
 To run test codes for all subprojects, navigate to the `_projects` directory and execute the following command:
 ```bash
-make test
+make test -C _projects
 ```
 
 ### Build example programs
 
 To build example programs, navigate to the `_projects` directory and execute the following command:
 ```bash
-make examples
+make examples -C _projects
 ```

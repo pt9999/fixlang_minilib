@@ -1,7 +1,7 @@
 module Minilib.Net.Curl;
 
 import AsyncTask;
-import Debug;
+import Minilib.Common.Assert;
 import Minilib.Text.StringEx;
 
 type Curl = box struct {
@@ -12,31 +12,39 @@ make: IOFail Curl;
 make = (
     eval *pure();
     eval debug_eprintln("curl_glue_init");
-    let glue = FFI_CALL[Ptr curl_glue_init()];
+    let glue = *FFI_CALL_IO[Ptr curl_glue_init()].lift;
     let curl = Curl {
         dtor: Destructor::make(glue, |glue|
             eval debug_eprintln("curl_glue_cleanup");
-            FFI_CALL[() curl_glue_cleanup(Ptr), glue]
+            if glue == nullptr { pure $ nullptr };
+            eval *FFI_CALL_IO[() curl_glue_cleanup(Ptr), glue];
+            pure $ nullptr
         )
     };
     pure $ curl
 );
 
-_check_error: CInt -> Ptr -> IOFail ();
-_check_error = |code, glue| (
+_check_error: IO CInt -> Ptr -> IOFail ();
+_check_error = |io_code, glue| (
+    let code = *io_code.lift;
     if code != 0.to_CInt {
-        let errmsg = FFI_CALL[Ptr curl_glue_get_error_message(Ptr), glue];
+        let errmsg = *FFI_CALL_IO[Ptr curl_glue_get_error_message(Ptr), glue].lift;
         throw $ "curl: " + String::_unsafe_from_c_str_ptr(errmsg)
     };
     pure()
 );
 
+_borrow_glue_iofail: (Ptr -> IOFail a) -> Curl -> IOFail a;
+_borrow_glue_iofail = |f, curl| (
+    curl.@dtor.borrow_io(|glue| f(glue).to_result).from_io_result
+);
+
 set_url: String -> Curl -> IOFail ();
 set_url = |url, curl| (
     eval *pure();
-    url.borrow_c_str(|p_url|
-        curl.@dtor.borrow(|glue|
-            glue._check_error(FFI_CALL[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url])
+    curl._borrow_glue_iofail(|glue|
+        url.borrow_c_str(|p_url|
+            glue._check_error(FFI_CALL_IO[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url])
         )
     )
 );
@@ -44,52 +52,53 @@ set_url = |url, curl| (
 perform: Curl -> IOFail ();
 perform = |curl| (
     eval *pure();
-    curl.@dtor.borrow(|glue|
-        glue._check_error(FFI_CALL[CInt curl_glue_perform(Ptr), glue])
+    curl._borrow_glue_iofail(|glue|
+        glue._check_error(FFI_CALL_IO[CInt curl_glue_perform(Ptr), glue])
     )
 );
 
-set_boxed_value: I64 -> Boxed a -> Curl -> IOFail ();
+set_boxed_value: I64 -> Box a -> Curl -> IOFail ();
 set_boxed_value = |index, boxed, curl| (
     eval *pure();
-    curl.@dtor.borrow(|glue|
-        let retained_ptr = FFI::unsafe_get_retained_ptr_of_boxed_value(boxed);
-        let retain = FFI::unsafe_get_retain_function_of_boxed_value(|_| boxed);
-        let release = FFI::unsafe_get_release_function_of_boxed_value(|_| boxed);
-        pure $ FFI_CALL[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release]
+    curl._borrow_glue_iofail(|glue|
+        let retained_ptr = FFI::boxed_to_retained_ptr(boxed);
+        let retain = FFI::get_funptr_retain(|_| boxed);
+        let release = FFI::get_funptr_release(|_| boxed);
+        FFI_CALL_IO[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release].lift
     )
 );
 
-get_boxed_value: I64 -> Curl -> IOFail (Boxed a);
+get_boxed_value: I64 -> Curl -> IOFail (Box a);
 get_boxed_value = |index, curl| (
     eval *pure();
-    curl.@dtor.borrow(|glue|
+    curl._borrow_glue_iofail(|glue|
         pure $ _get_boxed_value(index, glue)
     )
 );
 
-_get_boxed_value: I64 -> Ptr -> Boxed a;
+_get_boxed_value: I64 -> Ptr -> Box a;
 _get_boxed_value = |index, glue| (
     let retained_ptr = FFI_CALL[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
-    FFI::unsafe_get_boxed_value_from_retained_ptr(retained_ptr)
+    FFI::boxed_from_retained_ptr(retained_ptr)
 );
 
+// NOTE: This function is called from libcurl as a callback, so we can't use an IO monad as its return value.
 _callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> CSizeT;
 _callback_write_function = |ptr, size, nmemb, userdata| (
     let glue = userdata;
     //eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
-    eval assert(|_| "invalid size", size == 1.to_CSizeT);
-    eval assert(|_| "invalid nmemb", nmemb >= 0.to_CSizeT);
+    assert_lazy(|_| "invalid size", size == 1.to_CSizeT) $ |_|
+    assert_lazy(|_| "invalid nmemb", nmemb >= 0.to_CSizeT) $ |_|
 
     let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
     eval bytes.borrow_ptr(|p_bytes|
         FFI_CALL[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
     );
 
-    let boxed: Boxed (Destructor WriteFunc) = glue._get_boxed_value(0);
+    let boxed: Box (Destructor WriteFunc) = glue._get_boxed_value(0);
     boxed.@value.borrow(|write_func|
         let iof: IOFail I64 = write_func(bytes);
-        let res: Result ErrMsg I64 = iof.to_result._unsafe_perform;
+        let res: Result ErrMsg I64 = iof.to_result.unsafe_perform;
         if res.is_err {
             eval debug_eprintln("write_func failed! err=" + res.as_err);
             0.to_CSizeT
@@ -104,14 +113,15 @@ type WriteFunc = Array U8 -> IOFail I64;
 set_write_callback: WriteFunc -> Curl -> IOFail ();
 set_write_callback = |func, curl| (
     eval *pure();
-    let boxed: Boxed (Destructor WriteFunc) = Boxed {
+    let boxed: Box (Destructor WriteFunc) = Box {
         value: Destructor::make(func, |func|
-            debug_eprintln("write_func destructor is called")
+            eval debug_eprintln("write_func destructor is called");
+            pure $ func
         )
     };
     let boxed = mark_threaded(boxed);
     eval *curl.set_boxed_value(0, boxed);
-    curl.@dtor.borrow(|glue|
-        glue._check_error(FFI_CALL[CInt curl_glue_set_write_callback(Ptr), glue])
+    curl._borrow_glue_iofail(|glue|
+        glue._check_error(FFI_CALL_IO[CInt curl_glue_set_write_callback(Ptr), glue])
     )
 );

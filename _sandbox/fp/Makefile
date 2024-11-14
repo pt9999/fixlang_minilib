@@ -1,21 +1,12 @@
-TOPDIR = ../..
-FIXAUTOLINK = $(TOPDIR)/bin/fixautolink
-FIXAUTOTEST = $(TOPDIR)/bin/fixautotest
-LIBS = -I $(TOPDIR)/lib -I .
+all:
 
-OPT = separated
-OPT_BUILD = --opt-level $(OPT)
-OPT_RUN = --opt-level $(OPT)
-
-%.out: %.fix
-	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< $(OPT_BUILD)
-
-%.run: %.fix
-	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN)
-
-all::
-
-clean::
-	rm -f *.out
-	rm -f .depend
-	fix clean
+test:
+	fix run -f applicative.fix
+	fix run -f denotation.fix
+	fix run -f free_monad.fix
+	fix run -f lens.fix
+	fix run -f monad1.fix
+	#fix run -f monoid_ex.fix monoid_test1.fix
+	fix run -f option_t.fix
+	fix run -f reader_writer_test.fix
+	fix run -f state_monad_test2.fix

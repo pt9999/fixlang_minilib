@@ -1,26 +1,16 @@
-TOPDIR = ../..
-FIXAUTOLINK = $(TOPDIR)/bin/fixautolink
-FIXAUTOTEST = $(TOPDIR)/bin/fixautotest
-LIBS = -I $(TOPDIR)/lib -I .
+all:
 
-OPT = separated
-OPT_BUILD = --opt-level $(OPT)
-OPT_RUN = --opt-level $(OPT)
+test:
+	fix run -f algebra_test1.fix
+	fix run -f bigfloat_test1.fix
+	#fix run -f bigint_test1.fix		# requires BigIntPrime
+	fix run -f imp_prop.fix
+	fix run -f lnum.fix
+	fix run -f ndarray_test.fix ndarray.fix ndarray_random.fix
 
-%.out: %.fix
-	$(FIXAUTOLINK) build -o $@ $(LIBS) -f $< $(OPT_BUILD)
+examples:
+	fix build -f ndarray_calc.fix ndarray.fix ndarray_random.fix -o ndarray_calc.out -d readline
 
-%.run: %.fix
-	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN)
-
-all::
-
-clean::
-	rm -f *.out
-	rm -f .depend
+clean:
 	fix clean
-
-ndarray_calc.run: ndarray_calc.fix
-	$(FIXAUTOLINK) run $(LIBS) -f $< $(OPT_RUN) -d readline
-
-
+	rm -f *.out

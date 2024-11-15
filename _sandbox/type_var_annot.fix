@@ -1,0 +1,47 @@
+// Tests for type annotations which use type variables
+module Main;
+
+type Reader e a = unbox struct {
+    data: e -> a
+};
+
+make_reader: (e -> a) -> Reader e a;
+make_reader = |f| Reader { data: f };
+
+run_reader: e -> Reader e a -> a;
+run_reader = |e, reader| (reader.@data)(e);
+
+// Test for identity reader
+test_reader: e -> e;
+test_reader = (
+    // 型アノテーションで問題なく型変数を使用できる
+    let reader: Reader e e = make_reader(|env| env);
+    |env| reader.run_reader(env)
+);
+
+
+type [m: *->*] ReaderT e m a = unbox struct {
+    data: e -> m a
+};
+
+make_reader_t: [m: Monad] (e -> m a) -> ReaderT e m a;
+make_reader_t = |f| ReaderT { data: f };
+
+run_reader_t: [m: Monad] e -> ReaderT e m a -> m a;
+run_reader_t = |e, reader| (reader.@data)(e);
+
+// Test for identity reader_t
+test_reader_t: [m: Monad] e -> m e;
+test_reader_t = (
+    // 下記の型アノテーションのコメントを外すとエラーになる
+    let reader/*: ReaderT e m e*/ = make_reader_t(|env| pure(env));
+    |env| reader.run_reader_t(env)
+);
+
+main: IO ();
+main = (
+    let str = test_reader("abc");
+    println("test_reader: " + str);;
+    let str = *test_reader_t("abc");
+    println("test_reader_t: " + str)
+);

@@ -18,6 +18,10 @@ function gendoc () {
     )
 }
 
-for dir in "$@"; do
-    gendoc $dir
-done
+if [ $# = 0 ]; then
+    gendoc .
+else
+    for dir in "$@"; do
+        gendoc $dir
+    done
+fi

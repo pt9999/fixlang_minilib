@@ -31,12 +31,17 @@ update-deps-publish: \
 
 update-deps-publish-subprojects:
 	set -e; for d in $(SUBPROJECTS); do ( \
-		cd $$d && \
-		git checkout main && \
-		fix deps update && \
-		(git add fixdeps.lock && \
-		(git diff-index --quiet --cached HEAD || git commit -m 'update deps') && \
-		git push) || true \
+		echo "=== $$d ===" \
+		&& cd $$d \
+		&& git checkout main \
+		&& fix clean \
+		&& fix deps update \
+		&& git add fixdeps.lock \
+		&& if ! git diff-index --quiet --cached HEAD; then \
+			git commit -m 'update deps' \
+			&& python3 ../_verup.py --commit \
+		; fi \
+		&& git push \
 	); done
 
 update-deps-publish-examples:

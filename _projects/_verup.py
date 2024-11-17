@@ -25,12 +25,11 @@ def commit_file(filepath: str, message: str):
 @contextmanager
 def update_file(filepath: str):
     if not os.access(filepath, os.R_OK):
-        print("WARNING: file not found: " + filepath)
-        return
+        raise Exception("update_file: file not found: " + filepath)
     with open(filepath, "r") as input:
         with open(filepath + ".new", "w") as output:
             yield (input, output)
-    os.rename(filepath, filepath + ".bak")
+    # os.rename(filepath, filepath + ".bak")
     os.rename(filepath + ".new", filepath)
     print("Updated " + filepath)
 
@@ -60,7 +59,7 @@ def update_project_file(args, project_dir):
 def parse_args():
     parser = argparse.ArgumentParser(
                     prog='verup')
-    parser.add_argument('projects', nargs='*', help='target projects to change', default=['fixlang-minilib-common'])
+    parser.add_argument('projects', nargs='*', help='target projects to change', default=['.'])
     parser.add_argument('--commit', action='store_true', help='commit', default=False)
     args = parser.parse_args()
     return args

@@ -1,6 +1,6 @@
 module Main;
 
-import Math;
+//import Math;
 
 type Timeval = unbox struct {
     arr: Array U64
@@ -9,13 +9,23 @@ type Timeval = unbox struct {
 namespace Timeval {
     from_seconds: F64 -> Timeval;
     from_seconds = |seconds| (
-        let sec: U64 = Math::floor(seconds).to_U64;
-        let usec: U64 = ((seconds - Math::floor(seconds)) * 1.0e6).to_U64;
+        //let sec: U64 = Math::floor(seconds).to_U64;
+        //let usec: U64 = ((seconds - Math::floor(seconds)) * 1.0e6).to_U64;
+        let sec: U64 = seconds.to_U64;
+        let usec: U64 = ((seconds - sec.to_F64) * 1.0e6).to_U64;
         Timeval { arr: [sec, usec] }
     );
 
-    force_unique: Timeval -> Timeval;
-    force_unique = mod_arr(force_unique);
+    mutate_arr_io: (Ptr -> IO b) -> Timeval -> IO (Timeval, b);
+    mutate_arr_io = |f, timeval| (
+        // TODO: use type Wrapper b a = IO (a, b) and act_arr
+        let Timeval {
+            arr: arr
+        } = timeval;
+        let (arr, b) = *arr.mutate_boxed_io(f);
+        let timeval = Timeval { arr: arr };
+        pure $ (timeval, b)
+    );
 }
 
 impl Timeval: Zero {
@@ -40,8 +50,17 @@ namespace FDSet {
         }
     );
 
-    force_unique: FDSet -> FDSet;
-    force_unique = mod_arr(force_unique);
+    mutate_arr_io: (Ptr -> IO b) -> FDSet -> IO (FDSet, b);
+    mutate_arr_io = |f, fdset| (
+        // TODO: use type Wrapper b a = IO (a, b) and act_arr
+        let FDSet {
+            arr: arr,
+            nfds: nfds
+        } = fdset;
+        let (arr, b) = *arr.mutate_boxed_io(f);
+        let fdset = FDSet { arr: arr, nfds: nfds };
+        pure $ (fdset, b)
+    );
 
     _idx: I64 -> I64;
     _idx = |fd| fd / 32;
@@ -78,17 +97,15 @@ namespace FDSet {
 select: (FDSet, FDSet, FDSet, Timeval) -> IOFail (FDSet, FDSet, FDSet, Timeval);
 select = |(readfds, writefds, exceptfds, timeout)| (
     eval *pure();
-    let readfds = readfds.force_unique;
-    let writefds = writefds.force_unique;
-    let exceptfds = exceptfds.force_unique;
-    let timeout = timeout.force_unique;
     let nfds = max(readfds.@nfds, max(writefds.@nfds, exceptfds.@nfds));
-    let ret = readfds.@arr.borrow_boxed(|readfds|
-        writefds.@arr.borrow_boxed(|writefds|
-        exceptfds.@arr.borrow_boxed(|exceptfds|
-        timeout.@arr.borrow_boxed(|timeout|
-        FFI_CALL[I32 select(I32,Ptr,Ptr,Ptr,Ptr), nfds.to_I32, readfds, writefds, exceptfds, timeout]
-    ))));
+    let (readfds, (writefds, (exceptfds, (timeout, ret)))) = 
+        *readfds.mutate_arr_io(|p_readfds_arr|
+        writefds.mutate_arr_io(|p_writefds_arr|
+        exceptfds.mutate_arr_io(|p_exceptfds_arr|
+        timeout.mutate_arr_io(|p_timeout_arr|
+        FFI_CALL_IO[I32 select(I32, Ptr, Ptr, Ptr, Ptr), 
+            nfds.to_I32, p_readfds_arr, p_writefds_arr, p_exceptfds_arr, p_timeout_arr]
+    )))).lift;
     if ret == -1_I32 {
         throw $ "select failed"
     };
@@ -100,12 +117,17 @@ main = do {
     let readfds = FDSet::make(5);
     let writefds = FDSet::make(5);
     let exceptfds = FDSet::make(5);
-    let readfds = readfds.set_bit(0);
-    let timeout = Timeval::from_seconds(5.0);
-    eval *println("start").lift;
-    eval *println((readfds.@arr, timeout.@arr).to_string).lift;
+    let readfds = readfds.set_bit(0);  // stdin
+    //let writefds = writefds.set_bit(1);  // stdout
+    //let writefds = writefds.set_bit(2);  // stderr
+    let sec = 5;
+    let timeout = Timeval::from_seconds(sec.to_F64);
+    let print_log = println >> lift;
+    print_log("Please type enter key in any moment during " + sec.to_string + " seconds");;
+    print_log("--- start ---");;
+    print_log((readfds.@arr, timeout.@arr).to_string);;
     let (readfds, writefds, exceptfds, timeout) =  *select((readfds, writefds, exceptfds, timeout));
-    eval *println("end").lift;
-    eval *println((readfds.@arr, timeout.@arr).to_string).lift;
-    println(readfds.is_set(0).to_string).lift
+    print_log("--- end --- ");;
+    print_log((readfds.@arr, timeout.@arr).to_string);;
+    print_log(readfds.is_set(0).to_string)
 }.try(eprintln);

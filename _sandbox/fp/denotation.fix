@@ -12,7 +12,7 @@ type Expr = box union {
 };
 
 tinc: Expr;
-tinc = eapp((einc(), eapp((einc(), eint(2)))));
+tinc = eapp $ (einc(), eapp $ (einc(), eint(2)));
 
 type Dom = unbox union {
     derror: (),
@@ -24,29 +24,28 @@ type Dom = unbox union {
 eeval: Expr -> Dom;
 eeval = |ex| (
     //eval debug_eprintln("eeval");
-    if ex.is_eint {
-        dint $ ex.as_eint
-    } else if ex.is_einc {
-        dfun $ |x| (
-            if ! x.is_dint { derror() };
-            dint $ x.as_dint + 1
+    match ex {
+        eint(value) => dint(value),
+        einc(()) => dfun(|x| match x {
+            dint(value) => dint(value + 1),
+            _ => derror()
+        }),
+        eapp((e1, e2)) => (
+            match eeval(e1) {
+                dfun(f) => f(eeval(e2)),
+                _ => derror()
+            }
         )
-    } else {
-        let (e1, e2) = ex.as_eapp;
-        let e1 = eeval(e1);
-        if ! e1.is_dfun { derror() };
-        let f = e1.as_dfun;
-        let e2 = eeval(e2);
-        f(e2)
     }
 );
 
 test_unstable: IO ();
 test_unstable = (
     eval *println("--- test_unstable ---");
-    let dom = eeval(tinc);
-    if dom.is_dint { println("tinc=" + dom.as_dint.to_string) };
-    println("tinc=other")
+    match eeval(tinc) {
+        dint(value) => println("tinc=" + value.to_string),
+        _ => println("tinc=other"),
+    }
 );
 
 //-------------------------------------
@@ -72,12 +71,10 @@ type Comp = unbox union {
 
 impl Comp: ToString {
     to_string = |obj| (
-        if obj.is_done { "done(" + obj.as_done.to_string + ")" };
-        if obj.is_req {
-            let (reqt, f) = obj.as_req;
-            "req((" + reqt.to_string + ", ...))"
-        };
-        "invalid_comp"
+        match obj {
+            done(value) => "done(" + value.to_string + ")",
+            req((reqt, f)) => "req((" + reqt.to_string + ", ...))",
+        }
     );
 }
 
@@ -89,10 +86,11 @@ type DomC = unbox union {
 
 impl DomC: ToString {
     to_string = |obj| (
-        if obj.is_dcint { "dcint(" + obj.as_dcint.to_string + ")" };
-        if obj.is_dcbool { "dcbool(" + obj.as_dcbool.to_string + ")" };
-        if obj.is_dcfun { "dcfun(...)" };
-        "invalid_domc"
+        match obj {
+            dcint(value) => "dcint(" + value.to_string + ")",
+            dcbool(value) => "dcbool(" + value.to_string + ")",
+            dcfun(f) => "dcfun(...)",
+        }
     );
 }
 
@@ -102,8 +100,9 @@ type ReqT = unbox union {
 
 impl ReqT: ToString {
     to_string = |obj| (
-        if obj.is_reqerror { "reqerror()" };
-        "invalid_reqt"
+        match obj {
+            reqerror(err) => "reqerror()",
+        }
     );
 }
 
@@ -113,23 +112,22 @@ cerr = req $ (reqerror(), |_| cerr);
 impl Comp: EBasic {
     int = done << dcint;
     inc = done << dcfun $ |x| (
-        if ! x.is_dcint { cerr };
-        int(x.as_dcint + 1)
+        match x {
+            dcint(value) => int(value + 1),
+            _ => cerr
+        }
     );
     app = |e1, e2| (
-        if e1.is_req {
-            let (r, k) = e1.as_req;
-            req $ (r, |x| app(k(x), e2))
-        };
-        if e2.is_req {
-            let (r, k) = e2.as_req;
-            req $ (r, |x| app(e1, k(x)))
-        };
-        let d1 = e1.as_done;
-        let d2 = e2.as_done;
-        if ! d1.is_dcfun { cerr };
-        let f = d1.as_dcfun;
-        f(d2)
+        match e1 {
+            req((r, k)) => req $ (r, |x| app(k(x), e2)),
+            done(d1) => match e2 {
+                req((r, k)) => req $ (r, |x| app(e1, k(x))),
+                done(d2) => match d1 {
+                    dcfun(f) => f(d2),
+                    _ => cerr
+                }
+            }
+        }
     );
 }
 
@@ -138,14 +136,14 @@ ttinc = int(2).app(inc).app(inc);
 
 test_stable: IO ();
 test_stable = (
-    eval *println("--- test_stable ---");
+    println("--- test_stable ---");;
     println("ttinc=" + (ttinc: Comp).to_string)
 );
 
 main: IO ();
 main = (
-    eval *test_unstable;
-    eval *test_stable;
+    test_unstable;;
+    test_stable;;
     pure()
 );
 

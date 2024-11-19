@@ -4,7 +4,7 @@ all:
 
 test:
 	set -e && for f in $$(find tests/crypto -name "*_test.fix" | sort); do \
-		echo "=== $$f ===" && time fix run -f $$f; \
+		echo "=== $$f ===" && fix run -f $$f; \
 	done
 
 examples: examples/sample_https_client.out

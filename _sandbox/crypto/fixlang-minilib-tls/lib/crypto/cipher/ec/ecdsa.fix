@@ -14,6 +14,7 @@ module Minilib.Crypto.Cipher.Ec.ECDSA;
 
 import Character;
 
+import Minilib.Common.Assert;
 import Minilib.Monad.Random;
 import Minilib.Crypto.SHA256;
 import Minilib.Crypto.SHA512;
@@ -83,7 +84,7 @@ namespace ECInt {
             generate_ECInt_range(end, begin)      // swap range and retry
         };
         let n = end - begin;
-        eval assert(|_| "invalid range", n > zero);
+        assert_lazy(|_| "invalid range", n > zero) $ |_|
         let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
         let bytes = *generate_random_bytes(num_bits / 8);
         let r = from_bytes(bytes).as_ok;
@@ -283,7 +284,7 @@ impl ECPoint: Add {
         if p2.is_zero { p1 };
         let (x1, y1) = p1.@xy.as_some;
         let (x2, y2) = p2.@xy.as_some;
-        eval assert(|_| "ec mismatch", p1.@ec == p2.@ec);
+        assert_lazy(|_| "ec mismatch", p1.@ec == p2.@ec) $ |_|
         let ec = p1.@ec.as_some;
         if x1 == x2 {
             // 3. (x, y) + (x, -y) = O
@@ -291,7 +292,7 @@ impl ECPoint: Add {
                 zero
             };
             // 5. Rule to add a point to itself (double a point)
-            eval assert(|_| "invalid y", y1 == y2);
+            assert_lazy(|_| "invalid y", y1 == y2) $ |_|
             let dividend = ECField::from_I64(3) * x1 * x1 + ECField::from_ECInt(ec.@a);
             let divisor = ECField::from_I64(2) * y1;
             let lambda = dividend / divisor;
@@ -422,7 +423,7 @@ namespace ECKeyPair {
         let d = *generate_ECInt_range(
             one, n
         );
-        eval assert(|_| "d is out of range", one <= d && d <= n - one);
+        assert_lazy(|_| "d is out of range", one <= d && d <= n - one) $ |_|
         let g = ec.get_g;
         let q = g.mul_by_ECInt(d);
         let q = q.nonneg;
@@ -549,7 +550,7 @@ namespace ECDSAScheme {
         let k = *generate_ECInt_range(
             one, n
         );
-        eval assert(|_| "k is out of range", one <= k && k <= n - one);
+        assert_lazy(|_| "k is out of range", one <= k && k <= n - one) $ |_|
 
         // sign with generated k
         let res = scheme._sign_with_k(key_pair, message, k);
@@ -610,7 +611,7 @@ namespace ECDSAScheme {
         // ...does nothing
         // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
         let ceil_log2_n = ec.@n.@nat._bit_length.to_I64;
-        eval assert(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0);
+        assert_lazy(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0) $ |_|
         let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
         else { _H.get_sub(0, ceil_log2_n / 8) };
         // 5.3. Convert the bit string E to an octet string E using the conversion routine specified in Section 2.3.1.

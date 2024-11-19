@@ -4,7 +4,7 @@
 // https://datatracker.ietf.org/doc/html/rfc8017
 module Minilib.Crypto.Cipher.Rsa.Pkcs1;
 
-
+import Minilib.Common.Assert;
 import Minilib.Crypto.SHA1;
 import Minilib.Crypto.SHA256;
 import Minilib.Crypto.SHA512;
@@ -136,8 +136,8 @@ rsassa_pss_verify = |(n, e), _M, _S, options| (
     let modBits = n.bit_length.to_I64;
     let emLen = ((modBits - 1) + 7) / 8;
     let _EM = *i2osp(m, emLen);
-    eval assert(|_| "unexpected: (emLen, k, modBits)=" + (emLen, k, modBits).to_string,
-            if (modBits - 1) % 8 == 0 { emLen == k - 1 } else { emLen == k });
+    assert_lazy(|_| "unexpected: (emLen, k, modBits)=" + (emLen, k, modBits).to_string,
+            if (modBits - 1) % 8 == 0 { emLen == k - 1 } else { emLen == k }) $ |_|
     // 3.  EMSA-PSS verification: Apply the EMSA-PSS verification operation (Section 9.1.2)
     //     to the message M and the encoded message EM to determine whether they are consistent:
     emsa_pss_verify(_M, _EM, modBits - 1, options)
@@ -251,7 +251,7 @@ emsa_pss_encode = |_M, emBits, salt, options| (
     let maskedDB = Array::from_map(_DB.get_size, |i| _DB.@(i).bit_xor(dbMask.@(i)));
     // 11.  Set the leftmost 8emLen - emBits bits of the leftmost octet in maskedDB to zero.
     let k = 8 * emLen - emBits;
-    eval assert(|_| "k out of range", 0 <= k && k < 8);
+    assert_lazy(|_| "k out of range", 0 <= k && k < 8) $ |_|
     let kmask = 0xFF_U8.shift_left((8-k).to_U8);
     let maskedDB = maskedDB.mod(0, bit_and(kmask.bit_xor(0xFF_U8)));
     // 12.  Let EM = maskedDB || H || 0xbc.
@@ -300,13 +300,13 @@ emsa_pss_verify = |_M, _EM, emBits, options| (
     let maskedDB = _EM.subarray(0, emLen - hLen - 1);
     let _H = _EM.subarray(emLen - hLen - 1, emLen - 1);
     let k = 8 * emLen - emBits;
-    eval assert(|_| "k out of range", 0 <= k && k < 8);
+    assert_lazy(|_| "k out of range", 0 <= k && k < 8) $ |_|
     let kmask = 0xFF_U8.shift_left((8-k).to_U8);
     if _EM.@(0).bit_and(kmask) != 0_U8 {
         err $ inconsistent_error + "the masked first byte is not zero: @(0)=" + _EM.@(0).to_string_hex + " k=" + k.to_string
     };
     let dbMask = *mgf(_H, emLen - hLen - 1, hash, hLen);
-    eval assert(|_| "maskedDB and dbMask size unmatch", maskedDB.get_size == dbMask.get_size);
+    assert_lazy(|_| "maskedDB and dbMask size unmatch", maskedDB.get_size == dbMask.get_size) $ |_|
     let _DB = Array::from_map(maskedDB.get_size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
     let _DB = _DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
 

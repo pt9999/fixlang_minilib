@@ -14,7 +14,6 @@ fixlang-minilib-math
 fixlang-minilib-media
 fixlang-minilib-monad
 fixlang-minilib-net
-fixlang-minilib-regexp
 fixlang-minilib-text
 fixlang-minilib-thread
 fixlang-minilib-xml

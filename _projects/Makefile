@@ -65,7 +65,6 @@ SUBPROJECTS = \
 	fixlang-minilib-crypto \
 	fixlang-minilib-io \
 	fixlang-minilib-math \
-	fixlang-minilib-regexp \
 	fixlang-minilib-thread \
 	fixlang-minilib-app \
 	fixlang-minilib-media \

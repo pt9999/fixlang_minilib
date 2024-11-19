@@ -20,22 +20,20 @@ namespace Free {
 
 impl [f: Functor] Free f: Functor {
     map = |g, ma| (
-        if ma.is_pure_f {
-            pure_f $ g(ma.as_pure_f)
-        };
-        let m = ma.as_free_f;
-        free_f $ m.map(map(g))
+        match ma {
+            pure_f(value) => pure_f(g(value)),
+            free_f(fma) => free_f(fma.map(map(g))),
+        }
     );
 }
 
 impl [f: Functor] Free f: Monad {
     pure = pure_f;
     bind = |g, ma| (
-        if ma.is_pure_f {
-            g(ma.as_pure_f)
-        };
-        let m = ma.as_free_f;
-        free_f $ m.map(bind(g))
+        match ma {
+            pure_f(value) => g(value),
+            free_f(fma) => free_f(fma.map(bind(g))),
+        }
     );
 }
 
@@ -52,14 +50,11 @@ done_ = done();
 
 impl Toy: Functor {
     map = |f, toy| (
-        if toy.is_output {
-            let (x, next) = toy.as_output;
-            output $ (x, f(next))
-        };
-        if toy.is_bell {
-            bell $ f(toy.as_bell)
-        };
-        done()
+        match toy {
+            output((x, next)) => output((x, f(next))),
+            bell(next) => bell(f(next)),
+            done(_) => done(),
+        }
     );
 }
 
@@ -72,20 +67,14 @@ test_toy_1 = (
 
 impl [a: ToString] Free Toy a: ToString {
     to_string = |ma| (
-        if ma.is_free_f {
-            let toy = ma.as_free_f;
-            if toy.is_output {
-                let (x, next) = toy.as_output;
-                "output " + x + "\n" + next.to_string
-            };
-            if toy.is_bell {
-                let next = toy.as_bell;
-                "bell\n" + next.to_string
-            };
-            "done\n"
-        };
-        let r = ma.as_pure_f;
-        "pure " + r.to_string + "\n"
+        match ma {
+            free_f(toy) => match toy {
+                output((x, next)) => "output " + x + "\n" + next.to_string,
+                bell(next) => "bell\n" + next.to_string,
+                done(()) => "done\n",
+            },
+            pure_f(value) => "pure " + value.to_string + "\n",
+        }
     );
 }
 
@@ -163,12 +152,16 @@ test_str_parser = (
     let parser = parse_text1;
     loop_m(
         (parser, 0), |(parser, i)|
-        if parser.is_pure_f {
-            println(parser.as_pure_f.to_string);;
-            break_m $ ()
-        };
-        let parser = parser.as_free_f.run_reader(i.to_string);
-        continue_m $ (parser, i + 1)
+        match parser {
+            pure_f(value) => (
+                println(value.to_string);; 
+                break_m $ ()
+            ),
+            free_f(reader) => (
+                let parser = reader.run_reader(i.to_string);
+                continue_m $ (parser, i + 1)
+            ),
+        }
     )
 );
 
@@ -191,10 +184,11 @@ type Comm next = box union {
 
 impl Comm: Functor {
     map = |f, obj| (
-        if obj.is_comm_send_bytes { comm_send_bytes $ obj.as_comm_send_bytes.map(|g| g >> f) };
-        if obj.is_comm_recv_bytes { comm_recv_bytes $ obj.as_comm_recv_bytes.map(|g| g >> f) };
-        if obj.is_comm_gen_bytes { comm_gen_bytes $ obj.as_comm_gen_bytes.map(|g| g >> f) };
-        undefined("Comm::map: invalid type")
+        match obj {
+            comm_send_bytes(tuple2) => comm_send_bytes $ tuple2.map(|g| g >> f),
+            comm_recv_bytes(tuple2) => comm_recv_bytes $ tuple2.map(|g| g >> f),
+            comm_gen_bytes(tuple2) => comm_gen_bytes $ tuple2.map(|g| g >> f),
+        }
     );
 }
 
@@ -207,24 +201,14 @@ impl Free Comm: MonadCommIF {
 namespace FreeComm {
     interpret: [m: MonadComm] Free Comm a -> m a;
     interpret = |free| (
-        if free.is_pure_f { pure $ free.as_pure_f };
-        let comm = free.as_free_f;
-        if comm.is_comm_send_bytes {
-            let (bytes, cont) = comm.as_comm_send_bytes;
-            send_bytes(bytes);;
-            cont().interpret
-        };
-        if comm.is_comm_recv_bytes {
-            let (length, cont) = comm.as_comm_recv_bytes;
-            let bytes = *recv_bytes(length);
-            cont(bytes).interpret
-        };
-        if comm.is_comm_gen_bytes {
-            let (length, cont) = comm.as_comm_gen_bytes;
-            let bytes = *gen_bytes(length);
-            cont(bytes).interpret
-        };
-        undefined("FreeComm::interpret: invalid type")
+        match free {
+            pure_f(value) => pure(value),
+            free_f(comm) => match comm {
+                comm_send_bytes((bytes, cont)) => cont(*send_bytes(bytes)).interpret,
+                comm_recv_bytes((length, cont)) => cont(*recv_bytes(length)).interpret,
+                comm_gen_bytes((length, cont)) => cont(*gen_bytes(length)).interpret,
+            }
+        }
     );
 }
 

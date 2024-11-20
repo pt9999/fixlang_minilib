@@ -1,6 +1,6 @@
 module Main;
 
-import HashSet;
+//import HashSet;
 
 import Minilib.Encoding.Binary;
 import Minilib.Crypto.AES;
@@ -16,6 +16,10 @@ import Minilib.Testing.UnitTest;
 // https://csrc.nist.gov/groups/STM/cavp/documents/mac/gcmtestvectors.zip
 // The Galois/Counter Mode (GCM) and GMAC Validation System (GCMVS)
 // https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/gcmvs.pdf
+
+// The AES-GCM test vectors file (downloaded from the above URL)
+_TestVectorFile: Path;
+_TestVectorFile = Path::parse(".local/gcmEncryptExtIV128.rsp").as_some;
 
 type TestVector = unbox struct {
     key_len: I64,
@@ -183,17 +187,19 @@ namespace TestVectorParser {
         )
     );
 
-    write_test_cases: TestVectorParser -> IOFail ();
-    write_test_cases = |tvp| (
-        let ids: HashSet String = [
-            "128,96,256,128,120,0",
-            "128,96,408,0,112,0",
-            "128,8,0,0,128,0",
-            "128,1024,408,720,128,0"
-        ].to_iter.from_iter;
+    _selected_test_ids: Array String;
+    _selected_test_ids = [
+        "128,96,256,128,120,0",
+        "128,96,408,0,112,0",
+        "128,8,0,0,128,0",
+        "128,1024,408,720,128,0"
+    ];
+
+    write_selected_test_cases: Array String -> TestVectorParser -> IOFail ();
+    write_selected_test_cases = |selected_test_ids, tvp| (
         tvp.@tvs.to_iter.fold_m(
             (), |_, tv|
-            if !ids.contains(tv.get_id) { pure () };
+            if selected_test_ids.find_by(eq(tv.get_id)).is_none { pure () };
             let str = tv.get_test_data;
             //let tv2 = *TestVector::from_test_data(str).from_result;
             //println(tv2.to_string).lift
@@ -201,14 +207,19 @@ namespace TestVectorParser {
             println("\""+str+"\",").lift
         )
     );
+
+    run_all_test_cases: TestVectorParser -> IOFail ();
+    run_all_test_cases = |tvp| (
+        let tests = tvp.@tvs.map(test);
+        tests.run_test_driver.lift
+    );
 }
 
 main: IO ();
 main = do {
     let tvp = TestVectorParser::empty;
-    let tvp = *tvp.parse_file(Path::parse(".local/gcmEncryptExtIV128.rsp").as_some);
-    let _ = *tvp.write_test_cases;
-    if true { pure() };
-    let tests = tvp.@tvs.map(test);
-    tests.run_test_driver.lift
+    let tvp = *tvp.parse_file(_TestVectorFile);
+    //tvp.write_selected_test_cases(_selected_test_ids);;
+    tvp.run_all_test_cases;;
+    pure()
 }.try(eprintln);

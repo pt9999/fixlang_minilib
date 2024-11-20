@@ -1,0 +1,84 @@
+module Main;
+
+import Random;
+import AsyncTask;
+
+import Minilib.Crypto.SecureRandom;
+import Minilib.Monad.Random2;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+gen_bytes_tuple: [m: MonadRandom] m (Array U8, Array U8);
+gen_bytes_tuple = (
+    let a = *generate_random_bytes(4);
+    let b = *generate_random_bytes(4);
+    pure $ (a, b)
+);
+
+test_random: TestCase;
+test_random = (
+    make_test("test_random") $ |_|
+    let random = Random::init_by_seed(123_U64);
+    let (random, ret) = random.Rng::generate_bytes(4);
+    println(ret.to_string).lift
+);
+
+test_var_random: TestCase;
+test_var_random = (
+    make_test("test_var_random") $ |_|
+    let random = Random::init_by_seed(123_U64);
+    let var_random = *Var::make(random).lift;
+    let ret = *var_random.Rng::generate_bytes(4);
+    println(ret.to_string).lift
+);
+
+test_secure_random: TestCase;
+test_secure_random = (
+    make_test("test_secure_random") $ |_|
+    let secure_random = *SecureRandom::make;
+    let (secure_random, ret) = *secure_random.Rng::generate_bytes(4);
+    println(ret.to_string).lift
+);
+
+test_var_secure_random: TestCase;
+test_var_secure_random = (
+    make_test("test_var_secure_random") $ |_|
+    let secure_random = *SecureRandom::make;
+    let var_secure_random = *Var::make(secure_random).lift;
+    let ret = *var_secure_random.Rng::generate_bytes(4);
+    println(ret.to_string).lift
+);
+
+test_free_random: TestCase;
+test_free_random = (
+    make_test("test_free_random") $ |_|
+    let var_random = *Var::make(Random::init_by_seed(123_U64)).lift;
+    let free: FreeRandom (Array U8, Array U8) = gen_bytes_tuple;
+    let ret = *free.interpret.eval_state_t(var_random);
+    println(ret.to_string).lift
+);
+
+test_free_secure_random: TestCase;
+test_free_secure_random = (
+    make_test("test_free_secure_random") $ |_|
+    let secure_random = *SecureRandom::make;
+    let var_secure_random = *Var::make(secure_random).lift;
+    let free: FreeRandom (Array U8, Array U8) = gen_bytes_tuple;
+    let ret = *free.interpret.eval_state_t(var_secure_random);
+    println(ret.to_string).lift
+);
+
+main: IO ();
+main = (
+    [
+        test_random,
+        test_secure_random,
+        test_var_random,
+        test_var_secure_random,
+        test_free_random,
+        test_free_secure_random,
+    ]
+    .run_test_driver
+);

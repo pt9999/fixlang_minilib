@@ -1,0 +1,125 @@
+// Random Number Generator Monad
+module Minilib.Monad.Random2;
+
+import AsyncTask;
+import Random;
+
+import Minilib.Crypto.SecureRandom;
+import Minilib.Common.RandomEx;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+
+trait MonadRandom = Functor + Monad + MonadRandomIF;
+
+trait [m: * -> *] m: MonadRandomIF {
+    generate_random_bytes: I64 -> m (Array U8);
+}
+
+trait a: Rng {
+    type ResultType a r;
+    generate_bytes: I64 -> a -> Rng::ResultType a (Array U8);
+}
+
+impl Random: Rng {
+    type ResultType Random r = (Random, r);
+    generate_bytes = |size, random| (
+        random.generate_array(size, generate_U8)
+    );
+}
+
+impl SecureRandom: Rng {
+    type ResultType SecureRandom r = IOFail (SecureRandom, r);
+    generate_bytes = |size, secure_random| (
+        secure_random.SecureRandom::generate_bytes(size)
+    );
+}
+
+impl Var Random: Rng {
+    type ResultType (Var Random) r = IOFail r;
+    generate_bytes = |size, var_random| (
+        var_random.lock(|random|
+            let (random, bytes) = random.generate_array(size, generate_U8);
+            eval *var_random.Var::set(random);
+            pure $ bytes
+        ).lift
+    );
+}
+
+impl Var SecureRandom: Rng {
+    type ResultType (Var SecureRandom) r = IOFail r;
+    generate_bytes = |size, var_secure_random| (
+        let res = *var_secure_random.lock(|secure_random|
+            let res = *secure_random.SecureRandom::generate_bytes(size).to_result;
+            if res.is_err { pure $ err $ res.as_err };
+            let (secure_random, bytes) = res.as_ok;
+            eval *var_secure_random.Var::set(secure_random);
+            pure $ ok $ bytes
+        ).lift;
+        res.from_result
+    );
+}
+
+trait a: GetVarRng {
+    type RngType a;
+    get_var_rng: a -> RngType a;
+}
+
+impl Var Random: GetVarRng {
+    type RngType (Var Random) = Var Random;
+    get_var_rng = |var| var;
+}
+
+impl Var SecureRandom: GetVarRng {
+    type RngType (Var SecureRandom) = Var SecureRandom;
+    get_var_rng = |var| var;
+}
+
+impl [s: GetVarRng, 
+    rg: Rng, RngType s = rg, 
+    m: Monad,
+    Rng::ResultType rg (Array U8) = m (Array U8)]
+    StateT s m: MonadRandomIF {
+    generate_random_bytes = |size| (
+        let var_rng = *get_state.map(get_var_rng);
+        var_rng.generate_bytes(size).lift_t
+    );
+}
+
+//--------------------
+//  Free Random Monad
+//--------------------
+type FreeRandom a = box union {
+    fr_free: (I64, Array U8 -> FreeRandom a),
+    fr_pure: a
+};
+
+impl FreeRandom: Monad {
+    pure = fr_pure;
+    bind = |f, ma| (
+        if ma.is_fr_pure { f(ma.as_fr_pure) };
+        let (size, next) = ma.as_fr_free;
+        let next2 = |bytes| next(bytes).bind(f);
+        fr_free $ (size, next2)
+    );
+}
+
+impl FreeRandom: Functor {
+    map = |f| bind(f >> pure);
+}
+
+impl FreeRandom: MonadRandomIF {
+    generate_random_bytes = |size| (
+        fr_free $ (size, fr_pure)
+    );
+}
+
+namespace FreeRandom {
+    interpret: [m: MonadRandom] FreeRandom a -> m a;
+    interpret = |eff| (
+        if eff.is_fr_pure { pure $ eff.as_fr_pure };
+        let (size, next) = eff.as_fr_free;
+        let bytes = *generate_random_bytes(size);
+        let eff = next(bytes);
+        eff.interpret
+    );
+}

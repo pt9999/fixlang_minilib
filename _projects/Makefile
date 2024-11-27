@@ -1,58 +1,4 @@
-all:
-
-# Test all subprojects (except examples).
-test:
-	set -e; for d in $(SUBPROJECTS); do (cd $$d && fix clean && fix test); done
-
-# Build all examples.
-examples:
-	$(MAKE) -C fixlang-minilib-examples clean all
-
-# Clean all subprojects and examples.
-clean:
-	for d in $(SUBPROJECTS); do (cd $$d && if [ -f fixproj.toml ]; then fix clean; fi); done
-	$(MAKE) -C fixlang-minilib-examples clean
-
-# Generate documents for all subprojects.
-document:
-	bash _gendoc.sh $(SUBPROJECTS)
-
-# Generate a dependency graph (using `dot` program from `graphviz` package).
-dep-graph:
-	cd _depgraph && fix run
-	dot -T png -o dependencies.png < _depgraph/tmp.dot
-
-# Update dependencies all subprojects and examples.
-# Note that the subprojects and examples will be committed and pushed to remote repositories.
-update-deps-publish: \
-	update-deps-publish-subprojects \
-	update-deps-publish-examples \
-	commit-git-submodules
-
-update-deps-publish-subprojects:
-	set -e; for d in $(SUBPROJECTS); do ( \
-		echo "=== $$d ===" \
-		&& cd $$d \
-		&& git checkout main \
-		&& fix clean \
-		&& fix deps update \
-		&& git add fixdeps.lock \
-		&& if ! git diff-index --quiet --cached HEAD; then \
-			git commit -m 'update deps' \
-			&& python3 ../_verup.py --commit \
-		; fi \
-		&& git push \
-	); done
-
-update-deps-publish-examples:
-	$(MAKE) -C $(EXAMPLES) update-deps-publish
-
-commit-git-submodules:
-	git add $(SUBPROJECTS) $(EXAMPLES)
-	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
-
-publish: update-deps-publish test examples
-	git push origin
+# Makefile for projects directory
 
 # The subprojects in dependency order
 SUBPROJECTS = \
@@ -74,3 +20,56 @@ SUBPROJECTS = \
 
 EXAMPLES = \
 	fixlang-minilib-examples
+
+SUBPROJECT_MAKEFILE = $$(pwd)/subproject.make
+
+.PHONY: all test examples clean publish
+.SUFFIXES: .test .clean .publish
+
+all:
+
+# Test all subprojects (except examples).
+test: $(SUBPROJECTS:%=%.test)
+
+# Build all examples.
+examples:
+	$(MAKE) -C fixlang-minilib-examples clean all
+
+# Clean all subprojects and examples.
+clean: $(SUBPROJECTS:%=%.clean)
+	$(MAKE) -C fixlang-minilib-examples clean
+
+# Generate documents for all subprojects.
+document:
+	bash _gendoc.sh $(SUBPROJECTS)
+
+# Generate a dependency graph (using `dot` program from `graphviz` package).
+dep-graph:
+	cd _depgraph && fix run
+	dot -T png -o dependencies.png < _depgraph/tmp.dot
+
+publish: \
+	publish-subprojects \
+	publish-examples \
+	push-submodules
+
+# Publish all subprojects. (Update deps, Test, Commit & Push)
+publish-subprojects: $(SUBPROJECTS:%=%.publish)
+
+# Publish all examples. (Update deps, Build, Commit & Push)
+publish-examples:
+	$(MAKE) -C $(EXAMPLES) publish
+
+push-submodules:
+	git add $(SUBPROJECTS) $(EXAMPLES)
+	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
+	git push origin
+
+%.test:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean test
+
+%.clean:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean
+
+%.publish:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) publish

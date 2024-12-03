@@ -3,7 +3,7 @@
 all:
 
 test:
-	set -e && for f in $$(find tests/crypto -name "*_test.fix" | sort); do \
+	set -e && for f in $$(find tests -name "*_test.fix" | sort); do \
 		echo "=== $$f ===" && fix run -f $$f; \
 	done
 

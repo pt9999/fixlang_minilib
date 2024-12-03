@@ -1,6 +1,6 @@
 # Makefile for subprojects
 
-.PHONY: all build test clean update-deps
+.PHONY: all build test clean document update-deps
 
 all: build
 
@@ -13,6 +13,9 @@ test:
 clean:
 	fix clean
 	rm -rf *.out
+
+document:
+	bash ../_gendoc.sh .
 
 update-deps:
 	fix deps update

@@ -18,10 +18,21 @@ def increment_patch_version(version: str) -> str:
     patch = str(int(patch) + 1)
     return f"{major}.{minor}.{patch}"
 
-def commit_file(filepath: str, message: str):
-    subprocess.run(["git", "add", "--verbose", filepath], check=True)
-    subprocess.run(["git", "commit", "--verbose", "-m", message], check=True)
+def run_subprocess(cmd_args):
+    print("+ " + " ".join(cmd_args))
+    subprocess.run(cmd_args, check=True)
 
+def commit_file(args, filepath: str, version: str):
+    run_subprocess(["git", "add", "--verbose", filepath])
+    message = 'version ' + version
+    run_subprocess(["git", "commit", "--verbose", "-m", message])
+    if args.tag:
+        run_subprocess(["git", "tag", version])
+    if args.push:
+        run_subprocess(["git", "push"])
+    if args.push and args.tag:
+        run_subprocess(["git", "push", "origin", version])
+    
 @contextmanager
 def update_file(filepath: str):
     if not os.access(filepath, os.R_OK):
@@ -54,13 +65,15 @@ def update_project_file(args, project_dir):
             break
         output.write("".join(output_lines))
     if args.commit and version != '':
-        commit_file(fixproj_path, 'version ' + version)
+        commit_file(args, fixproj_path, version)
 
 def parse_args():
     parser = argparse.ArgumentParser(
                     prog='verup')
     parser.add_argument('projects', nargs='*', help='target projects to change', default=['.'])
     parser.add_argument('--commit', action='store_true', help='commit', default=False)
+    parser.add_argument('--tag', action='store_true', help='add tag', default=False)
+    parser.add_argument('--push', action='store_true', help='push to the remote repository', default=False)
     args = parser.parse_args()
     return args
 

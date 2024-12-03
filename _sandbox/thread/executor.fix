@@ -1,0 +1,70 @@
+module Main;
+
+import AsyncTask;
+
+import Minilib.Monad.FunctorM;
+import Minilib.Thread.TaskPool;
+import Minilib.Thread.Future;
+import Minilib.Common.TimeEx;
+import Minilib.Testing.UnitTest;
+
+trait ex: Executor {
+    // `executor.execute(request)` enqueues the request to the queue, then returns an response action to receive the result.
+    // The request is processed in background.
+    // When the response action is performed, it waits for the request being processed.
+    // If the request is processed, the response action returns the result.
+    // If the request is processed, the response action reports an error.
+    execute: IOFail a -> ex -> IOFail (IOFail a);
+    // Cancel all pending requests.
+    cancel_all: ex -> IOFail ();
+}
+
+execute_all: [ex: Executor] Array (IOFail a) -> ex -> IOFail (Array a);
+execute_all = |requests, ex| (
+    let responses = *requests.map_m(
+        |req| ex.execute(req)
+    );
+    responses.map_m(|res| res)
+);
+
+impl TaskPool: Executor {
+    execute = |iof, pool| (
+        let future = *Future::make(pool, iof.to_result);
+        pure $ future.get.map(from_result).flatten
+    );
+    cancel_all = |pool| pool.cancel_all_pendings_futures.lift;
+}
+
+test_taskpool_execute: TestCase;
+test_taskpool_execute = (
+    make_test("test_taskpool_execute") $ |_|
+    let pool = *TaskPool::make(5).lift;
+    let response = *pool.execute(do {
+        usleep(1000_U32);;
+        pure(1)
+    });
+    assert_equal("response", 1, *response);;
+    pool.shutdown.lift.forget
+);
+
+test_taskpool_execute_all: TestCase;
+test_taskpool_execute_all = (
+    make_test("test_taskpool_execute_all") $ |_|
+    let pool = *TaskPool::make(5).lift;
+    let requests = Array::from_map(10, |i| 
+        usleep(1000_U32);;
+        pure(i)
+    );
+    let responses = *pool.execute_all(requests);
+    assert_equal("responses", Array::from_map(10, |i| i), responses);;
+    pool.shutdown.lift.forget
+);
+
+main: IO ();
+main = (
+    [
+        test_taskpool_execute,
+        test_taskpool_execute_all,
+    ]
+    .run_test_driver
+);

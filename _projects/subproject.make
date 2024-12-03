@@ -20,7 +20,7 @@ update-deps:
 # Publish a subproject.
 # - Update dependencies
 # - Run test
-# - Commit dependencies
+# - Commit `fixdeps.lock`
 # - Push to the remote repository
 publish:
 	git checkout main
@@ -30,7 +30,13 @@ publish:
 	git add fixdeps.lock
 	if ! git diff-index --quiet --cached HEAD; then \
 		git commit -m 'update deps' \
-		&& python3 ../_verup.py --commit \
 	; fi
 	git push
 
+# Version up.
+# - Increment the patch version of `[general]version` in `fixproj.toml`
+# - Commit `fixproj.toml` to the local git repository
+# - Add tag to the local git repository
+# - Push to the remote git repository
+verup:
+	python3 ../_verup.py --commit --tag --push

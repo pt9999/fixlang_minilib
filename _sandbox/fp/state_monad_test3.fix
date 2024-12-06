@@ -1,77 +1,120 @@
 module Main;
 
 import Minilib.Monad.State;
-import Minilib.Monad.Writer;
 import Minilib.Monad.IO;
 import Minilib.Monad.Error;
 import Minilib.Monad.FunctorM;
 
-type NameList = unbox struct {
-    names: Array String,
-    ids: Array I64,
+trait [cat: * -> (* -> *)] cat: CategoryIF {
+    // identity
+    id: cat a a;
+    // composition
+    comp: cat a b -> cat b c -> cat a c;
+}
+trait Category = CategoryIF;
+
+type [f: * -> *] Act f a b = unbox struct {
+    data: (a -> f a) -> (b -> f b)
 };
 
-type NameService = unbox struct {
-    name_list: NameList,
+impl [f: * -> *] Act f: CategoryIF {
+    id = Act {data: |x| x };
+    comp = |g, h| Act {data: g.@data >> h.@data };
+}
+
+
+/*
+trait a: LensTo b {
+    lens_to: [f: Functor] (b -> f b) -> (a -> f a);
+}
+*/
+
+type User = unbox struct {
+    name: String,
+    age: I64,
 };
+
+impl User: ToString {
+    to_string = |user| "User { name=" + user.@name + " age=" + user.@age.to_string + " }";
+}
+
+type UserService = unbox struct {
+    users: Array User,
+};
+
+impl UserService: ToString {
+    to_string = |svc| "UserService { users=[\n" + svc.@users.to_iter.map(to_string).join(",\n") + "\n] }";
+}
+
+namespace UserService {
+    empty: UserService;
+    empty = UserService {
+        users: []
+    };
+
+    add_user: [m: Monad] String -> I64 -> StateT UserService m ();
+    add_user = |name, age| (
+        let user = User { name: name, age: age };
+        mod_state(mod_users(push_back(user)))
+    );    
+}
+
 
 type Logger = unbox struct {
     messages: Array String
 };
+impl Logger: ToString {
+    to_string = |logger| "Logger { messages=[\n" + logger.@messages.to_iter.map(to_string).join(",\n") + "\n] }";
+}
+
+namespace Logger {
+    empty: Logger;
+    empty = Logger {
+        messages: []
+    };
+
+    log_message: [m: Monad] String -> StateT Logger m ();
+    log_message = |message| (
+        mod_state(mod_messages(push_back(message)))
+    );
+}
 
 type App = unbox struct {
-    name_svc: NameService,
+    user_service: UserService,
     logger: Logger,
 };
 
-
-// Looks similar to WriterT, but this is a functor against `s`, ie. the left part of Tuple2.
-type [m: * -> *] StateResultT a m s = unbox struct {
-    data: m (s, a)
-};
-
-namespace StateResultT {
-    make: [m: * -> *] m (s, a) -> StateResultT a m s;
-    make = |data| StateResultT { data: data };
+impl App: ToString {
+    to_string = |app| (
+        "App {"
+        + "\n user_service=" + app.@user_service.to_string
+        + "\n logger=" + app.@logger.to_string
+        + "\n}"
+    );
 }
 
-impl [m: Monad] StateResultT a m: Functor {
-    map = |f, ms| StateResultT {
-        data: do {
-            let (s, a) = *ms.@data;
-            pure $ (f(s), a)
-        }
+namespace App {
+    empty: App;
+    empty = App {
+        user_service: UserService::empty,
+        logger: Logger::empty,
+    };
+
+    run_task: [m: MonadIO] StateT App m ();
+    run_task = do {
+        lens_state_t(act_user_service, add_user("taro", 12));;
+        lens_state_t(act_logger, log_message("hello"));;
+        lens_state_t(act_user_service, add_user("jiro", 10));;
+        lens_state_t(act_logger, log_message("world"));;
+        println((*get_state).to_string).lift_io;;
+        pure()
     };
 }
-
-//with_act: [m: Monad] ([f: Functor] (s -> f s) -> (t -> f t)) -> StateT s m a -> StateT t m a;
-with_act: [m: Monad] ((s -> StateResultT a m s) -> (t -> StateResultT a m t)) -> StateT s m a -> StateT t m a;
-with_act = |act, sma| (
-    let f: s -> m (s, a) = sma.@data;
-    let f: s -> StateResultT a m s = f >> StateResultT::make;
-    let f: t -> StateResultT a m t = act(f);
-    let f: t -> m (t, a) = f >> StateResultT::@data;
-    make_state_t_monad(f)
-);
-
-
-add_name: [m: Monad] String -> StateT (Array String) m I64;
-add_name = |name| (
-    mod_state(push_back(name));;
-    pure(42)
-);
-
-add_name2: [m: Monad] String -> StateT NameList m I64;
-add_name2 = |name| add_name(name).with_act(act_names);
 
 main: IO ();
 main = (
-    let name_list = NameList {
-        names: [],
-        ids: []
-    };
-    let (name_list, ret) = add_name2("user").run_state(name_list);
-    println((name_list.@names, ret).to_string);;
+    let app = App::empty;
+    let app = *run_task.exec_state_t(app);
     pure()
 );
 

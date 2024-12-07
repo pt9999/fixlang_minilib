@@ -7,6 +7,7 @@ SUBPROJECTS = \
 	fixlang-minilib-text \
 	fixlang-minilib-monad \
 	fixlang-minilib-comonad \
+	fixlang-minilib-random \
 	fixlang-minilib-collection \
 	fixlang-minilib-crypto \
 	fixlang-minilib-io \

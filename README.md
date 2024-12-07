@@ -24,6 +24,7 @@ For example, `minilib-common` is stored in [fixlang-minilib-common](https://gith
 |[minilib-collection](https://github.com/pt9999/fixlang-minilib-collection)| Collections  (Red-Black tree, Double-ended queue etc.)|
 |[minilib-monad](https://github.com/pt9999/fixlang-minilib-monad)| Monads (State/Reader/Writer monad, Monad transformer etc.)|
 |[minilib-comonad](https://github.com/pt9999/fixlang-minilib-comonad)| Comonads (Env/Traced comonad etc.)|
+|[minilib-random](https://github.com/pt9999/fixlang-minilib-random)| Random monad etc. |
 |[minilib-thread](https://github.com/pt9999/fixlang-minilib-thread)| Multithreading (Task pool etc.) |
 |[minilib-net](https://github.com/pt9999/fixlang-minilib-net)| Networks (TCP/IP, HTTP etc.) |
 |[minilib-math](https://github.com/pt9999/fixlang-minilib-math)| Math (Complex number, BigInt, BigFloat, Algebra etc.)|

@@ -7,11 +7,9 @@ test:
 		echo "=== $$f ===" && fix run -f $$f; \
 	done
 
-examples: examples/sample_https_client.out
+examples:
+	fix build -f examples/sample_https_client.fix -o examples/sample_https_client.out
 
 clean:
 	fix clean
 	rm -f examples/*.out
-
-%.out: %.fix
-	fix build -f $< -o $@

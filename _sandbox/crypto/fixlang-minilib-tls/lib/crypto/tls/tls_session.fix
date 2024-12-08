@@ -36,17 +36,36 @@ type TLSSession = unbox struct {
     handshake_state: HandshakeState,
 };
 
-impl TLSSession: GetRandomSource {
-    type RandomGeneratorType TLSSession = SecureRandom;
-    get_random_generator = @var_secure_random;
-}
-
 impl TLSSession: GetByteIO {
     type BytesIOType TLSSession = TLSSocket;
     get_bytes_io = TLSSession::@socket;
 }
 
 type StateTLSSession = StateT TLSSession IOFail;
+
+namespace StateTLSSession {
+    lift_random: StateT SecureRandom IOFail a -> StateTLSSession a;
+    lift_random = |sma| (
+        make_state_t_monad $ |session|
+        let a = *session.@var_secure_random._act_var(|secure_random|
+            sma.run_state_t(secure_random)
+        );
+        pure $ (session, a)
+    );
+
+    namespace Var {
+        _act_var: (a -> IOFail (a, b)) -> Var a -> IOFail b;
+        _act_var = |f, var| (
+            var.lock(|a|
+                let res = *f(a).to_result;
+                if res.is_err { pure $ err $ res.as_err };
+                let (a, b) = res.as_ok;
+                eval *var.Var::set(a);
+                pure $ ok $ b
+            ).from_io_result
+        );
+    }
+}
 
 namespace TLSSession {
     // Creates a TLSSession object.
@@ -144,7 +163,12 @@ namespace TLSSession {
         eval *pure();
         let session = *get_state;
         let init_param = session.@init_param;
-        eval *HandshakeState::start_handshake(init_param).lift_hstate;
+        do {
+            let hstate = *get_hstate;
+            let hstate = *HandshakeState::start_handshake(init_param, hstate).lift_random;
+            set_hstate(hstate)
+        };;
+        //eval *HandshakeState::start_handshake(init_param).lift_hstate;
         eval *HandshakeState::send_records.lift_hstate;
         pure()
     );

@@ -1,0 +1,27 @@
+module Main;
+
+import AsyncTask;
+
+namespace Var {
+    act_var: (a -> IOFail (a, b)) -> Var a -> IOFail b;
+    act_var = |f, var| (
+        var.lock(|a|
+            let res = *f(a).to_result;
+            if res.is_err { pure $ err $ res.as_err };
+            let (a, b) = res.as_ok;
+            eval *var.Var::set(a);
+            pure $ ok $ b
+        ).from_io_result
+    );
+}
+
+main: IO ();
+main = do {
+    let state = 1;
+    let var = *Var::make(1).lift;
+    let x = *var.act_var(|state| pure $ (state + 1, state + 2));
+    println(x.to_string).lift;;
+    let state = *var.get.lift;
+    println(state.to_string).lift;;
+    pure()
+}.try(eprintln);

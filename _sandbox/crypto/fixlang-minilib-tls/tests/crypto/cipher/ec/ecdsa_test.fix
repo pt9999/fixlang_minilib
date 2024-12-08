@@ -5,8 +5,8 @@ import Random;
 import HashMap;
 
 import Minilib.Crypto.Cipher.Ec.ECDSA;
-//import Minilib.Crypto.SecureRandom;
 import Minilib.Math.BigInt;
+import Minilib.Monad.Random;
 import Minilib.Monad.State;
 import Minilib.Monad.Trans;
 import Minilib.Text.Hex;
@@ -41,8 +41,7 @@ test_generate_keypair = (
     let ec = secp256r1;
     let _ = *log("ec="+ec.to_string);
     let random = Random::init_by_seed(123_U64);
-    let var_random = *Var::make(random).lift;
-    let key_pair = *generate_keypair(ec).eval_state_t(var_random);
+    let key_pair = *generate_keypair(ec).eval_state_t(random);
     let _ = *log("key_pair=" + key_pair.to_string);
 
     let _ = *log("validating public key q");
@@ -77,7 +76,8 @@ test_generate_keypair = (
 test_sign: TestCase;
 test_sign = (
     make_test("test_sign") $ |_|
-    let sm: StateT (Var Random) IOFail () = do {
+    let random = Random::init_by_seed(123_U64);
+    do {
         //let log = println >> lift >> lift_t;
         let log = |s| pure();
         let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
@@ -99,10 +99,7 @@ test_sign = (
         eval *scheme.verify(key_pair.@q, signature, message).from_result.lift_t;
         eval *log("ok");
         pure()
-    };
-    let random = Random::init_by_seed(123_U64);
-    let var_random = *Var::make(random).lift;
-    sm.eval_state_t(var_random)
+    }.eval_state_t(random)
 );
 
 // These test vectors were obtained using the steps below:

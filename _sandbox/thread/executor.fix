@@ -27,6 +27,25 @@ execute_all = |requests, ex| (
     responses.map_m(|res| res)
 );
 
+execute_until_success: [ex: Executor] Array (IOFail a) -> ex -> IOFail a;
+execute_until_success = |requests, ex| (
+    let responses = *requests.map_m(
+        |req| ex.execute(req)
+    );
+    loop_m(
+        0, |i|
+        if i >= responses.get_size {
+            throw $ "failed"
+        };
+        let res = *responses.@(i).to_result.lift;
+        if res.is_ok {
+            ex.cancel_all;;   
+            break_m $ res.as_ok
+        };
+        continue_m $ i + 1
+    )
+);
+
 impl TaskPool: Executor {
     execute = |iof, pool| (
         let future = *Future::make(pool, iof.to_result);
@@ -60,11 +79,40 @@ test_taskpool_execute_all = (
     pool.shutdown.lift.forget
 );
 
+test_taskpool_execute_until_success: TestCase;
+test_taskpool_execute_until_success = (
+    make_test("test_taskpool_execute_until_success") $ |_|
+    let pool = *TaskPool::make(5).lift;
+    let requests: Array (IOFail I64) = Array::from_map(10, |i| 
+        usleep(1000_U32);;
+        if i < 7 { throw $ "err" };
+        pure(i)
+    );
+    let res/*: Result ErrMsg I64*/ = *pool.execute_until_success(requests).to_result.lift;
+    assert_equal("res", ok(7), res);;
+    pool.shutdown.lift.forget
+);
+
+test_taskpool_execute_until_success2: TestCase;
+test_taskpool_execute_until_success2 = (
+    make_test("test_taskpool_execute_until_success2") $ |_|
+    let pool = *TaskPool::make(5).lift;
+    let requests: Array (IOFail I64) = Array::from_map(10, |i| 
+        usleep(1000_U32);;
+        throw $ "err" // NOTE: return type is indeterminate
+    );
+    let res/*: Result ErrMsg I64*/ = *pool.execute_until_success(requests).to_result.lift;
+    assert_equal("res", err("failed"), res);;
+    pool.shutdown.lift.forget
+);
+
 main: IO ();
 main = (
     [
         test_taskpool_execute,
         test_taskpool_execute_all,
+        test_taskpool_execute_until_success,
+        test_taskpool_execute_until_success2,
     ]
     .run_test_driver
 );

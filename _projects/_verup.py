@@ -111,15 +111,21 @@ class ProjectFile(object):
 # Upgrading the project version
 # ---------------------------------------------------
 
+def ask_new_version(new_version: str) -> str:
+    answer = input(f"Input new version (default: {new_version}): ")
+    if answer != "":
+        new_version = answer
+    return new_version
 
-def confirm_upgrade(old_version, new_version):
+def confirm_upgrade(old_version: str, new_version: str) -> None:
     print(f"Going to upgrade the project version")
     print(f"  Old version: {old_version}")
     print(f"  New version: {new_version}")
     answer = input(f"Do you want to actually upgrade the project version? (yes/no): ")
     if answer != "yes":
+        print(f"Confirmation canceled")
+        sys.exit(1)
         raise Exception(f"Confirmation canceled")
-
 
 def upgrade_project_version(args, project_dir):
     project_file_path = f"{project_dir}/fixproj.toml"
@@ -129,6 +135,7 @@ def upgrade_project_version(args, project_dir):
         new_version = increment_version(old_version)
     else:
         new_version = args.version
+    new_version = ask_new_version(new_version)
     confirm_upgrade(old_version, new_version)
     project_file.set_project_version(new_version)
     project_file.save()

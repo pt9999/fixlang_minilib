@@ -1,6 +1,8 @@
 module Main;
 
 import Minilib.Monad.IteratorT;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
 
 test_empty: TestCase;
@@ -21,6 +23,73 @@ test_push_front = (
     assert_true("empty", *xs2.is_empty)
 );
 
+test_push_m_front: TestCase;
+test_push_m_front = (
+    make_test("test_push_m_front") $ |_|
+    let inc: StateT I64 IOFail I64 = make_state_t_monad $ |i| pure $ (i + 1, i);
+    let xs: IteratorT (StateT I64 IOFail) I64 = (
+        IteratorT::empty
+        .push_m_front(inc)
+        .push_m_front(inc)
+        .push_m_front(inc)
+    );
+    do {
+        put_state(100);;
+        let arr = *xs.to_array_m;
+        assert_equal("arr", [100, 101, 102], arr).lift_iofail;;
+        assert_equal("state", 103, *get_state).lift_iofail;;
+        pure()
+    }.eval_state_t(0)
+);
+
+test_from_m_iter: TestCase;
+test_from_m_iter = (
+    make_test("test_from_m_iter") $ |_|
+    let inc: StateT I64 IOFail I64 = make_state_t_monad $ |i| pure $ (i + 1, i);
+    let xs: Iterator (StateT I64 IOFail I64) = (
+        Iterator::empty
+        .push_front(inc)
+        .push_front(inc)
+        .push_front(inc)
+    );
+    let xs: IteratorT (StateT I64 IOFail) I64 = IteratorT::from_m_iter $ xs;
+    do {
+        put_state(0);;
+        let arr = *xs.to_array_m;
+        assert_equal("arr", [0, 1, 2], arr).lift_iofail;;
+        assert_equal("state", 3, *get_state).lift_iofail;;
+        put_state(100);;
+        let arr = *xs.to_array_m;
+        assert_equal("arr", [100, 101, 102], arr).lift_iofail;;
+        assert_equal("state", 103, *get_state).lift_iofail;;
+        pure()
+    }.eval_state_t(0)
+);
+
+test_from_iter: TestCase;
+test_from_iter = (
+    make_test("test_from_iter") $ |_|
+    let xs: IteratorT IOFail I64 = IteratorT::from_iter(Iterator::empty.push_front(1).push_front(2));
+    let arr = *xs.to_array_m;
+    assert_equal("arr", [2, 1], arr)
+);
+
+test_from_array: TestCase;
+test_from_array = (
+    make_test("test_from_array") $ |_|
+    let xs: IteratorT IOFail I64 = IteratorT::from_array([1, 2, 3]);
+    let arr = *xs.to_array_m;
+    assert_equal("arr", [1, 2, 3], arr)
+);
+
+test_to_array_m: TestCase;
+test_to_array_m = (
+    make_test("test_to_array_m") $ |_|
+    let xs: IteratorT IOFail I64 = IteratorT::empty.push_front(1).push_front(2).push_front(3);
+    let arr = *xs.to_array_m;
+    assert_equal("arr", [3, 2, 1], arr)
+);
+
 // TODO: add tests
 
 main: IO ();
@@ -28,6 +97,11 @@ main = (
     [
         test_empty,
         test_push_front,
+        test_push_m_front,
+        test_from_m_iter,
+        test_from_iter,
+        test_from_array,
+        test_to_array_m,
     ]
     .run_test_driver
 );

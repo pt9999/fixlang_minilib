@@ -1,0 +1,98 @@
+module Minilib.Monad.IteratorT;
+
+// https://hackage.haskell.org/package/list-transformer-1.1.1
+
+import Minilib.Monad.Trans;
+
+type [m: * -> *] IteratorT m a = box struct {
+    next: m (Option (a, IteratorT m a))
+};
+
+impl [m: Functor] IteratorT m: Functor {
+    map = |f, xs| (
+        IteratorT::make $ xs.@next.map(
+            |opt| opt.map(
+                |(a, ys)| (f(a), ys.map(f))
+            )
+        )
+    );
+}
+
+impl [m: Monad] IteratorT m: Monad {
+    pure = |x| IteratorT::make $ pure $ cons(x, IteratorT::empty);
+    bind = |f, xs| (
+        IteratorT::make $ do {
+            match *xs.advance {
+                none() => pure $ none(),
+                some((x, ys)) => f(x).append(ys.bind(f)).advance
+            }
+        }
+    );
+}
+
+namespace IteratorT {
+    make: [m: Monad] m (Option (a, IteratorT m a)) -> IteratorT m a;
+    make = |next| IteratorT { next: next };
+
+    empty: [m: Monad] IteratorT m a;
+    empty = IteratorT::make $ pure $ none();
+
+    is_empty: [m: Monad] IteratorT m a -> m Bool;
+    is_empty = |xs| xs.advance.bind(is_none >> pure);
+
+    push_front: [m: Monad] a -> IteratorT m a -> IteratorT m a;
+    push_front = |x, xs| IteratorT::make $ pure $ some $ (x, xs);
+
+    advance: [m: Monad] IteratorT m a -> m (Option (a, IteratorT m a));
+    advance = @next;
+
+    from_m_iter: [m: Monad] Iterator (m a) -> IteratorT m a;
+    from_m_iter = |xs| IteratorT::make $ do {
+        match xs.advance {
+            none() => pure $ none(),
+            some((x, xs2)) => pure $ some((*x, IteratorT::from_iter(xs2)))
+        }
+    };
+
+    from_iter: [m: Monad] Iterator a -> IteratorT m a;
+    from_iter = |xs| IteratorT::make $ do {
+        match xs.advance {
+            none() => pure $ none(),
+            some((x, xs2)) => pure $ some((x, IteratorT::from_iter(xs2)))
+        }
+    };
+
+    from_array: [m: Monad] Array a -> IteratorT m a;
+    from_array = |arr| IteratorT::from_iter(arr.to_iter);
+
+    append: [m: Monad] IteratorT m a -> IteratorT m a -> IteratorT m a;
+    append = |ys, xs| IteratorT::make $ do {
+        match *xs.advance {
+            none() => ys.advance,
+            some((x, xs2)) => f(x).append(xs2.append(ys))
+        }
+    };
+
+    fold_m: [m : Monad] b -> (b -> a -> m b) -> IteratorT m a -> m b;
+    fold_m = |init, op, iter| (
+        loop_m((init, iter), |(accum, iter)| (
+            let next = *iter.advance;
+            if next.is_none { break_m $ accum };
+            let (next, iter) = next.as_some;
+            let accum = *op(accum, next);
+            continue_m $ (accum, iter)
+        ))
+    );
+
+    to_array_m: [m : Monad] IteratorT m a -> m (Array a);
+    to_array_m = |xs| (
+        xs.fold_m(
+            [], |(array, x)|
+            pure $ array.push_back(x)
+        )
+    );
+
+    to_iter_m: [m: Monad] IteratorT m a -> m (Array a);
+    to_iter_m = |xs| xs.to_array_m.map(to_iter);
+}
+

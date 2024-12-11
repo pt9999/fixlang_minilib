@@ -3,6 +3,8 @@ module Minilib.Monad.IteratorT;
 // https://hackage.haskell.org/package/list-transformer-1.1.1
 
 import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
 
 type [m: * -> *] IteratorT m a = box struct {
     next: m (Option (a, IteratorT m a))
@@ -10,16 +12,16 @@ type [m: * -> *] IteratorT m a = box struct {
 
 impl [m: Functor] IteratorT m: Functor {
     map = |f, xs| (
-        IteratorT::make $ xs.@next.map(
+        IteratorT::make $ xs.advance.map(
             |opt| opt.map(
-                |(a, ys)| (f(a), ys.map(f))
+                |(x, xs2)| (f(x), xs2.map(f))
             )
         )
     );
 }
 
 impl [m: Monad] IteratorT m: Monad {
-    pure = |x| IteratorT::make $ pure $ cons(x, IteratorT::empty);
+    pure = |x| IteratorT::make $ pure $ some $ (x, IteratorT::empty);
     bind = |f, xs| (
         IteratorT::make $ do {
             match *xs.advance {
@@ -31,7 +33,7 @@ impl [m: Monad] IteratorT m: Monad {
 }
 
 namespace IteratorT {
-    make: [m: Monad] m (Option (a, IteratorT m a)) -> IteratorT m a;
+    make: [m: * -> *] m (Option (a, IteratorT m a)) -> IteratorT m a;
     make = |next| IteratorT { next: next };
 
     empty: [m: Monad] IteratorT m a;
@@ -48,7 +50,7 @@ namespace IteratorT {
         pure $ some $ (*x, xs)
     };
 
-    advance: [m: Monad] IteratorT m a -> m (Option (a, IteratorT m a));
+    advance: [m: * -> *] IteratorT m a -> m (Option (a, IteratorT m a));
     advance = @next;
 
     from_m_iter: [m: Monad] Iterator (m a) -> IteratorT m a;
@@ -74,7 +76,7 @@ namespace IteratorT {
     append = |ys, xs| IteratorT::make $ do {
         match *xs.advance {
             none() => ys.advance,
-            some((x, xs2)) => f(x).append(xs2.append(ys))
+            some((x, xs2)) => pure $ some $ (x, xs2.append(ys))
         }
     };
 
@@ -101,3 +103,26 @@ namespace IteratorT {
     to_iter_m = |xs| xs.to_array_m.map(to_iter);
 }
 
+impl IteratorT: MonadTrans {
+    lift_t = |ma| (
+        IteratorT::empty.push_m_front(ma)
+    );
+}
+
+impl [m: MonadError] IteratorT m: MonadErrorIF {
+    error = lift_t << error;
+    catch = |handler, xs| (
+        IteratorT::make $
+        xs.advance.catch(
+            handler >> advance
+        )
+    );
+}
+
+impl [m: MonadIO] IteratorT m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] IteratorT m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
+}

@@ -15,6 +15,9 @@ namespace IteratorT {
     make: [m: * -> *] m (Option (a, IteratorT m a)) -> IteratorT m a;
     make = |next| IteratorT { next: next };
 
+    advance: [m: * -> *] IteratorT m a -> m (Option (a, IteratorT m a));
+    advance = @next;
+
     empty: [m: Monad] IteratorT m a;
     empty = IteratorT::make $ pure $ none();
 
@@ -31,9 +34,6 @@ namespace IteratorT {
     push_m_front = |x, xs| IteratorT::make $ do {
         pure $ some $ (*x, xs)
     };
-
-    advance: [m: * -> *] IteratorT m a -> m (Option (a, IteratorT m a));
-    advance = @next;
 
     from_m_iter: [m: Monad] Iterator (m a) -> IteratorT m a;
     from_m_iter = |xs| IteratorT::make $ do {
@@ -54,6 +54,14 @@ namespace IteratorT {
     from_array: [m: Monad] Array a -> IteratorT m a;
     from_array = |arr| IteratorT::from_iter(arr.to_iter);
 
+    to_array_m: [m : Monad] IteratorT m a -> m (Array a);
+    to_array_m = |xs| (
+        xs.fold_m(
+            [], |array, x|
+            pure $ array.push_back(x)
+        )
+    );
+
     append: [m: Monad] IteratorT m a -> IteratorT m a -> IteratorT m a;
     append = |ys, xs| IteratorT::make $ do {
         match *xs.advance {
@@ -72,17 +80,6 @@ namespace IteratorT {
             continue_m $ (accum, iter)
         ))
     );
-
-    to_array_m: [m : Monad] IteratorT m a -> m (Array a);
-    to_array_m = |xs| (
-        xs.fold_m(
-            [], |array, x|
-            pure $ array.push_back(x)
-        )
-    );
-
-    to_iter_m: [m: Monad] IteratorT m a -> m (Array a);
-    to_iter_m = |xs| xs.to_array_m.map(to_iter);
 }
 
 impl [m: Functor] IteratorT m: Functor {

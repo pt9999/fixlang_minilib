@@ -3,13 +3,39 @@ module Main;
 import Minilib.Monad.IteratorT;
 import Minilib.Monad.State;
 import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
 import Minilib.Testing.UnitTest;
 
 test_empty: TestCase;
 test_empty = (
     make_test("test_empty") $ |_|
-    let xs: IteratorT IOFail I64 = IteratorT::empty;
-    assert_true("empty", *xs.is_empty)
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::empty;
+    assert_equal("is_none", ok(true), xs.advance.map(is_none))
+);
+
+test_is_empty: TestCase;
+test_is_empty = (
+    make_test("test_is_empty") $ |_|
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::empty;
+    assert_equal("is_empty", ok(true), xs.is_empty);;
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::empty.push_front(42);
+    assert_equal("is_empty", ok(false), xs.is_empty);;
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::make $ err("invalid");
+    assert_equal("is_empty", err("invalid"), xs.is_empty);;
+    pure()
+);
+
+test_get_front: TestCase;
+test_get_front = (
+    make_test("test_get_front") $ |_|
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::empty;
+    assert_equal("get_front", ok(none()), xs.get_front);;
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::empty.push_front(42);
+    assert_equal("get_front", ok(some(42)), xs.get_front);;
+    let xs: IteratorT (Result ErrMsg) I64 = IteratorT::make $ err("invalid");
+    assert_equal("get_front", err("invalid"), xs.get_front);;
+    pure()
 );
 
 test_push_front: TestCase;
@@ -99,26 +125,26 @@ test_append = (
     assert_equal("arr", [1, 2, 3, 4, 5], arr)
 );
 
-test_map: TestCase;
-test_map = (
-    make_test("test_map") $ |_|
+test_functor_map: TestCase;
+test_functor_map = (
+    make_test("test_functor_map") $ |_|
     let xs: IteratorT IOFail I64 = IteratorT::from_array([1, 2, 3]);
     let xs: IteratorT IOFail String = xs.map(to_string);
     let arr = *xs.to_array_m;
     assert_equal("arr", ["1", "2", "3"], arr)
 );
 
-test_pure: TestCase;
-test_pure = (
-    make_test("test_pure") $ |_|
+test_monad_pure: TestCase;
+test_monad_pure = (
+    make_test("test_monad_pure") $ |_|
     let xs: IteratorT IOFail I64 = pure(1);
     let arr = *xs.to_array_m;
     assert_equal("arr", [1], arr)
 );
 
-test_bind: TestCase;
-test_bind = (
-    make_test("test_bind") $ |_|
+test_monad_bind: TestCase;
+test_monad_bind = (
+    make_test("test_monad_bind") $ |_|
     let xs: IteratorT IOFail (I64, I64) = do {
         let x = *IteratorT::from_array([1,2]);
         let y = *IteratorT::from_array([3,4]);
@@ -128,12 +154,66 @@ test_bind = (
     assert_equal("arr", [(1,3),(1,4),(2,3),(2,4)], arr)
 );
 
+test_monad_trans_lift_t: TestCase;
+test_monad_trans_lift_t = (
+    make_test("test_monad_trans_lift_t") $ |_|
+    let xs: IteratorT (Result ErrMsg) (I64, I64) = do {
+        let x = *IteratorT::from_array([1,2]);
+        let y = *ok(3).lift_t;
+        pure $ (x, y)
+    };
+    assert_equal("arr", ok([(1,3),(2,3)]), xs.to_array_m);;
+    let xs: IteratorT (Result ErrMsg) (I64, I64) = do {
+        let x = *IteratorT::from_array([1,2]);
+        let y = *err("error").lift_t;
+        pure $ (x, y)
+    };
+    assert_equal("arr", err("error"), xs.to_array_m);;
+    pure()
+);
+
+test_monad_error_error: TestCase;
+test_monad_error_error = (
+    make_test("test_monad_error_error") $ |_|
+    let xs1: IteratorT (Result ErrMsg) I64 = error("error");
+    assert_equal("xs1.advance.map(@0)", err("error"), xs1.advance.map(map(Tuple2::@0)));;
+    assert_equal("xs1.to_array_m", err("error"), xs1.to_array_m);;
+    let xs2: IteratorT (Result ErrMsg) I64 = xs1.push_front(42);
+    assert_equal("xs2.advance.map(@0)", ok(some(42)), xs2.advance.map(map(Tuple2::@0)));;
+    assert_equal("xs2.to_array_m", err("error"), xs2.to_array_m);;
+    pure()
+);
+
+test_monad_error_catch: TestCase;
+test_monad_error_catch = (
+    make_test("test_monad_error_catch") $ |_|
+    let xs1: IteratorT (Result ErrMsg) I64 = do {
+        let x = *IteratorT::from_array([1,2,3]);
+        if x == 3 { error("error") };
+        pure(x)
+    };
+    assert_equal("xs1.to_array_m", err("error"), xs1.to_array_m);;
+    let xs2: IteratorT (Result ErrMsg) I64 = xs1.catch(|errmsg|
+        let x = *IteratorT::from_array([4,5,6]);
+        if x == 6 { error("error2") };
+        pure(x)
+    );
+    assert_equal("xs2.to_array_m", err("error2"), xs2.to_array_m);;
+    let xs3: IteratorT (Result ErrMsg) I64 = xs2.catch(|errmsg|
+        let x = *IteratorT::from_array([7,8,9]);
+        pure(x)
+    );
+    assert_equal("xs3.to_array_m", ok([1,2,4,5,7,8,9]), xs3.to_array_m);;
+    pure()
+);
 // TODO: add tests
 
 main: IO ();
 main = (
     [
         test_empty,
+        test_is_empty,
+        test_get_front,
         test_push_front,
         test_push_m_front,
         test_from_m_iter,
@@ -141,9 +221,12 @@ main = (
         test_from_array,
         test_to_array_m,
         test_append,
-        test_map,
-        test_pure,
-        test_bind,
+        test_functor_map,
+        test_monad_pure,
+        test_monad_bind,
+        test_monad_trans_lift_t,
+        test_monad_error_error,
+        test_monad_error_catch,
     ]
     .run_test_driver
 );

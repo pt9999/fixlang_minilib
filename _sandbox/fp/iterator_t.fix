@@ -10,27 +10,6 @@ type [m: * -> *] IteratorT m a = box struct {
     next: m (Option (a, IteratorT m a))
 };
 
-impl [m: Functor] IteratorT m: Functor {
-    map = |f, xs| (
-        IteratorT::make $ xs.advance.map(
-            |opt| opt.map(
-                |(x, xs2)| (f(x), xs2.map(f))
-            )
-        )
-    );
-}
-
-impl [m: Monad] IteratorT m: Monad {
-    pure = |x| IteratorT::make $ pure $ some $ (x, IteratorT::empty);
-    bind = |f, xs| (
-        IteratorT::make $ do {
-            match *xs.advance {
-                none() => pure $ none(),
-                some((x, ys)) => f(x).append(ys.bind(f)).advance
-            }
-        }
-    );
-}
 
 namespace IteratorT {
     make: [m: * -> *] m (Option (a, IteratorT m a)) -> IteratorT m a;
@@ -40,7 +19,10 @@ namespace IteratorT {
     empty = IteratorT::make $ pure $ none();
 
     is_empty: [m: Monad] IteratorT m a -> m Bool;
-    is_empty = |xs| xs.advance.bind(is_none >> pure);
+    is_empty = |xs| xs.advance.bind(|opt| pure $ opt.is_none);
+
+    get_front: [m: Monad] IteratorT m a -> m (Option a);
+    get_front = |xs| xs.advance.bind(|opt| pure $ opt.map(Tuple2::@0));
 
     push_front: [m: Monad] a -> IteratorT m a -> IteratorT m a;
     push_front = |x, xs| IteratorT::make $ pure $ some $ (x, xs);
@@ -103,6 +85,28 @@ namespace IteratorT {
     to_iter_m = |xs| xs.to_array_m.map(to_iter);
 }
 
+impl [m: Functor] IteratorT m: Functor {
+    map = |f, xs| (
+        IteratorT::make $ xs.advance.map(
+            |opt| opt.map(
+                |(x, xs2)| (f(x), xs2.map(f))
+            )
+        )
+    );
+}
+
+impl [m: Monad] IteratorT m: Monad {
+    pure = |x| IteratorT::make $ pure $ some $ (x, IteratorT::empty);
+    bind = |f, xs| (
+        IteratorT::make $ do {
+            match *xs.advance {
+                none() => pure $ none(),
+                some((x, ys)) => f(x).append(ys.bind(f)).advance
+            }
+        }
+    );
+}
+
 impl IteratorT: MonadTrans {
     lift_t = |ma| (
         IteratorT::empty.push_m_front(ma)
@@ -112,10 +116,12 @@ impl IteratorT: MonadTrans {
 impl [m: MonadError] IteratorT m: MonadErrorIF {
     error = lift_t << error;
     catch = |handler, xs| (
-        IteratorT::make $
-        xs.advance.catch(
-            handler >> advance
-        )
+        IteratorT::make $ do {
+            match *xs.advance {
+                none() => pure $ none(),
+                some((x, xs2)) => pure $ some $ (x, xs2.catch(handler))
+            }
+        }.catch(handler >> advance)
     );
 }
 

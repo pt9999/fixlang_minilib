@@ -1,57 +1,58 @@
-module Main;
+module Minilib.Trait.Applicative;
 
+// A trait which can create a lifted value,
+// and apply a lifted function to a lifted value.
 trait [f : *->*] f : Applicative {
-    app: f (a -> b) -> f a -> f b;
+    // Creates a lifted value from a value.
+    pure_a: a -> f a;
+    // Applies a lifted function to a lifted value.
+    app_a: f (a -> b) -> f a -> f b;
 }
 
+// Applies a lifted two-argument function to two lifted values.
 lift_a2: [f: Functor, f: Applicative] (a -> b -> c) -> f a -> f b -> f c;
-lift_a2 = |f, xs, ys| app(xs.map(f), ys);
+lift_a2 = |f, xs, ys| app_a(xs.map(f), ys);
+
+// Applies a lifted function to a lifted value.
+// NOTE: A monad is an applicative.
+app: [f: Monad] f (a -> b) -> f a -> f b;
+app = |fs, xs| (
+    let f = *fs;
+    let x = *xs;
+    pure $ f(x)
+);
 
 impl Array: Applicative {
-    app = |fs, xs| (
-        let f = *fs;
-        let x = *xs;
-        pure $ f(x)
-    );
+    pure_a = pure;
+    app_a = app;
+}
+
+impl Arrow a: Applicative {
+    pure_a = pure;
+    app_a = app;
+}
+
+impl IO: Applicative {
+    pure_a = pure;
+    app_a = app;
+}
+
+impl IOFail: Applicative {
+    pure_a = pure;
+    app_a = app;
 }
 
 impl Iterator: Applicative {
-    app = |fs, xs| (
-        let f = *fs;
-        let x = *xs;
-        pure $ f(x)
-    );
+    pure_a = pure;
+    app_a = app;
 }
 
-test_array: IO ();
-test_array = (
-    let add: I8 -> I32 -> I64 = |x,y| x.to_I64 + y.to_I64;
-    let fs = [add(1_I8), add(2_I8)];
-    let ys = [10_I32, 20_I32];
-    let zs: Array I64 = app(fs, ys);
-    let _ = *println(zs.map(to_string).to_iter.join(","));
-    let xs = [1_I8, 2_I8];
-    let zs: Array I64 = lift_a2(add, xs, ys);
-    let _ = *println(zs.map(to_string).to_iter.join(","));
-    pure()
-);
+impl Option: Applicative {
+    pure_a = pure;
+    app_a = app;
+}
 
-test_iter: IO ();
-test_iter = (
-    let add: I8 -> I32 -> I64 = |x,y| x.to_I64 + y.to_I64;
-    let fs = [add(1_I8), add(2_I8)].to_iter;
-    let ys = [10_I32, 20_I32].to_iter;
-    let zs: Iterator I64 = app(fs, ys);
-    let _ = *println(zs.map(to_string).join(","));
-    let xs = [1_I8, 2_I8].to_iter;
-    let zs: Iterator I64 = lift_a2(add, xs, ys);
-    let _ = *println(zs.map(to_string).join(","));
-    pure()
-);
-
-main: IO ();
-main = (
-    let _ = *test_array;
-    let _ = *test_iter;
-    pure()
-);
+impl Result e: Applicative {
+    pure_a = pure;
+    app_a = app;
+}

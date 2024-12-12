@@ -2,6 +2,13 @@ module Minilib.Trait.Applicative;
 
 // A trait which can create a lifted value,
 // and apply a lifted function to a lifted value.
+//
+// NOTE: If `f` implements both `Applicative` and `Monad`,
+// the following equations should be hold.
+// - `pure_a(x) == pure(x)`
+// - `app_a(fs,xs) == app(fs,xs)`
+//
+// NOTE: With `app` and `pure`, you can implement `Applicative` from `Monad`.
 trait [f : *->*] f : Applicative {
     // Creates a lifted value from a value.
     pure_a: a -> f a;
@@ -9,13 +16,23 @@ trait [f : *->*] f : Applicative {
     app_a: f (a -> b) -> f a -> f b;
 }
 
+// Maps an applicative with a function.
+//
+// NOTE: If `f` implements both `Applicative` and `Functor`,
+// the following equations should be hold.
+// - `map_a(f, xs) == map(f, xs)`.
+//
+// NOTE: With `map_a`, you can implement `Functor` from `Applicative`.
+map_a: [f: Applicative] (a -> b) -> f a -> f b;
+//map_a = |f, xs| app_a(pure_a(f), xs);
+map_a = pure_a >> app_a;
+
 // Applies a lifted two-argument function to two lifted values.
-lift_a2: [f: Functor, f: Applicative] (a -> b -> c) -> f a -> f b -> f c;
-lift_a2 = |f, xs, ys| app_a(xs.map(f), ys);
+lift_a2: [f: Applicative] (a -> b -> c) -> f a -> f b -> f c;
+lift_a2 = |f, xs, ys| app_a(xs.map_a(f), ys);
 
 // Applies a lifted function to a lifted value.
-// NOTE: A monad is an applicative.
-app: [f: Monad] f (a -> b) -> f a -> f b;
+app: [m: Monad] m (a -> b) -> m a -> m b;
 app = |fs, xs| (
     let f = *fs;
     let x = *xs;

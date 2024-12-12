@@ -1,76 +1,47 @@
-//module Minilib.Trait.Traversable;
-module Main;
+module Minilib.Trait.Traversable;
 
-trait [f : *->*] f : Applicative {
-    pure_a: a -> f a;
-    app: f (a -> b) -> f a -> f b;
-}
-
-lift_a2: [f: Functor, f: Applicative] (a -> b -> c) -> f a -> f b -> f c;
-lift_a2 = |f, xs, ys| app(xs.map(f), ys);
-
-// Applicative だが Monad ではないものが少ない
-
-impl [e: Zero] Tuple2 e: Applicative {
-    pure_a = |a| (zero, a);
-    app = |(e, f), (_, a)| (e, f(a));
-}
-
-impl IO: Applicative {
-    pure_a = pure;
-    app = |fs, xs| (
-        let f = *fs;
-        let x = *xs;
-        pure $ f(x)
-    );
-}
-
-impl Array: Applicative {
-    pure_a = pure;
-    app = |fs, xs| (
-        let f = *fs;
-        let x = *xs;
-        pure $ f(x)
-    );
-}
-
-impl Iterator: Applicative {
-    pure_a = pure;
-    app = |fs, xs| (
-        let f = *fs;
-        let x = *xs;
-        pure $ f(x)
-    );
-}
+import Minilib.Trait.Applicative;
 
 trait [t: * -> *] t: Traversable {
-    traverse: [f: Functor, f: Applicative] (a -> f b) -> t a -> f (t b);
-    map_m : [m : Monad] (a -> m b) -> t a -> m (t b);
+    sequence_a: [f: Applicative] t (f a) -> f (t a);
+    sequence: [m: Monad] t (m a) -> m (t a);
 }
+
+traverse: [f: Applicative, t: Traversable, t: Functor] (a -> f b) -> t a -> f (t b);
+traverse = |f, ta| ta.map(f).sequence_a;
+
+map_m: [m: Monad, t: Traversable, t: Functor] (a -> m b) -> t a -> m (t b);
+map_m = |f, ta| ta.map(f).sequence;
+
+foreach_m: [m: Monad, t: Traversable, t: Functor] (a -> m ()) -> t a -> m ();
+foreach_m = |f, ta| ta.map(f).sequence.forget;
 
 impl Array: Traversable {
-    traverse = |g: a -> f b, array| (
+    sequence_a = |array| (
         array.to_iter.fold(
             pure_a(Array::empty(array.get_size)), |output, a|
-            lift_a2(push_back, g(a), output);
+            lift_a2(push_back, a, output)
         )
     );
-    map_m = |f, array| array.to_iter.fold_m(
-        Array::empty(array.get_size), |output, a|
-        let b = *f(a);
-        pure $ output.push_back(b)
+    sequence = |array| (
+        array.to_iter.fold_m(
+            Array::empty(array.get_size), |output, a|
+            pure $ output.push_back(*a)
+        )
     );
 }
 
-test_traverse: IO ();
-test_traverse = (
-    let arr = Iterator::range(0, 5).to_array;
-    let g = |i| (42, "a" + i.to_string);
-    let output = arr.traverse(g);
-    println(output.to_string)
-);
-
-main: IO ();
-main = (
-    test_traverse
-);
+impl Iterator: Traversable {
+    sequence_a = |iter| (
+        iter.fold(
+            pure_a([]), |output, a|
+            lift_a2(push_back, a, output)
+        ).app(pure_a(to_iter))
+    );
+    sequence = |iter| (
+        iter.fold_m(
+            [], |output, a|
+            pure $ output.push_back(a)
+        ).bind(to_iter >> pure)
+    );
+}

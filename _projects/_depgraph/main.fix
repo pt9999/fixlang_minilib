@@ -4,12 +4,14 @@ import Minilib.IO.FileSystem;
 import Minilib.IO.Path;
 import Minilib.Text.StringEx;
 import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
 
+import DepGraph;
 
 // Application
 type App = unbox struct {
     projects: Array String,
-    deps: Array (String, String),
+    graph: DepGraph,
     proj_name: String,
     section: String,
 };
@@ -18,7 +20,7 @@ namespace App {
     empty: App;
     empty = App {
         projects: [],
-        deps: [],
+        graph: DepGraph::empty,
         proj_name: "",
         section: "",
     };
@@ -64,13 +66,19 @@ namespace App {
                     continue_m $ app
                 };
                 if app.@section == "[[dependencies]]" {
-                    let app = app.mod_deps(push_back((app.@proj_name, value)));
+                    let app = app.mod_graph(add(app.@proj_name, value));
                     continue_m $ app
                 };
                 continue_m $ app
             };
             continue_m $ app
        )
+    );
+
+    cleanup_dependencies: App -> App;
+    cleanup_dependencies = |app| (
+        let app = app.mod_graph(transitive_reduction); // Remove redundant dependencies
+        app
     );
 
     write_dependency_graph: App -> IOFail ();
@@ -81,12 +89,10 @@ namespace App {
             eval *write("digraph \"deps\" {");
             eval *write("rankdir=TB;");
             eval *write("node [shape=box, style=filled];");
-            eval *app.@projects.to_iter.fold_m(
-                (), |_, proj_name|
+            eval *app.@projects.to_iter.foreach_m(|proj_name|
                 write((proj_name, ).format("\"{}\" [fillcolor=\"#ccffff\"];"))
             );
-            eval *app.@deps.to_iter.fold_m(
-                (), |_, (parent, child)|
+            eval *app.@graph.to_iter.foreach_m(|(parent, child)|
                 write((parent, child).format("\"{}\" -> \"{}\" [];"))
             );
             eval *write("}");
@@ -100,6 +106,7 @@ main: IO ();
 main = do {
     let app = App::empty;
     let app = *app.read_deps_from_base_dir("..");
+    let app = app.cleanup_dependencies;
     eval *app.write_dependency_graph;
     pure()
 }.try(eprintln);

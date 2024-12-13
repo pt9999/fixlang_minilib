@@ -1,28 +1,19 @@
 module Minilib.Trait.Traversable;
 
-import Minilib.Trait.Applicative;
-
 trait [t: * -> *] t: Traversable {
-    sequence_a: [f: Applicative] t (f a) -> f (t a);
     sequence: [m: Monad] t (m a) -> m (t a);
 }
 
-traverse: [f: Applicative, t: Traversable, t: Functor] (a -> f b) -> t a -> f (t b);
-traverse = |f, ta| ta.map(f).sequence_a;
+traverse: [m: Monad, t: Traversable, t: Functor] (a -> m b) -> t a -> m (t b);
+traverse = |f, ta| ta.map(f).sequence;
 
 map_m: [m: Monad, t: Traversable, t: Functor] (a -> m b) -> t a -> m (t b);
-map_m = |f, ta| ta.map(f).sequence;
+map_m = traverse;
 
 foreach_m: [m: Monad, t: Traversable, t: Functor] (a -> m ()) -> t a -> m ();
 foreach_m = |f, ta| ta.map(f).sequence.forget;
 
 impl Array: Traversable {
-    sequence_a = |array| (
-        array.to_iter.fold(
-            pure_a(Array::empty(array.get_size)), |output, a|
-            lift_a2(push_back, a, output)
-        )
-    );
     sequence = |array| (
         array.to_iter.fold_m(
             Array::empty(array.get_size), |output, a|
@@ -32,13 +23,6 @@ impl Array: Traversable {
 }
 
 impl Iterator: Traversable {
-    sequence_a = |iter| (
-        let output = iter.fold(
-            pure_a([]), |output, a|
-            lift_a2(push_back, a, output)
-        );
-        output.map_a(to_iter)
-    );
     sequence = |iter| (
         let output = *iter.fold_m(
             [], |output, a|

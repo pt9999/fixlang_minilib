@@ -36,6 +36,8 @@ For example, `minilib-common` is stored in [fixlang-minilib-common](https://gith
 
 ### Subproject dependency diagram
 
+NOTE: Redundant dependencies are not displayed.
+
 ![Subproject dependencies](_projects/dependencies.png)
 
 ### Example programs

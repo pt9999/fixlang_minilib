@@ -2,6 +2,7 @@
 module Main;
 
 import Minilib.Trait.Traversable;
+import Minilib.Monad.State;
 import Minilib.Testing.UnitTest;
 
 test_array_sequence: TestCase;
@@ -34,6 +35,29 @@ test_array_traverse = (
     pure()
 );
 
+test_array_map_m: TestCase;
+test_array_map_m = (
+    make_test("test_array_map_m") $ |_|
+    let arr: Array I64 = [1,2,3];
+    let st: State I64 (Array I64) = arr.map_m(|i|
+        mod_state(add(i));;
+        get_state
+    );
+    assert_equal("eq", (6, [1, 3, 6]), st.run_state(0));;
+    pure()
+);
+
+test_array_foreach_m: TestCase;
+test_array_foreach_m = (
+    make_test("test_array_foreach_m") $ |_|
+    let arr: Array I64 = [1,2,3];
+    let st: State I64 () = arr.foreach_m(|i|
+        mod_state(add(i))
+    );
+    assert_equal("eq", 6, st.exec_state(0));;
+    pure()
+);
+
 test_iterator_sequence: TestCase;
 test_iterator_sequence = (
     make_test("test_iterator_sequence") $ |_|
@@ -52,6 +76,35 @@ test_iterator_sequence = (
     pure()
 );
 
+test_option_sequence: TestCase;
+test_option_sequence = (
+    make_test("test_option_sequence") $ |_|
+    let opt: Option (Result ErrMsg I64) = some $ ok $ 1;
+    let res: Result ErrMsg (Option I64) = opt.sequence;
+    assert_equal("eq", ok $ some $ 1, res);;
+    let opt: Option (Result ErrMsg I64) = some $ err $ "err";
+    let res: Result ErrMsg (Option I64) = opt.sequence;
+    assert_equal("eq", err $ "err", res);;
+    let opt: Option (Result ErrMsg I64) = none();
+    let res: Result ErrMsg (Option I64) = opt.sequence;
+    assert_equal("eq", ok $ none(), res);;
+    pure()
+);
+
+test_result_sequence: TestCase;
+test_result_sequence = (
+    make_test("test_result_sequence") $ |_|
+    let res: Result ErrMsg (Option I64) = ok $ some $ 1;
+    let opt: Option (Result ErrMsg I64) = res.sequence;
+    assert_equal("eq", some $ ok $ 1, opt);;
+    let res: Result ErrMsg (Option I64) = ok $ none();
+    let opt: Option (Result ErrMsg I64) = res.sequence;
+    assert_equal("eq", none(), opt);;
+    let res: Result ErrMsg (Option I64) = err $ "err";
+    let opt: Option (Result ErrMsg I64) = res.sequence;
+    assert_equal("eq", some $ err $ "err", opt);;
+    pure()
+);
 // TODO: add tests
 
 main: IO ();
@@ -59,7 +112,11 @@ main = (
     [
         test_array_sequence,
         test_array_traverse,
+        test_array_map_m,
+        test_array_foreach_m,
         test_iterator_sequence,
+        test_option_sequence,
+        test_result_sequence,
     ]
     .run_test_driver
 );

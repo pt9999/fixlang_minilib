@@ -16,13 +16,13 @@ map_m = traverse;
 
 // `ta.foreach_m(f)` maps each element with `f`, then performs all elements sequentially and forgets the results.
 foreach_m: [m: Monad, t: Traversable, t: Functor] (a -> m ()) -> t a -> m ();
-foreach_m = |f, ta| ta.map_m(f).forget;
+foreach_m = |f, ta| ta.map_m(f).bind(|_| pure());
 
 impl Array: Traversable {
     sequence = |array| (
         array.to_iter.fold_m(
-            Array::empty(array.get_size), |output, a|
-            pure $ output.push_back(*a)
+            Array::empty(array.get_size), |output, ma|
+            pure $ output.push_back(*ma)
         )
     );
 }
@@ -30,9 +30,33 @@ impl Array: Traversable {
 impl Iterator: Traversable {
     sequence = |iter| (
         let output = *iter.fold_m(
-            [], |output, a|
-            pure $ output.push_back(*a)
+            [], |output, ma|
+            pure $ output.push_back(*ma)
         );
         pure $ output.to_iter
+    );
+}
+
+impl Option: Traversable {
+    sequence = |opt| (
+        match opt {
+            none() => pure $ none(),
+            some(ma) => pure $ some(*ma)
+        }
+    );
+}
+
+impl Result e: Traversable {
+    sequence = |res| (
+        match res {
+            err(e) => pure $ err(e),
+            ok(ma) => pure $ ok(*ma)
+        }
+    );
+}
+
+impl Tuple2 e: Traversable {
+    sequence = |(e, ma)| (
+        pure $ (e, *ma)
     );
 }

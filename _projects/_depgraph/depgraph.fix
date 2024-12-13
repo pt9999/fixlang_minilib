@@ -2,6 +2,8 @@ module DepGraph;
 
 import Minilib.Collection.TreeMap;
 import Minilib.Collection.TreeSet;
+import Minilib.Monad.State;
+import Minilib.Trait.Traversable;
 
 type NodeId = String;
 
@@ -57,22 +59,12 @@ namespace DepGraph {
     // Finds descendants of the node including the node itself.
     find_descendants: NodeId -> DepGraph -> TreeSet NodeId;
     find_descendants = |node, graph| (
-        let queue = Iterator::empty.push_front(node);
-        let descendants = TreeSet::make();
-        loop(
-            (queue, descendants), |(queue, descendants)|
-            let opt = queue.advance;
-            if opt.is_none {
-                break $ descendants
-            };
-            let (node, queue) = opt.as_some;
-            if descendants.contains(node) {
-                continue $ (queue, descendants)
-            };
-            let descendants = descendants.TreeSet::insert(node);
-            let queue = graph.find_children(node).append(queue);
-            continue $ (queue, descendants)
-        )
+        let inner: NodeId -> State (TreeSet NodeId) () = fix $ |inner, node| (
+            if (*get_state).contains(node) { pure() };
+            mod_state(TreeSet::insert(node));;
+            graph.find_children(node).foreach_m(inner)
+        );
+        inner(node).exec_state(TreeSet::make())
     );
 
     _find_all: [k: TreeSetElem, k: LessThan, v: TreeSetElem] k -> TreeSet (k, v) -> Iterator v;
@@ -86,13 +78,18 @@ namespace DepGraph {
     // topological sort from child to parent
     toposort: DepGraph -> Array NodeId;
     toposort = |graph| (
+        // checks if the node has no children
         let is_free = |node, graph| graph.find_children(node).is_empty;
+        // first, find all free nodes
         let free_nodes: Iterator NodeId = graph.get_nodes.to_iter.filter(
             |node| graph.is_free(node)
         ).bang;
         loop(
             (graph, free_nodes, []), |(graph, free_nodes, sort_result)|
-            if free_nodes.is_empty {
+            // pick a node from the free list
+            let opt = free_nodes.advance;
+            if opt.is_none {
+                // if the free list is empty, remaining nodes should be empty. if not, there are circular dependencies.
                 let remaining_nodes = graph.get_nodes.to_iter;
                 if ! remaining_nodes.is_empty {
                     let message = "toposort failed! remaining = " + remaining_nodes.map(to_string).join(", ");
@@ -100,22 +97,19 @@ namespace DepGraph {
                 };
                 break $ sort_result
             };
-            let (child, free_nodes) = free_nodes.advance.as_some;
-            let sort_result = sort_result.push_back(child);
-            let parents = graph.find_parents(child);
-            let (graph, free_nodes) = parents.fold(
-                (graph, free_nodes), |(graph, free_nodes), parent|
-                let graph = graph.erase(parent, child);
-                let free_nodes = if graph.is_free(parent) {
-                    free_nodes.push_front(parent)
-                } else { free_nodes };
-                (graph, free_nodes)
-            );
+            let (node, free_nodes) = opt.as_some;
+            // add the node to the sorted list
+            let sort_result = sort_result.push_back(node);
+            // find all parents of the node
+            let parents = graph.find_parents(node);
+            // remove the edges from the node to its parents
+            let graph = parents.fold(graph, |graph, parent| graph.erase(parent, node));
+            // add parents who became free to the free list
+            let free_nodes = parents.filter(|parent| graph.is_free(parent)).append(free_nodes);
             continue $ (graph, free_nodes, sort_result)
         )
     );
 
-    /*
     test_toposort: DepGraph -> IO ();
     test_toposort = |graph| (
         let desc = graph.find_descendants("minilib-net").to_iter.to_array;
@@ -123,7 +117,6 @@ namespace DepGraph {
         let sorted = graph.toposort;
         println("toposort: " + sorted.to_string)
     );
-    */
 
     // Removes redundant edges.
     // see: https://en.wikipedia.org/wiki/Transitive_reduction

@@ -16,9 +16,17 @@ clean:
 
 document:
 	bash ../_gendoc.sh .
+	if ! git diff --quiet HEAD doc; then \
+		git add doc ; \
+		git commit -m 'update document' ; \
+	fi
 
 update-deps:
 	fix deps update
+	if ! git diff --quiet HEAD fixdeps.lock; then \
+		git add fixdeps.lock ; \
+		git commit -m 'update deps' ; \
+	fi
 
 # Publish a subproject.
 # - Update dependencies
@@ -32,8 +40,8 @@ publish:
 	fix test
 	git add fixdeps.lock
 	if ! git diff-index --quiet --cached HEAD; then \
-		git commit -m 'update deps' \
-	; fi
+		git commit -m 'update deps' ; \
+	fi
 	git push
 
 # Version up.

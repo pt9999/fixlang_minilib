@@ -16,15 +16,15 @@ clean:
 
 document:
 	bash ../_gendoc.sh .
-	if ! git diff --quiet HEAD doc; then \
-		git add doc ; \
+	git add doc
+	if ! git diff-index --quiet HEAD doc; then \
 		git commit -m 'update document' ; \
 	fi
 
 update-deps:
 	fix deps update
-	if ! git diff --quiet HEAD fixdeps.lock; then \
-		git add fixdeps.lock ; \
+	git add fixdeps.lock
+	if ! git diff-index --quiet HEAD fixdeps.lock; then \
 		git commit -m 'update deps' ; \
 	fi
 

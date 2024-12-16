@@ -1,0 +1,143 @@
+module Main;
+
+import Minilib.Monad.OptionT;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+import Minilib.Testing.UnitTest;
+
+test_from_option: TestCase;
+test_from_option = (
+    make_test("test_from_option") $ |_|
+    let oma: OptionT IOFail I64 = from_option $ some(42);
+    assert_equal("eq", ok $ some(42), *oma.run_option_t.to_result.lift);;
+    let oma: OptionT IOFail I64 = from_option $ none();
+    assert_equal("eq", ok $ none(), *oma.run_option_t.to_result.lift);;
+    pure()
+);
+
+test_functor: TestCase;
+test_functor = (
+    make_test("test_functor") $ |_|
+    let oma: OptionT IOFail I64 = option_t $ pure $ some(42);
+    let oma = oma.map(to_string);
+    assert_equal("eq", ok $ some("42"), *oma.run_option_t.to_result.lift);;
+    let oma: OptionT IOFail I64 = option_t $ pure $ none();
+    let oma = oma.map(to_string);
+    assert_equal("eq", ok $ none(), *oma.run_option_t.to_result.lift);;
+    let oma: OptionT IOFail I64 = option_t $ throw $ "err";
+    let oma = oma.map(to_string);
+    assert_equal("eq", err $ "err", *oma.run_option_t.to_result.lift);;
+    pure()
+);
+
+test_pure: TestCase;
+test_pure = (
+    make_test("test_pure") $ |_|
+    let oma: OptionT IOFail I64 = pure(42);
+    assert_equal("eq", ok $ some(42), *oma.run_option_t.to_result.lift);;
+    pure()
+);
+
+test_bind: TestCase;
+test_bind = (
+    make_test("test_bind") $ |_|
+    let oma: OptionT IOFail I64 = option_t $ pure $ some(42);
+    let oma = oma.bind(|i| pure("abc"));
+    assert_equal("eq", ok $ some("abc"), *oma.run_option_t.to_result.lift);;
+    let oma: OptionT IOFail I64 = option_t $ pure $ none();
+    let oma = oma.bind(|i| pure("abc"));
+    assert_equal("eq", ok $ none(), *oma.run_option_t.to_result.lift);;
+    let oma: OptionT IOFail I64 = option_t $ throw $ "err";
+    let oma = oma.bind(|i| pure("abc"));
+    assert_equal("eq", err $ "err", *oma.run_option_t.to_result.lift);;
+    pure()
+);
+
+test_lift_t: TestCase;
+test_lift_t = (
+    make_test("test_lift_t") $ |_|
+    let oma: OptionT (StateT I64 IOFail) String = do {
+        lift_t $ do {
+            let i64 = *get_state;
+            println("message from test_lift_t").lift_io;;
+            put_state(i64 + 1)
+        };;
+        some("abc").lift_option
+    };
+    let sma: StateT I64 IOFail (Option String) = oma.run_option_t;
+    let iof: IOFail (I64, Option String) = sma.run_state_t(42);
+    assert_equal("eq", ok $ (43, some("abc")), *iof.to_result.lift)
+);
+
+test_error: TestCase;
+test_error = (
+    make_test("test_error") $ |_|
+    let oma: OptionT (Result ErrMsg) I64 = do {
+        error $ "err"
+    };
+    assert_equal("eq", err $ "err", oma.run_option_t)
+);
+
+test_catch: TestCase;
+test_catch = (
+    make_test("test_catch") $ |_|
+    let oma: OptionT (Result ErrMsg) String = do {
+        lift_t $ err $ "err"
+    }.catch(|errmsg|
+        pure("caught " + errmsg)
+    );
+    assert_equal("eq", ok $ some $ "caught err", oma.run_option_t)
+);
+
+test_lift_io: TestCase;
+test_lift_io = (
+    make_test("test_lift_io") $ |_|
+    let oma: OptionT IOFail I64 = do {
+        lift_io $ println("message from test_lift_io");;
+        let a = *none().lift_option;
+        lift_io $ println("this message will not be printed");;
+        some(a + 1).lift_option
+    };
+    assert_equal("eq", ok $ none(), *oma.run_option_t.to_result.lift)
+);
+
+test_lift_iofail: TestCase;
+test_lift_iofail = (
+    make_test("test_lift_io") $ |_|
+    let oma: OptionT IOFail I64 = lift_iofail $ do {
+        println("message from test_lift_iofail").lift;;
+        throw $ "err"
+    };
+    assert_equal("eq", err $ "err", *oma.run_option_t.to_result.lift)
+);
+
+test_array: TestCase;
+test_array = (
+    make_test("test_array") $ |_|
+    let oma: OptionT Array I64 = do {
+        let a = *[10, 20, 30].lift_t;
+        let a = *(from_option $ if a == 20 { none() } else { some(a) });
+        let b = *[1, 2, 3].lift_t;
+        from_option $ if (a + b) % 3 != 0 { some(a+b) } else { none() }
+    };
+    let arr: Array (Option I64) = oma.run_option_t;
+    assert_equal("eq", [some(11), none(), some(13), none(), some(31), some(32), none()], arr)
+);
+
+main: IO ();
+main = (
+    [
+        test_from_option,
+        test_functor,
+        test_pure,
+        test_bind,
+        test_lift_t,
+        test_error,
+        test_catch,
+        test_lift_io,
+        test_lift_iofail,
+        test_array,
+    ].run_test_driver
+);

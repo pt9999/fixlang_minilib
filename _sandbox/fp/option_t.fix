@@ -1,5 +1,8 @@
-module Main;
-//module Minilib.Monad.OptionT;
+module Minilib.Monad.OptionT;
+
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
 
 type [m: * -> *] OptionT m a = unbox struct {
   data: m (Option a)
@@ -8,27 +11,53 @@ type [m: * -> *] OptionT m a = unbox struct {
 option_t: [m: * -> *] m (Option a) -> OptionT m a;
 option_t = |ma| OptionT { data: ma };
 
-run: [m: * -> *] OptionT m a -> m (Option a);
-run = @data;
+run_option_t: [m: * -> *] OptionT m a -> m (Option a);
+run_option_t = @data;
+
+lift_option: [m: Monad] Option a -> OptionT m a;
+lift_option = |opt| option_t $ pure(opt);
+
+from_option: [m: Monad] Option a -> OptionT m a;
+from_option = lift_option;
 
 impl [m: Functor] OptionT m: Functor {
   map = |f, ma| (
-    let run = (ma.run).map(map(f));
-    option_t(run)
+    option_t $ ma.run_option_t.map(map(f))
   );
 }
 
 impl [m: Monad] OptionT m: Monad {
   pure = |a| option_t(pure(pure(a)));
-  bind = |f, m_opt_a| (
-    let run = do {
-        let opt_a = *(m_opt_a.run);        // Option a
-        if opt_a.is_none { pure(none()) };
-        let a = opt_a.as_some;
-        f(a).run
-    };
-    option_t(run)
+  bind = |f, ma| (
+    option_t $ do {
+      match *ma.run_option_t {
+          none() => pure $ none(),
+          some(a) => f(a).run_option_t
+      }
+    }
   );
+}
+
+impl OptionT: MonadTrans {
+  lift_t = |ma| option_t $ ma.bind(some >> pure);
+}
+
+impl [m: MonadError] OptionT m: MonadErrorIF {
+    error = lift_t << error;
+    catch = |handler, ma| (
+        option_t $
+        ma.run_option_t.catch(
+            handler >> run_option_t
+        )
+    );
+}
+
+impl [m: MonadIO] OptionT m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] OptionT m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
 }
 
 main: IO ();
@@ -36,6 +65,6 @@ main = (
     let oma: OptionT IO I64 = option_t(pure(some(1)));
     let oma: OptionT IO I32 = oma.bind(|a| pure $ (a + 1).to_I32);
     let oma: OptionT IO String = oma.map(to_string);
-    let opt_a = *(oma.run);
+    let opt_a = *oma.run_option_t;
     println(opt_a.to_string)
 );

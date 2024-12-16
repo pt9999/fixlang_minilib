@@ -1,0 +1,106 @@
+module Main;
+
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+
+type Toml = unbox struct {
+    text: String,
+    exprs: Array TomlExpr
+};
+
+type TomlExpr = unbox struct {
+    text: String
+};
+
+type TomlKeyVal = unbox struct {
+    text: String
+};
+
+type TomlVal = unbox union {
+    vstring: String,
+    vint: I64,
+    vfloat: F64,
+    vbool: Bool,
+    varray: Array TomlVal,
+    vtable: Array TomlKeyVal,
+};
+
+_match_ws: Parser String;
+_match_ws = (
+    repeat(
+        match_any_char.filter(|c| c == 0x20_U8 || c == 0x09_U8)
+    )._unsafe_to_string
+);
+
+//_match_expression:
+
+test1: IOFail ();
+test1 = (
+    let contents = *read_file_string(Path::parse("test.toml").as_some);
+    let toml = *Toml::parse(contents).from_result;
+    let toml = toml.upsert_table("build", upsert_key("files",
+        files.to_iter.map(|f| "\"" + f + "\"").join(",\n")
+    ));
+    let contents2 = toml.to_string;
+    pure()
+);
+
+test2: IOFail ();
+test2 = (
+    let toml = Toml::empty;
+    let toml = toml.add_comment("this is comment");
+    let toml = toml.add_table("general",
+        TomlTable::empty
+        .add_string_value("name", "test")
+        .add_string_value("version", "0.0.0")
+    );
+    let toml = toml.add_table("build",
+        TomlTable::empty
+        .add_string_array_value("files", ["a", "b"])
+        .add_string_array_value("static_links", [])
+    );
+    let toml = toml.add_table_array(
+        TomlTable::make("dependencies")
+        .add_string_value("name", "certain-project")
+        .add_inline_table("git",
+            TomlTable::empty
+            .add_string_value("url", "https://github.com/foo/bar")
+        )
+    );
+    pure()
+);
+
+test3: IOFail ();
+test3 = (
+    let toml = Toml::empty;
+    let toml = toml.add_comment("this is comment");
+    let toml = toml.add_table("general",
+        [
+            toml_keyval("name", toml_string("test")),
+            toml_keyval("version", toml_string("0.0.0")),
+            toml_newline
+        ]
+    );
+    let toml = toml.add_table("build",
+        TomlTable::empty
+        .add_string_array_value("files", ["a", "b"])
+        .add_string_array_value("static_links", [])
+    );
+    let toml = toml.add_table_array(
+        TomlTable::make("dependencies")
+        .add_string_value("name", "certain-project")
+        .add_inline_table("git",
+            TomlTable::empty
+            .add_string_value("url", "https://github.com/foo/bar")
+        )
+    );
+    pure()
+);
+
+test4: IOFail ();
+test4 = (
+    let toml_reader = TomlReader::empty;
+    let toml_writer = TomlWriter::empty;
+
+    pure()
+);

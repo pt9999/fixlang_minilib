@@ -1,0 +1,94 @@
+module Minilib.Encoding.Toml.TomlReader;
+
+//import Minilib.Encoding.Toml;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+
+//parse_toml: Parser Toml;
+
+
+_parse_ws: Parser String;
+_parse_ws = (
+    repeat(
+        match_any_char.filter(|c| c == 0x20_U8 || c == 0x09_U8)
+    ).map(_unsafe_to_string)
+);
+
+_parse_newline: Parser String;
+_parse_newline = (
+    _get_matched_content $ do {
+        match_char(0x0a_U8)
+        .or_else(
+            match_char(0x0d_U8);;
+            match_char(0x0a_U8)
+        )
+    }
+);
+
+_is_non_ascii: U8 -> Bool;
+_is_non_ascii = |c| (c >= 0x80_U8);
+
+_is_non_eol: U8 -> Bool;
+_is_non_eol = |c| (
+    c == 0x09_U8 ||
+    (0x20_U8 <= c && c <= 0x7f_U8) ||
+    _is_non_ascii(c)
+);
+
+_parse_comment: Parser String;
+_parse_comment = (
+    _get_matched_content $ do {
+        match_char(0x23_U8);;   // '#'
+        repeat(
+            match_any_char.filter(_is_non_eol)
+        )
+    }
+);
+
+_parse_keyval: Parser ();
+_parse_keyval = undefined("");
+
+_parse_key: Parser String;
+_parse_key = undefined("");
+
+_parse_simple_key: Parser ();
+_parse_simple_key = undefined("");
+
+_parse_unquoted_key: Parser String;
+_parse_unquoted_key = (
+    one_or_more(
+        match_any_char.filter(|c|
+            ('A' <= c && c <= 'Z') ||
+            ('a' <= c && c <= 'z') ||
+            ('0' <= c && c <= '9') ||
+            c == 0x2d_U8 ||             // '-'
+            c == 0x5f_U8                // '_'
+        )
+    ).map(_unsafe_to_string)
+);
+
+_parse_quoted_key: Parser ();
+_parse_quoted_key = undefined("");
+
+_parse_dotted_key: Parser ();
+_parse_dotted_key = undefined("");
+
+
+
+
+_get_matched_content_and_value: Parser a -> Parser (String, a);
+_get_matched_content_and_value = |parser| (
+    let start = *get_stream;
+    let a = *parser;
+    let end = *get_stream;
+    let content = start.read_string_between(end);
+    pure $ (content, a)
+);
+
+_get_matched_content: Parser a -> Parser String;
+_get_matched_content = |parser| (
+    _get_matched_content_and_value(parser).map(Tuple2::@0)
+);
+
+
+//_match_expression:

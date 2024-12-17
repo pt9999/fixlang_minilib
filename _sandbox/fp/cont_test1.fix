@@ -1,0 +1,129 @@
+module Main;
+
+import Minilib.Monad.Cont;
+import Minilib.Monad.Trans;
+
+type [cm: * -> *] Label cm a b = box struct {
+    // the argument of a jump
+    arg: a,
+    // current continuation of a jump
+    cc: Label cm a b -> cm b
+};
+
+namespace Label {
+    make: [cm: MonadCont] a -> cm (Label cm a b);
+    make = |arg| (
+        call_cc(|cc| pure $ Label { arg: arg, cc: cc })
+    );
+
+    jump: [cm: MonadCont] a -> Label cm a b -> cm b;
+    jump = |arg, label| (
+        (label.@cc)(label.set_arg(arg))
+    );
+}
+
+test_label: IOFail ();
+test_label = (
+    let cont: ContT () IOFail () = do {
+        let label = *Label::make(0);
+        print(label.@arg.to_string + "> ").lift.lift_t;;
+        let str = *read_line(IO::stdin).lift_t;
+        let str = str.strip_last_newlines;
+        if (str == "") { pure() };
+        println(str).lift.lift_t;;
+        label.jump(label.@arg + 1)
+    };
+    cont.run_cont_t(|_| pure())
+);
+
+main: IO ();
+main = do {
+    FFI_CALL_IO[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr].lift;;
+    test_label
+}.try(eprintln);
+
+/*
+type [cm: * -> *] LabelPair cm a b = box struct {
+    label0: Label cm a b,
+    label1: Label cm a b,
+    code: I64,
+};
+
+coroutine0: [cm: MonadCont] LabelPair cm a b -> cm (LabelPair cm a b);
+coroutine0 = |lp| (
+    eval debug_eprintln("coroutine0 a");
+    let lp = lp.set_code(0);
+    let label0 = *Label::make(lp);
+    let lp = label0.@arg;
+    let lp = lp.set_label0(label0);
+    if lp.@code == 0 {
+        pure $ lp
+    };
+    if lp.@code < 1 {
+        lp.@label1.jump(lp)
+    };
+    eval debug_eprintln("coroutine0 b");
+    let lp = lp.set_code(2);
+    let label0 = *Label::make(lp);
+    let lp = label0.@arg;
+    let lp = lp.set_label0(label0);
+    if lp.@code == 2 {
+        pure $ lp
+    };
+    if lp.@code < 3 {
+        lp.@label1.jump(lp)
+    };
+    eval debug_eprintln("coroutine0 c");
+    pure $ lp
+);
+
+coroutine1: [cm: MonadCont] LabelPair cm a b -> cm (LabelPair cm a b);
+coroutine1 = |lp| (
+    eval debug_eprintln("coroutine1 a");
+    let lp = lp.set_code(1);
+    let label1 = *Label::make(lp);
+    let lp = label1.@arg;
+    let lp = lp.set_label1(label1);
+    if lp.@code == 1 {
+        pure $ lp
+    };
+    if lp.@code < 2 {
+        lp.@label0.jump(lp)
+    };
+    eval debug_eprintln("coroutine1 b");
+    let lp = lp.set_code(3);
+    let label1 = *Label::make(lp);
+    let lp = label1.@arg;
+    let lp = lp.set_label1(label1);
+    if lp.@code == 3 {
+        pure $ lp
+    };
+    if lp.@code < 4 {
+        lp.@label0.jump(lp)
+    };
+    eval debug_eprintln("coroutine1 c");
+    pure $ lp
+);
+*/
+
+
+/*
+type Yield y a = box union {
+    y_pure: a,
+    y_yield: y -> a,
+};
+
+
+yield: I64 -> Generator I64;
+yield = |i| ...;
+
+generator1: Generator I64;
+generator1 = (
+    loop_m(
+        (0, 1), |(i, j)|
+        if i >= 100 { break_m $ i };
+        let j = *yield(i);
+        continue_m $ (i + j, j)
+    )
+);
+*/

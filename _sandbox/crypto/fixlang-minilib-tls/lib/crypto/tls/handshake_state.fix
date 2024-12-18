@@ -45,6 +45,7 @@ type HandshakeInitParam = box struct {
     cert_api: CertApi,
     server_name: String,
     session_start_time: CerTime,
+    skip_cert_verify: Bool,
 };
 
 type HandshakeState = unbox union {
@@ -301,7 +302,8 @@ namespace AfterServerHello {
         };
 
         // verify certificate
-        eval *_verify_certificate(handshakes, protection, init_param);
+        eval *_verify_certificate(handshakes, protection, init_param)
+            .unless(init_param.@skip_cert_verify);
 
         // check finished
         eval *_check_handshakes_order(handshakes.map(@0));
@@ -341,6 +343,7 @@ namespace AfterServerHello {
 
     _verify_certificate: [m: MonadError] Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> m ();
     _verify_certificate = |handshakes, protection, init_param| (
+        eval *pure();   // make it lazy
         eval log_debug("_verify_certificate");
         // find Certificate and CertificateVerify Handshake record
         let opt_certificate = handshakes.find_by(|(h,_)| h.is_certificate);
@@ -386,6 +389,7 @@ namespace AfterServerHello {
 
     _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
     _verify_server_finished = |handshakes, protection| (
+        eval log_debug("_verify_server_finished");
         let size = handshakes.get_size;
         let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
         let finished = handshakes.@(size - 1).@0.as_finished;
@@ -460,6 +464,7 @@ namespace AfterFinished {
 
     _make_client_finished: Protection -> Result ErrMsg (Array U8, TLSCiphertext, Protection);
     _make_client_finished = |protection| (
+        eval log_debug("_make_client_finished");
         let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::client_tk());
         let client_finished = Finished { verify_data: verify_data };
         let handshake = Handshake::finished $ client_finished;

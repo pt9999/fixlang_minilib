@@ -69,12 +69,17 @@ impl HttpClientRequest: ToBytes {
 
 type HttpClient = unbox struct {
     save_certificates: Bool,
+    ts_init_param: TLSSessionInitParam,
 };
 
 namespace HttpClient {
     empty: HttpClient;
     empty = HttpClient {
-        save_certificates: false
+        save_certificates: false,
+        ts_init_param: TLSSessionInitParam {
+            server_name: "",
+            skip_cert_verify: false,
+        },
     };
 
     fetch: HttpClientRequest -> HttpClient -> IOFail HttpClientResponse;
@@ -126,9 +131,10 @@ namespace HttpClient {
         let host_port = url.@host + ":" + url.@port;
         let path = url.@path;
 
+        let client = client.mod_ts_init_param(set_server_name(host));
         let socket: Socket = *connect_to_tcp_server(host_port);
         let tls_socket: TLSSocket = TLSSocket::make(socket).set_debug(true);
-        let session: TLSSession = *TLSSession::make(tls_socket, host);
+        let session: TLSSession = *TLSSession::make(tls_socket, client.@ts_init_param);
         let sm: StateTLSSession HttpClientResponse = do {
             eval *establish_handshake;
 

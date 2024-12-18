@@ -30,10 +30,16 @@ import Minilib.Net.Tcp;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
+type TLSSessionInitParam = box struct {
+    server_name: String,
+    skip_cert_verify: Bool,
+};
+
 type TLSSession = unbox struct {
     socket: TLSSocket,
     secure_random: SecureRandom,
-    init_param: HandshakeInitParam,
+    ts_init_param: TLSSessionInitParam,
+    hs_init_param: HandshakeInitParam,
     handshake_state: HandshakeState,
 };
 
@@ -46,30 +52,34 @@ type StateTLSSession = StateT TLSSession IOFail;
 
 namespace TLSSession {
     // Creates a TLSSession object.
-    make: TLSSocket -> String -> IOFail TLSSession;
-    make = |socket, server_name| (
+    make: TLSSocket -> TLSSessionInitParam -> IOFail TLSSession;
+    make = |socket, ts_init_param| (
         let secure_random = *SecureRandom::make;
-        let init_param = *_make_init_param(server_name);
+        let hs_init_param = *_make_hs_init_param(ts_init_param);
         let handshake_state = *HandshakeState::make;
         pure $ TLSSession {
             socket: socket,
             secure_random: secure_random,
-            init_param: init_param,
+            ts_init_param: ts_init_param,
+            hs_init_param: hs_init_param,
             handshake_state: handshake_state,
         }
     );
 
-    _make_init_param: String -> IOFail HandshakeInitParam;
-    _make_init_param = |server_name| (
+    _make_hs_init_param: TLSSessionInitParam -> IOFail HandshakeInitParam;
+    _make_hs_init_param = |ts_init_param| (
         let cipher_api = *make_cipher_api.from_result_t;
         let cert_api = *make_cert_api(cipher_api).from_result_t;
         let cert_api = *@load_ca_certificates(cert_api);
-        let now = *@get_now(cert_api).lift;
+        let server_name = ts_init_param.@server_name;
+        let session_start_time = *@get_now(cert_api).lift;
+        let skip_cert_verify = ts_init_param.@skip_cert_verify;
         pure $ HandshakeInitParam {
             cipher_api: cipher_api,
             cert_api: cert_api,
             server_name: server_name,
-            session_start_time: now,
+            session_start_time: session_start_time,
+            skip_cert_verify: skip_cert_verify,
         }
     );
 
@@ -141,8 +151,8 @@ namespace TLSSession {
     _send_client_hello =  (
         eval *pure();
         let session = *get_state;
-        let init_param = session.@init_param;
-        eval *(HandshakeState::start_handshake(init_param) >> lift_random).lift_hstate;
+        let hs_init_param = session.@hs_init_param;
+        eval *(HandshakeState::start_handshake(hs_init_param) >> lift_random).lift_hstate;
         eval *HandshakeState::send_records.lift_hstate;
         pure()
     );

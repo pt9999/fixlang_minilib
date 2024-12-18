@@ -19,6 +19,7 @@ import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.Random;
 import Minilib.Monad.BytesIO;
+import Minilib.Trait.Traversable;
 import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 
@@ -360,7 +361,7 @@ namespace AfterServerHello {
         )
     );
 
-    _verify_certificate: [m: MonadError] Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> m ();
+    _verify_certificate: Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> IOFail ();
     _verify_certificate = |handshakes, protection, init_param| (
         eval *pure();   // make it lazy
         eval log_debug("_verify_certificate");
@@ -384,8 +385,18 @@ namespace AfterServerHello {
 
         eval log_debug("validating date");
         eval *@validate_date(cert_path_api, init_param.@session_start_time).from_result_t;
+
         eval log_debug("validating certificate signatures");
-        eval *@validate_certificate_signatures(cert_path_api, ()).from_result_t;
+        eval *do {
+            let array_lazy: Array (Lazy (Result ErrMsg ())) = @validate_certificate_signatures_mt(cert_path_api, ());
+            let tasks: Array (IOTask (Result ErrMsg ())) = *array_lazy.map_m(|lazy|
+                lift $ AsyncIOTask::make $ do {
+                    eval *pure();
+                    pure $ lazy()
+                }
+            );
+            tasks.foreach_m(|task| task.get.from_io_result)
+        };
 
         let cerficate_api_array = @get_certificates(cert_path_api, ());
         if cerficate_api_array.get_size == 0 { error $ "cert_path is empty" };
@@ -402,9 +413,9 @@ namespace AfterServerHello {
         eval *@verify_signature_by_subject_public_key(cerficate_api, content, sig_scheme, signature).from_result_t;
 
         eval log_debug("verifying certificate identity");
-        eval *@verify_certificate_identity(cerficate_api, init_param.@server_name);
+        eval *@verify_certificate_identity(cerficate_api, init_param.@server_name).from_result_t;
         pure()
-    ).from_result_t;
+    );
 
     _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
     _verify_server_finished = |handshakes, protection| (

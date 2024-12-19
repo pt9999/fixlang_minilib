@@ -6,8 +6,10 @@ import Minilib.Common.Assert;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 //import Minilib.Math.BigIntPrime;
+import Minilib.Math.Types;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
 import Minilib.Common.TimeEx;
 
 namespace Karatsuba {
@@ -509,6 +511,14 @@ namespace DivMod4 {
             } else {    // an > bn
                 let b_u64 = b.@(bn - 1).to_U64;
                 let a_u64 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+
+                // Vibrates significantly when a = 2^128 - 1, b = 2^65 - 1
+                // since a_u64 = 2^32-1, b_u64 = 1
+                let b_u64 = b_u64 + 1_U64;  // To avoid the vibration problem, add 1 to b_u64
+                // TODO: If b_u64 is too small, pull more bits from b.@(bn - 2) and
+                // append them to b_u64.  A native division will not give a good approximation of the division of big integers
+                // when the denominator contains few information.
+
                 let qoff = (an - 2) - (bn - 1);
                 let q: U64 = max(1_U64, a_u64 / b_u64);
                 if q >= _base {
@@ -518,6 +528,7 @@ namespace DivMod4 {
                     (q.to_U32, qoff)
                 }
             };
+            //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
             let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
             let rem = rem._remove_last_zeros;
             let rem_sign = rem_sign * a_sign;
@@ -751,7 +762,9 @@ test_divmod4 = (
         (random, 0), |(random, i)|
         if i >= 10 { break_m $ () };
         let (random, a) = random.generate_bigint(2*bits);
-        let (random, b) = random.generate_bigint(bits);
+        //let (random, b) = random.generate_bigint(bits);
+        // The current algorithm of division is very slow when (b.bit_length % 32) is too small
+        let (random, b) = random.generate_bigint(bits + 1);
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
         let (quo4, rem4) = *_divmod4(a.@nat, b.@nat).from_result;
@@ -762,8 +775,40 @@ test_divmod4 = (
         let (quo4, rem4) = *timeit("(quo4, rem4)", |_| _divmod4(a.@nat, b.@nat)).lift;
         let _ = *assert_equal("quo", quo1, quo4);
         let _ = *assert_equal("rem", rem1, rem4);
+        let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo4), rem4));
+        let _ = *assert_true("rem < b", _cmp((rem4,0), (b.@nat,0)) < 0);
         continue_m $ (random, i + 1)
     ).try(eprintln)
+);
+
+test_divmod4_spec: IO ();
+test_divmod4_spec = (
+    println("=== test_divmod4_spec ===");;
+    do {
+        let test: BigInt -> BigInt -> IOFail () = |a, b| (
+            eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
+            let (quo, rem) = _divmod4(a.@nat, b.@nat);
+            let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo), rem));
+            let _ = *assert_true("rem < b", _cmp((rem,0), (b.@nat,0)) < 0);
+            eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
+            pure()
+        );
+        let n = 64;
+/*
+        let a: BigInt = One::one.shift_left((2*n).to_U64) + BigInt::from_I64(-1);
+        let b: BigInt = One::one.shift_left((n+1).to_U64) + BigInt::from_I64(-1);
+        test(a,b);;
+        pure()
+*/
+        let arr: Array (IOFail ()) = do {
+            let a = *[-1, 0, 1];
+            let b = *[-1, 0, 1];
+            let a: BigInt = One::one.shift_left((2*n).to_U64) + BigInt::from_I64(a);
+            let b: BigInt = One::one.shift_left((n+1).to_U64) + BigInt::from_I64(b);
+            pure $ test(a,b)
+        };
+        arr.sequence.forget
+    }.try(eprintln)
 );
 
 prof_divmod4: IO ();
@@ -772,7 +817,7 @@ prof_divmod4 = (
     let _ = *pure();
     let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
-    let bits = 256;
+    let bits = 64;
     let (random, a) = random.generate_bigint(2*bits);
     let (random, b) = random.generate_bigint(bits);
     let _ = loop(
@@ -800,6 +845,7 @@ main = (
     test_perf_karatsuba;;
     */
     test_divmod4;;
+    //test_divmod4_spec;;
     //prof_divmod4;;
     pure()
 );

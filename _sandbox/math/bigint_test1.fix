@@ -2,6 +2,7 @@ module Main;
 
 import Random;
 
+import Minilib.Common.Assert;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 //import Minilib.Math.BigIntPrime;
@@ -13,7 +14,7 @@ namespace Karatsuba {
 
     _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
     _get_sub_or_zero = |begin, end, a| (
-        eval assert(|_| "invalid range", begin < end);
+        assert_lazy(|_| "invalid range", begin < end) $ |_|
         let n = a.get_size;
         if begin >= n { BigNat::_zero };
         let end = min(end, n);
@@ -284,7 +285,7 @@ namespace DivMod3 {
             continue $ (a2, i + 1, borrow)
         );
         if borrow > 0_U64 {
-            eval assert(|_| "should not reach here", false);
+            assert_lazy(|_| "should not reach here", false) $ |_|
             err $ "underflow"
         };
         ok $ (a2, offset2)
@@ -308,7 +309,7 @@ namespace DivMod3 {
 
         let a0 = a0._remove_last_zeros;
         let a1 = a1._remove_last_zeros;
-        eval assert(|_| "Divide by zero", a1 != [ 0_U32 ]);
+        assert_lazy(|_| "Divide by zero", a1 != [ 0_U32 ]) $ |_|
         if a1.get_size == 1 {
             let (quo, rem) = _divmod_u32(a0, a1.@(0));
             (quo, [rem])
@@ -316,7 +317,7 @@ namespace DivMod3 {
         let a1_shift_table = _make_shift_table(a1);
         let n0 = a0.get_size;
         let n1 = a1.get_size;
-        eval assert(|_| "Invalid array size", n0 > 0 && n1 > 0);
+        assert_lazy(|_| "Invalid array size", n0 > 0 && n1 > 0) $ |_|
         if n0 < n1 {
             ([0_U32], a0)
         };
@@ -361,6 +362,111 @@ namespace DivMod3 {
         );
         let a2 = a2._remove_last_zeros;
         (a2, a0)
+    );
+
+}
+
+namespace DivMod4 {
+    // Calculates `a - b * pow(_base, b_offset) * q`.
+    // returns the result and the sign.
+    _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_with_offset_mul = |a, b, q, b_offset| (
+        let na = a.get_size;
+        let nb = b.get_size + b_offset;
+        let na = max(na, nb + 1 /*for q*/);
+        let a = loop(
+            a, |a|
+            if a.get_size >= na { break $ a };
+            continue $ a.push_back(0_U32)
+        );
+        let (a, borrow) = loop(
+            (a, 0, 0_U64), |(a, i, borrow)|
+            if i >= na  {
+                break $ (a, borrow)
+            };
+            let a_u32: U32 = a.@(i);
+            let b_u32: U32 = if b_offset <= i && i < nb { b.@(i - b_offset) } else { 0_U32 };
+            let sub_u64: U64 = b_u32.to_U64 * q.to_U64 + borrow;
+            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
+            let sub_lo: U32 = sub_lo.to_U32;
+
+            let (borrow, a_u32) = if a_u32 >= sub_lo {
+                (sub_hi, a_u32 - sub_lo)
+            } else {
+                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+            };
+            let a = a.set(i, a_u32);
+            continue $ (a, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            let a = a._neg;
+            let a = a._remove_last_zeros;
+            (a, -1)
+        };
+        let a = a._remove_last_zeros;
+        (a, 1)
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod4: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod4 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
+        if b.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a, b.@(0));
+            (quo, [rem])
+        };
+        let (quo, rem, rem_sign) = loop(
+            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
+            let an = a.get_size;
+            let bn = b.get_size;
+            if an < bn {
+                break $ (quo, a, a_sign)
+            };
+            let (q:U32, qoff: I64) = if an == bn {
+                let b_u32 = b.@(bn - 1);
+                let a_u32 = a.@(an - 1);
+                let q: U32 = max(1_U32, a_u32 / b_u32);
+                let qoff = (an - 1) - (bn - 1);
+                (q, qoff)
+            } else {    // an > bn
+                let b_u64 = b.@(bn - 1).to_U64;
+                let a_u64 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                let qoff = (an - 2) - (bn - 1);
+                let q: U64 = max(1_U64, a_u64 / b_u64);
+                if q >= _base {
+                    let q = q / _base;
+                    (q.to_U32, qoff + 1)
+                } else {
+                    (q.to_U32, qoff)
+                }
+            };
+            let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 {
+                _add_with_offset1(quo, ([q], qoff))
+            } else {
+                let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), ([q], qoff));
+                assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
+                quo
+            };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue $ (quo, rem, rem_sign)
+        );
+        if rem_sign > 0 || rem == BigNat::_zero {
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        }
     );
 
 }
@@ -581,8 +687,34 @@ test_perf_karatsuba = (
     )
 );
 
+test_divmod4: IO ();
+test_divmod4 = (
+    println("=== test_divmod4 ===");;
+    let random = Random::init_by_seed(124_U64); // time.to_U64);
+    let bits = 256;
+    loop_m(
+        (random, 0), |(random, i)|
+        if i >= 10 { break_m $ () };
+        let (random, a) = random.generate_bigint(2*bits);
+        let (random, b) = random.generate_bigint(bits);
+        /*
+        let (quo1, rem1) = _divmod(a.@nat, b.@nat);
+        let (quo4, rem4) = *_divmod4(a.@nat, b.@nat).from_result;
+        let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
+        let _ = *println((quo4, rem4).format("quo4={} rem4={}")).lift;
+        */
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
+        let (quo4, rem4) = *timeit("(quo4, rem4)", |_| _divmod4(a.@nat, b.@nat)).lift;
+        let _ = *assert_equal("quo", quo1, quo4);
+        let _ = *assert_equal("rem", rem1, rem4);
+        continue_m $ (random, i + 1)
+    ).try(eprintln)
+);
+
+
 main: IO ();
 main = (
+    /*
     test_karatsuba;;
     test_divmod;;
     test_exp;;
@@ -593,6 +725,8 @@ main = (
     //prof_divmod3;;
     test_perf_div;;
     test_perf_karatsuba;;
+    */
+    test_divmod4;;
     pure()
 );
 

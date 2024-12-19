@@ -367,6 +367,82 @@ namespace DivMod3 {
 }
 
 namespace DivMod4 {
+    // Appends trailing zeros until the size of the array is at least the specified size.
+    _append_last_zeros: I64 -> Array U32 -> Array U32;
+    _append_last_zeros = |n, a| (
+        loop (
+            a, |a|
+            if a.get_size >= n { break $ a };
+            continue $ a.push_back(0_U32)
+        )
+    );
+
+    // Calculates `a0 + a1 * _base ^ offset1`.
+    _add_u32_with_offset1: Array U32 -> U32 -> I64 -> Array U32;
+    _add_u32_with_offset1 = |a0, a1, offset1| (
+        let n0 = a0.get_size;
+        let n1 = 1 + offset1;
+        let n2 = max(n0, n1);
+        let a0 = a0._append_last_zeros(n2);
+        loop(
+            (a0, offset1, 0_U64), |(a0, i, carry)|
+            if i >= n2 {
+                let a0 = if carry == 0_U64 { a0 }
+                else { a0.push_back(carry.to_U32) };
+                break $ a0
+            };
+            if i >= n1 && carry == 0_U64 {
+                break $ a0
+            };
+            let d0: U32 = a0.@(i);
+            let d1: U32 = if i == offset1 { a1 } else { 0_U32 };
+            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a0 = a0.set(i, d2.to_U32);
+            continue $ (a0, i + 1, carry)
+        )._remove_last_zeros
+    );
+
+    // Calculates `a - b * pow(_base, b_offset)`.
+    // returns the result and the sign.
+    _signed_sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_u32_with_offset = |a, b, b_offset| (
+        let na = a.get_size;
+        let nb = 1 + b_offset;
+        let na = max(na, nb);
+        let a = a._append_last_zeros(na);
+        let (a, borrow) = loop(
+            (a, b_offset, 0_U64), |(a, i, borrow)|
+            if i >= na  {
+                break $ (a, borrow)
+            };
+            if i >= nb && borrow == 0_U64 {
+                break $ (a, borrow)
+            };
+            let a_u32: U32 = a.@(i);
+            let b_u32: U32 = if i == b_offset { b } else { 0_U32 };
+            let sub_u64: U64 = b_u32.to_U64 + borrow;
+            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
+            let sub_lo: U32 = sub_lo.to_U32;
+
+            let (borrow, a_u32) = if a_u32 >= sub_lo {
+                (sub_hi, a_u32 - sub_lo)
+            } else {
+                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+            };
+            let a = a.set(i, a_u32);
+            continue $ (a, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            let a = a._neg;
+            let a = a._remove_last_zeros;
+            (a, -1)
+        };
+        let a = a._remove_last_zeros;
+        (a, 1)
+    );
+
+
     // Calculates `a - b * pow(_base, b_offset) * q`.
     // returns the result and the sign.
     _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
@@ -374,14 +450,13 @@ namespace DivMod4 {
         let na = a.get_size;
         let nb = b.get_size + b_offset;
         let na = max(na, nb + 1 /*for q*/);
-        let a = loop(
-            a, |a|
-            if a.get_size >= na { break $ a };
-            continue $ a.push_back(0_U32)
-        );
+        let a = a._append_last_zeros(na);
         let (a, borrow) = loop(
-            (a, 0, 0_U64), |(a, i, borrow)|
+            (a, b_offset, 0_U64), |(a, i, borrow)|
             if i >= na  {
+                break $ (a, borrow)
+            };
+            if i >= nb && borrow == 0_U64 {
                 break $ (a, borrow)
             };
             let a_u32: U32 = a.@(i);
@@ -447,9 +522,9 @@ namespace DivMod4 {
             let rem = rem._remove_last_zeros;
             let rem_sign = rem_sign * a_sign;
             let quo = if a_sign > 0 {
-                _add_with_offset1(quo, ([q], qoff))
+                _add_u32_with_offset1(quo, q, qoff)
             } else {
-                let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), ([q], qoff));
+                let (quo, sign) = _signed_sub_u32_with_offset(quo, q, qoff);
                 assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
                 quo
             };
@@ -624,26 +699,6 @@ test_divmod3 = (
     ).try(eprintln)
 );
 
-prof_divmod3: IO ();
-prof_divmod3 = (
-    println("=== prof_divmod3 ===");;
-    let _ = *pure();
-    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
-    let random = Random::init_by_seed(123_U64); // time.to_U64);
-    let bits = 256;
-    let (random, a) = random.generate_bigint(2*bits);
-    let (random, b) = random.generate_bigint(bits);
-    let _ = loop(
-        0, |i|
-        if i >= 1000000 { break $ () };
-        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
-        let (quo, rem) = _divmod3(a.@nat, b.@nat);
-        continue $ i + 1
-    );
-    pure()
-);
-
-
 test_perf_div: IO ();
 test_perf_div = (
     println("=== test_perf_div ===");;
@@ -711,6 +766,24 @@ test_divmod4 = (
     ).try(eprintln)
 );
 
+prof_divmod4: IO ();
+prof_divmod4 = (
+    println("=== prof_divmod4 ===");;
+    let _ = *pure();
+    let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    let (random, a) = random.generate_bigint(2*bits);
+    let (random, b) = random.generate_bigint(bits);
+    let _ = loop(
+        0, |i|
+        if i >= 1000000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = _divmod4(a.@nat, b.@nat);
+        continue $ i + 1
+    );
+    pure()
+);
 
 main: IO ();
 main = (
@@ -727,6 +800,7 @@ main = (
     test_perf_karatsuba;;
     */
     test_divmod4;;
+    //prof_divmod4;;
     pure()
 );
 

@@ -5,7 +5,7 @@ import Minilib.Monad.IO;
 import Minilib.Monad.Error;
 import Minilib.Trait.Traversable;
 
-// A monadic iterator, ie. a monad transformer of an array.
+// A monadic array, ie. a monad transformer of an array.
 type [m: * -> *] ArrayT m a = box struct {
     data: m (Array a)
 };
@@ -18,6 +18,19 @@ namespace ArrayT {
     // Creates an empty monadic array.
     empty: [m: Monad] ArrayT m a;
     empty = make $ pure $ [];
+
+    // Creates an monadic array from an array.
+    from_array: [m: Monad] Array a -> ArrayT m a;
+    from_array = |arr| make $ pure $ arr;
+
+    // Converts an monadic array to a monad of an array.
+    to_array_m: [m: * -> *] ArrayT m a -> m (Array a);
+    to_array_m = @data;
+
+    // Synonym of `to_array_m`.
+    run_array_t: [m: * -> *] ArrayT m a -> m (Array a);
+    run_array_t = @data;
+
 }
 
 impl [m: Functor] ArrayT m: Functor {
@@ -27,7 +40,7 @@ impl [m: Functor] ArrayT m: Functor {
     );
 }
 
-impl [m: Monad] IteratorT m: Monad {
+impl [m: Monad] ArrayT m: Monad {
     // Creates a monadic array of a single element.
     pure = |x| make $ pure $ [x];
     // Binds a function to a monadic array with comprehension of elements.
@@ -35,8 +48,39 @@ impl [m: Monad] IteratorT m: Monad {
     bind = |f, xs| (
         make $ do {
             let arr = *xs.@data;            // Array a
-            let arr = arr.map(f >> @data);  // Array (m b)
-            arr.sequence                    // m (Array b)
+            let arr = arr.map(f >> @data);  // Array (m (Array b))
+            let arr = *arr.sequence;        // Array (Array b)
+            pure $ arr.flatten              // m (Array b)
         }
     );
+}
+
+impl ArrayT: MonadTrans {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from the monad.
+    lift_t = |ma| (
+        make $ ma.bind(pure >> pure)
+    );
+}
+
+impl [m: MonadError] ArrayT m: MonadErrorIF {
+    // Creates a monadic array which causes an error.
+    error = lift_t << error;
+
+    // Catches an error of a monadic array.
+    catch = |handler, xs| (
+        ArrayT::make $ xs.@data.catch(handler >> @data)
+    );
+}
+
+impl [m: MonadIO] ArrayT m: MonadIOIF {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from an `IO a`.
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] ArrayT m: MonadIOFailIF {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from an `IOFail a`.
+    lift_iofail = lift_t << lift_iofail;
 }

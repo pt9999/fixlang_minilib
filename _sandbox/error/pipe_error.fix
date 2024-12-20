@@ -1,0 +1,64 @@
+/*
+Compiler panicks with the following error:
+
+$ RUST_BACKTRACE=1 fix run -f pipe_error.fix
+thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', src/ast/program.rs:1167:23
+stack backtrace:
+   0: rust_begin_unwind
+             at /rustc/d5c2e9c342b358556da91d61ed4133f6f50fc0c3/library/std/src/panicking.rs:593:5
+   1: core::panicking::panic_fmt
+             at /rustc/d5c2e9c342b358556da91d61ed4133f6f50fc0c3/library/core/src/panicking.rs:67:14
+   2: core::panicking::panic
+             at /rustc/d5c2e9c342b358556da91d61ed4133f6f50fc0c3/library/core/src/panicking.rs:117:5
+   3: fix::ast::program::Program::instantiate_exported_value
+   4: fix::ast::program::Program::instantiate_main_function
+   5: fix::runner::build_file
+   6: fix::runner::run_file
+   7: fix::main
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+*/
+module Main;
+
+type Pipe a b r = box union {
+    p_pure: r,
+    p_read: a -> Pipe a b r,
+    p_write: (b, () -> Pipe a b r),
+};
+
+namespace Pipe {
+    read: Pipe a b a;
+    read = p_read $ p_pure;
+
+    write: b -> Pipe a b ();
+    write = |b| p_write $ (b, |_| p_pure());
+}
+
+impl Pipe a b: Functor {
+    map = |f, pipe| (
+        match pipe {
+            p_pure(r) => p_pure(f(r)),
+            p_read(fa) => p_read(fa >> map(f)),
+            p_write((b, next)) => p_write((b, next >> map(f))),
+        }
+    );
+}
+
+impl Pipe a b: Monad {
+    pure = p_pure;
+    bind = |f, pipe| (
+        match pipe {
+            p_pure(r) => f(r),
+            p_read(fa) => p_read(|a| fa(a).bind(f)),
+            p_write((b, next)) => p_write((b, |_| next().bind(f))),
+        }
+    );
+}
+
+main: IO ();
+main = (
+    let pipe: Pipe I64 String () = do {
+        let a = *read;
+        write(a.to_string)
+    };
+    pure()
+);

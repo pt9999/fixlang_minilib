@@ -1,0 +1,141 @@
+module Main;
+
+import Minilib.Common.Assert;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+namespace RingBuffer {
+    type RingBuffer a = unbox struct {
+        array: Array a,             // array of elements
+        empty_value: a,             // empty value of `a`
+        write_pos: I64,             // write position
+        read_pos: I64               // read position
+    };
+
+    // Creates an empty ring buffer with specified capacity.
+    // The internal array is initialized with `zero`.
+    make: [a: Zero] I64 ->  RingBuffer a;
+    make = |capacity| (
+        make_with_empty(capacity, zero)
+    );
+
+    // Creates an empty ring buffer with specified capacity.
+    // The internal array is initialized with specified initial value.
+    // The initial value is used when the element of buffer does not contain a value.
+    make_with_empty: I64 -> a -> RingBuffer a;
+    make_with_empty = |capacity, empty_value| (
+        eval assert(|_| "invalid capacity", capacity >= 0);
+        RingBuffer {
+            array: Array::fill(capacity + 1, empty_value),
+            empty_value: empty_value,
+            write_pos: 0,
+            read_pos: 0
+        }
+    );
+
+    // Returns the capacity of a ring buffer.
+    get_capacity: RingBuffer a -> I64;
+    get_capacity = |ring_buf| (
+        ring_buf.@array.get_size - 1
+    );
+
+    // Returns the number of values hold in a ring buffer.
+    get_size: RingBuffer a -> I64;
+    get_size = |ring_buf| (
+        let n = ring_buf.@array.get_size;
+        (ring_buf.@write_pos + n - ring_buf.@read_pos) % n
+    );       
+     
+    // Checks whether a ring buffer is empty.
+    is_empty: RingBuffer a -> Bool;
+    is_empty = |ring_buf| (
+        ring_buf.@write_pos == ring_buf.@read_pos
+    );
+
+    // Checks whether a ring buffer is full.
+    _is_full: RingBuffer a -> Bool;
+    _is_full = |ring_buf| (
+        ring_buf.get_size == ring_buf.get_capacity
+    );
+
+    _grow: RingBuffer a -> RingBuffer a;
+    _grow = |ring_buf| (
+        let size = ring_buf.@array.get_size;
+        assert_lazy(|_| "invalid size", size > 0) $ |_|
+        let grow_size = size;
+        let new_size = size + grow_size;
+        let read_pos = ring_buf.@read_pos;
+        let write_pos = ring_buf.@write_pos;
+        ring_buf.mod_array(|array|
+            if read_pos <= write_pos {
+                loop(
+                    array, |array|
+                    if array.get_size >= new_size { break $ array };
+                    continue $ array.push_back(ring_buf.@empty_value)
+                )
+            };
+            Array::from_map(new_size, |i|
+                if i < write_pos { array.@(i) };
+                if i >= read_pos + grow_size { array.@(i - grow_size) };
+                ring_buf.@empty_value
+            )
+        ) 
+    );
+
+    // Pushes a value into a ring buffer.
+    // The ring buffer will grow when it is full.
+    push: a -> RingBuffer a -> Result ErrMsg (RingBuffer a);
+    push = |value, ring_buf| (
+        let ring_buf = if ring_buf._is_full {
+            ring_buf._grow
+        } else { ring_buf };
+        assert_lazy(|_| "cannot push", !ring_buf._is_full) $ |_|
+        let write_pos = ring_buf.@write_pos;
+        let ring_buf = ring_buf.mod_array(set(write_pos, value));
+        let ring_buf = ring_buf.set_write_pos(
+            if write_pos < ring_buf.@array.get_size - 1 { write_pos + 1 } else { 0 }
+        );
+        ok $ ring_buf
+    );
+
+    // Pops a value from a ring buffer.
+    // If the ring buffer is empty, an error is returned.
+    pop: RingBuffer a -> Result ErrMsg (a, RingBuffer a);
+    pop = |ring_buf| (
+        if ring_buf.is_empty { err $ "ring buffer is empty" };
+        let read_pos = ring_buf.@read_pos;
+        let value = ring_buf.@array.@(read_pos);
+        // set initial value so that `value` is released
+        let ring_buf = ring_buf.mod_array(set(read_pos, ring_buf.@empty_value));
+        let ring_buf = ring_buf.set_read_pos(
+            if read_pos < ring_buf.@array.get_size - 1 { read_pos + 1 } else { 0 }
+        );
+        ok $ (value, ring_buf)
+    );
+}
+
+main: IO ();
+main = (
+    do {
+        let capacity = 10;
+        let ring_buf = RingBuffer::make(capacity);
+        let n = 100;
+        let iter = Iterator::range(0, n);
+        let ring_buf = *iter.fold_m(
+            ring_buf, |ring_buf, value|
+            ring_buf.push(value).from_result
+        );
+        let ring_buf = *iter.fold_m(
+            ring_buf, |ring_buf, value| 
+            let (popped_value, ring_buf) = *ring_buf.pop.from_result;
+            let _ = *assert_equal("pop", value, popped_value);
+            pure $ ring_buf
+        );
+        let _ = *assert_true("is_empty", ring_buf.is_empty);
+        let _ = *assert_true("pop on empty", ring_buf.pop.is_err);
+        let _ = *assert_equal("array is cleared", Array::fill(ring_buf.@array.get_size, 0), ring_buf.@array);
+        let _ = *println("OK").lift;
+        pure()
+    }.try(eprintln)
+);
+

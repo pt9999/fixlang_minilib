@@ -1,0 +1,42 @@
+module Minilib.Monad.ArrayT;
+
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
+
+// A monadic iterator, ie. a monad transformer of an array.
+type [m: * -> *] ArrayT m a = box struct {
+    data: m (Array a)
+};
+
+namespace ArrayT {
+    // Creates an monadic array from a monad of an array.
+    make: [m: * -> *] m (Array a) -> ArrayT m a;
+    make = |data| ArrayT { data: data };
+
+    // Creates an empty monadic array.
+    empty: [m: Monad] ArrayT m a;
+    empty = make $ pure $ [];
+}
+
+impl [m: Functor] ArrayT m: Functor {
+    // Maps every element of a monadic array by a function.
+    map = |f, xs| (
+        make $ xs.@data.map(map(f))
+    );
+}
+
+impl [m: Monad] IteratorT m: Monad {
+    // Creates a monadic array of a single element.
+    pure = |x| make $ pure $ [x];
+    // Binds a function to a monadic array with comprehension of elements.
+    // Similar to `bind` function for `Array`.
+    bind = |f, xs| (
+        make $ do {
+            let arr = *xs.@data;            // Array a
+            let arr = arr.map(f >> @data);  // Array (m b)
+            arr.sequence                    // m (Array b)
+        }
+    );
+}

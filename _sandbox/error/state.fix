@@ -1,0 +1,51 @@
+/*
+以下のように panic する。
+
+thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', src/ast/program.rs:931:23
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+*/
+
+
+module Main;
+
+type State s a = unbox struct { _data: s -> (a, s) };
+
+namespace State {
+    make_state_monad: (s -> (a, s)) -> State s a;
+    make_state_monad = |f| State { _data: f };
+
+    run_state: s -> State s a -> (a, s);
+    run_state = |s, ma| (ma.@_data) (s);
+}
+
+impl State s: Monad {
+    pure = |a| make_state_monad $ |s| (a, s);
+    bind = |f, ma| make_state_monad $ |s|
+        let (a, ss) = ma.run_state(s);
+        f(a).run_state(ss);
+}
+
+trait [m: * -> *] m: GetPutState {
+    get_state: m s;
+    put_state: s -> m ();
+}
+
+impl State s: GetPutState {
+    get_state = make_state_monad $ |s| (s, s);
+    put_state = |s| make_state_monad $ |_| ((), s);
+}
+
+trait StateMonad = Monad + GetPutState;
+
+statefunc: [m: StateMonad] m ();
+statefunc = (
+    let i: I64 = *get_state;
+    let _ = *put_state(i + 1);
+    pure()
+);
+
+main: IO ();
+main = (
+    let _ = statefunc.run_state("abc");
+    pure()
+);

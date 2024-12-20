@@ -9,7 +9,7 @@ type Pipe a b r = box union {
     p_write: (b, () -> Pipe a b r),
 };
 
-// A data type that is uninhabited, i.e. it should not have any instances.
+// A data type which has no instances (uninhabited).
 type Void = box union {
     _void: Void
 };
@@ -23,12 +23,12 @@ namespace Pipe {
         }
     );
 
-    to_iter: Pipe Void a () -> Iterator a;
+    to_iter: Pipe a b () -> Iterator b;
     to_iter = |pipe| (
         match pipe {
             p_pure() => Iterator::empty,
-            p_read(fa) => undefined("cannot read Void"),
-            p_write((b, next)) => Iterator { next: |_| some $ (b, next().to_iter )},
+            p_read(fa) => Iterator::empty,      // no more input
+            p_write((b, next)) => Iterator { next: |_| some $ (b, next().to_iter) },
         }
     );
 
@@ -38,25 +38,29 @@ namespace Pipe {
     write: b -> Pipe a b ();
     write = |b| p_write $ (b, |_| p_pure());
 
-    comp: Pipe a b () -> Pipe b c () -> Pipe a c ();
-    comp = |pab, pbc| (
+    compose: Pipe a b () -> Pipe b c () -> Pipe a c ();
+    compose = |pab, pbc| (
         match pbc {
-            p_pure(r) => p_pure(r),
-            p_write((c, next)) => p_write((c, |_| comp(pab, next()))),
+            p_pure() => p_pure(),
+            p_write((c, next)) => p_write((c, |_| compose(pab, next()))),
             p_read(fb) => match pab {
-                p_pure(r) => p_pure(r),     // unexpected EOF
+                p_pure() => p_pure(),   // no more input
                 p_write((b, next)) => (
                     let pbc = fb(b);
                     let pab = next();
-                    comp(pab, pbc)
+                    compose(pab, pbc)
                 ),
                 p_read(fa) => p_read(|a|
                     let pab = fa(a);
-                    comp(pab, pbc)
+                    compose(pab, pbc)
                 ),
             }
         }
     );
+
+    // Flipped version of `compose`.
+    composeF: Pipe b c () -> Pipe a b () -> Pipe a c ();
+    composeF = |pbc, pab| compose(pab, pbc);
 }
 
 impl [b: ToString, r: ToString] Pipe a b r: ToString {
@@ -86,7 +90,7 @@ impl Pipe a c: Monad {
         match pipe {
             p_pure(r) => f(r),
             p_read(fa) => p_read(fa >> bind(f)),
-            p_write((b, next)) => p_write((b, |_| next().bind(f))),
+            p_write((b, next)) => p_write((b, next >> bind(f))),
         }
     );
 }

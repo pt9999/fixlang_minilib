@@ -48,9 +48,9 @@ For details, see README.md in [fixlang-minilib-examples](https://github.com/pt99
 
 ### Registy File
 
-You might want to add [registry.toml](registry.toml) to your `${HOME}/.fixproj.toml`.
+You might want to add [registry.toml](registry.toml) to your `${HOME}/.fixconfig.toml`.
 For example:
-```toml:~/.fixproj.toml
+```toml:~/.fixconfig.toml
 registries = [
     "https://raw.githubusercontent.com/pt9999/fixlang_minilib/refs/heads/main/registry.toml"
 ]

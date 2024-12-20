@@ -23,14 +23,26 @@ namespace ArrayT {
     from_array: [m: Monad] Array a -> ArrayT m a;
     from_array = |arr| make $ pure $ arr;
 
+    // Synonym of `from_array`.
+    lift_array: [m: Monad] Array a -> ArrayT m a;
+    lift_array = from_array;
+
     // Converts an monadic array to a monad of an array.
     to_array_m: [m: * -> *] ArrayT m a -> m (Array a);
     to_array_m = @data;
 
     // Synonym of `to_array_m`.
     run_array_t: [m: * -> *] ArrayT m a -> m (Array a);
-    run_array_t = @data;
+    run_array_t = to_array_m;
 
+    // Converts an monadic array of monads to an monadic array.
+    run_sequence: [m: Monad] ArrayT m (m a) -> ArrayT m a;
+    run_sequence = |ma| (
+        let ma = ma.@data;                    // m (Array (m a))
+        let ma = ma.bind(sequence >> pure);   // m (m (Array a))
+        let ma = ma.flatten;                  // m (Array a)
+        make $ ma                             // ArrayT m a
+    );
 }
 
 impl [m: Functor] ArrayT m: Functor {
@@ -83,4 +95,14 @@ impl [m: MonadIOFail] ArrayT m: MonadIOFailIF {
     // Creates a monadic array of a single element,
     // whose value is lifted from an `IOFail a`.
     lift_iofail = lift_t << lift_iofail;
+}
+
+impl [m: Monad, m: Traversable] ArrayT m: Traversable {
+    sequence /*: [n: Monad] ArrayT m (n a) -> n (ArrayT m a) */ = |ma| (
+        let ma = ma.@data;                    // m (Array (n a))
+        let ma = ma.bind(sequence >> pure);   // m (n (Array a))
+        let ma = ma.sequence;                 // n (m (Array a))
+        let ma = ma.bind(ArrayT::make >> pure);       // n (ArrayT m a)
+        ma
+    );
 }

@@ -8,11 +8,23 @@ import Minilib.Monad.Trans;
 // Similar to `Pipe` monad in Haskell.
 // https://hackage.haskell.org/package/pipes-1.0/docs/Control-PipeT-Common.html
 
+// `PipeT a b m r` represents a pipeline, which reads values from the upstream,
+// and writes values to the downstream.
+// - `a`: the type of input
+// - `b`: the type of output
+// - `m`: the type of underlying monad
+// - `r`: the type of the `PipeT` monad result
+//
+// A pipe consists of steps, which are:
+// - `p_pure` step, which terminates the pipe.
+// - `p_read` step, which reads a value from the upstream.
+// - `p_write` step, which writes a value to the downstream.
+// - `p_monad` step, which performs a monad.
 type [m: * -> *] PipeT a b m r = box union {
     p_pure: r,
     p_read: a -> PipeT a b m r,
-    p_monad: m (PipeT a b m r),
     p_write: (b, () -> PipeT a b m r),
+    p_monad: m (PipeT a b m r),
 };
 
 // A data type which has no instances (uninhabited).
@@ -31,6 +43,7 @@ namespace PipeT {
 
     to_iter_t: [m: Monad] PipeT a b m () -> IteratorT m b;
     to_iter_t = |pipe| (
+        //eval debug_eprintln("to_iter_t: pipe=" + pipe.to_string);
         match pipe {
             p_pure() => IteratorT::empty,
             p_read(fa) => IteratorT::empty,      // no more input
@@ -56,6 +69,7 @@ namespace PipeT {
 
     compose: [m: Monad] PipeT a b m () -> PipeT b c m () -> PipeT a c m ();
     compose = |pab, pbc| (
+        //eval debug_eprintln("compose: pab=" + pab.to_string + " pbc=" + pbc.to_string);
         match pbc {
             p_pure() => p_pure(),
             p_monad(mbc) => p_monad(do {
@@ -87,13 +101,13 @@ namespace PipeT {
     composeF = |pbc, pab| compose(pab, pbc);
 }
 
-impl [b: ToString, r: ToString, m: Monad] PipeT a b m r: ToString {
+impl [m: Monad] PipeT a b m r: ToString {
     to_string = |pipe| (
         match pipe {
-            p_pure(r) => "p_pure(" + r.to_string + ")",
+            p_pure(r) => "p_pure(...)",
             p_read(fa) => "p_read(...)",
             p_monad(mab) => "p_monad(...)",
-            p_write((b, next)) => "p_write((" + b.to_string + ", ...))",
+            p_write((b, next)) => "p_write((b, ...))",
         }
     );
 }
@@ -139,18 +153,26 @@ impl PipeT a b: MonadTrans {
 impl [m: MonadError] PipeT a b m: MonadErrorIF {
     error = lift_t << error;
 
-    // Catches an error at any element of a monadic iterator.
-    // If retrieving any element of the monadic iterator causes an error,
-    // that element and the tail part is replaced by the handler.
+    // Catches an error at any monadic step (`p_monad`) in a pipe.
+    // If an error is caught, the remaining steps are replaced by the handler.
     catch = |handler, pipe| (
         match pipe {
             p_pure(r) => p_pure(r),
-            p_monad(mab) => p_monad(do {
-                let pab = *mab;
-                pure $ pab.catch(handler)
-            }),
-            p_read(fa) => p_read(fa >> bind(catch(handler) >> pure)),
-            p_write((b, next)) => p_write((b, next >> bind(catch(handler) >> pure))),
+            p_monad(mab) => p_monad(
+                do {
+                    let pab = *mab;
+                    pure $ pab.catch(handler)   // after the monadic step is performed successfully, catch errors in the remaining steps
+                }.catch(handler >> pure)    // catch errors during the monadic step is performed
+            /*
+            // this does not work
+                do {
+                    let pab = *mab.catch(handler >> pure);  // if handler returns a new steps which have errors
+                    pure $ pab.catch(handler)   // then the new steps are handled by the same handler, so we fall into the infinite loop
+                }
+            */
+            ),
+            p_read(fa) => p_read(fa >> catch(handler)),
+            p_write((b, next)) => p_write((b, next >> catch(handler))),
         }
     );
 }

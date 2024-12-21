@@ -47,6 +47,7 @@ namespace IteratorT {
     // Creates a monadic iterator from an iterator of monads of elements.
     from_m_iter: [m: Monad] Iterator (m a) -> IteratorT m a;
     from_m_iter = |xs| IteratorT::make $ do {
+        pure();;    // make it lazy, since it may be an infinite iterator
         match xs.advance {
             none() => pure $ none(),
             some((x, xs2)) => pure $ some((*x, IteratorT::from_m_iter(xs2)))
@@ -56,6 +57,7 @@ namespace IteratorT {
     // Creates a monadic iterator from an iterator of elements.
     from_iter: [m: Monad] Iterator a -> IteratorT m a;
     from_iter = |xs| IteratorT::make $ do {
+        pure();;    // make it lazy, since it may be an infinite iterator
         match xs.advance {
             none() => pure $ none(),
             some((x, xs2)) => pure $ some((x, IteratorT::from_iter(xs2)))
@@ -106,6 +108,33 @@ namespace IteratorT {
             let accum = *op(accum, next);
             continue_m $ (accum, iter)
         ))
+    );
+
+    // Takes at most n elements from a monadic iterator.
+    take : [m : Monad] I64 -> IteratorT m a -> IteratorT m a;
+    take = |n, iter| (
+        IteratorT::make $ do {
+            if n <= 0 { pure $ none() };
+            match *iter.advance {
+                none() => pure $ none(),
+                some((a, next)) => pure $ some $ (a, next.take(n-1))
+            }
+        }
+    );
+
+    // Skips at most n elements from a monadic iterator.
+    skip: [m : Monad] I64 -> IteratorT m a -> IteratorT m a;
+    skip = |n, iter| (
+        IteratorT::make $ do {
+            loop_m(
+                (0, iter), |(i, iter)|
+                if i >= n { break_m $ *iter.advance };
+                match *iter.advance {
+                    none() => break_m $ none(),
+                    some((a, iter)) => continue_m $ (i + 1, iter)
+                }
+            )
+        }
     );
 }
 

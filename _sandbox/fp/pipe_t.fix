@@ -1,0 +1,163 @@
+module Minilib.Monad.PipeT;
+
+import Minilib.Monad.IteratorT;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+
+// Similar to `Pipe` monad in Haskell.
+// https://hackage.haskell.org/package/pipes-1.0/docs/Control-PipeT-Common.html
+
+type [m: * -> *] PipeT a b m r = box union {
+    p_pure: r,
+    p_read: a -> PipeT a b m r,
+    p_monad: m (PipeT a b m r),
+    p_write: (b, () -> PipeT a b m r),
+};
+
+// A data type which has no instances (uninhabited).
+type Void = box union {
+    _void: Void
+};
+
+namespace PipeT {
+    from_iter: [m: Monad] Iterator a -> PipeT Void a m ();
+    from_iter = |iter| (
+        match iter.advance {
+            none() => p_pure $ (),
+            some((a, next)) => p_write $ (a, |_| from_iter(next))
+        }
+    );
+
+    to_iter_t: [m: Monad] PipeT a b m () -> IteratorT m b;
+    to_iter_t = |pipe| (
+        match pipe {
+            p_pure() => IteratorT::empty,
+            p_read(fa) => IteratorT::empty,      // no more input
+            p_monad(mab) => IteratorT::make $ do {
+                let pipe = *mab;
+                pipe.to_iter_t.advance
+            },
+            p_write((b, next)) => IteratorT::make $ do {
+                pure();;    // make it lazy
+                pure $ some $ (b, next().to_iter_t)
+            },
+        }
+    );
+
+    read: [m: Monad] PipeT a b m a;
+    read = p_read $ p_pure;
+
+    write: [m: Monad] b -> PipeT a b m ();
+    write = |b| p_write $ (b, |_| p_pure());
+
+    compose: [m: Monad] PipeT a b m () -> PipeT b c m () -> PipeT a c m ();
+    compose = |pab, pbc| (
+        match pbc {
+            p_pure() => p_pure(),
+            p_monad(mbc) => p_monad(do {
+                let pbc = *mbc;
+                pure $ compose(pab, pbc)
+            }),
+            p_write((c, next)) => p_write((c, |_| compose(pab, next()))),
+            p_read(fb) => match pab {
+                p_pure() => p_pure(),   // no more input
+                p_monad(mab) => p_monad(do {
+                    let pab = *mab;
+                    pure $ compose(pab, pbc)
+                }),
+                p_write((b, next)) => (
+                    let pbc = fb(b);
+                    let pab = next();
+                    compose(pab, pbc)
+                ),
+                p_read(fa) => p_read(|a|
+                    let pab = fa(a);
+                    compose(pab, pbc)
+                ),
+            }
+        }
+    );
+
+    // Flipped version of `compose`.
+    composeF: [m: Monad] PipeT b c m () -> PipeT a b m () -> PipeT a c m ();
+    composeF = |pbc, pab| compose(pab, pbc);
+}
+
+impl [b: ToString, r: ToString, m: Monad] PipeT a b m r: ToString {
+    to_string = |pipe| (
+        match pipe {
+            p_pure(r) => "p_pure(" + r.to_string + ")",
+            p_read(fa) => "p_read(...)",
+            p_monad(mab) => "p_monad(...)",
+            p_write((b, next)) => "p_write((" + b.to_string + ", ...))",
+        }
+    );
+}
+
+impl [m: Monad] PipeT a b m: Functor {
+    map = |f, pipe| (
+        match pipe {
+            p_pure(r) => p_pure(f(r)),
+            p_monad(mab) => p_monad(do {
+                let pab = *mab;
+                pure $ pab.map(f)
+            }),
+            p_read(fa) => p_read(fa >> map(f)),
+            p_write((b, next)) => p_write((b, next >> map(f))),
+        }
+    );
+}
+
+impl [m: Monad] PipeT aa bb m: Monad {
+    pure = p_pure;
+    bind = |f, pipe| (
+        match pipe {
+            p_pure(r) => f(r),
+            p_monad(mab) => p_monad(do {
+                let pab = *mab;
+                pure $ pab.bind(f)
+            }),
+            p_read(fa) => p_read(fa >> bind(f)),
+            p_write((b, next)) => p_write((b, next >> bind(f))),
+        }
+    );
+}
+
+impl PipeT a b: MonadTrans {
+    lift_t = |mr| (
+        p_monad(do {
+            let r = *mr;
+            pure $ p_pure(r)
+        })
+    );
+}
+
+impl [m: MonadError] PipeT a b m: MonadErrorIF {
+    error = lift_t << error;
+
+    // Catches an error at any element of a monadic iterator.
+    // If retrieving any element of the monadic iterator causes an error,
+    // that element and the tail part is replaced by the handler.
+    catch = |handler, pipe| (
+        match pipe {
+            p_pure(r) => p_pure(r),
+            p_monad(mab) => p_monad(do {
+                let pab = *mab;
+                pure $ pab.catch(handler)
+            }),
+            p_read(fa) => p_read(fa >> bind(catch(handler) >> pure)),
+            p_write((b, next)) => p_write((b, next >> bind(catch(handler) >> pure))),
+        }
+    );
+}
+
+
+impl [m: MonadIO] PipeT a b m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] PipeT a b m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
+}
+

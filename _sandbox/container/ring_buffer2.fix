@@ -1,6 +1,7 @@
 module Main;
 
 import Minilib.Common.Assert;
+//import Minilib.Common.TimeEx;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
@@ -10,6 +11,17 @@ type RingBuffer a = unbox struct {
     write_pos: I64,             // write position
     read_pos: I64               // read position
 };
+
+// For debugging
+impl RingBuffer a: ToString {
+    to_string = |rb| (
+        "RingBuffer {"
+        + " array_size:" + rb.@array.get_size.to_string
+        + " write_pos:" + rb.@write_pos.to_string
+        + " read_pos:" + rb.@read_pos.to_string
+        + " }"
+    );
+}
 
 namespace RingBuffer {
     // Creates an empty ring buffer with specified capacity.
@@ -64,6 +76,7 @@ namespace RingBuffer {
         assert_lazy(|_| "invalid size", size > 0) $ |_|
         let grow_size = size;
         let new_size = size + grow_size;
+        eval debug_println("size,new_size="+(size,new_size).to_string);
         let read_pos = ring_buf.@read_pos;
         let write_pos = ring_buf.@write_pos;
         ring_buf.mod_array(|array|
@@ -112,44 +125,52 @@ namespace RingBuffer {
         );
         some $ (value, ring_buf)
     );
+
+    // Pushes all elements in an array into a ring buffer.
+    // The ring buffer will grow when it is full.
+    push_many: Array a -> RingBuffer a -> RingBuffer a;
+    push_many = |arr, ring_buf| (
+        arr.to_iter.fold(
+            ring_buf, |ring_buf, value|
+            ring_buf.push(value)
+        )
+    );
+
+    // Pops at most `n` elements from a ring buffer.
+    pop_many: I64 -> RingBuffer a -> (Array a, RingBuffer a);
+    pop_many = |n, ring_buf| (
+        let arr = Array::empty(n);
+        Iterator::range(0, n).loop_iter(
+            (arr, ring_buf), |(arr, ring_buf), i|
+            match ring_buf.pop {
+                none() => break $ (arr, ring_buf),
+                some((value, ring_buf)) => continue $ (arr.push_back(value), ring_buf)
+            }
+        )
+    );
 }
-
-push_many: Array a -> RingBuffer a -> RingBuffer a;
-push_many = |arr, ring_buf| (
-    arr.to_iter.fold(
-        ring_buf, |ring_buf, value|
-        ring_buf.push(value)
-    )
-);
-
-pop_many: I64 -> RingBuffer a -> (Array a, RingBuffer a);
-pop_many = |max_size, ring_buf| (
-    let arr = Array::empty(max_size);
-    Iterator::range(0, max_size).loop_iter(
-        (arr, ring_buf), |(arr, ring_buf), i|
-        match ring_buf.pop {
-            none() => break $ (arr, ring_buf),
-            some((value, ring_buf)) => continue $ (arr.push_back(value), ring_buf)
-        }
-    )
-);
-
 
 main: IO ();
 main = (
     do {
-        let capacity = 7;
+        let capacity = 8;
         let rb = RingBuffer::make(capacity);
         let array_range = |begin, end| Iterator::range(begin, end).to_array;
         let rb = rb.push_many(array_range(0, 30));
+        println(rb.to_string).lift;;
         let (arr, rb) = rb.pop_many(10);
+        println(rb.to_string).lift;;
         assert_equal("arr", array_range(0, 10), arr);;
         let rb = rb.push_many(array_range(30, 40));
+        println(rb.to_string).lift;;
         let (arr, rb) = rb.pop_many(55);
+        println(rb.to_string).lift;;
         assert_equal("arr", array_range(10, 40), arr);;
         let rb = rb.push_many(array_range(50, 60));
+        println(rb.to_string).lift;;
         let (arr, rb) = rb.pop_many(10);
         assert_equal("arr", array_range(50, 60), arr);;
+        println(rb.to_string).lift;;
         pure()
     }.try(eprintln)
 );

@@ -1,0 +1,95 @@
+module Minilib.Terminal.Ncurses;
+
+type Ncurses = unbox struct {
+    dtor: Destructor ()
+};
+
+namespace Ncurses {
+    run: (Ncurses -> IOFail ()) -> IOFail ();
+    run = |runner| (
+        FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
+        let ncurses = Ncurses {
+            dtor: Destructor::make((), |_|
+                FFI_CALL_IO[() minilib_ncurses_finialize()];;
+                println("finalize done");;
+                pure()
+            )
+        };
+        runner(ncurses);;
+        eval ncurses;
+        pure()
+    );
+}
+
+type Window = unbox struct {
+    dtor: Destructor Ptr
+};
+
+namespace Window {
+    make: I64 -> I64 -> I64 -> I64 -> Ncurses -> IOFail Window;
+    make = |x, y, w, h, ncurses| (
+        let p_win = *FFI_CALL_IO[Ptr newwin(CInt, CInt, CInt, CInt), h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt].lift;
+        if p_win == nullptr {
+            throw $ "newwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
+        };
+        let win = Window {
+            dtor: Destructor::make(p_win, |p_win|
+                FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
+                pure $ nullptr
+            )
+        };
+        pure $ win
+    );
+
+    get_default_window: Ncurses -> IOFail Window;
+    get_default_window = |ncurses| (
+        let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_default_window()].lift;
+        pure $ Window {
+            dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
+        }
+    );
+
+    _check_cint_err: String -> Window -> (Ptr -> IO CInt) -> IOFail ();
+    _check_cint_err = |name, win, ffi_call_io| (
+        let err = *win.@dtor.borrow_io(|p_win| ffi_call_io(p_win)).lift;
+        if err != 0.to_CInt { throw $ name + " failed!" };
+        pure()
+    );
+
+    clear: Window -> IOFail ();
+    clear = |win| (
+        win._check_cint_err("clear") $ |p_win|
+        FFI_CALL_IO[CInt erase(Ptr), p_win]
+    );
+
+    move_to: I64 -> I64 -> Window -> IOFail ();
+    move_to = |x, y, win| (
+        win._check_cint_err("move_to") $ |p_win|
+        FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.to_CInt, x.to_CInt]
+    );
+
+    add_str: String -> Window -> IOFail ();
+    add_str = |str, win| (
+        win._check_cint_err("add_str") $ |p_win|
+        str.borrow_c_str_io(|p_str|
+            FFI_CALL_IO[CInt waddstr(Ptr, Ptr), p_win, p_str]
+        )
+    );
+
+    move_add_str: I64 -> I64 -> String -> Window -> IOFail ();
+    move_add_str = |x, y, str, win| (
+        win._check_cint_err("move_add_str") $ |p_win|
+        str.borrow_c_str_io(|p_str|
+            FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_str]
+        )
+    );
+
+    getch: Window -> IOFail I64;
+    getch = |win| (
+        //let c: I64 = undefined("getch failed");
+        win.@dtor.borrow_io(|p_win|
+            FFI_CALL_IO[CInt wgetch(Ptr), p_win]
+        ).map(to_I64).lift
+    );
+
+}

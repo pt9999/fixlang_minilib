@@ -81,6 +81,21 @@ namespace ControlSequence {
     );
 }
 
+namespace Keys {
+    // Returns a character that corresponds to a control key.
+    // For example, `ctrl('C') == 3_U8`.
+    ctrl: U8 -> U8;
+    ctrl = |c| (
+        if 'A' <= c && c <= 'Z' { c - 'A' + 1_U8 };
+        if 'a' <= c && c <= 'z' { c - 'a' + 1_U8 };
+        0_U8
+    );
+
+    // A character that represents Escape key.
+    esc: U8;
+    esc = 0x1b_U8;
+}
+
 // A structure to make the standard input to noncanonical mode (a.k.a raw-mode).
 type RawMode = unbox struct {
     dtor: Destructor ()
@@ -96,26 +111,26 @@ namespace RawMode {
         eval debug_eprintln("fileno="+fileno.to_string);
         let old_termios = Array::fill(120, 0_U8);
         let res = *old_termios.borrow_boxed(|p_old_termios|
-            FFI_CALL_IO[I32 tcgetattr(I32, Ptr), 0_I32, p_old_termios]
+            FFI_CALL_IO[CInt tcgetattr(CInt, Ptr), 0.to_CInt, p_old_termios]
         ).lift;
-        if res != 0_I32 {
+        if res.to_I64 != 0 {
             throw $ "tcgetattr failed: " + *get_last_error.lift
         };
         let termios = Array::fill(120, 0_U8);
         let res = *termios.borrow_boxed(|p_termios|
             FFI_CALL_IO[() cfmakeraw(Ptr), p_termios];;
-            FFI_CALL_IO[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_termios]
+            FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_termios]
         ).lift;
-        if res != 0_I32 {
+        if res.to_I64 != 0 {
             throw $ "tcsetattr failed: " + *get_last_error.lift
         };
 
         let dtor = Destructor::make((), |_|
             // eval debug_eprintln ("destructor is called");
             let res = *old_termios.borrow_boxed(|p_old_termios|
-                FFI_CALL_IO[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_old_termios]
+                FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_old_termios]
             );
-            if res != 0_I32 {
+            if res.to_I64 != 0 {
                 undefined("tcsetattr failed: res="+res.to_string)
             };
             pure()

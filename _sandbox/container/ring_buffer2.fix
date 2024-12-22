@@ -4,14 +4,14 @@ import Minilib.Common.Assert;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
-namespace RingBuffer {
-    type RingBuffer a = unbox struct {
-        array: Array a,             // array of elements
-        empty_value: a,             // empty value of `a`
-        write_pos: I64,             // write position
-        read_pos: I64               // read position
-    };
+type RingBuffer a = unbox struct {
+    array: Array a,             // array of elements
+    empty_value: a,             // empty value of `a`
+    write_pos: I64,             // write position
+    read_pos: I64               // read position
+};
 
+namespace RingBuffer {
     // Creates an empty ring buffer with specified capacity.
     // The internal array is initialized with `zero`.
     make: [a: Zero] I64 ->  RingBuffer a;
@@ -84,7 +84,7 @@ namespace RingBuffer {
 
     // Pushes a value into a ring buffer.
     // The ring buffer will grow when it is full.
-    push: a -> RingBuffer a -> Result ErrMsg (RingBuffer a);
+    push: a -> RingBuffer a -> RingBuffer a;
     push = |value, ring_buf| (
         let ring_buf = if ring_buf._is_full {
             ring_buf._grow
@@ -95,14 +95,14 @@ namespace RingBuffer {
         let ring_buf = ring_buf.set_write_pos(
             if write_pos < ring_buf.@array.get_size - 1 { write_pos + 1 } else { 0 }
         );
-        ok $ ring_buf
+        ring_buf
     );
 
     // Pops a value from a ring buffer.
-    // If the ring buffer is empty, an error is returned.
-    pop: RingBuffer a -> Result ErrMsg (a, RingBuffer a);
+    // If the ring buffer is empty, `none()` is returned.
+    pop: RingBuffer a -> Option (a, RingBuffer a);
     pop = |ring_buf| (
-        if ring_buf.is_empty { err $ "ring buffer is empty" };
+        if ring_buf.is_empty { none() };
         let read_pos = ring_buf.@read_pos;
         let value = ring_buf.@array.@(read_pos);
         // set initial value so that `value` is released
@@ -110,31 +110,46 @@ namespace RingBuffer {
         let ring_buf = ring_buf.set_read_pos(
             if read_pos < ring_buf.@array.get_size - 1 { read_pos + 1 } else { 0 }
         );
-        ok $ (value, ring_buf)
+        some $ (value, ring_buf)
     );
 }
+
+push_many: Array a -> RingBuffer a -> RingBuffer a;
+push_many = |arr, ring_buf| (
+    arr.to_iter.fold(
+        ring_buf, |ring_buf, value|
+        ring_buf.push(value)
+    )
+);
+
+pop_many: I64 -> RingBuffer a -> (Array a, RingBuffer a);
+pop_many = |max_size, ring_buf| (
+    let arr = Array::empty(max_size);
+    Iterator::range(0, max_size).loop_iter(
+        (arr, ring_buf), |(arr, ring_buf), i|
+        match ring_buf.pop {
+            none() => break $ (arr, ring_buf),
+            some((value, ring_buf)) => continue $ (arr.push_back(value), ring_buf)
+        }
+    )
+);
+
 
 main: IO ();
 main = (
     do {
-        let capacity = 10;
-        let ring_buf = RingBuffer::make(capacity);
-        let n = 100;
-        let iter = Iterator::range(0, n);
-        let ring_buf = *iter.fold_m(
-            ring_buf, |ring_buf, value|
-            ring_buf.push(value).from_result
-        );
-        let ring_buf = *iter.fold_m(
-            ring_buf, |ring_buf, value| 
-            let (popped_value, ring_buf) = *ring_buf.pop.from_result;
-            let _ = *assert_equal("pop", value, popped_value);
-            pure $ ring_buf
-        );
-        let _ = *assert_true("is_empty", ring_buf.is_empty);
-        let _ = *assert_true("pop on empty", ring_buf.pop.is_err);
-        let _ = *assert_equal("array is cleared", Array::fill(ring_buf.@array.get_size, 0), ring_buf.@array);
-        let _ = *println("OK").lift;
+        let capacity = 7;
+        let rb = RingBuffer::make(capacity);
+        let array_range = |begin, end| Iterator::range(begin, end).to_array;
+        let rb = rb.push_many(array_range(0, 30));
+        let (arr, rb) = rb.pop_many(10);
+        assert_equal("arr", array_range(0, 10), arr);;
+        let rb = rb.push_many(array_range(30, 40));
+        let (arr, rb) = rb.pop_many(55);
+        assert_equal("arr", array_range(10, 40), arr);;
+        let rb = rb.push_many(array_range(50, 60));
+        let (arr, rb) = rb.pop_many(10);
+        assert_equal("arr", array_range(50, 60), arr);;
         pure()
     }.try(eprintln)
 );

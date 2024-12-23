@@ -5,7 +5,7 @@ type Ncurses = unbox struct {
 };
 
 namespace Ncurses {
-    run: (Ncurses -> IOFail ()) -> IOFail ();
+    run: (Window -> IOFail ()) -> IOFail ();
     run = |runner| (
         FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
         let ncurses = Ncurses {
@@ -15,9 +15,18 @@ namespace Ncurses {
                 pure()
             )
         };
-        runner(ncurses);;
+        let win = *ncurses.get_standard_window;
+        runner(win);;
         eval ncurses;
         pure()
+    );
+
+    get_standard_window: Ncurses -> IOFail Window;
+    get_standard_window = |ncurses| (
+        let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_standard_window()].lift;
+        pure $ Window {
+            dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
+        }
     );
 }
 
@@ -26,8 +35,8 @@ type Window = unbox struct {
 };
 
 namespace Window {
-    make: I64 -> I64 -> I64 -> I64 -> Ncurses -> IOFail Window;
-    make = |x, y, w, h, ncurses| (
+    make_new_window: I64 -> I64 -> I64 -> I64 -> Window -> IOFail Window;
+    make_new_window = |x, y, w, h, orig| (
         let p_win = *FFI_CALL_IO[Ptr newwin(CInt, CInt, CInt, CInt), h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt].lift;
         if p_win == nullptr {
             throw $ "newwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
@@ -41,12 +50,31 @@ namespace Window {
         pure $ win
     );
 
-    get_default_window: Ncurses -> IOFail Window;
-    get_default_window = |ncurses| (
-        let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_default_window()].lift;
-        pure $ Window {
-            dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
-        }
+    make_sub_window: I64 -> I64 -> I64 -> I64 -> Window -> IOFail Window;
+    make_sub_window = |x, y, w, h, parent| (
+        let p_win = *parent.@dtor.borrow_io(|p_parent|
+            FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt]
+        ).lift;
+        if p_win == nullptr {
+            throw $ "subwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
+        };
+        let win = Window {
+            dtor: Destructor::make(p_win, |p_win|
+                FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
+                pure $ nullptr
+            )
+        };
+        pure $ win
+    );
+
+    get_window_size: Window -> IOFail (I64, I64);
+    get_window_size = |win| (
+        let ret = *win.@dtor.borrow_io(|p_win|
+            FFI_CALL_IO[CInt minilib_ncurses_get_window_size(Ptr), p_win]
+        ).lift;
+        let w = ret.to_I64.shift_right(16).bit_and(0xffff);
+        let h = ret.to_I64.bit_and(0xffff);
+        pure $ (w, h)
     );
 
     _check_cint_err: String -> Window -> (Ptr -> IO CInt) -> IOFail ();
@@ -60,6 +88,24 @@ namespace Window {
     clear = |win| (
         win._check_cint_err("clear") $ |p_win|
         FFI_CALL_IO[CInt erase(Ptr), p_win]
+    );
+
+    draw_border: Window -> IOFail ();
+    draw_border = |win| (
+        win._check_cint_err("draw_border") $ |p_win|
+        FFI_CALL_IO[CInt minilib_ncurses_draw_border(Ptr), p_win]
+    );
+
+    set_attr: ChType -> Window -> IOFail ();
+    set_attr = |chtype, win| (
+        win._check_cint_err("set_attr") $ |p_win|
+        FFI_CALL_IO[CInt wattrset(Ptr, U32), p_win, chtype]
+    );
+
+    set_color: I64 -> Attr -> Window -> IOFail ();
+    set_color = |color_pair, attr, win| (
+        win._check_cint_err("set_color") $ |p_win|
+        FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.to_U16, nullptr]
     );
 
     move_to: I64 -> I64 -> Window -> IOFail ();
@@ -86,10 +132,84 @@ namespace Window {
 
     getch: Window -> IOFail I64;
     getch = |win| (
-        //let c: I64 = undefined("getch failed");
         win.@dtor.borrow_io(|p_win|
             FFI_CALL_IO[CInt wgetch(Ptr), p_win]
         ).map(to_I64).lift
     );
 
+}
+
+type Color = I64;
+
+namespace Color {
+    black: Color;
+    black = 0;
+
+    red: Color;
+    red = 1;
+
+    green: Color;
+    green = 2;
+
+    yellow: Color;
+    yellow = 3;
+
+    blue: Color;
+    blue = 4;
+
+    magenta: Color;
+    magenta = 5;
+
+    cyan: Color;
+    cyan = 6;
+
+    white: Color;
+    white = 7;
+}
+
+type ColorPair = I64;
+
+namespace ColorPair {
+    init_color_pair: ColorPair -> Color -> Color -> IOFail ();
+    init_color_pair = |color_pair, fore_color, back_color| (
+        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
+        if err != 0.to_CInt { throw $ "init_color_pair failed!" };
+        pure()
+    );
+
+    color_pair: I64 -> ChType;
+    color_pair = |i| (i.bit_and(255)).to_U32.shift_left(8_U32);
+}
+
+type ChType = U32;
+
+_ncurses_bits: ChType -> ChType -> ChType;
+_ncurses_bits = |shift, mask| mask.shift_left(shift + 8_U32);
+
+type Attr = ChType;
+
+make_attr: ColorPair -> Attr -> ChType;
+make_attr = |pair, attr| (
+    color_pair(pair).bit_or(attr)
+);
+
+namespace Attr {
+
+    normal: Attr;
+    normal = 0_U32;
+
+    underline: Attr;
+    underline = 1_U32._ncurses_bits(9_U32);
+
+    reverse: Attr;
+    reverse = 1_U32._ncurses_bits(10_U32);
+
+    blink: Attr;
+    blink = 1_U32._ncurses_bits(11_U32);
+
+    dim: Attr;
+    dim = 1_U32._ncurses_bits(12_U32);
+
+    bold: Attr;
+    bold = 1_U32._ncurses_bits(13_U32);
 }

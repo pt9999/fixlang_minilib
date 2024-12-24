@@ -42,7 +42,7 @@ namespace CustomColorPair {
     );
 }
 
-type FileItem = unbox struct {
+type FileItem = box struct {
     file_name: String,
     file_path: String,
     stat: FileStat,
@@ -75,6 +75,7 @@ namespace FileItem {
 type FileListView = unbox struct {
     window: Window,
     dir_path: String,
+    file_items: Array FileItem,
     scroll_top: I64,
     selected_index: I64,
 };
@@ -82,11 +83,33 @@ type FileListView = unbox struct {
 namespace FileListView {
     make: Window -> String -> IOFail FileListView;
     make = |window, dir_path| (
+        let file_items = *get_file_items(dir_path);
         pure $ FileListView {
             window: window,
             dir_path: dir_path,
+            file_items: file_items,
             scroll_top: 0,
             selected_index: -1,
+        }
+    );
+
+    get_selected_item: FileListView -> Option FileItem;
+    get_selected_item = |file_list_view| (
+        let file_items = file_list_view.@file_items;
+        let selected_index = file_list_view.@selected_index;
+        if 0 <= selected_index && selected_index < file_items.get_size {
+            some $ file_items.@(selected_index)
+        } else {
+            none()
+        }
+    );
+
+    select_item_by_name: String -> FileListView -> IOFail FileListView;
+    select_item_by_name = |name, file_list_view| (
+        let file_items = file_list_view.@file_items;
+        match file_items.find_by(|item| item.@file_name == name) {
+            none() => pure $ file_list_view,
+            some(index) => pure $ file_list_view.set_selected_index(index)
         }
     );
 
@@ -95,13 +118,14 @@ namespace FileListView {
         let FileListView {
             window: window,
             dir_path: dir_path,
+            file_items: file_items,
             scroll_top: scroll_top,
             selected_index: selected_index
         } = file_list_view;
-        let file_items = *get_file_items(dir_path);
-        let (w, h) = *window.get_window_size;
+
         window.clear;;
 
+        let (w, h) = *window.get_window_size;
         loop_m(
             0, |y|
             let file_index = y + scroll_top;
@@ -121,6 +145,58 @@ namespace FileListView {
         window.move_add_str(2, 0, " " + dir_path + " ");;
         pure()
     );
+
+    handle_keys: FileListView -> IOFail FileListView;
+    handle_keys = |file_list_view| (
+        let FileListView {
+            window: window,
+            file_items: file_items
+        } = file_list_view;
+        let c = (*window.getch).to_U8;
+        if c == 'q' || c == 'Q' || c == 0x1b_U8 {
+            throw $ "Quit"
+        };
+        if c == 'j' {
+            pure $ file_list_view.mod_selected_index(|index| min(file_items.get_size - 1, index + 1))
+        };
+        if c == 'k' {
+            pure $ file_list_view.mod_selected_index(|index| max(0, index - 1))
+        };
+        if c == '\n' {
+            file_list_view.command_enter
+        };
+        if c == '^' {
+            file_list_view.command_up_directory
+        };
+        pure $ file_list_view
+    );
+
+    command_enter: FileListView -> IOFail FileListView;
+    command_enter = |file_list_view| (
+        let opt = file_list_view.get_selected_item;
+        if opt.is_none {
+            pure $ file_list_view
+        };
+        let item = opt.as_some;
+        if ! item.@stat.is_dir {
+            pure $ file_list_view
+        };
+        let dir_path = item.@file_path;
+        FileListView::make(file_list_view.@window, dir_path)
+    );
+
+    command_up_directory: FileListView -> IOFail FileListView;
+    command_up_directory = |file_list_view| (
+        let dir_path = file_list_view.@dir_path;
+        if dir_path == "/" {
+            pure $ file_list_view
+        };
+        let dir_name = Path::basename(dir_path);
+        let parent_path = Path::dirname(dir_path);
+        let file_list_view = *FileListView::make(file_list_view.@window, parent_path);
+        let file_list_view = *file_list_view.select_item_by_name(dir_name);
+        pure $ file_list_view
+    );
 }
 
 main: IO ();
@@ -128,8 +204,10 @@ main = do {
     Ncurses::run $ |win| (
         init_custom_color_pairs;;
         let file_list_view = *FileListView::make(win, *realpath("."));
-        file_list_view.show;;
-        let c = *win.getch;
-        pure()
+        loop_m(
+            file_list_view, |file_list_view|
+            file_list_view.show;;
+            continue_m $ *file_list_view.handle_keys
+        )
     )
 }.try(eprintln);

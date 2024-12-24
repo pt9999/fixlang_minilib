@@ -28,6 +28,15 @@ namespace StringUtils {
         let pad = Array::fill(pad_size, char)._unsafe_to_string;
         pad + str
     );
+
+    ellipsis: I64 -> String -> String;
+    ellipsis = |result_size, str| (
+        let str_size = str.get_size;
+        let result_size = max(0, result_size);
+        if str_size <= result_size { str };
+        if result_size < 3 { str.get_sub(0, result_size) };
+        "..." + str.get_sub(str_size - (result_size - 3), str_size)
+    );
 }
 
 namespace CustomColorPair {
@@ -53,6 +62,8 @@ type ListItem = unbox struct {
 
 type ListView = unbox struct {
     window: Window,
+    visible: Bool,
+    has_focus: Bool,
     title: String,
     items: Array ListItem,
     scroll_top: I64,
@@ -65,6 +76,8 @@ namespace ListView {
     make = |window, items| (
         pure $ ListView {
             window: window,
+            visible: true,
+            has_focus: false,
             title: "",
             items: items,
             scroll_top: 0,
@@ -76,6 +89,7 @@ namespace ListView {
     show: ListView -> IOFail ListView;
     show = |list_view| (
         let ListView {
+            has_focus: has_focus,
             title: title,
             items: items,
             scroll_top: scroll_top,
@@ -100,7 +114,11 @@ namespace ListView {
             if i >= visible_lines || item_index >= items.get_size { break_m $ () };
             let item = items.@(item_index);
             if item_index == selected_index {
-                window.set_color_pair(cp_selected, normal)
+                if (has_focus) {
+                    window.set_color_pair(cp_selected, normal)
+                } else {
+                    window.set_color_pair(cp_selected, dim)
+                }
             } else {
                 //window.set_color_pair(cp_white, normal)
                 window.set_attr(item.@attr)
@@ -108,11 +126,15 @@ namespace ListView {
             window.move_add_str(1, i + 1, item.@text);;
             continue_m $ i + 1
         );;
-        window.set_color_pair(cp_green, normal);;
+        if (has_focus) {
+            window.set_color_pair(cp_green, normal)
+        } else {
+            window.set_color_pair(cp_white, normal)
+        };;
         window.draw_border;;
-        window.set_color_pair(cp_white, normal);;
-        window.move_add_str(2, 0, " " + title + " ").when(title != "");;
-        window.move_add_str(2, h - 1, " " + message + " ").when(message != "");;
+        window.move_add_str(2, 0, " " + ellipsis(w - 6, title) + " ").when(title != "");;
+        window.move_add_str(2, h - 1, " " + ellipsis(w - 6, message) + " ").when(message != "");;
+        window.refresh;;
         pure $ list_view
     );
 
@@ -190,6 +212,7 @@ namespace FileListView {
         let file_items = *get_file_items(dir_path);
         let list_items = file_items.map(to_list_item);
         let list_view = *ListView::make(window, list_items);
+        let list_view = list_view.set_title(dir_path);
         pure $ FileListView {
             list_view: list_view,
             dir_path: dir_path,
@@ -225,8 +248,10 @@ namespace FileListView {
     handle_keys: FileListView -> IOFail Action;
     handle_keys = |file_list_view| (
         let list_view = file_list_view.@list_view;
-        let key = *list_view.@window.get_key;
-        let file_list_view = file_list_view.mod_list_view(set_message(key));
+        let ch = *list_view.@window.getch;
+        //let key = *list_view.@window.get_key;
+        let key = *keyname(ch);
+        eval debug_eprintln(key);
         if key == "q" || key == "Q" || key == "KEY_ESC" {
             pure $ action("app_quit")
         };
@@ -245,31 +270,18 @@ namespace FileListView {
         pure $ action("")
     );
 
-    handle_action: Action -> FileListView -> IOFail FileListView;
-    handle_action = |act, flv| (
-        match act {
-            action(name) => (
-                if name == "flv_select_next_item" { flv.action_flv_select_next_item };
-                if name == "flv_select_prev_item" { flv.action_flv_select_prev_item };
-                if name == "flv_open_file" { flv.action_flv_open_file };
-                if name == "flv_up_directory" { flv.action_flv_up_directory };
-                pure $ flv
-            ),
-        }
+    select_next_item: FileListView -> IOFail FileListView;
+    select_next_item = |file_list_view| (
+        file_list_view.act_list_view(ListView::select_next_item)
     );
 
-    action_flv_select_next_item: FileListView -> IOFail FileListView;
-    action_flv_select_next_item = |file_list_view| (
-        file_list_view.act_list_view(select_next_item)
+    select_prev_item: FileListView -> IOFail FileListView;
+    select_prev_item = |file_list_view| (
+        file_list_view.act_list_view(ListView::select_prev_item)
     );
 
-    action_flv_select_prev_item: FileListView -> IOFail FileListView;
-    action_flv_select_prev_item = |file_list_view| (
-        file_list_view.act_list_view(select_prev_item)
-    );
-
-    action_flv_open_file: FileListView -> IOFail FileListView;
-    action_flv_open_file = |file_list_view| (
+    open_directory: String -> FileListView -> IOFail FileListView;
+    open_directory = |dir_path, file_list_view| (
         let opt = file_list_view.get_selected_item;
         if opt.is_none {
             pure $ file_list_view
@@ -282,8 +294,8 @@ namespace FileListView {
         FileListView::make(file_list_view.@list_view.@window, dir_path)
     );
 
-    action_flv_up_directory: FileListView -> IOFail FileListView;
-    action_flv_up_directory = |file_list_view| (
+    up_directory: FileListView -> IOFail FileListView;
+    up_directory = |file_list_view| (
         let dir_path = file_list_view.@dir_path;
         if dir_path == "/" {
             pure $ file_list_view
@@ -297,24 +309,35 @@ namespace FileListView {
 }
 
 type FileView = unbox struct {
-    window: Window,
-    items: Array String,
-    scroll_top: I64,
-    selected_index: I64,
-    message: String,
+    list_view: ListView,
 };
 
 namespace FileView {
     make: Window -> IOFail FileView;
     make = |win| (
         pure $ FileView {
-            window: win,
-            items: [],
-            scroll_top: 0,
-            selected_index: -1,
-            message: ""
+            list_view: *ListView::make(win, []),
         }
     );
+
+    open_file: String -> FileView -> IOFail FileView;
+    open_file = |file_path, file_view| (
+        let contents = *read_file_bytes(Path::parse(file_path).as_some);
+        let contents = contents._unsafe_to_string;
+        let items = contents.split("\n").to_array.map(|line|
+            ListItem {
+                text: line,
+                attr: normal
+            }
+        );
+        pure $ file_view.mod_list_view(set_items(items) >> set_title(Path::basename(file_path)))
+    );
+
+    show: FileView -> IOFail FileView;
+    show = |file_view| (
+        file_view.act_list_view(ListView::show)
+    );
+
 }
 
 type App = unbox struct {
@@ -327,10 +350,11 @@ namespace App {
     make: Window -> IOFail App;
     make = |win| (
         let (w, h) = *win.get_window_size;
-        let flv_w = w * 2 / 3;
+        let flv_w = w * 1 / 3;
         let flv_win = *win.make_sub_window(0, 0, flv_w, h);
-        let fv_win = *win.make_sub_window(0, 0, w - flv_w, h);
+        let fv_win = *win.make_sub_window(flv_w, 0, w - flv_w, h);
         let flv = *FileListView::make(flv_win, *realpath("."));
+        let flv = flv.mod_list_view(set_has_focus(true));
         let fv = *FileView::make(fv_win);
         pure $ App {
             window: win,
@@ -342,6 +366,7 @@ namespace App {
     show: App -> IOFail App;
     show = |app| (
         app.act_file_list_view(FileListView::show)
+        .bind(act_file_view(FileView::show))
     );
 
     handle_keys: App -> IOFail Action;
@@ -350,8 +375,29 @@ namespace App {
     );
 
     handle_action: Action -> App -> IOFail App;
-    handle_action = |action, app| (
-        app.act_file_list_view(FileListView::handle_action(action))
+    handle_action = |act, app| (
+        match act {
+            action(name) => (
+                if name == "flv_select_next_item" { app.act_file_list_view(FileListView::select_next_item) };
+                if name == "flv_select_prev_item" { app.act_file_list_view(FileListView::select_prev_item) };
+                if name == "flv_up_directory" { app.act_file_list_view(FileListView::up_directory) };
+                if name == "flv_open_file" {
+                    match app.@file_list_view.get_selected_item {
+                        none() => pure $ app,
+                        some(item) => (
+                            if item.@stat.is_dir {
+                                app.act_file_list_view(FileListView::open_directory(item.@file_path))
+                            };
+                            if item.@stat.is_file {
+                                app.act_file_view(FileView::open_file(item.@file_path))
+                            };
+                            pure $ app
+                        )
+                    }
+                };
+                pure $ app
+            ),
+        }
     );
 }
 

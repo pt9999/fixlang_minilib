@@ -51,8 +51,18 @@ namespace CustomColorPair {
     );
 }
 
+type ListViewId = I64;
+
 type Action = unbox union {
-    action: String,
+    no_action: (),
+    action_quit: (),
+    action_next_focus: (),
+    action_select_prev_item: ListViewId,
+    action_select_next_item: ListViewId,
+    action_page_up: ListViewId,
+    action_page_down: ListViewId,
+    action_open_file: (),
+    action_up_directory: (),
 };
 
 type ListItem = unbox struct {
@@ -61,6 +71,7 @@ type ListItem = unbox struct {
 };
 
 type ListView = unbox struct {
+    id: I64,
     window: Window,
     visible: Bool,
     has_focus: Bool,
@@ -75,6 +86,7 @@ namespace ListView {
     make: Window -> Array ListItem -> IOFail ListView;
     make = |window, items| (
         pure $ ListView {
+            id: 0,
             window: window,
             visible: true,
             has_focus: false,
@@ -138,14 +150,64 @@ namespace ListView {
         pure $ list_view
     );
 
-    select_next_item: ListView -> IOFail ListView;
-    select_next_item = |list_view| (
+    handle_key: KeyName -> ListView -> IOFail Action;
+    handle_key = |key, list_view| (
+        if key == "q" || key == "Q" || key == "KEY_ESC" {
+            pure $ action_quit()
+        };
+        if key == "j" || key == "KEY_DOWN" {
+            pure $ action_select_next_item(list_view.@id)
+        };
+        if key == "k" || key == "KEY_UP" {
+            pure $ action_select_prev_item(list_view.@id)
+        };
+        if key == "KEY_PPAGE" {
+            pure $ action_page_up(list_view.@id)
+        };
+        if key == "KEY_NPAGE" {
+            pure $ action_page_down(list_view.@id)
+        };
+        if key == "^I" {
+            pure $ action_next_focus()
+        };
+        pure $ no_action()
+    );
+
+    handle_action: Action -> ListView -> IOFail ListView;
+    handle_action = |action, list_view| (
+        match action {
+            action_select_prev_item(target) => list_view.select_prev_item(target),
+            action_select_next_item(target) => list_view.select_next_item(target),
+            action_page_up(target) => list_view.page_up(target),
+            action_page_down(target) => list_view.page_down(target),
+            _ => pure $ list_view
+        }
+    );
+
+    select_next_item: ListViewId -> ListView -> IOFail ListView;
+    select_next_item = |target, list_view| (
+        if target != list_view.@id { pure $ list_view };
         pure $ list_view.mod_selected_index(|index| min(list_view.@items.get_size - 1, index + 1))
     );
 
-    select_prev_item: ListView -> IOFail ListView;
-    select_prev_item = |list_view| (
+    select_prev_item: ListViewId -> ListView -> IOFail ListView;
+    select_prev_item = |target, list_view| (
+        if target != list_view.@id { pure $ list_view };
         pure $ list_view.mod_selected_index(|index| max(0, index - 1))
+    );
+
+    page_down: ListViewId -> ListView -> IOFail ListView;
+    page_down = |target, list_view| (
+        if target != list_view.@id { pure $ list_view };
+        let (w, h) = *list_view.@window.get_window_size;
+        pure $ list_view.mod_selected_index(|index| min(list_view.@items.get_size - 1, index + h / 2))
+    );
+
+    page_up: ListViewId -> ListView -> IOFail ListView;
+    page_up = |target, list_view| (
+        if target != list_view.@id { pure $ list_view };
+        let (w, h) = *list_view.@window.get_window_size;
+        pure $ list_view.mod_selected_index(|index| max(0, index - h / 2))
     );
 }
 
@@ -245,39 +307,31 @@ namespace FileListView {
         file_list_view.act_list_view(ListView::show)
     );
 
-    handle_keys: FileListView -> IOFail Action;
-    handle_keys = |file_list_view| (
+    handle_key: FileListView -> IOFail Action;
+    handle_key = |file_list_view| (
         let list_view = file_list_view.@list_view;
-        let ch = *list_view.@window.getch;
-        //let key = *list_view.@window.get_key;
-        let key = *keyname(ch);
-        eval debug_eprintln(key);
-        if key == "q" || key == "Q" || key == "KEY_ESC" {
-            pure $ action("app_quit")
-        };
-        if key == "j" || key == "KEY_DOWN" {
-            pure $ action("flv_select_next_item")
-        };
-        if key == "k" || key == "KEY_UP" {
-            pure $ action("flv_select_prev_item")
-        };
+        let key = *list_view.@window.get_key;
+        //eval debug_eprintln(key);
+
+        let action = *list_view.handle_key(key);
+        if ! action.is_no_action { pure $ action };
+
         if key == "^J" || key == "KEY_ENTER" {
-            pure $ action("flv_open_file")
+            pure $ action_open_file()
         };
         if key == "^" {
-            pure $ action("flv_up_directory")
+            pure $ action_up_directory()
         };
-        pure $ action("")
+        pure $ no_action()
     );
 
-    select_next_item: FileListView -> IOFail FileListView;
-    select_next_item = |file_list_view| (
-        file_list_view.act_list_view(ListView::select_next_item)
-    );
-
-    select_prev_item: FileListView -> IOFail FileListView;
-    select_prev_item = |file_list_view| (
-        file_list_view.act_list_view(ListView::select_prev_item)
+    handle_action: Action -> FileListView -> IOFail FileListView;
+    handle_action = |action, file_list_view| (
+        let file_list_view = *file_list_view.act_list_view(handle_action(action));
+        match action {
+            action_up_directory() => file_list_view.up_directory,
+            _ => pure $ file_list_view
+        }
     );
 
     open_directory: String -> FileListView -> IOFail FileListView;
@@ -325,6 +379,7 @@ namespace FileView {
         let contents = *read_file_bytes(Path::parse(file_path).as_some);
         let contents = contents._unsafe_to_string;
         let items = contents.split("\n").to_array.map(|line|
+            let line = if line == "" { " " } else { line };
             ListItem {
                 text: line,
                 attr: normal
@@ -338,6 +393,24 @@ namespace FileView {
         file_view.act_list_view(ListView::show)
     );
 
+    handle_key: FileView -> IOFail Action;
+    handle_key = |file_view| (
+        let list_view = file_view.@list_view;
+        let key = *list_view.@window.get_key;
+        //eval debug_eprintln(key);
+        let action = *list_view.handle_key(key);
+        if ! action.is_no_action { pure $ action };
+
+        pure $ no_action()
+    );
+
+    handle_action: Action -> FileView -> IOFail FileView;
+    handle_action = |action, file_view| (
+        let file_view = *file_view.act_list_view(handle_action(action));
+        match action {
+            _ => pure $ file_view
+        }
+    );
 }
 
 type App = unbox struct {
@@ -354,8 +427,9 @@ namespace App {
         let flv_win = *win.make_sub_window(0, 0, flv_w, h);
         let fv_win = *win.make_sub_window(flv_w, 0, w - flv_w, h);
         let flv = *FileListView::make(flv_win, *realpath("."));
-        let flv = flv.mod_list_view(set_has_focus(true));
+        let flv = flv.mod_list_view(set_id(0) >> set_has_focus(true));
         let fv = *FileView::make(fv_win);
+        let fv = fv.mod_list_view(set_id(1) >> set_has_focus(false));
         pure $ App {
             window: win,
             file_list_view: flv,
@@ -369,34 +443,55 @@ namespace App {
         .bind(act_file_view(FileView::show))
     );
 
-    handle_keys: App -> IOFail Action;
-    handle_keys = |app| (
-        app.@file_list_view.handle_keys
+    get_focus: App -> I64;
+    get_focus = |app| (
+        if app.@file_list_view.@list_view.@has_focus { 0 };
+        if app.@file_view.@list_view.@has_focus { 1 };
+        -1
+    );
+
+    set_focus: I64 -> App -> App;
+    set_focus = |id, app| (
+        app
+        .mod_file_list_view(mod_list_view(set_has_focus(id == 0)))
+        .mod_file_view(mod_list_view(set_has_focus(id == 1)))
+    );
+
+    next_focus: App -> IOFail App;
+    next_focus = |app| (
+        let focus = app.get_focus;
+        pure $ app.set_focus((focus + 1) % 2)
+    );
+
+    handle_key: App -> IOFail Action;
+    handle_key = |app| (
+        let focus = app.get_focus;
+        if focus == 0 { app.@file_list_view.handle_key };
+        if focus == 1 { app.@file_view.handle_key };
+        pure $ no_action()
     );
 
     handle_action: Action -> App -> IOFail App;
-    handle_action = |act, app| (
-        match act {
-            action(name) => (
-                if name == "flv_select_next_item" { app.act_file_list_view(FileListView::select_next_item) };
-                if name == "flv_select_prev_item" { app.act_file_list_view(FileListView::select_prev_item) };
-                if name == "flv_up_directory" { app.act_file_list_view(FileListView::up_directory) };
-                if name == "flv_open_file" {
-                    match app.@file_list_view.get_selected_item {
-                        none() => pure $ app,
-                        some(item) => (
-                            if item.@stat.is_dir {
-                                app.act_file_list_view(FileListView::open_directory(item.@file_path))
-                            };
-                            if item.@stat.is_file {
-                                app.act_file_view(FileView::open_file(item.@file_path))
-                            };
-                            pure $ app
-                        )
-                    }
-                };
-                pure $ app
+    handle_action = |action, app| (
+        let app = *app.act_file_list_view(handle_action(action));
+        let app = *app.act_file_view(handle_action(action));
+        match action {
+            action_next_focus() => app.next_focus,
+            action_open_file() => (
+                match app.@file_list_view.get_selected_item {
+                    none() => pure $ app,
+                    some(item) => (
+                        if item.@stat.is_dir {
+                            app.act_file_list_view(FileListView::open_directory(item.@file_path))
+                        };
+                        if item.@stat.is_file {
+                            app.act_file_view(FileView::open_file(item.@file_path))
+                        };
+                        pure $ app
+                    )
+                }
             ),
+            _ => pure $ app
         }
     );
 }
@@ -409,8 +504,8 @@ main = do {
         loop_m(
             app, |app|
             let app = *app.show;
-            let action = *app.handle_keys;
-            if action.is_action && action.as_action == "app_quit" {
+            let action = *app.handle_key;
+            if action.is_action_quit {
                 break_m $ ()
             };
             let app = *app.handle_action(action);

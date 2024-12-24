@@ -35,21 +35,6 @@ type Window = unbox struct {
 };
 
 namespace Window {
-    make_new_window: I64 -> I64 -> I64 -> I64 -> Window -> IOFail Window;
-    make_new_window = |x, y, w, h, orig| (
-        let p_win = *FFI_CALL_IO[Ptr newwin(CInt, CInt, CInt, CInt), h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt].lift;
-        if p_win == nullptr {
-            throw $ "newwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
-        };
-        let win = Window {
-            dtor: Destructor::make(p_win, |p_win|
-                FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
-                pure $ nullptr
-            )
-        };
-        pure $ win
-    );
-
     make_sub_window: I64 -> I64 -> I64 -> I64 -> Window -> IOFail Window;
     make_sub_window = |x, y, w, h, parent| (
         let p_win = *parent.@dtor.borrow_io(|p_parent|
@@ -57,6 +42,10 @@ namespace Window {
         ).lift;
         if p_win == nullptr {
             throw $ "subwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
+        };
+        let err = *FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt].lift;
+        if err != 0.to_CInt {
+            throw $ "keypad failed!"
         };
         let win = Window {
             dtor: Destructor::make(p_win, |p_win|

@@ -42,6 +42,10 @@ namespace CustomColorPair {
     );
 }
 
+type Action = unbox union {
+    action: String,
+};
+
 type FileItem = box struct {
     file_name: String,
     file_path: String,
@@ -172,7 +176,7 @@ namespace FileListView {
         pure $ file_list_view
     );
 
-    handle_keys: FileListView -> IOFail FileListView;
+    handle_keys: FileListView -> IOFail Action;
     handle_keys = |file_list_view| (
         let FileListView {
             window: window,
@@ -181,25 +185,48 @@ namespace FileListView {
         let key = *window.get_key;
         let file_list_view = file_list_view.set_message(key);
         if key == "q" || key == "Q" || key == "KEY_ESC" {
-            throw $ "Quit"
+            pure $ action("app_quit")
         };
         if key == "j" || key == "KEY_DOWN" {
-            pure $ file_list_view.mod_selected_index(|index| min(file_items.get_size - 1, index + 1))
+            pure $ action("flv_select_next_item")
         };
         if key == "k" || key == "KEY_UP" {
-            pure $ file_list_view.mod_selected_index(|index| max(0, index - 1))
+            pure $ action("flv_select_prev_item")
         };
         if key == "^J" || key == "KEY_ENTER" {
-            file_list_view.command_enter
+            pure $ action("flv_open_file")
         };
         if key == "^" {
-            file_list_view.command_up_directory
+            pure $ action("flv_up_directory")
         };
-        pure $ file_list_view
+        pure $ action("")
     );
 
-    command_enter: FileListView -> IOFail FileListView;
-    command_enter = |file_list_view| (
+    handle_action: Action -> FileListView -> IOFail FileListView;
+    handle_action = |act, flv| (
+        match act {
+            action(name) => (
+                if name == "flv_select_next_item" { flv.action_flv_select_next_item };
+                if name == "flv_select_prev_item" { flv.action_flv_select_prev_item };
+                if name == "flv_open_file" { flv.action_flv_open_file };
+                if name == "flv_up_directory" { flv.action_flv_up_directory };
+                pure $ flv
+            ),
+        }
+    );
+
+    action_flv_select_next_item: FileListView -> IOFail FileListView;
+    action_flv_select_next_item = |file_list_view| (
+        pure $ file_list_view.mod_selected_index(|index| min(file_list_view.@file_items.get_size - 1, index + 1))
+    );
+
+    action_flv_select_prev_item: FileListView -> IOFail FileListView;
+    action_flv_select_prev_item = |file_list_view| (
+        pure $ file_list_view.mod_selected_index(|index| max(0, index - 1))
+    );
+
+    action_flv_open_file: FileListView -> IOFail FileListView;
+    action_flv_open_file = |file_list_view| (
         let opt = file_list_view.get_selected_item;
         if opt.is_none {
             pure $ file_list_view
@@ -212,8 +239,8 @@ namespace FileListView {
         FileListView::make(file_list_view.@window, dir_path)
     );
 
-    command_up_directory: FileListView -> IOFail FileListView;
-    command_up_directory = |file_list_view| (
+    action_flv_up_directory: FileListView -> IOFail FileListView;
+    action_flv_up_directory = |file_list_view| (
         let dir_path = file_list_view.@dir_path;
         if dir_path == "/" {
             pure $ file_list_view
@@ -226,16 +253,79 @@ namespace FileListView {
     );
 }
 
+type FileView = unbox struct {
+    window: Window,
+    items: Array String,
+    scroll_top: I64,
+    selected_index: I64,
+    message: String,
+};
+
+namespace FileView {
+    make: Window -> IOFail FileView;
+    make = |win| (
+        pure $ FileView {
+            window: win,
+            items: [],
+            scroll_top: 0,
+            selected_index: -1,
+            message: ""
+        }
+    );
+}
+
+type App = unbox struct {
+    window: Window,
+    file_list_view: FileListView,
+    file_view: FileView,
+};
+
+namespace App {
+    make: Window -> IOFail App;
+    make = |win| (
+        let (w, h) = *win.get_window_size;
+        let flv_w = w * 2 / 3;
+        let flv_win = *win.make_sub_window(0, 0, flv_w, h);
+        let fv_win = *win.make_sub_window(0, 0, w - flv_w, h);
+        let flv = *FileListView::make(flv_win, *realpath("."));
+        let fv = *FileView::make(fv_win);
+        pure $ App {
+            window: win,
+            file_list_view: flv,
+            file_view: fv
+        }
+    );
+
+    show: App -> IOFail App;
+    show = |app| (
+        app.act_file_list_view(FileListView::show)
+    );
+
+    handle_keys: App -> IOFail Action;
+    handle_keys = |app| (
+        app.@file_list_view.handle_keys
+    );
+
+    handle_action: Action -> App -> IOFail App;
+    handle_action = |action, app| (
+        app.act_file_list_view(FileListView::handle_action(action))
+    );
+}
+
 main: IO ();
 main = do {
     Ncurses::run $ |win| (
         init_custom_color_pairs;;
-        let file_list_view = *FileListView::make(win, *realpath("."));
+        let app = *App::make(win);
         loop_m(
-            file_list_view, |file_list_view|
-            let file_list_view = *file_list_view.show;
-            let file_list_view = *file_list_view.handle_keys;
-            continue_m $ file_list_view
+            app, |app|
+            let app = *app.show;
+            let action = *app.handle_keys;
+            if action.is_action && action.as_action == "app_quit" {
+                break_m $ ()
+            };
+            let app = *app.handle_action(action);
+            continue_m $ app
         )
     )
 }.try(eprintln);

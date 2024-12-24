@@ -44,6 +44,15 @@ void minilib_ncurses_initialize()
 
     // initialize colors
     start_color();
+    init_color(COLOR_BLACK, 0, 0, 0);
+    init_color(COLOR_RED, 255, 0, 0);
+    init_color(COLOR_GREEN, 0, 255, 0);
+    init_color(COLOR_YELLOW, 255, 255, 0);
+    init_color(COLOR_BLUE, 0, 0, 255);
+    init_color(COLOR_MAGENTA, 255, 0, 255);
+    init_color(COLOR_CYAN, 0, 255, 255);
+    init_color(COLOR_WHITE, 255, 255, 255);
+
     //init_pair(0, COLOR_BLACK, COLOR_BLACK); // cannot redefine
     init_pair(1, COLOR_RED, COLOR_BLACK);
     init_pair(2, COLOR_GREEN, COLOR_BLACK);

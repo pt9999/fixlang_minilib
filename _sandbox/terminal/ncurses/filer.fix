@@ -1,0 +1,109 @@
+module Main;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+
+pad_right: I64 -> U8 -> String -> String;
+pad_right = |result_size, char, str| (
+    let str_size = str.get_size;
+    if str_size >= result_size {
+        str.get_sub(0, result_size)
+    };
+    let pad_size = result_size - str_size;
+    let pad = Array::fill(pad_size, char)._unsafe_to_string;
+    str + pad
+);
+
+pad_left: I64 -> U8 -> String -> String;
+pad_left = |result_size, char, str| (
+    let str_size = str.get_size;
+    if str_size >= result_size {
+        str.get_sub(str_size - result_size, str_size)
+    };
+    let pad_size = result_size - str_size;
+    let pad = Array::fill(pad_size, char)._unsafe_to_string;
+    pad + str
+);
+
+type FileEntry = unbox struct {
+    file_name: String,
+    file_path: String,
+    stat: FileStat,
+};
+
+namespace FileEntry {
+    get_file_entry: String -> String -> IOFail FileEntry;
+    get_file_entry = |dir_path, file_name| (
+        let file_path = join_paths([dir_path, file_name]);
+        pure $ FileEntry {
+            file_name: file_name,
+            file_path: file_path,
+            stat: *stat(file_path)
+        }
+    );
+
+    get_file_entries: String -> IOFail (Array FileEntry);
+    get_file_entries = |dir_path| (
+        let file_names = *list_dir(dir_path);
+        file_names.map_m(|name| get_file_entry(dir_path, name))
+    );
+
+    format_file_entry: FileEntry -> String;
+    format_file_entry = |entry| (
+        entry.@file_name.pad_right(20, ' ') +
+        entry.@stat.st_size.to_string.pad_left(13, ' ')
+    );
+}
+
+type FileListView = unbox struct {
+    window: Window,
+    dir_path: String,
+};
+
+namespace FileListView {
+    make: Window -> String -> IOFail FileListView;
+    make = |window, dir_path| (
+        pure $ FileListView {
+            window: window,
+            dir_path: dir_path
+        }
+    );
+
+    show: FileListView -> IOFail ();
+    show = |file_list_view| (
+        let window = file_list_view.@window;
+        let dir_path = file_list_view.@dir_path;
+        let file_entries = *get_file_entries(dir_path);
+        let (w, h) = *window.get_window_size;
+        window.clear;;
+        window.set_color(white, normal);;
+        loop_m(
+            0, |y|
+            if y >= h - 2 || y >= file_entries.get_size { break_m $ () };
+            let str = file_entries.@(y).format_file_entry;
+            window.move_add_str(1, y + 1, str);;
+            continue_m $ y + 1
+        );;
+        window.set_color(green, normal);;
+        window.draw_border;;
+        window.set_color(white, normal);;
+        window.move_add_str(2, 0, " " + dir_path + " ");;
+        pure()
+    );
+}
+
+main: IO ();
+main = do {
+    Ncurses::run $ |win| (
+        let (w, h) = *win.get_window_size;
+        let selected = 10;
+        init_color_pair(selected, white, blue);;
+        let file_list_view = *FileListView::make(win, *realpath("."));
+        file_list_view.show;;
+        let c = *win.getch;
+        pure()
+    )
+}.try(eprintln);

@@ -1,0 +1,67 @@
+module Main;
+
+clz_table: Array U8;
+clz_table = Array::from_map(256, |val|
+    loop(
+        0, |i|
+        if i >= 8 { break $ i };
+        if val.bit_and(1.shift_left(7-i)) != 0 { break $ i };
+        continue $ i + 1
+    ).to_U8
+);
+
+count_leading_zeros_U8: U8 -> I64;
+count_leading_zeros_U8 = |u8| (
+    clz_table.@(u8.to_I64).to_I64
+);
+
+count_leading_zeros_U16: U16 -> I64;
+count_leading_zeros_U16 = |u16| (
+    if u16.bit_and(0xff00_U16) != 0_U16 {
+        count_leading_zeros_U8 $ u16.shift_right(8_U16).to_U8
+    };
+    8 + count_leading_zeros_U8(u16.to_U8)
+);
+
+count_leading_zeros_U32: U32 -> I64;
+count_leading_zeros_U32 = |u32| (
+    if u32.bit_and(0xffff0000_U32) != 0_U32 {
+        count_leading_zeros_U16 $ u32.shift_right(16_U32).to_U16
+    };
+    16 + count_leading_zeros_U16(u32.to_U16)
+);
+
+count_leading_zeros_U64: U64 -> I64;
+count_leading_zeros_U64 = |u64| (
+    if u64.bit_and(0xffffffff00000000_U64) != 0_U64 {
+        count_leading_zeros_U32 $ u64.shift_right(32_U64).to_U32
+    };
+    32 + count_leading_zeros_U32(u64.to_U32)
+);
+
+test1: IO ();
+test1 = (
+    loop_m(
+        0, |i|
+        if i > 64 { break_m $ () };
+        let u64 = -1.to_U64;
+        //let u64 = u64.shift_right(i.to_U64);
+        let u64 = u64.shift_right(64_U64);
+        eval debug_eprintln("(u64,)="+(u64,).to_string);
+        let n = count_leading_zeros_U64(u64);
+        eval debug_eprintln("(u64,i,n)="+(u64,i,n).to_string);
+        //assert_eq(|_| "clz:(u64,i,n)="+(u64,i,n).to_string, i, n);;
+        continue_m $ i + 1
+    )
+);
+
+main: IO ();
+main = (
+    let i = 64;
+    let u64 = -1.to_U64;
+    let u64 = u64.shift_right(i.to_U64);
+    println(u64.to_string);;
+    test1;;
+    pure()
+);
+

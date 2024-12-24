@@ -77,3 +77,4 @@ int minilib_ncurses_draw_border(WINDOW* win)
 {
     return box(win, ACS_VLINE, ACS_HLINE);
 }
+

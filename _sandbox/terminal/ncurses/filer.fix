@@ -67,8 +67,21 @@ namespace FileItem {
 
     format_file_item: FileItem -> String;
     format_file_item = |item| (
-        item.@file_name.pad_right(20, ' ') +
-        item.@stat.st_size.to_string.pad_left(13, ' ')
+        let name = item.@file_name;
+        let stat = item.@stat;
+        let name = if stat.is_dir { name + "/" }
+        else if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { name + "*" }
+        else { name };
+        name.pad_right(20, ' ') +
+        stat.st_size.to_string.pad_left(13, ' ')
+    );
+
+    get_attr: FileItem -> ChType;
+    get_attr = |item| (
+        let stat = item.@stat;
+        if stat.is_dir { color_pair(cp_blue).bit_or(bold) };
+        if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { color_pair(cp_green).bit_or(bold) };
+        color_pair(cp_white)
     );
 }
 
@@ -78,6 +91,7 @@ type FileListView = unbox struct {
     file_items: Array FileItem,
     scroll_top: I64,
     selected_index: I64,
+    message: String,
 };
 
 namespace FileListView {
@@ -90,6 +104,7 @@ namespace FileListView {
             file_items: file_items,
             scroll_top: 0,
             selected_index: -1,
+            message: "",
         }
     );
 
@@ -113,37 +128,48 @@ namespace FileListView {
         }
     );
 
-    show: FileListView -> IOFail ();
+    show: FileListView -> IOFail FileListView;
     show = |file_list_view| (
         let FileListView {
-            window: window,
             dir_path: dir_path,
             file_items: file_items,
             scroll_top: scroll_top,
-            selected_index: selected_index
+            selected_index: selected_index,
+            message: message,
+            window: window
         } = file_list_view;
 
         window.clear;;
 
         let (w, h) = *window.get_window_size;
+        let visible_lines = max(0, h - 2);
+        let scroll_top = if selected_index < 0 { scroll_top }
+        else if selected_index < scroll_top || scroll_top + visible_lines <= selected_index {
+            max(0, selected_index - visible_lines / 2)
+        } else { scroll_top };
+        let file_list_view = file_list_view.set_scroll_top(scroll_top);
+
         loop_m(
-            0, |y|
-            let file_index = y + scroll_top;
-            if y >= h - 2 || file_index >= file_items.get_size { break_m $ () };
-            let formatted = file_items.@(file_index).format_file_item;
+            0, |i|
+            let file_index = scroll_top + i;
+            if i >= visible_lines || file_index >= file_items.get_size { break_m $ () };
+            let item = file_items.@(file_index);
+            let formatted = item.format_file_item;
             if file_index == selected_index {
                 window.set_color_pair(cp_selected, normal)
             } else {
-                window.set_color_pair(cp_white, normal)
+                //window.set_color_pair(cp_white, normal)
+                window.set_attr(item.get_attr)
             };;
-            window.move_add_str(1, y + 1, formatted);;
-            continue_m $ y + 1
+            window.move_add_str(1, i + 1, formatted);;
+            continue_m $ i + 1
         );;
         window.set_color_pair(cp_green, normal);;
         window.draw_border;;
         window.set_color_pair(cp_white, normal);;
         window.move_add_str(2, 0, " " + dir_path + " ");;
-        pure()
+        window.move_add_str(2, h - 1, " " + message + " ").when(message != "");;
+        pure $ file_list_view
     );
 
     handle_keys: FileListView -> IOFail FileListView;
@@ -152,20 +178,21 @@ namespace FileListView {
             window: window,
             file_items: file_items
         } = file_list_view;
-        let c = (*window.getch).to_U8;
-        if c == 'q' || c == 'Q' || c == 0x1b_U8 {
+        let key = *window.get_key;
+        let file_list_view = file_list_view.set_message(key);
+        if key == "q" || key == "Q" || key == "KEY_ESC" {
             throw $ "Quit"
         };
-        if c == 'j' {
+        if key == "j" || key == "KEY_DOWN" {
             pure $ file_list_view.mod_selected_index(|index| min(file_items.get_size - 1, index + 1))
         };
-        if c == 'k' {
+        if key == "k" || key == "KEY_UP" {
             pure $ file_list_view.mod_selected_index(|index| max(0, index - 1))
         };
-        if c == '\n' {
+        if key == "^J" || key == "KEY_ENTER" {
             file_list_view.command_enter
         };
-        if c == '^' {
+        if key == "^" {
             file_list_view.command_up_directory
         };
         pure $ file_list_view
@@ -206,8 +233,9 @@ main = do {
         let file_list_view = *FileListView::make(win, *realpath("."));
         loop_m(
             file_list_view, |file_list_view|
-            file_list_view.show;;
-            continue_m $ *file_list_view.handle_keys
+            let file_list_view = *file_list_view.show;
+            let file_list_view = *file_list_view.handle_keys;
+            continue_m $ file_list_view
         )
     )
 }.try(eprintln);

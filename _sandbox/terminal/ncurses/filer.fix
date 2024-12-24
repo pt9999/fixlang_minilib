@@ -6,61 +6,77 @@ import Minilib.Terminal.Ncurses;
 import Minilib.Trait.Traversable;
 import Minilib.Text.StringEx;
 
-pad_right: I64 -> U8 -> String -> String;
-pad_right = |result_size, char, str| (
-    let str_size = str.get_size;
-    if str_size >= result_size {
-        str.get_sub(0, result_size)
-    };
-    let pad_size = result_size - str_size;
-    let pad = Array::fill(pad_size, char)._unsafe_to_string;
-    str + pad
-);
+namespace StringUtils {
+    pad_right: I64 -> U8 -> String -> String;
+    pad_right = |result_size, char, str| (
+        let str_size = str.get_size;
+        if str_size >= result_size {
+            str.get_sub(0, result_size)
+        };
+        let pad_size = result_size - str_size;
+        let pad = Array::fill(pad_size, char)._unsafe_to_string;
+        str + pad
+    );
 
-pad_left: I64 -> U8 -> String -> String;
-pad_left = |result_size, char, str| (
-    let str_size = str.get_size;
-    if str_size >= result_size {
-        str.get_sub(str_size - result_size, str_size)
-    };
-    let pad_size = result_size - str_size;
-    let pad = Array::fill(pad_size, char)._unsafe_to_string;
-    pad + str
-);
+    pad_left: I64 -> U8 -> String -> String;
+    pad_left = |result_size, char, str| (
+        let str_size = str.get_size;
+        if str_size >= result_size {
+            str.get_sub(str_size - result_size, str_size)
+        };
+        let pad_size = result_size - str_size;
+        let pad = Array::fill(pad_size, char)._unsafe_to_string;
+        pad + str
+    );
+}
 
-type FileEntry = unbox struct {
+namespace CustomColorPair {
+    cp_selected: ColorPair;
+    cp_selected = 10;
+
+    init_custom_color_pairs: IOFail ();
+    init_custom_color_pairs = (
+        pure();;    // make it lazy
+        init_color_pair(cp_selected, white, blue);;
+        pure()
+    );
+}
+
+type FileItem = unbox struct {
     file_name: String,
     file_path: String,
     stat: FileStat,
 };
 
-namespace FileEntry {
-    get_file_entry: String -> String -> IOFail FileEntry;
-    get_file_entry = |dir_path, file_name| (
+namespace FileItem {
+    get_file_item: String -> String -> IOFail FileItem;
+    get_file_item = |dir_path, file_name| (
         let file_path = join_paths([dir_path, file_name]);
-        pure $ FileEntry {
+        pure $ FileItem {
             file_name: file_name,
             file_path: file_path,
             stat: *stat(file_path)
         }
     );
 
-    get_file_entries: String -> IOFail (Array FileEntry);
-    get_file_entries = |dir_path| (
+    get_file_items: String -> IOFail (Array FileItem);
+    get_file_items = |dir_path| (
         let file_names = *list_dir(dir_path);
-        file_names.map_m(|name| get_file_entry(dir_path, name))
+        file_names.map_m(|name| get_file_item(dir_path, name))
     );
 
-    format_file_entry: FileEntry -> String;
-    format_file_entry = |entry| (
-        entry.@file_name.pad_right(20, ' ') +
-        entry.@stat.st_size.to_string.pad_left(13, ' ')
+    format_file_item: FileItem -> String;
+    format_file_item = |item| (
+        item.@file_name.pad_right(20, ' ') +
+        item.@stat.st_size.to_string.pad_left(13, ' ')
     );
 }
 
 type FileListView = unbox struct {
     window: Window,
     dir_path: String,
+    scroll_top: I64,
+    selected_index: I64,
 };
 
 namespace FileListView {
@@ -68,28 +84,40 @@ namespace FileListView {
     make = |window, dir_path| (
         pure $ FileListView {
             window: window,
-            dir_path: dir_path
+            dir_path: dir_path,
+            scroll_top: 0,
+            selected_index: -1,
         }
     );
 
     show: FileListView -> IOFail ();
     show = |file_list_view| (
-        let window = file_list_view.@window;
-        let dir_path = file_list_view.@dir_path;
-        let file_entries = *get_file_entries(dir_path);
+        let FileListView {
+            window: window,
+            dir_path: dir_path,
+            scroll_top: scroll_top,
+            selected_index: selected_index
+        } = file_list_view;
+        let file_items = *get_file_items(dir_path);
         let (w, h) = *window.get_window_size;
         window.clear;;
-        window.set_color(white, normal);;
+
         loop_m(
             0, |y|
-            if y >= h - 2 || y >= file_entries.get_size { break_m $ () };
-            let str = file_entries.@(y).format_file_entry;
-            window.move_add_str(1, y + 1, str);;
+            let file_index = y + scroll_top;
+            if y >= h - 2 || file_index >= file_items.get_size { break_m $ () };
+            let formatted = file_items.@(file_index).format_file_item;
+            if file_index == selected_index {
+                window.set_color_pair(cp_selected, normal)
+            } else {
+                window.set_color_pair(cp_white, normal)
+            };;
+            window.move_add_str(1, y + 1, formatted);;
             continue_m $ y + 1
         );;
-        window.set_color(green, normal);;
+        window.set_color_pair(cp_green, normal);;
         window.draw_border;;
-        window.set_color(white, normal);;
+        window.set_color_pair(cp_white, normal);;
         window.move_add_str(2, 0, " " + dir_path + " ");;
         pure()
     );
@@ -98,9 +126,7 @@ namespace FileListView {
 main: IO ();
 main = do {
     Ncurses::run $ |win| (
-        let (w, h) = *win.get_window_size;
-        let selected = 10;
-        init_color_pair(selected, white, blue);;
+        init_custom_color_pairs;;
         let file_list_view = *FileListView::make(win, *realpath("."));
         file_list_view.show;;
         let c = *win.getch;

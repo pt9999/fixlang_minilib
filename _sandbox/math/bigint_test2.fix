@@ -126,14 +126,14 @@ namespace DivMod5 {
     );
 
     // Calculates `a - b * pow(_base, b_offset)`.
-    // returns the result and the sign.
-    _signed_sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, I64);
-    _signed_sub_u32_with_offset = |a, b, b_offset| (
+    // returns the result and the borrow.
+    _sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, U64);
+    _sub_u32_with_offset = |a, b, b_offset| (
         let na = a.get_size;
         let nb = 1 + b_offset;
         let na = max(na, nb);
         let a = a._append_last_zeros(na);
-        let (a, borrow) = loop(
+        loop(
             (a, b_offset, 0_U64), |(a, i, borrow)|
             if i >= na  {
                 break $ (a, borrow)
@@ -154,7 +154,11 @@ namespace DivMod5 {
             };
             let a = a.set(i, a_u32);
             continue $ (a, i + 1, borrow)
-        );
+        )
+    );
+
+    _convert_borrow_to_sign: (Array U32, U64) -> (Array U32, I64);
+    _convert_borrow_to_sign = |(a, borrow)| (
         if borrow > 0_U64 {
             let a = a._neg;
             let a = a._remove_last_zeros;
@@ -164,11 +168,51 @@ namespace DivMod5 {
         (a, 1)
     );
 
-
-    // Calculates `a - b * q * pow(_base, b_offset) * q`.
+    // Calculates `a - b * pow(_base, b_offset)`.
     // returns the result and the sign.
-    _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
-    _signed_sub_with_offset_mul = |a, b, q, b_offset| (
+    _signed_sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_u32_with_offset = |a, b, b_offset| (
+        _sub_u32_with_offset(a, b, b_offset)
+        ._convert_borrow_to_sign
+    );
+
+    // Calculates `a + bm * 2^be`.
+    // returns the result.
+    _add_u64_with_exp: Array U32 -> U64 -> U64 -> Array U32;
+    _add_u64_with_exp = |a, bm, be| (
+        loop(
+            (a, bm, be), |(a, bm, be)|
+            if bm == 0_U64 { break $ a };
+            let (off, shift) = _divmod_log2_base(be);
+            let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
+            let a = _add_u32_with_offset1(a, q32, off);
+            let bm = bm.shift_right(log2_base - shift);
+            let be = be + (log2_base - shift);
+            continue $ (a, bm, be)
+        )
+    );
+
+    // Calculates `a - bm * 2^be`.
+    // returns the result and the borrow.
+    _sub_u64_with_exp: Array U32 -> U64 -> U64 -> (Array U32, U64);
+    _sub_u64_with_exp = |a, bm, be| (
+        loop(
+            (a, 0_U64, bm, be), |(a, borrow, bm, be)|
+            if bm == 0_U64 { break $ a };
+            let (off, shift) = _divmod_log2_base(be);
+            let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
+            let (a, borrow1) = _sub_u32_with_offset1(a, q32, off);
+            let borrow = borrow + borrow1;
+            let bm = bm.shift_right(log2_base - shift);
+            let be = be + (log2_base - shift);
+            continue $ (a, borrow, bm, be)
+        )
+    );
+
+    // Calculates `a - b * q * pow(_base, b_offset)`.
+    // returns the result and the borrow.
+    _sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, U64);
+    _sub_with_offset_mul = |a, b, q, b_offset| (
         let na = a.get_size;
         let nb = b.get_size + b_offset;
         let na = max(na, nb + 1 /*for q*/);
@@ -195,6 +239,8 @@ namespace DivMod5 {
             let a = a.set(i, a_u32);
             continue $ (a, i + 1, borrow)
         );
+        (a, borrow)
+        /*
         if borrow > 0_U64 {
             let a = a._neg;
             let a = a._remove_last_zeros;
@@ -202,6 +248,24 @@ namespace DivMod5 {
         };
         let a = a._remove_last_zeros;
         (a, 1)
+        */
+    );
+
+    // Calculates `a - b * qm * 2^qe`.
+    // returns the result and the borrow.
+    _sub_with_exp_mul: Array U32 -> Array U32 -> U64 -> U64 -> (Array U32, U64);
+    _sub_with_exp_mul = |a, b, qm, qe| (
+        loop(
+            (a, 0_U64, qm, qe), |(a, borrow, qm, qe)|
+            if qm == 0_U64 { break $ (a, borrow) };
+            let (off, shift) = _divmod_log2_base(qe);
+            let q32 = qm.shift_left(shift).bit_and(base - 1_U64).to_U32;
+            let (a, borrow1) = _signed_sub_with_offset_mul2(a, b, q32, off);
+            let borrow = borrow + borrow1;
+            let qm = qm.shift_right(log2_base - shift);
+            let qe = qe + (log2_base - shift);
+            continue $ (a, borrow, qm, qe)
+        )
     );
 
     // Calculates `(a0 / a1, a0 % a1)`.
@@ -215,13 +279,26 @@ namespace DivMod5 {
             let (quo, rem) = _divmod_u32(a, b.@(0));
             (quo, [rem])
         };
+        let (bm, be) = b._approx_bignat(32);
         let (quo, rem, rem_sign) = loop(
             (BigNat::_zero, a, 1), |(quo, a, a_sign)|
+            eval debug_eprintln((quo,a).format("quo={} a={}"));
+            if _cmp((a,0), (b,0)) < 0 {
+                break $ (quo, a, a_sign)
+            };
             let an = a.get_size;
             let bn = b.get_size;
             if an < bn {
                 break $ (quo, a, a_sign)
             };
+            let (am, ae) = a._approx_bignat(64);
+            let qm = am / bm;
+            let qe = ae - be;
+            let (qm, qe) = if qe < 0 {
+                assert_lazy(|_| "qe too small: " + qe.to_string, qe >= -63) $ |_|
+                (qm.shift_left((-qe).to_U64), 0)
+            } else { (qm, qe) };
+
             let (q:U32, qoff: I64) = if an == bn {
                 let b_u32 = b.@(bn - 1);
                 let a_u32 = a.@(an - 1);
@@ -260,10 +337,6 @@ namespace DivMod5 {
                 quo
             };
             let quo = quo._remove_last_zeros;
-            if _cmp((rem,0), (b,0)) < 0 {
-                break $ (quo, rem, rem_sign)
-            };
-            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
             continue $ (quo, rem, rem_sign)
         );
         if rem_sign > 0 || rem == BigNat::_zero {

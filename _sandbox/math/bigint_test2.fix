@@ -12,6 +12,7 @@ import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
 import Minilib.Common.TimeEx;
+import Minilib.Text.Hex;
 
 /*
 // it might be better to move this to Minilib.Binary.BitOps
@@ -186,8 +187,8 @@ namespace DivMod5 {
             let (off, shift) = _divmod_log2_base(be);
             let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
             let a = _add_u32_with_offset1(a, q32, off);
-            let bm = bm.shift_right(log2_base - shift);
-            let be = be + (log2_base - shift);
+            let bm = bm.shift_right(_log2_base - shift);
+            let be = be + (_log2_base - shift);
             continue $ (a, bm, be)
         )
     );
@@ -203,8 +204,8 @@ namespace DivMod5 {
             let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
             let (a, borrow1) = _sub_u32_with_offset1(a, q32, off);
             let borrow = borrow + borrow1;
-            let bm = bm.shift_right(log2_base - shift);
-            let be = be + (log2_base - shift);
+            let bm = bm.shift_right(_log2_base - shift);
+            let be = be + (_log2_base - shift);
             continue $ (a, borrow, bm, be)
         )
     );
@@ -215,7 +216,7 @@ namespace DivMod5 {
     _sub_with_offset_mul = |a, b, q, b_offset| (
         let na = a.get_size;
         let nb = b.get_size + b_offset;
-        let na = max(na, nb + 1 /*for q*/);
+        let na = max(na, nb + 1);  // +1 in `nb + 1` is for q
         let a = a._append_last_zeros(na);
         let (a, borrow) = loop(
             (a, b_offset, 0_U64), |(a, i, borrow)|
@@ -240,15 +241,14 @@ namespace DivMod5 {
             continue $ (a, i + 1, borrow)
         );
         (a, borrow)
-        /*
-        if borrow > 0_U64 {
-            let a = a._neg;
-            let a = a._remove_last_zeros;
-            (a, -1)
-        };
-        let a = a._remove_last_zeros;
-        (a, 1)
-        */
+    );
+
+    // Calculates `a - b * q * pow(_base, b_offset)`.
+    // returns the result and the sign.
+    _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_with_offset_mul = |a, b, q, b_offset| (
+        _sub_with_offset_mul(a, b, q, b_offset)
+        ._convert_borrow_to_sign
     );
 
     // Calculates `a - b * qm * 2^qe`.
@@ -262,8 +262,8 @@ namespace DivMod5 {
             let q32 = qm.shift_left(shift).bit_and(base - 1_U64).to_U32;
             let (a, borrow1) = _signed_sub_with_offset_mul2(a, b, q32, off);
             let borrow = borrow + borrow1;
-            let qm = qm.shift_right(log2_base - shift);
-            let qe = qe + (log2_base - shift);
+            let qm = qm.shift_right(_log2_base - shift);
+            let qe = qe + (_log2_base - shift);
             continue $ (a, borrow, qm, qe)
         )
     );
@@ -294,6 +294,7 @@ namespace DivMod5 {
             let (am, ae) = a._approx_bignat(64);
             let qm: U64 = am / bm;
             let qe: I64 = ae - be;
+            eval debug_eprintln(((am.to_string_hex,ae), (bm.to_string_hex,be), (qm.to_string_hex,qe)).format("(am,ae)={} (bm,be)={} (qm,qe)={}"));
             let (qm: U64, qe: U64) = if qe < 0 {
                 assert_lazy(|_| "qe too small: " + qe.to_string, qe >= -63) $ |_|
                 (qm.shift_left((-qe).to_U64), 0_U64)
@@ -303,41 +304,15 @@ namespace DivMod5 {
             let (qoff: U64, qm: U64) = if qm.bit_and(-1.to_U64.shift_right(32_U64 + qshift)) == qm {
                 (qoff, qm.shift_left(qshift))
             } else {
-                (qoff + 1_U64, qm.shift_right(log2_base - qshift))
+                (qoff + 1_U64, qm.shift_right(_log2_base - qshift))
             };
-            let (qoff: U64, q: U32) = if qm < base {
-                (qoff, qm.to_U32)
+            let (qoff: I64, q: U32) = if qm < _base {
+                (qoff.to_I64, qm.to_U32)
             } else {
-                (qoff + 1_U64, qm.shift_right(log2_base).to_U32)
-            }
-            /*
-            let (q:U32, qoff: I64) = if an == bn {
-                let b_u32 = b.@(bn - 1);
-                let a_u32 = a.@(an - 1);
-                let q: U32 = max(1_U32, a_u32 / b_u32);
-                let qoff = (an - 1) - (bn - 1);
-                (q, qoff)
-            } else {    // an > bn
-                let b_u64 = b.@(bn - 1).to_U64;
-                let a_u64 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                (qoff.to_I64 + 1, qm.shift_right(_log2_base).to_U32)
+            };      // TODO: suppress semicolon
+            eval debug_eprintln((q,qoff).format("q={} qoff={}"));
 
-                // Vibrates significantly when a = 2^128 - 1, b = 2^65 - 1
-                // since a_u64 = 2^32-1, b_u64 = 1
-                let b_u64 = b_u64 + 1_U64;  // To avoid the vibration problem, add 1 to b_u64
-                // TODO: If b_u64 is too small, pull more bits from b.@(bn - 2) and
-                // append them to b_u64.  A native division will not give a good approximation of the division of big integers
-                // when the denominator contains few information.
-
-                let qoff = (an - 2) - (bn - 1);
-                let q: U64 = max(1_U64, a_u64 / b_u64);
-                if q >= _base {
-                    let q = q / _base;
-                    (q.to_U32, qoff + 1)
-                } else {
-                    (q.to_U32, qoff)
-                }
-            };
-            */
             //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
             let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
             let rem = rem._remove_last_zeros;
@@ -485,7 +460,7 @@ main = (
     test_perf_karatsuba;;
     */
     //test_approx_bignat;;
-    //test_divmod5;;
+    test_divmod5;;
     //test_divmod5_spec;;
     //prof_divmod5;;
     pure()

@@ -185,8 +185,8 @@ namespace DivMod5 {
             (a, bm, be), |(a, bm, be)|
             if bm == 0_U64 { break $ a };
             let (off, shift) = _divmod_log2_base(be);
-            let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
-            let a = _add_u32_with_offset1(a, q32, off);
+            let q32 = bm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
+            let a = _add_u32_with_offset1(a, q32, off.to_I64);
             let bm = bm.shift_right(_log2_base - shift);
             let be = be + (_log2_base - shift);
             continue $ (a, bm, be)
@@ -199,10 +199,10 @@ namespace DivMod5 {
     _sub_u64_with_exp = |a, bm, be| (
         loop(
             (a, 0_U64, bm, be), |(a, borrow, bm, be)|
-            if bm == 0_U64 { break $ a };
+            if bm == 0_U64 { break $ (a, borrow) };
             let (off, shift) = _divmod_log2_base(be);
-            let q32 = bm.shift_left(shift).bit_and(base - 1_U64).to_U32;
-            let (a, borrow1) = _sub_u32_with_offset1(a, q32, off);
+            let q32 = bm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
+            let (a, borrow1) = _sub_u32_with_offset(a, q32, off.to_I64);
             let borrow = borrow + borrow1;
             let bm = bm.shift_right(_log2_base - shift);
             let be = be + (_log2_base - shift);
@@ -259,8 +259,8 @@ namespace DivMod5 {
             (a, 0_U64, qm, qe), |(a, borrow, qm, qe)|
             if qm == 0_U64 { break $ (a, borrow) };
             let (off, shift) = _divmod_log2_base(qe);
-            let q32 = qm.shift_left(shift).bit_and(base - 1_U64).to_U32;
-            let (a, borrow1) = _signed_sub_with_offset_mul2(a, b, q32, off);
+            let q32 = qm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
+            let (a, borrow1) = _sub_with_offset_mul(a, b, q32, off.to_I64);
             let borrow = borrow + borrow1;
             let qm = qm.shift_right(_log2_base - shift);
             let qe = qe + (_log2_base - shift);
@@ -282,7 +282,11 @@ namespace DivMod5 {
         let (bm, be) = b._approx_bignat(32);
         let (quo, rem, rem_sign) = loop(
             (BigNat::_zero, a, 1), |(quo, a, a_sign)|
-            eval debug_eprintln((quo,a).format("quo={} a={}"));
+            /*
+            eval debug_eprintln((quo,).format("quo={}"));
+            eval debug_eprintln((a,).format("a={}"));
+            eval debug_eprintln((b,).format("b={}"));
+            */
             if _cmp((a,0), (b,0)) < 0 {
                 break $ (quo, a, a_sign)
             };
@@ -292,36 +296,27 @@ namespace DivMod5 {
                 break $ (quo, a, a_sign)
             };
             let (am, ae) = a._approx_bignat(64);
+            /*
+            eval debug_eprintln(((am.to_string_hex,ae), ).format("(am,ae)={}"));
+            eval debug_eprintln(((bm.to_string_hex,be), ).format("(bm,be)={}"));
+            */
             let qm: U64 = am / bm;
             let qe: I64 = ae - be;
-            eval debug_eprintln(((am.to_string_hex,ae), (bm.to_string_hex,be), (qm.to_string_hex,qe)).format("(am,ae)={} (bm,be)={} (qm,qe)={}"));
+            //eval debug_eprintln(((qm.to_string_hex,qe), ).format("(qm,qe)={}"));
             let (qm: U64, qe: U64) = if qe < 0 {
                 assert_lazy(|_| "qe too small: " + qe.to_string, qe >= -63) $ |_|
-                (qm.shift_left((-qe).to_U64), 0_U64)
+                (qm.shift_right((-qe).to_U64), 0_U64)
             } else { (qm, qe.to_U64) };
+            //eval debug_eprintln(((qm.to_string_hex,qe),).format(" -> (qm,qe)={}"));
 
-            let (qoff: U64, qshift: U64) = _divmod_log2_base(qe);
-            let (qoff: U64, qm: U64) = if qm.bit_and(-1.to_U64.shift_right(32_U64 + qshift)) == qm {
-                (qoff, qm.shift_left(qshift))
-            } else {
-                (qoff + 1_U64, qm.shift_right(_log2_base - qshift))
-            };
-            let (qoff: I64, q: U32) = if qm < _base {
-                (qoff.to_I64, qm.to_U32)
-            } else {
-                (qoff.to_I64 + 1, qm.shift_right(_log2_base).to_U32)
-            };      // TODO: suppress semicolon
-            eval debug_eprintln((q,qoff).format("q={} qoff={}"));
-
-            //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
-            let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
+            let (rem, rem_sign) = _sub_with_exp_mul(a, b, qm, qe)._convert_borrow_to_sign;
             let rem = rem._remove_last_zeros;
             let rem_sign = rem_sign * a_sign;
             let quo = if a_sign > 0 {
-                _add_u32_with_offset1(quo, q, qoff)
+                _add_u64_with_exp(quo, qm, qe)
             } else {
-                let (quo, sign) = _signed_sub_u32_with_offset(quo, q, qoff);
-                assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
+                let (quo, borrow) = _sub_u64_with_exp(quo, qm, qe);
+                assert_lazy(|_| "quo subtraction underflow", borrow == 0_U64) $ |_|
                 quo
             };
             let quo = quo._remove_last_zeros;
@@ -347,20 +342,20 @@ test_divmod5 = (
         if i >= 10 { break_m $ () };
         let (random, a) = random.generate_bigint(2*bits);
         //let (random, b) = random.generate_bigint(bits);
-        // The current algorithm of division is very slow when (b.bit_length % 32) is too small
+        // _divmod was very slow when (b.bit_length % 32) is too small
         let (random, b) = random.generate_bigint(bits + 1);
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
-        let (quo4, rem4) = *_divmod5(a.@nat, b.@nat).from_result;
+        let (quo5, rem5) = *_divmod5(a.@nat, b.@nat).from_result;
         let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
-        let _ = *println((quo4, rem4).format("quo4={} rem4={}")).lift;
+        let _ = *println((quo5, rem5).format("quo5={} rem5={}")).lift;
         */
         let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
-        let (quo4, rem4) = *timeit("(quo4, rem4)", |_| _divmod5(a.@nat, b.@nat)).lift;
-        let _ = *assert_equal("quo", quo1, quo4);
-        let _ = *assert_equal("rem", rem1, rem4);
-        let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo4), rem4));
-        let _ = *assert_true("rem < b", _cmp((rem4,0), (b.@nat,0)) < 0);
+        let (quo5, rem5) = *timeit("(quo5, rem5)", |_| _divmod5(a.@nat, b.@nat)).lift;
+        let _ = *assert_equal("quo", quo1, quo5);
+        let _ = *assert_equal("rem", rem1, rem5);
+        let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo5), rem5));
+        let _ = *assert_true("rem < b", _cmp((rem5,0), (b.@nat,0)) < 0);
         continue_m $ (random, i + 1)
     ).try(eprintln)
 );
@@ -461,7 +456,7 @@ main = (
     */
     //test_approx_bignat;;
     test_divmod5;;
-    //test_divmod5_spec;;
+    test_divmod5_spec;;
     //prof_divmod5;;
     pure()
 );

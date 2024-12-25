@@ -292,13 +292,25 @@ namespace DivMod5 {
                 break $ (quo, a, a_sign)
             };
             let (am, ae) = a._approx_bignat(64);
-            let qm = am / bm;
-            let qe = ae - be;
-            let (qm, qe) = if qe < 0 {
+            let qm: U64 = am / bm;
+            let qe: I64 = ae - be;
+            let (qm: U64, qe: U64) = if qe < 0 {
                 assert_lazy(|_| "qe too small: " + qe.to_string, qe >= -63) $ |_|
-                (qm.shift_left((-qe).to_U64), 0)
-            } else { (qm, qe) };
+                (qm.shift_left((-qe).to_U64), 0_U64)
+            } else { (qm, qe.to_U64) };
 
+            let (qoff: U64, qshift: U64) = _divmod_log2_base(qe);
+            let (qoff: U64, qm: U64) = if qm.bit_and(-1.to_U64.shift_right(32_U64 + qshift)) == qm {
+                (qoff, qm.shift_left(qshift))
+            } else {
+                (qoff + 1_U64, qm.shift_right(log2_base - qshift))
+            };
+            let (qoff: U64, q: U32) = if qm < base {
+                (qoff, qm.to_U32)
+            } else {
+                (qoff + 1_U64, qm.shift_right(log2_base).to_U32)
+            }
+            /*
             let (q:U32, qoff: I64) = if an == bn {
                 let b_u32 = b.@(bn - 1);
                 let a_u32 = a.@(an - 1);
@@ -325,6 +337,7 @@ namespace DivMod5 {
                     (q.to_U32, qoff)
                 }
             };
+            */
             //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
             let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
             let rem = rem._remove_last_zeros;
@@ -471,10 +484,10 @@ main = (
     test_perf_div;;
     test_perf_karatsuba;;
     */
+    //test_approx_bignat;;
     //test_divmod5;;
     //test_divmod5_spec;;
     //prof_divmod5;;
-    test_approx_bignat;;
     pure()
 );
 

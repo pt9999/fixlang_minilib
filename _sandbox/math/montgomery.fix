@@ -1,0 +1,86 @@
+module Main;
+
+import Minilib.Common.Assert;
+import Minilib.Math.BigInt;
+import Minilib.Math.BigNat;
+import Minilib.Math.Euclid;
+import Minilib.Math.Types;
+
+// https://en.wikipedia.org/wiki/Montgomery_modular_multiplication
+
+/*
+REDC algorithm
+Input:
+- integer R and N with gcd(R,N)=1
+  (R = pow(_base, _R_log_base))
+- integer M in [0, R-1] such that MN = -1 mod R
+- integer T in the range [0, RN-1]
+Output:
+- integer S in the range [0, N-1] such that S = TR^-1 mod N
+*/
+redc: U64 -> BigInt -> BigInt -> BigInt -> BigInt;
+redc = |_R_log_base, _N, _M, _T| (
+    /*
+    let _R: BigInt = one.shift_left(_R_log_base * _log2_base);
+    eval debug_eprintln("R=" + _R.to_string);
+    eval debug_eprintln("N=" + _N.to_string);
+    eval debug_eprintln("M=" + _M.to_string);
+    eval debug_eprintln("T=" + _T.to_string);
+    assert_lazy(|_| "gcd(R,N) != 1", gcd(_R, _N) == one) $ |_|
+    assert_lazy(|_| "M out of range", zero <= _M && _M < _R) $ |_|
+    assert_lazy(|_| "MN != -1 mod R", (_M * _N + one) % _R == zero) $ |_|
+    assert_lazy(|_| "T out of range", zero <= _T && _T < _R * _N) $ |_|
+    */
+    let mod_R: BigInt -> BigInt = |a| BigInt::make(a.@sign, a.@nat.truncate(_R_log_base.to_I64));
+    let div_R: BigInt -> BigInt = |a| BigInt::make(a.@sign, a.@nat.get_sub(_R_log_base.to_I64, a.@nat.get_size));
+
+    let m: BigInt = (_T.mod_R * _M).mod_R;
+    //let m: BigInt = (_T % _R * _M) % _R;
+
+    /*
+    eval debug_eprintln("m=" + m.to_string);
+    eval debug_eprintln("(_T + m * _N)=" + (_T + m * _N).to_string);
+    assert_lazy(|_| "(_T + m * _N) % _R != zero", (_T + m * _N) % _R == zero) $ |_|
+    */
+
+    let t: BigInt = (_T + m * _N).div_R;
+    //let t: BigInt = (_T + m * _N) / _R;
+    //eval debug_eprintln("t=" + t.to_string);
+    let _S: BigInt = if t >= _N {
+        t - _N
+    } else {
+        t
+    };
+    /*
+    eval debug_eprintln("S=" + _S.to_string);
+    eval debug_eprintln("(_S * _R - _T) % _N=" + ((_S * _R - _T) % _N).to_string);
+    assert_lazy(|_| "_S != TR^-1 mod N", (_S * _R - _T) % _N == zero) $ |_|
+    */
+    _S
+);
+
+test_redc: IOFail ();
+test_redc = (
+    pure();;
+    let _R_log_base: U64 = 4_U64;
+    let _R: BigInt = one.shift_left(_R_log_base * _log2_base);
+    let _N: BigInt = from_string("123456789012345").as_ok;
+    let (x, y, d) = extended_euclid(_R, _N);
+    if d != one {
+        throw $ "R and N are not coprime"
+    };
+    // R * x + _N * y = 1
+    // _N * (-y) = -1 mod R
+    let _M = (-y) % _R;
+    let _M = if _M.is_negative { _M + _R } else { _M };
+    let _T: BigInt = from_string("332456712312312").as_ok;
+    let _S = redc(_R_log_base, _N, _M, _T);
+    assert_lazy(|_| "_S != TR^-1 mod N", (_S * _R - _T) % _N == zero) $ |_|
+    println("S=" + _S.to_string).lift
+);
+
+main: IO ();
+main = do {
+    test_redc
+}.try(eprintln);
+

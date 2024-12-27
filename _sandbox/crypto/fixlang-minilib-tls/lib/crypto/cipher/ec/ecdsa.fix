@@ -19,7 +19,8 @@ import Minilib.Monad.Random;
 import Minilib.Crypto.SHA256;
 import Minilib.Crypto.SHA512;
 import Minilib.Encoding.Binary;
-import Minilib.Math.Modular;
+//import Minilib.Math.Modular;
+import Minilib.Math.Montgomery;
 import Minilib.Math.BigInt;
 import Minilib.Math.BigNat;
 import Minilib.Math.Types;
@@ -98,38 +99,38 @@ namespace ECInt {
 }
 
 // a number in F(p) where p is an odd prime number
-type ECField = Modular ECInt;
+type ECField = Montgomery;
 
 namespace ECField {
 
-    // `ECField::make(a,p)` creates a number `a` in `F(p)`.
-    make: ECInt -> ECInt -> ECField;
-    make = Modular::make;
+    // `ECField::make(a,ps)` creates a number `a` in `F(p)`.
+    make: ECInt -> MontScheme -> ECField;
+    make = Montgomery::make;
 
     from_ECInt: ECInt -> ECField;
     from_ECInt = |a| (
-        Modular::make(a, zero)
+        Montgomery::from_BigInt(a)
     );
 
     // 2.3.9 Field-Element-to-Integer Conversion
     to_ECInt: ECField -> ECInt;
     to_ECInt = |a| (
         let a = a.nonneg;               // 1..(q-1)
-        a.@value
+        a.to_BigInt
     );
 
     from_I64: I64 -> ECField;
     from_I64 = |i64| (
-        Modular::make(BigInt::from_I64(i64), zero)
+        Montgomery::from_I64(i64)
     );
 
     // 2.3.5 FieldElement-to-OctetString Conversion
     to_bytes: ECField -> Array U8;
     to_bytes = |a| (
         let a = a.nonneg;               // 1..(q-1)
-        let q = a.@modulus;
+        let q = a.get_modulus;
         let mlen = q.get_mlen;
-        a.@value.to_n_bytes(mlen)
+        a.to_BigInt.to_n_bytes(mlen)
     );
 
     // Calculates the square root of `z`.
@@ -138,7 +139,7 @@ namespace ECField {
     sqrt: ECField -> Result ErrMsg ECField;
     sqrt = |z| (
         let z = z.nonneg;
-        let p = z.@modulus;
+        let p = z.get_modulus;
         let (k, r) = divmod(p, BigInt::from_I64(4));
         if r != BigInt::from_I64(3) {
             err $ "Currently only supports `z.@modulus % 4 == 3`"
@@ -181,8 +182,8 @@ namespace ECPoint {
 
     _get_rhs: ECParam -> ECField -> ECField;
     _get_rhs = |ec, x| (
-        let a = ECField::make(ec.@a, ec.@p);
-        let b = ECField::make(ec.@b, ec.@p);
+        let a = ECField::make(ec.@a, ec.@ps);
+        let b = ECField::make(ec.@b, ec.@ps);
         let rhs = x * (x * x + a) + b;
         rhs.nonneg
     );
@@ -208,7 +209,7 @@ namespace ECPoint {
         let (x, y) = p.@xy.as_some;
         let x_bytes = x.to_bytes;
         let y = y.nonneg;
-        let y_bytes = if y.@value.is_even { [ 2_U8 ] } else { [ 3_U8 ]};
+        let y_bytes = if y.to_BigInt.is_even { [ 2_U8 ] } else { [ 3_U8 ]};
         y_bytes.append(x_bytes)
     );
 
@@ -225,11 +226,11 @@ namespace ECPoint {
     from_bytes_ec: ECParam -> Array U8 -> Result ErrMsg ECPoint;
     from_bytes_ec = |ec, bytes| (
         if bytes == [ 0_U8 ] { ok $ zero };
-        let mlen = ec.@p.get_mlen;
+        let mlen = ec.@ps.@n.get_mlen;
         if bytes.get_size == mlen + 1 {     // compressed
             let y_bytes = bytes.get_sub(0, 1);
             let x_bytes = bytes.get_sub(1, mlen + 1);
-            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
+            let x = ECField::make(*from_bytes(x_bytes), ec.@ps);
             let y_even = (y_bytes.@(0) == 2_U8);
             let y_odd = (y_bytes.@(0) == 3_U8);
             if !y_even && !y_odd {
@@ -237,9 +238,9 @@ namespace ECPoint {
             };
             let alpha = _get_rhs(ec, x);
             let beta = *alpha.sqrt;
-            let beta_even = beta.@value.is_even;
+            let beta_even = beta.to_BigInt.is_even;
             let y: ECField = if y_even == beta_even { beta } else {
-                (-beta).nonneg
+                -beta
             };
             let p = ECPoint::make(ec, x, y);
             let _ = *p.check_on_curve;
@@ -252,8 +253,8 @@ namespace ECPoint {
             if w.@(0) != 4_U8 {
                 err $ "from_bytes_ec: invalid uncompressed marker"
             };
-            let x = ECField::make(*from_bytes(x_bytes), ec.@p);
-            let y = ECField::make(*from_bytes(y_bytes), ec.@p);
+            let x = ECField::make(*from_bytes(x_bytes), ec.@ps);
+            let y = ECField::make(*from_bytes(y_bytes), ec.@ps);
             let p = ECPoint::make(ec, x, y);
             let _ = *p.check_on_curve;
             ok $ p
@@ -318,11 +319,13 @@ namespace ECPoint {
 // E(F(p)): y^2 = x^3 + a*x + b
 type ECParam = box struct {
     id: String,    // a unique id
-    p: ECInt,      // a prime `p` for F(p)
+    //p: ECInt,      // a prime `p` for F(p)
+    ps: MontScheme, // Montgomery scheme for `p`
     a: ECInt,      // coefficient of `x`
     b: ECInt,      // constant
     g: (ECInt, ECInt),     // a base point `G`
-    n: ECInt,      // a prime `n` which is order of `G`
+    //n: ECInt,      // a prime `n` which is order of `G`
+    ns: MontScheme, // Montgomery scheme for `n`
     h: ECInt       // the cofactor `h = #E(F(p)) / n`
 };
 
@@ -333,7 +336,7 @@ impl ECParam: Eq {
 
 impl ECParam: ToString {
     to_string = |ec| (
-        [ec.@p, ec.@a, ec.@b, ec.@g.@0, ec.@g.@1, ec.@n, ec.@h]
+        [ec.@ps.@n, ec.@a, ec.@b, ec.@g.@0, ec.@g.@1, ec.@ns.@n, ec.@h]
         .format("ECParam { p:{}, a:{}, b:{}, g:({},{}), n:{}, h:{} }")
     );
 }
@@ -342,8 +345,8 @@ namespace ECParam {
     // Creates a point.
     make_point: (ECInt, ECInt) -> ECParam -> ECPoint;
     make_point = |xy, ec| (
-        let x = ECField::make(xy.@0, ec.@p);
-        let y = ECField::make(xy.@1, ec.@p);
+        let x = ECField::make(xy.@0, ec.@ps);
+        let y = ECField::make(xy.@1, ec.@ps);
         ECPoint::make(ec, x, y)
     );
 
@@ -358,14 +361,20 @@ namespace ECParam {
     secp256r1: ECParam;
     secp256r1 = ECParam {
         id: "secp256r1",
-        p: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF").as_ok,
+        ps: MontScheme::make(
+            256_U64,
+            ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF").as_ok
+        ),
         a: ECInt::from_string_hex("FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFC").as_ok,
         b: ECInt::from_string_hex("5AC635D8 AA3A93E7 B3EBBD55 769886BC 651D06B0 CC53B0F6 3BCE3C3E 27D2604B").as_ok,
         g: (
             ECInt::from_string_hex("6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296").as_ok,
             ECInt::from_string_hex("4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5").as_ok
         ),
-        n: ECInt::from_string_hex("FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551").as_ok,
+        ns: MontScheme::make(
+            256_U64,
+            ECInt::from_string_hex("FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551").as_ok
+        ),
         h: ECInt::from_string_hex("01").as_ok
     };
 
@@ -373,8 +382,11 @@ namespace ECParam {
     secp384r1: ECParam;
     secp384r1 = ECParam {
         id: "secp384r1",
-        p: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF
-FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFF").as_ok,
+        ps: MontScheme::make(
+            384_U64,
+            ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF
+FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFF").as_ok
+        ),
         a: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF
 FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFC").as_ok,
         b: ECInt::from_string_hex("B3312FA7 E23EE7E4 988E056B E3F82D19 181D9C6E FE814112 0314088F
@@ -385,8 +397,11 @@ FFFFFFFE FFFFFFFF 00000000 00000000 FFFFFFFC").as_ok,
             ECInt::from_string_hex("3617DE4A 96262C6F 5D9E98BF 9292DC29 F8F41DBD 289A147C E9DA3113
 B5F0B8C0 0A60B1CE 1D7E819D 7A431D7C 90EA0E5F").as_ok
         ),
-        n: ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF C7634D81
-F4372DDF 581A0DB2 48B0A77A ECEC196A CCC52973").as_ok,
+        ns: MontScheme::make(
+            384_U64,
+            ECInt::from_string_hex("FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF C7634D81
+F4372DDF 581A0DB2 48B0A77A ECEC196A CCC52973").as_ok
+        ),
         h: ECInt::from_string_hex("01").as_ok
     };
 
@@ -419,7 +434,7 @@ namespace ECKeyPair {
     // Generates a keypair from a RandGen and an ECParam.
     generate_keypair: [m: MonadRandom] ECParam -> m ECKeyPair;
     generate_keypair = |ec| (
-        let n = ec.@n;
+        let n = ec.@ns.@n;
         let d = *generate_ECInt_range(
             one, n
         );
@@ -449,7 +464,7 @@ namespace ECKeyPair {
                 // if h == 1, then n * q == O for all points q in E(F(p)).
                 ok()
             };
-            let n = ec.@n;
+            let n = ec.@ns.@n;
             let nq = q.mul_by_ECInt(n);
             if !nq.is_zero {
                 err $ "validate_pubkey: nq != zero: nq=" + nq.to_string
@@ -546,7 +561,7 @@ namespace ECDSAScheme {
     sign = |key_pair, message, scheme| (
         // 1. Select an ephemeral elliptic curve key pair (k, R)
         let ec = scheme.@ec;
-        let n = ec.@n;
+        let n = ec.@ns.@n;
         let k = *generate_ECInt_range(
             one, n
         );
@@ -579,7 +594,7 @@ namespace ECDSAScheme {
         let xR: ECField = _R.@xy.as_some.@0;
         let xR: ECInt = xR.to_ECInt;
         // 3. Set r = xR mod n. If r = 0, or optionally r fails to meet other publicly verifiable criteria (see below), return to Step 1.
-        let r: Modular ECInt = Modular::make(xR, ec.@n);
+        let r: Montgomery = Montgomery::make(xR, ec.@ns);
         if r == zero {
             err $ _Err_Retry
         };
@@ -590,10 +605,10 @@ namespace ECDSAScheme {
         // 6. Compute:
         //    s = k^−1(e + r dU ) mod n.
         // If s = 0, return to Step 1.
-        let n = ec.@n;
-        let dividend = Modular::make(e, n) + r * Modular::make(key_pair.@d, n);
-        let divisor = Modular::make(k, n);
-        let s: Modular ECInt = dividend / divisor;
+        let ns = ec.@ns;
+        let dividend = Montgomery::make(e, ns) + r * Montgomery::make(key_pair.@d, ns);
+        let divisor = Montgomery::make(k, ns);
+        let s: Montgomery = dividend / divisor;
         if s == zero {
             err $ _Err_Retry
         };
@@ -610,7 +625,7 @@ namespace ECDSAScheme {
         // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
         // ...does nothing
         // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
-        let ceil_log2_n = ec.@n.@nat._bit_length.to_I64;
+        let ceil_log2_n = ec.@ns.@n.@nat._bit_length.to_I64;
         assert_lazy(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0) $ |_|
         let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
         else { _H.get_sub(0, ceil_log2_n / 8) };
@@ -635,7 +650,8 @@ namespace ECDSAScheme {
     verify: ECPoint -> ECDSASignature -> Array U8 -> ECDSAScheme -> Result ErrMsg ();
     verify = |_Qu, signature, message, scheme| (
         let ec = scheme.@ec;
-        let n = ec.@n;
+        let ns = ec.@ns;
+        let n = ns.@n;
         // 1. If r and s are not both integers in the interval [1, n − 1], output “invalid” and stop.
         let r = signature.@r;
         let s = signature.@s;
@@ -649,10 +665,10 @@ namespace ECDSAScheme {
         let e: ECInt = *scheme._derive_e(_H);
         // 4. Compute:
         //     u1 = e s^−1 mod n and u2 = r s^−1 mod n.
-        let u1: Modular ECInt = Modular::make(e, n) / Modular::make(s, n);
-        let u2: Modular ECInt = Modular::make(r, n) / Modular::make(s, n);
-        let u1: ECInt = u1.nonneg.@value;
-        let u2: ECInt = u2.nonneg.@value;
+        let u1: Montgomery = Montgomery::make(e, ns) / Montgomery::make(s, ns);
+        let u2: Montgomery = Montgomery::make(r, ns) / Montgomery::make(s, ns);
+        let u1: ECInt = u1.to_BigInt;
+        let u2: ECInt = u2.to_BigInt;
         // 5. Compute:
         //     R = (xR, yR) = u1 G + u2 QU .
         //      If R = O, output “invalid” and stop.
@@ -663,9 +679,9 @@ namespace ECDSAScheme {
         let xR: ECField = _R.@xy.as_some.@0;
         let xR: ECInt = xR.to_ECInt;
         // 7. Set v = xR mod n.
-        let v = Modular::make(xR, n);
+        let v = Montgomery::make(xR, ns);
         // 8. Compare v and r — if v = r, output “valid”, and if v != r, output “invalid”.
-        let r = Modular::make(r, n);
+        let r = Montgomery::make(r, ns);
         if v == r {
             ok()
         } else {

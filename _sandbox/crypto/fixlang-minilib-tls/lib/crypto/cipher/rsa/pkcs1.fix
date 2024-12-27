@@ -297,8 +297,8 @@ emsa_pss_verify = |_M, _EM, emBits, options| (
     if _EM.@(_EM.get_size - 1) != 0xbc_U8 {
         err $ inconsistent_error + "the last byte of EM is not 0xbc: " + _EM.@(_EM.get_size - 1).to_string_hex
     };
-    let maskedDB = _EM.subarray(0, emLen - hLen - 1);
-    let _H = _EM.subarray(emLen - hLen - 1, emLen - 1);
+    let maskedDB = _EM.get_sub(0, emLen - hLen - 1);
+    let _H = _EM.get_sub(emLen - hLen - 1, emLen - 1);
     let k = 8 * emLen - emBits;
     assert_lazy(|_| "k out of range", 0 <= k && k < 8) $ |_|
     let kmask = 0xFF_U8.shift_left((8-k).to_U8);
@@ -310,7 +310,7 @@ emsa_pss_verify = |_M, _EM, emBits, options| (
     let _DB = Array::from_map(maskedDB.get_size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
     let _DB = _DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
 
-    let _DB_left = _DB.subarray(0, emLen - hLen - sLen - 2);
+    let _DB_left = _DB.get_sub(0, emLen - hLen - sLen - 2);
     let is_all_zeros = _DB_left.find_by(|u8| u8 != 0_U8).is_none;
     if !is_all_zeros {
         err $ inconsistent_error + "DB_left is not all zero: " + _DB_left.to_string_hex
@@ -321,7 +321,7 @@ emsa_pss_verify = |_M, _EM, emBits, options| (
     if _DB_middle != 0x01_U8 {
         err $ inconsistent_error + "DB_middle is not one: " + _DB_middle.to_string_hex + " DB=" + _DB.to_string_hex
     };
-    let salt = _DB.subarray(_DB.get_size - sLen, _DB.get_size);
+    let salt = _DB.get_sub(_DB.get_size - sLen, _DB.get_size);
     let _M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
     let _H_dash = hash(_M_dash);
     if _H != _H_dash {
@@ -445,5 +445,5 @@ mgf1 = |mgf_seed, mask_len, hash, hLen| (
         let _T = _T.append(hash(mgf_seed.append(_C)));
         pure $ _T
     );
-    ok $ _T.subarray(0, mask_len)
+    ok $ _T.get_sub(0, mask_len)
 );

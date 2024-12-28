@@ -245,6 +245,12 @@ namespace ListView {
     );
 }
 
+trait s: WithListView {
+    type ListViewType s;
+    with_list_view: [m: Monad, m: Functor] StateT (ListViewType s) m a -> StateT s m a;
+}
+
+
 type FileItem = box struct {
     file_name: String,
     file_path: String,
@@ -302,6 +308,11 @@ type FileListView = unbox struct {
     file_items: Array FileItem,
 };
 
+impl FileListView: WithListView {
+    type ListViewType FileListView = ListView;
+    with_list_view = |sm| sm.lens_state_t(act_list_view);
+}
+
 namespace FileListView {
     make: Window -> String -> IOFail FileListView;
     make = |window, dir_path| (
@@ -315,9 +326,6 @@ namespace FileListView {
             file_items: file_items,
         }
     );
-
-    with_list_view: StateIOF ListView a -> StateIOF FileListView a;
-    with_list_view = |sm| sm.lens_state_t(act_list_view);
 
     has_focus: StateIOF FileListView Bool;
     has_focus = with_list_view(has_focus);
@@ -338,7 +346,7 @@ namespace FileListView {
         let file_items = *select_state(@file_items);
         match file_items.find_by(|item| item.@file_name == name) {
             none() => pure(),
-            some(index) => mod_state $ mod_list_view(set_selected_index(index))
+            some(index) => with_list_view $ mod_state(set_selected_index(index))
         }
     );
 
@@ -380,19 +388,6 @@ namespace FileListView {
         put_state $ *FileListView::make(window, dir_path).lift_iofail;;
         with_list_view(set_focus(focus));;
         pure()
-        /*
-        match *FileListView::selected_item {
-            none() => pure(),
-            some(item) => (
-                if ! item.@stat.is_dir {
-                    pure()
-                };
-                let dir_path = item.@file_path;
-                let window = *with_list_view(select_state(@window));;
-                put_state $ *FileListView::make(window, dir_path).lift_iofail;
-            )
-        }
-        */
     );
 
     up_directory: StateIOF FileListView ();
@@ -412,6 +407,11 @@ type FileView = unbox struct {
     list_view: ListView,
 };
 
+impl FileView: WithListView {
+    type ListViewType FileView = ListView;
+    with_list_view = |sm| sm.lens_state_t(act_list_view);
+}
+
 namespace FileView {
     make: Window -> IOFail FileView;
     make = |win| (
@@ -420,11 +420,8 @@ namespace FileView {
         }
     );
 
-    fv_with_list_view: StateIOF ListView a -> StateIOF FileView a;
-    fv_with_list_view = |sm| sm.lens_state_t(act_list_view);
-
     has_focus: StateIOF FileView Bool;
-    has_focus = fv_with_list_view(has_focus);
+    has_focus = with_list_view(has_focus);
 
     open_file: String -> StateIOF FileView ();
     open_file = |file_path| (
@@ -437,20 +434,20 @@ namespace FileView {
                 attr: normal
             }
         );
-        fv_with_list_view $ mod_state(set_items(items) >> set_title(Path::basename(file_path)))
+        with_list_view $ mod_state(set_items(items) >> set_title(Path::basename(file_path)))
     );
 
     show: StateIOF FileView ();
     show = (
-        fv_with_list_view $ ListView::show
+        with_list_view(ListView::show)
     );
 
     handle_key: StateIOF FileView Action;
     handle_key = (
-        let key = *fv_with_list_view(ListView::get_key);
+        let key = *with_list_view(ListView::get_key);
         //eval debug_eprintln(key);
 
-        let action = *fv_with_list_view(ListView::handle_key(key));
+        let action = *with_list_view(ListView::handle_key(key));
         if ! action.is_no_action { pure $ action };
 
         pure $ no_action()
@@ -458,7 +455,7 @@ namespace FileView {
 
     handle_action: Action -> StateIOF FileView ();
     handle_action = |action| (
-        fv_with_list_view(ListView::handle_action(action));;
+        with_list_view(ListView::handle_action(action));;
         match action {
             _ => pure $ ()
         }
@@ -512,7 +509,7 @@ namespace App {
     set_focus: I64 -> StateIOF App ();
     set_focus = |id| (
         with_file_list_view $ with_list_view $ set_focus(id == 0);;
-        with_file_view $ fv_with_list_view $ set_focus(id == 1);;
+        with_file_view $ with_list_view $ set_focus(id == 1);;
         pure()
     );
 

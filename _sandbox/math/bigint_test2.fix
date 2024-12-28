@@ -3,91 +3,19 @@ module Main;
 import Random;
 
 import Minilib.Common.Assert;
-import Minilib.Common.RandomEx;
 import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 //import Minilib.Math.BigIntPrime;
 import Minilib.Math.Types;
+import Minilib.Monad.Random;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
 import Minilib.Common.TimeEx;
 import Minilib.Text.Hex;
 
-/*
-// it might be better to move this to Minilib.Binary.BitOps
-namespace BitOps {
-    clz_table: Array U8;
-    clz_table = Array::from_map(256, |val|
-        loop(
-            0, |i|
-            if i >= 8 { break $ i };
-            if val.bit_and(1.shift_left(7-i)) != 0 { break $ i };
-            continue $ i + 1
-        ).to_U8
-    );
-
-    count_leading_zeros_U8: U8 -> I64;
-    count_leading_zeros_U8 = |u8| (
-        clz_table.@(u8.to_I64).to_I64
-    );
-
-    count_leading_zeros_U16: U16 -> I64;
-    count_leading_zeros_U16 = |u16| (
-        if u16.bit_and(0xff00_U16) != 0_U16 {
-            count_leading_zeros_U8 $ u16.shift_right(8_U16).to_U8
-        };
-        8 + count_leading_zeros_U8(u16.to_U8)
-    );
-
-    count_leading_zeros_U32: U32 -> I64;
-    count_leading_zeros_U32 = |u32| (
-        if u32.bit_and(0xffff0000_U32) != 0_U32 {
-            count_leading_zeros_U16 $ u32.shift_right(16_U32).to_U16
-        };
-        16 + count_leading_zeros_U16(u32.to_U16)
-    );
-
-    count_leading_zeros_U64: U64 -> I64;
-    count_leading_zeros_U64 = |u64| (
-        if u64.bit_and(0xffffffff00000000_U64) != 0_U64 {
-            count_leading_zeros_U32 $ u64.shift_right(32_U64).to_U32
-        };
-        32 + count_leading_zeros_U32(u64.to_U32)
-    );
-}
-*/
-
-namespace Approx {
-
-    // Approximate BigNat `a` as `m * 2^e`.
-    // `m` is the mantissa and its type is U64.
-    // `e` is the expopnent and its type is I64.
-    // If the bitlength of `a` is smaller or equal to `m_bitlen`, returns `(a._to_u64, 0)`.
-    // It should be hold that `m * e^2 <= a < (m+1) * e^2`.
-    _approx_with_exp: I64 -> Array U32 -> (U64, I64);
-    _approx_with_exp = |m_bitlen, a| (
-        assert_lazy(|_| "invalid m_bitlen: m_bitlen=" + m_bitlen.to_string, 0 <= m_bitlen && m_bitlen <= 64) $ |_|
-        let a = a._remove_last_zeros;
-        let a_bitlen = a._bit_length.to_I64;
-        if a_bitlen <= m_bitlen {
-            (a._to_u64, 0)
-        };
-        let e = a_bitlen - m_bitlen;
-        let (off, shift) = _divmod_log2_base(e.to_U64);
-        let (off, shift) = (off.to_I64, shift.to_I64);
-        let m: U64 = loop(
-            (0_U64, a.get_size - 1), |(m, i)|
-            if i < off { break $ m };
-            let d: U64 = a.@(i).to_U64;
-            let s: I64 = (i - off) * _log2_base.to_I64 - shift;
-            let d: U64 = if s >= 0 { d.shift_left(s.to_U64) } else { d.shift_right((-s).to_U64) };
-            let m: U64 = m.bit_or(d);
-            continue $ (m, i - 1)
-        );
-        (m, e)
-    );
-}
 
 namespace DivMod1 {
     _divmod1: Array U32 -> Array U32 -> (Array U32, Array U32);
@@ -151,224 +79,10 @@ namespace DivMod1 {
 }
 
 namespace DivMod5 {
-    // Appends trailing zeros until the size of the array is at least the specified size.
-    _append_last_zeros: I64 -> Array U32 -> Array U32;
-    _append_last_zeros = |n, a| (
-        loop (
-            a, |a|
-            if a.get_size >= n { break $ a };
-            continue $ a.push_back(0_U32)
-        )
-    );
-
-    // Calculates `a0 + a1 * _base ^ offset1`.
-    _add_u32_with_offset1: Array U32 -> U32 -> I64 -> Array U32;
-    _add_u32_with_offset1 = |a0, a1, offset1| (
-        let n0 = a0.get_size;
-        let n1 = 1 + offset1;
-        let n2 = max(n0, n1);
-        let a0 = a0._append_last_zeros(n2);
-        loop(
-            (a0, offset1, 0_U64), |(a0, i, carry)|
-            if i >= n2 {
-                let a0 = if carry == 0_U64 { a0 }
-                else { a0.push_back(carry.to_U32) };
-                break $ a0
-            };
-            if i >= n1 && carry == 0_U64 {
-                break $ a0
-            };
-            let d0: U32 = a0.@(i);
-            let d1: U32 = if i == offset1 { a1 } else { 0_U32 };
-            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
-            let (carry, d2) = _divmod_base(d2);
-            let a0 = a0.set(i, d2.to_U32);
-            continue $ (a0, i + 1, carry)
-        )._remove_last_zeros
-    );
-
-    // Calculates `a - b * pow(_base, b_offset)`.
-    // returns the result and the borrow.
-    _sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, U64);
-    _sub_u32_with_offset = |a, b, b_offset| (
-        let na = a.get_size;
-        let nb = 1 + b_offset;
-        let na = max(na, nb);
-        let a = a._append_last_zeros(na);
-        loop(
-            (a, b_offset, 0_U64), |(a, i, borrow)|
-            if i >= na  {
-                break $ (a, borrow)
-            };
-            if i >= nb && borrow == 0_U64 {
-                break $ (a, borrow)
-            };
-            let a_u32: U32 = a.@(i);
-            let b_u32: U32 = if i == b_offset { b } else { 0_U32 };
-            let sub_u64: U64 = b_u32.to_U64 + borrow;
-            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
-            let sub_lo: U32 = sub_lo.to_U32;
-
-            let (borrow, a_u32) = if a_u32 >= sub_lo {
-                (sub_hi, a_u32 - sub_lo)
-            } else {
-                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
-            };
-            let a = a.set(i, a_u32);
-            continue $ (a, i + 1, borrow)
-        )
-    );
-
-    // Calculates `a + bm * 2^be`.
-    // returns the result.
-    _add_u64_with_exp: Array U32 -> U64 -> U64 -> Array U32;
-    _add_u64_with_exp = |a, bm, be| (
-        loop(
-            (a, bm, be), |(a, bm, be)|
-            if bm == 0_U64 { break $ a };
-            let (off, shift) = _divmod_log2_base(be);
-            let q32 = bm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
-            let a = _add_u32_with_offset1(a, q32, off.to_I64);
-            let bm = bm.shift_right(_log2_base - shift);
-            let be = be + (_log2_base - shift);
-            continue $ (a, bm, be)
-        )
-    );
-
-    // Calculates `a - bm * 2^be`.
-    // returns the result and the borrow.
-    _sub_u64_with_exp: Array U32 -> U64 -> U64 -> (Array U32, U64);
-    _sub_u64_with_exp = |a, bm, be| (
-        loop(
-            (a, 0_U64, bm, be), |(a, borrow, bm, be)|
-            if bm == 0_U64 { break $ (a, borrow) };
-            let (off, shift) = _divmod_log2_base(be);
-            let q32 = bm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
-            let (a, borrow1) = _sub_u32_with_offset(a, q32, off.to_I64);
-            let borrow = borrow + borrow1;
-            let bm = bm.shift_right(_log2_base - shift);
-            let be = be + (_log2_base - shift);
-            continue $ (a, borrow, bm, be)
-        )
-    );
-
-    // Calculates `a - b * q * pow(_base, b_offset)`.
-    // returns the result and the borrow.
-    _sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, U64);
-    _sub_with_offset_mul = |a, b, q, b_offset| (
-        let na = a.get_size;
-        let nb = b.get_size + b_offset;
-        let na = max(na, nb + 1);  // +1 in `nb + 1` is for q
-        let a = a._append_last_zeros(na);
-        let (a, borrow) = loop(
-            (a, b_offset, 0_U64), |(a, i, borrow)|
-            if i >= na  {
-                break $ (a, borrow)
-            };
-            if i >= nb && borrow == 0_U64 {
-                break $ (a, borrow)
-            };
-            let a_u32: U32 = a.@(i);
-            let b_u32: U32 = if b_offset <= i && i < nb { b.@(i - b_offset) } else { 0_U32 };
-            let sub_u64: U64 = b_u32.to_U64 * q.to_U64 + borrow;
-            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
-            let sub_lo: U32 = sub_lo.to_U32;
-
-            let (borrow, a_u32) = if a_u32 >= sub_lo {
-                (sub_hi, a_u32 - sub_lo)
-            } else {
-                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
-            };
-            let a = a.set(i, a_u32);
-            continue $ (a, i + 1, borrow)
-        );
-        (a, borrow)
-    );
-
-    // Calculates `a - b * qm * 2^qe`.
-    // returns the result and the borrow.
-    _sub_with_exp_mul: Array U32 -> Array U32 -> U64 -> U64 -> (Array U32, U64);
-    _sub_with_exp_mul = |a, b, qm, qe| (
-        loop(
-            (a, 0_U64, qm, qe), |(a, borrow, qm, qe)|
-            if qm == 0_U64 { break $ (a, borrow) };
-            let (off, shift) = _divmod_log2_base(qe);
-            let q32 = qm.shift_left(shift).bit_and(_base - 1_U64).to_U32;
-            let (a, borrow1) = _sub_with_offset_mul(a, b, q32, off.to_I64);
-            let borrow = borrow + borrow1;
-            let qm = qm.shift_right(_log2_base - shift);
-            let qe = qe + (_log2_base - shift);
-            continue $ (a, borrow, qm, qe)
-        )
-    );
-
-    // Converts a result of a borrowed subtraction to a signed subtraction.
-    _convert_borrow_to_sign: (Array U32, U64) -> (Array U32, I64);
-    _convert_borrow_to_sign = |(a, borrow)| (
-        if borrow > 0_U64 {
-            let a = a._neg;
-            let a = a._remove_last_zeros;
-            (a, -1)
-        };
-        let a = a._remove_last_zeros;
-        (a, 1)
-    );
-
     // Calculates `(a0 / a1, a0 % a1)`.
     // Aborts if any error occured.
     _divmod5: Array U32 -> Array U32 -> (Array U32, Array U32);
-    _divmod5 = |a, b| (
-        let a = a._remove_last_zeros;
-        let b = b._remove_last_zeros;
-        assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
-        if b.get_size == 1 {
-            let (quo, rem) = _divmod_u32(a, b.@(0));
-            (quo, [rem])
-        };
-        let (bm, be) = b._approx_with_exp(32);
-        let (quo, rem, rem_sign) = loop(
-            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
-            if _cmp((a,0), (b,0)) < 0 {
-                break $ (quo, a, a_sign)
-            };
-            let an = a.get_size;
-            let bn = b.get_size;
-            if an < bn {
-                break $ (quo, a, a_sign)
-            };
-            let (am, ae) = a._approx_with_exp(64);
-            //eval debug_eprintln(((am.to_string_hex,ae), ).format("(am,ae)={}"));
-            //eval debug_eprintln(((bm.to_string_hex,be), ).format("(bm,be)={}"));
-            let qm: U64 = am / bm;
-            let qe: I64 = ae - be;
-            //eval debug_eprintln(((qm.to_string_hex,qe), ).format("(qm,qe)={}"));
-            let (qm: U64, qe: U64) = if qe < 0 {
-                assert_lazy(|_| "qe too small: " + qe.to_string, -qe < 64) $ |_|
-                (qm.shift_right((-qe).to_U64), 0_U64)
-            } else { (qm, qe.to_U64) };
-            //eval debug_eprintln(((qm.to_string_hex,qe),).format(" -> (qm,qe)={}"));
-
-            let (rem, rem_sign) = _sub_with_exp_mul(a, b, qm, qe)._convert_borrow_to_sign;
-            let rem = rem._remove_last_zeros;
-            let rem_sign = rem_sign * a_sign;
-            let quo = if a_sign > 0 {
-                _add_u64_with_exp(quo, qm, qe)
-            } else {
-                let (quo, borrow) = _sub_u64_with_exp(quo, qm, qe);
-                assert_lazy(|_| "quo subtraction underflow", borrow == 0_U64) $ |_|
-                quo
-            };
-            let quo = quo._remove_last_zeros;
-            continue $ (quo, rem, rem_sign)
-        );
-        if rem_sign > 0 || rem == BigNat::_zero {
-            (quo, rem)
-        } else {
-            let quo = _sub(quo, [1_U32]);
-            let rem = _sub(b, rem);
-            (quo, rem)
-        }
-    );
+    _divmod5 = BigNat::_divmod;
 }
 
 test_divmod5: IO ();
@@ -378,20 +92,22 @@ test_divmod5 = (
     //let bits = 256;
     let bits = 512;
     loop_m(
-        (random, 0), |(random, i)|
+        0, |i|
         if i >= 10 { break_m $ () };
-        let (random, a) = random.generate_bigint(2*bits);
-        //let (random, b) = random.generate_bigint(bits);
+        let a = *generate_bigint(2*bits);
+        //let b = *generate_bigint(bits);
         // _divmod1 was very slow when (b.bit_length % 32) is too small
-        let (random, b) = random.generate_bigint(bits + 1);
-        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod1(a.@nat, b.@nat)).lift;
-        let (quo5, rem5) = *timeit("(quo5, rem5)", |_| _divmod5(a.@nat, b.@nat)).lift;
-        let _ = *assert_equal("quo", quo1, quo5);
-        let _ = *assert_equal("rem", rem1, rem5);
-        let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo5), rem5));
-        let _ = *assert_true("rem < b", _cmp((rem5,0), (b.@nat,0)) < 0);
-        continue_m $ (random, i + 1)
-    ).try(eprintln)
+        let b = *generate_bigint(bits + 1);
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod1(a.@nat, b.@nat)).lift_io;
+        let (quo5, rem5) = *timeit("(quo5, rem5)", |_| _divmod5(a.@nat, b.@nat)).lift_io;
+        let _ = *assert_equal("quo", quo1, quo5).lift_iofail;
+        let _ = *assert_equal("rem", rem1, rem5).lift_iofail;
+        let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo5), rem5)).lift_iofail;
+        let _ = *assert_true("rem < b", _cmp((rem5,0), (b.@nat,0)) < 0).lift_iofail;
+        continue_m $ (i + 1)
+    )
+    .eval_state_t(random)
+    .try(eprintln)
 );
 
 test_divmod_spec: (Array U32 -> Array U32 -> (Array U32, Array U32)) -> IO ();
@@ -413,7 +129,7 @@ test_divmod_spec = |divmod| (
                 one.BigInt::shift_left(n.to_U64) - one,
                 (
                     let random = Random::init_by_seed(seed + (n * 1000).to_U64);
-                    let (random, a) = random.generate_bigint(n);
+                    let a = generate_bigint(n).eval_state(random);
                     a
                 )
         ];
@@ -422,10 +138,12 @@ test_divmod_spec = |divmod| (
             let b: BigInt = *base_nums(234_U64, *bit_lengths);
             pure $ test(a,b)
         };
-        //arr.sequence.forget
+        arr.sequence.forget
+        /*
         let (a,b) = ([0, 2147483648], [4294967295, 1]);
         let (a,b) = (BigInt::make(1, a.map(to_U32)), BigInt::make(1, b.map(to_U32)));
         test(a,b)
+        */
     }.try(eprintln)
 );
 
@@ -460,11 +178,11 @@ prof_divmod5 = (
     let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 64;
-    let (random, a) = random.generate_bigint(2*bits);
-    let (random, b) = random.generate_bigint(bits);
+    let (random, a) = generate_bigint(2*bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
     let _ = loop(
         0, |i|
-        if i >= 1000000 { break $ () };
+        if i >= 10000 { break $ () };
         eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
         let (quo, rem) = _divmod5(a.@nat, b.@nat);
         continue $ i + 1
@@ -477,42 +195,31 @@ test_approx_with_exp = (
     println("=== test_approx_with_exp ===");;
     let _ = *pure();
     let random = Random::init_by_seed(123_U64); // time.to_U64);
-    loop_m(
-        (random, 0), |(random, i)|
-        if i >= 30 { break_m $ () };
-        let (random, bit_length) = random.generate_I64_range(128, 256);
-        let (random, a) = random.generate_bigint(bit_length).map(@nat);
-        let (random, m_bitlen) = random.generate_I64_range(10, 64);
+    let sm: StateT Random IOFail () = do {
+        let bit_length = *random_I64_range(128, 256);
+        let a = *generate_bigint(bit_length).map(@nat);
+        let m_bitlen = *random_I64_range(10, 64);
         let (m, e) = a._approx_with_exp(m_bitlen);
-        println("(bit_length, a)=" + (bit_length, a).to_string);;
-        println("(m_bitlen, m, e)=" + (m_bitlen, m, e).to_string);;
+        println("(bit_length, a)=" + (bit_length, a).to_string).lift_io;;
+        println("(m_bitlen, m, e)=" + (m_bitlen, m, e).to_string).lift_io;;
         let lower = BigNat::_from_u64(m)._shift_left(e.to_U64);
         let upper = BigNat::_from_u64(m)._add(BigNat::_one)._shift_left(e.to_U64);
-        assert(|_| "lower check failed", _cmp((lower,0), (a,0)) <= 0);;
-        assert(|_| "upper check failed", _cmp((a,0), (upper,0)) <= 0);;
-        continue_m $ (random, i + 1)
-    )
+        assert(|_| "lower check failed", _cmp((lower,0), (a,0)) <= 0).lift_io;;
+        assert(|_| "upper check failed", _cmp((a,0), (upper,0)) <= 0).lift_io;;
+        pure()
+    };
+
+    Iterator::range(0, 30).foreach_m(|i| sm).eval_state_t(random)
+    .try(eprintln)
 );
 
 main: IO ();
 main = (
-    /*
-    test_karatsuba;;
-    test_divmod;;
-    test_exp;;
-    test_shift_right;;
-    test_divmod2;;
-    //prof_divmod2;;
-    test_divmod3;;
-    //prof_divmod3;;
-    test_perf_div;;
-    test_perf_karatsuba;;
-    */
-    //test_approx_with_exp;;
-    //test_divmod5;;
-    //test_divmod5_spec;;
-    //prof_divmod5;;
-    test_divmod_spec(_divmod);;
+    test_approx_with_exp;;
+    test_divmod5;;
+    test_divmod5_spec;;
+    prof_divmod5;;
+    test_divmod_spec(_divmod5);;
     pure()
 );
 

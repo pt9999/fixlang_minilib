@@ -397,6 +397,7 @@ test_divmod5 = (
 test_divmod_spec: (Array U32 -> Array U32 -> (Array U32, Array U32)) -> IO ();
 test_divmod_spec = |divmod| (
     do {
+        let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stderr._file_ptr, nullptr];
         let test: BigInt -> BigInt -> IOFail () = |a, b| (
             eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
             let (quo, rem) = divmod(a.@nat, b.@nat);
@@ -405,23 +406,26 @@ test_divmod_spec = |divmod| (
             eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
             pure()
         );
-        let arr: Array (IOFail ()) = do {
-            let n = *[1, 2, 16, 31, 32, 33, 48, 63, 64, 65, 95, 96, 97];
-            let c: BigInt = *[
+        let bit_lengths = [1, 2, 16, 31, 32, 33, 48, 63, 64, 65, 95, 96, 97];
+        let base_nums = |seed:U64, n:I64| [
                 one.BigInt::shift_left(n.to_U64),
+                one.BigInt::shift_left(n.to_U64) + one,
+                one.BigInt::shift_left(n.to_U64) - one,
                 (
-                    let random = Random::init_by_seed(123_U64 + (n * 1000).to_U64);
+                    let random = Random::init_by_seed(seed + (n * 1000).to_U64);
                     let (random, a) = random.generate_bigint(n);
                     a
                 )
-            ];
-            let a = *[c, c * from_I64(2)];
-            let a = *[a, a + from_I64(1), a - from_I64(1)];
-            let b = *[c, c * from_I64(2)];
-            let b = *[b, b + from_I64(1), b + from_I64(1)];
+        ];
+        let arr: Array (IOFail ()) = do {
+            let a: BigInt = *base_nums(123_U64, *bit_lengths);
+            let b: BigInt = *base_nums(234_U64, *bit_lengths);
             pure $ test(a,b)
         };
-        arr.sequence.forget
+        //arr.sequence.forget
+        let (a,b) = ([0, 2147483648], [4294967295, 1]);
+        let (a,b) = (BigInt::make(1, a.map(to_U32)), BigInt::make(1, b.map(to_U32)));
+        test(a,b)
     }.try(eprintln)
 );
 

@@ -394,6 +394,37 @@ test_divmod5 = (
     ).try(eprintln)
 );
 
+test_divmod_spec: (Array U32 -> Array U32 -> (Array U32, Array U32)) -> IO ();
+test_divmod_spec = |divmod| (
+    do {
+        let test: BigInt -> BigInt -> IOFail () = |a, b| (
+            eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
+            let (quo, rem) = divmod(a.@nat, b.@nat);
+            let _ = *assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo), rem));
+            let _ = *assert_true("rem < b", _cmp((rem,0), (b.@nat,0)) < 0);
+            eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
+            pure()
+        );
+        let arr: Array (IOFail ()) = do {
+            let n = *[1, 2, 16, 31, 32, 33, 48, 63, 64, 65, 95, 96, 97];
+            let c: BigInt = *[
+                one.BigInt::shift_left(n.to_U64),
+                (
+                    let random = Random::init_by_seed(123_U64 + (n * 1000).to_U64);
+                    let (random, a) = random.generate_bigint(n);
+                    a
+                )
+            ];
+            let a = *[c, c * from_I64(2)];
+            let a = *[a, a + from_I64(1), a - from_I64(1)];
+            let b = *[c, c * from_I64(2)];
+            let b = *[b, b + from_I64(1), b + from_I64(1)];
+            pure $ test(a,b)
+        };
+        arr.sequence.forget
+    }.try(eprintln)
+);
+
 test_divmod5_spec: IO ();
 test_divmod5_spec = (
     println("=== test_divmod5_spec ===");;
@@ -474,9 +505,10 @@ main = (
     test_perf_karatsuba;;
     */
     //test_approx_with_exp;;
-    test_divmod5;;
-    test_divmod5_spec;;
+    //test_divmod5;;
+    //test_divmod5_spec;;
     //prof_divmod5;;
+    test_divmod_spec(_divmod);;
     pure()
 );
 

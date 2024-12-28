@@ -2,9 +2,16 @@ module Main;
 
 import Minilib.IO.FileSystem;
 import Minilib.IO.Path;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
 import Minilib.Terminal.Ncurses;
 import Minilib.Trait.Traversable;
 import Minilib.Text.StringEx;
+
+type StateIOF s = StateT s IOFail;
+
+select_state: [m: Monad] (s -> a) -> StateT s m a;
+select_state = |selector| get_state.map(selector);
 
 namespace StringUtils {
     pad_right: I64 -> U8 -> String -> String;
@@ -98,8 +105,8 @@ namespace ListView {
         }
     );
 
-    show: ListView -> IOFail ListView;
-    show = |list_view| (
+    show: StateIOF ListView ();
+    show = (
         let ListView {
             has_focus: has_focus,
             title: title,
@@ -108,7 +115,7 @@ namespace ListView {
             selected_index: selected_index,
             message: message,
             window: window
-        } = list_view;
+        } = *get_state;
 
         window.clear;;
 
@@ -123,7 +130,7 @@ namespace ListView {
                 scroll_top
             }
         );
-        let list_view = list_view.set_scroll_top(scroll_top);
+        mod_state(set_scroll_top(scroll_top));;
 
         loop_m(
             0, |i|
@@ -152,25 +159,27 @@ namespace ListView {
         window.move_add_str(2, 0, " " + ellipsis(w - 6, title) + " ").when(title != "");;
         window.move_add_str(2, h - 1, " " + ellipsis(w - 6, message) + " ").when(message != "");;
         window.refresh;;
-        pure $ list_view
+        pure()
     );
 
-    handle_key: KeyName -> ListView -> IOFail Action;
-    handle_key = |key, list_view| (
+    handle_key: KeyName -> StateIOF ListView Action;
+    handle_key = |key| (
+        let id = *select_state(@id);
+
         if key == "q" || key == "Q" || key == "KEY_ESC" {
             pure $ action_quit()
         };
         if key == "j" || key == "KEY_DOWN" {
-            pure $ action_select_next_item(list_view.@id)
+            pure $ action_select_next_item(id)
         };
         if key == "k" || key == "KEY_UP" {
-            pure $ action_select_prev_item(list_view.@id)
+            pure $ action_select_prev_item(id)
         };
         if key == "KEY_PPAGE" {
-            pure $ action_page_up(list_view.@id)
+            pure $ action_page_up(id)
         };
         if key == "KEY_NPAGE" {
-            pure $ action_page_down(list_view.@id)
+            pure $ action_page_down(id)
         };
         if key == "^I" {
             pure $ action_next_focus()
@@ -178,41 +187,61 @@ namespace ListView {
         pure $ no_action()
     );
 
-    handle_action: Action -> ListView -> IOFail ListView;
-    handle_action = |action, list_view| (
+    handle_action: Action -> StateIOF ListView ();
+    handle_action = |action| (
         match action {
-            action_select_prev_item(target) => list_view.select_prev_item(target),
-            action_select_next_item(target) => list_view.select_next_item(target),
-            action_page_up(target) => list_view.page_up(target),
-            action_page_down(target) => list_view.page_down(target),
-            _ => pure $ list_view
+            action_select_prev_item(target) => ListView::select_prev_item(target),
+            action_select_next_item(target) => ListView::select_next_item(target),
+            action_page_up(target) => ListView::page_up(target),
+            action_page_down(target) => ListView::page_down(target),
+            _ => pure()
         }
     );
 
-    select_next_item: ListViewId -> ListView -> IOFail ListView;
-    select_next_item = |target, list_view| (
-        if target != list_view.@id { pure $ list_view };
-        pure $ list_view.mod_selected_index(|index| min(list_view.@items.get_size - 1, index + 1))
+    has_focus: StateIOF ListView Bool;
+    has_focus = select_state(@has_focus);
+
+    set_focus: Bool -> StateIOF ListView ();
+    set_focus = |focus| mod_state $ set_has_focus(focus);
+
+    get_key: StateIOF ListView KeyName;
+    get_key = (
+        let window = *select_state(ListView::@window);
+        window.get_key
     );
 
-    select_prev_item: ListViewId -> ListView -> IOFail ListView;
-    select_prev_item = |target, list_view| (
-        if target != list_view.@id { pure $ list_view };
-        pure $ list_view.mod_selected_index(|index| max(0, index - 1))
+    window_size: StateIOF ListView (I64, I64);
+    window_size = (
+        let window = *select_state(ListView::@window);
+        window.get_window_size
     );
 
-    page_down: ListViewId -> ListView -> IOFail ListView;
-    page_down = |target, list_view| (
-        if target != list_view.@id { pure $ list_view };
-        let (w, h) = *list_view.@window.get_window_size;
-        pure $ list_view.mod_selected_index(|index| min(list_view.@items.get_size - 1, index + h / 2))
+    select_next_item: ListViewId -> StateIOF ListView ();
+    select_next_item = |target| (
+        if target != *select_state(@id) { pure() };
+        let size = *select_state(|s| s.@items.get_size);
+        mod_state $ mod_selected_index(|index| min(size - 1, index + 1))
     );
 
-    page_up: ListViewId -> ListView -> IOFail ListView;
-    page_up = |target, list_view| (
-        if target != list_view.@id { pure $ list_view };
-        let (w, h) = *list_view.@window.get_window_size;
-        pure $ list_view.mod_selected_index(|index| max(0, index - h / 2))
+    select_prev_item: ListViewId -> StateIOF ListView ();
+    select_prev_item = |target| (
+        if target != *select_state(@id) { pure() };
+        mod_state $ mod_selected_index(|index| max(0, index - 1))
+    );
+
+    page_down: ListViewId -> StateIOF ListView ();
+    page_down = |target| (
+        if target != *select_state(@id) { pure() };
+        let size = *select_state(|s| s.@items.get_size);
+        let (w, h) = *ListView::window_size;
+        mod_state $ mod_selected_index(|index| min(size - 1, index + h / 2))
+    );
+
+    page_up: ListViewId -> StateIOF ListView ();
+    page_up = |target| (
+        if target != *select_state(@id) { pure() };
+        let (w, h) = *ListView::window_size;
+        mod_state $ mod_selected_index(|index| max(0, index - h / 2))
     );
 }
 
@@ -287,38 +316,43 @@ namespace FileListView {
         }
     );
 
-    get_selected_item: FileListView -> Option FileItem;
-    get_selected_item = |file_list_view| (
-        let file_items = file_list_view.@file_items;
-        let selected_index = file_list_view.@list_view.@selected_index;
+    with_list_view: StateIOF ListView a -> StateIOF FileListView a;
+    with_list_view = |sm| sm.lens_state_t(act_list_view);
+
+    has_focus: StateIOF FileListView Bool;
+    has_focus = with_list_view(has_focus);
+
+    selected_item: StateIOF FileListView (Option FileItem);
+    selected_item = (
+        let file_items = *select_state(@file_items);
+        let selected_index = *with_list_view(select_state(@selected_index));
         if 0 <= selected_index && selected_index < file_items.get_size {
-            some $ file_items.@(selected_index)
+            pure $ some $ file_items.@(selected_index)
         } else {
-            none()
+            pure $ none()
         }
     );
 
-    select_item_by_name: String -> FileListView -> IOFail FileListView;
-    select_item_by_name = |name, file_list_view| (
-        let file_items = file_list_view.@file_items;
+    select_item_by_name: String -> StateIOF FileListView ();
+    select_item_by_name = |name| (
+        let file_items = *select_state(@file_items);
         match file_items.find_by(|item| item.@file_name == name) {
-            none() => pure $ file_list_view,
-            some(index) => pure $ file_list_view.mod_list_view(set_selected_index(index))
+            none() => pure(),
+            some(index) => mod_state $ mod_list_view(set_selected_index(index))
         }
     );
 
-    show: FileListView -> IOFail FileListView;
-    show = |file_list_view| (
-        file_list_view.act_list_view(ListView::show)
+    show: StateIOF FileListView ();
+    show =  (
+        with_list_view $ ListView::show
     );
 
-    handle_key: FileListView -> IOFail Action;
-    handle_key = |file_list_view| (
-        let list_view = file_list_view.@list_view;
-        let key = *list_view.@window.get_key;
+    handle_key: StateIOF FileListView Action;
+    handle_key = (
+        let key = *with_list_view(ListView::get_key);
         //eval debug_eprintln(key);
 
-        let action = *list_view.handle_key(key);
+        let action = *with_list_view(ListView::handle_key(key));
         if ! action.is_no_action { pure $ action };
 
         if key == "^J" || key == "KEY_ENTER" {
@@ -330,40 +364,47 @@ namespace FileListView {
         pure $ no_action()
     );
 
-    handle_action: Action -> FileListView -> IOFail FileListView;
-    handle_action = |action, file_list_view| (
-        let file_list_view = *file_list_view.act_list_view(handle_action(action));
+    handle_action: Action -> StateIOF FileListView ();
+    handle_action = |action| (
+        with_list_view(ListView::handle_action(action));;
         match action {
-            action_up_directory() => file_list_view.up_directory,
-            _ => pure $ file_list_view
+            action_up_directory() => up_directory,
+            _ => pure()
         }
     );
 
-    open_directory: String -> FileListView -> IOFail FileListView;
-    open_directory = |dir_path, file_list_view| (
-        let opt = file_list_view.get_selected_item;
-        if opt.is_none {
-            pure $ file_list_view
-        };
-        let item = opt.as_some;
-        if ! item.@stat.is_dir {
-            pure $ file_list_view
-        };
-        let dir_path = item.@file_path;
-        FileListView::make(file_list_view.@list_view.@window, dir_path)
+    open_directory: String -> StateIOF FileListView ();
+    open_directory = |dir_path| (
+        let focus = *with_list_view(has_focus);
+        let window = *with_list_view(select_state(@window));
+        put_state $ *FileListView::make(window, dir_path).lift_iofail;;
+        with_list_view(set_focus(focus));;
+        pure()
+        /*
+        match *FileListView::selected_item {
+            none() => pure(),
+            some(item) => (
+                if ! item.@stat.is_dir {
+                    pure()
+                };
+                let dir_path = item.@file_path;
+                let window = *with_list_view(select_state(@window));;
+                put_state $ *FileListView::make(window, dir_path).lift_iofail;
+            )
+        }
+        */
     );
 
-    up_directory: FileListView -> IOFail FileListView;
-    up_directory = |file_list_view| (
-        let dir_path = file_list_view.@dir_path;
+    up_directory: StateIOF FileListView ();
+    up_directory = (
+        let dir_path = *select_state(@dir_path);
         if dir_path == "/" {
-            pure $ file_list_view
+            pure()
         };
         let dir_name = Path::basename(dir_path);
         let parent_path = Path::dirname(dir_path);
-        let file_list_view = *FileListView::make(file_list_view.@list_view.@window, parent_path);
-        let file_list_view = *file_list_view.select_item_by_name(dir_name);
-        pure $ file_list_view
+        open_directory(parent_path);;
+        select_item_by_name(dir_name)
     );
 }
 
@@ -379,9 +420,15 @@ namespace FileView {
         }
     );
 
-    open_file: String -> FileView -> IOFail FileView;
-    open_file = |file_path, file_view| (
-        let contents = *read_file_bytes(Path::parse(file_path).as_some);
+    fv_with_list_view: StateIOF ListView a -> StateIOF FileView a;
+    fv_with_list_view = |sm| sm.lens_state_t(act_list_view);
+
+    has_focus: StateIOF FileView Bool;
+    has_focus = fv_with_list_view(has_focus);
+
+    open_file: String -> StateIOF FileView ();
+    open_file = |file_path| (
+        let contents = *read_file_bytes(Path::parse(file_path).as_some).lift_iofail;
         let contents = contents._unsafe_to_string;
         let items = contents.split("\n").to_array.map(|line|
             let line = if line == "" { " " } else { line };
@@ -390,30 +437,30 @@ namespace FileView {
                 attr: normal
             }
         );
-        pure $ file_view.mod_list_view(set_items(items) >> set_title(Path::basename(file_path)))
+        fv_with_list_view $ mod_state(set_items(items) >> set_title(Path::basename(file_path)))
     );
 
-    show: FileView -> IOFail FileView;
-    show = |file_view| (
-        file_view.act_list_view(ListView::show)
+    show: StateIOF FileView ();
+    show = (
+        fv_with_list_view $ ListView::show
     );
 
-    handle_key: FileView -> IOFail Action;
-    handle_key = |file_view| (
-        let list_view = file_view.@list_view;
-        let key = *list_view.@window.get_key;
+    handle_key: StateIOF FileView Action;
+    handle_key = (
+        let key = *fv_with_list_view(ListView::get_key);
         //eval debug_eprintln(key);
-        let action = *list_view.handle_key(key);
+
+        let action = *fv_with_list_view(ListView::handle_key(key));
         if ! action.is_no_action { pure $ action };
 
         pure $ no_action()
     );
 
-    handle_action: Action -> FileView -> IOFail FileView;
-    handle_action = |action, file_view| (
-        let file_view = *file_view.act_list_view(handle_action(action));
+    handle_action: Action -> StateIOF FileView ();
+    handle_action = |action| (
+        fv_with_list_view(ListView::handle_action(action));;
         match action {
-            _ => pure $ file_view
+            _ => pure $ ()
         }
     );
 }
@@ -442,61 +489,68 @@ namespace App {
         }
     );
 
-    show: App -> IOFail App;
-    show = |app| (
-        app.act_file_list_view(FileListView::show)
-        .bind(act_file_view(FileView::show))
+    with_file_list_view: StateIOF FileListView a -> StateIOF App a;
+    with_file_list_view = |sm| sm.lens_state_t(act_file_list_view);
+
+    with_file_view: StateIOF FileView a -> StateIOF App a;
+    with_file_view = |sm| sm.lens_state_t(act_file_view);
+
+    show: StateIOF App ();
+    show = (
+        with_file_list_view(FileListView::show);;
+        with_file_view(FileView::show);;
+        pure()
     );
 
-    get_focus: App -> I64;
-    get_focus = |app| (
-        if app.@file_list_view.@list_view.@has_focus { 0 };
-        if app.@file_view.@list_view.@has_focus { 1 };
-        -1
+    get_focus: StateIOF App I64;
+    get_focus = (
+        if *with_file_list_view(has_focus) { pure $ 0 };
+        if *with_file_view(has_focus) { pure $ 1 };
+        pure $ -1
     );
 
-    set_focus: I64 -> App -> App;
-    set_focus = |id, app| (
-        app
-        .mod_file_list_view(mod_list_view(set_has_focus(id == 0)))
-        .mod_file_view(mod_list_view(set_has_focus(id == 1)))
+    set_focus: I64 -> StateIOF App ();
+    set_focus = |id| (
+        with_file_list_view $ with_list_view $ set_focus(id == 0);;
+        with_file_view $ fv_with_list_view $ set_focus(id == 1);;
+        pure()
     );
 
-    next_focus: App -> IOFail App;
-    next_focus = |app| (
-        let focus = app.get_focus;
-        pure $ app.set_focus((focus + 1) % 2)
+    next_focus: StateIOF App ();
+    next_focus = (
+        let focus = *get_focus;
+        set_focus((focus + 1) % 2)
     );
 
-    handle_key: App -> IOFail Action;
-    handle_key = |app| (
-        let focus = app.get_focus;
-        if focus == 0 { app.@file_list_view.handle_key };
-        if focus == 1 { app.@file_view.handle_key };
+    handle_key: StateIOF App Action;
+    handle_key = (
+        let focus = *get_focus;
+        if focus == 0 { with_file_list_view $ FileListView::handle_key };
+        if focus == 1 { with_file_view $ FileView::handle_key };
         pure $ no_action()
     );
 
-    handle_action: Action -> App -> IOFail App;
-    handle_action = |action, app| (
-        let app = *app.act_file_list_view(handle_action(action));
-        let app = *app.act_file_view(handle_action(action));
+    handle_action: Action -> StateIOF App ();
+    handle_action = |action| (
+        with_file_list_view $ FileListView::handle_action(action);;
+        with_file_view $ FileView::handle_action(action);;
         match action {
-            action_next_focus() => app.next_focus,
+            action_next_focus() => next_focus,
             action_open_file() => (
-                match app.@file_list_view.get_selected_item {
-                    none() => pure $ app,
+                match *with_file_list_view(selected_item) {
+                    none() => pure(),
                     some(item) => (
                         if item.@stat.is_dir {
-                            app.act_file_list_view(FileListView::open_directory(item.@file_path))
+                            with_file_list_view(FileListView::open_directory(item.@file_path))
                         };
                         if item.@stat.is_file {
-                            app.act_file_view(FileView::open_file(item.@file_path))
+                            with_file_view(FileView::open_file(item.@file_path))
                         };
-                        pure $ app
+                        pure()
                     )
                 }
             ),
-            _ => pure $ app
+            _ => pure()
         }
     );
 }
@@ -507,14 +561,14 @@ main = do {
         init_custom_color_pairs;;
         let app = *App::make(win);
         loop_m(
-            app, |app|
-            let app = *app.show;
-            let action = *app.handle_key;
+            (), |_|
+            App::show;;
+            let action = *App::handle_key;
             if action.is_action_quit {
                 break_m $ ()
             };
-            let app = *app.handle_action(action);
-            continue_m $ app
-        )
+            App::handle_action(action);;
+            continue_m $ ()
+        ).eval_state_t(app)
     )
 }.try(eprintln);

@@ -7,10 +7,20 @@ import Minilib.Math.BigNat;
 import Minilib.Math.BigInt;
 //import Minilib.Math.BigIntPrime;
 import Minilib.Math.Types;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
 import Minilib.Common.TimeEx;
+
+or_abort: Result ErrMsg a -> a;
+or_abort = |res| (
+    if res.is_err {
+        undefined("err: " + res.as_err)
+    };
+    res.as_ok
+);
 
 namespace Karatsuba {
 
@@ -227,7 +237,7 @@ namespace Goldschmidt {
         undefined("error: " + res.as_err)
     );
 
-    _divmod2: Array U32 -> Array U32 -> Result ErrMsg (Array U32, Array U32);
+    _divmod2: Array U32 -> Array U32 -> (Array U32, Array U32);
     _divmod2 = |a, b| (
         let a = a._remove_last_zeros;
         let b = b._remove_last_zeros;
@@ -253,7 +263,7 @@ namespace Goldschmidt {
             (quo, rem)
         };
         pure $ (quo, rem)
-    );
+    ).or_abort;
 }
 
 namespace DivMod3 {
@@ -583,13 +593,13 @@ test_probable_prime = (
 
 test_karatsuba: IO ();
 test_karatsuba = (
-    let _ = *pure();
+    println("test_karatsuba");;
     let _ = FFI_CALL[() setbuf(Ptr, Ptr), IO::stdout._file_ptr, nullptr];
     let time = FFI_CALL[I32 time(Ptr), nullptr];
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 8192;   //1024;
-    let (random, a) = random.generate_bigint(bits);
-    let (random, b) = random.generate_bigint(bits);
+    let (random, a) = generate_bigint(bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
     timeit("a*b", |_| a*b);;
     timeit("mul_karatsuba(a,b)", |_| mul_karatsuba(a,b));;
     assert_eq(|_| "eq", a*b, mul_karatsuba(a,b));;
@@ -601,8 +611,8 @@ test_divmod = (
     println("=== test_divmod ===");;
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 512;
-    let (random, a) = random.generate_bigint(2*bits);
-    let (random, b) = random.generate_bigint(bits);
+    let (random, a) = generate_bigint(2*bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
     timeit("divmod(a,b)", |_| divmod(a,b));;
     pure()
 );
@@ -624,25 +634,30 @@ test_shift_right = (
     println("=== test_shift_right ===");;
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 128;
-    let iter = Iterator::generate(random, generate_bigint(bits) >> |(r,a)| some $ (a, r)).take(3);
-    iter.fold_m(
-        (), |_, a|
-        [1, 3, 31, 32, 33].map(I64::to_U64).to_iter.fold_m(
-            (), |_, shift|
+    do {
+        let sm: I64 -> U64 -> StateT Random IOFail () = |i, shift| (
+            let a = *generate_bigint(bits);
             let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
             let b = BigInt::make(1, a.@nat._shift_left(shift));
             let c = a * n;
-            let _ = *println(b.to_string).lift;
-            let _ = *assert_equal("left", c, b);
+            println(b.to_string).lift_io;;
+            assert_equal("left", c, b).lift_iofail;;
 
             let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
             let b = BigInt::make(1, a.@nat._shift_right(shift));
             let c = a / n;
-            let _ = *println(b.to_string).lift;
-            let _ = *assert_equal("right", c, b);
+            println(b.to_string).lift_io;;
+            assert_equal("right", c, b).lift_iofail;;
             pure()
-        )
-    ).try(eprintln)
+        );
+        let arr: Array (StateT Random IOFail ()) = do {
+            let i = *Iterator::range(0, 3).to_array;
+            let shift = *[1, 3, 31, 32, 33].map(to_U64);
+            pure $ sm(i, shift)
+        };
+        arr.sequence.eval_state_t(random).forget
+    }
+    .try(eprintln)
 );
 
 test_divmod2: IO ();
@@ -650,37 +665,36 @@ test_divmod2 = (
     println("=== test_divmod2 ===");;
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 256;
-    loop_m(
-        (random, 0), |(random, i)|
-        if i >= 10 { break_m $ () };
-        let (random, a) = random.generate_bigint(2*bits);
-        let (random, b) = random.generate_bigint(bits);
+    Iterator::range(0, 10).foreach_m(|i|
+        let a = *generate_bigint(2*bits);
+        let b = *generate_bigint(bits);
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
-        let (quo2, rem2) = *_divmod2(a.@nat, b.@nat).from_result;
+        let (quo2, rem2) = _divmod2(a.@nat, b.@nat);
         let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
         let _ = *println((quo2, rem2).format("quo2={} rem2={}")).lift;
         */
-        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
-        let (quo2, rem2) = *timeit("(quo2, rem2)", |_| _divmod2(a.@nat, b.@nat).as_ok).lift;
-        let _ = *assert_equal("quo", quo1, quo2);
-        let _ = *assert_equal("rem", rem1, rem2);
-        continue_m $ (random, i + 1)
-    ).try(eprintln)
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift_io;
+        let (quo2, rem2) = *timeit("(quo2, rem2)", |_| _divmod2(a.@nat, b.@nat)).lift_io;
+        assert_equal("quo", quo1, quo2).lift_iofail;;
+        assert_equal("rem", rem1, rem2).lift_iofail;;
+        pure()
+    ).eval_state_t(random)
+    .try(eprintln)
 );
 
-prof_divmod2: IO ();
-prof_divmod2 = (
-    println("=== prof_divmod2 ===");;
+prof_divmod: (Array U32 -> Array U32 -> (Array U32, Array U32)) -> IO ();
+prof_divmod = |divmod| (
+    println("=== prof_divmod ===");;
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 256;
-    let (random, a) = random.generate_bigint(2*bits);
-    let (random, b) = random.generate_bigint(bits);
+    let (random, a) = generate_bigint(2*bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
     let _ = loop(
         0, |i|
-        if i >= 1000000 { break $ () };
+        if i >= 10000 { break $ () };
         eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
-        let (quo, rem) = _divmod2(a.@nat, b.@nat).as_ok;
+        let (quo, rem) = divmod(a.@nat, b.@nat);
         continue $ i + 1
     );
     pure()
@@ -691,23 +705,22 @@ test_divmod3 = (
     println("=== test_divmod3 ===");;
     let random = Random::init_by_seed(123_U64); // time.to_U64);
     let bits = 256;
-    loop_m(
-        (random, 0), |(random, i)|
-        if i >= 10 { break_m $ () };
-        let (random, a) = random.generate_bigint(2*bits);
-        let (random, b) = random.generate_bigint(bits);
+    Iterator::range(0, 10).foreach_m(|i|
+        let a = *generate_bigint(2*bits);
+        let b = *generate_bigint(bits);
         /*
         let (quo1, rem1) = _divmod(a.@nat, b.@nat);
         let (quo3, rem3) = *_divmod3(a.@nat, b.@nat).from_result;
         let _ = *println((quo1, rem1).format("quo1={} rem1={}")).lift;
         let _ = *println((quo3, rem3).format("quo3={} rem3={}")).lift;
         */
-        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift;
-        let (quo3, rem3) = *timeit("(quo3, rem3)", |_| _divmod3(a.@nat, b.@nat)).lift;
-        let _ = *assert_equal("quo", quo1, quo3);
-        let _ = *assert_equal("rem", rem1, rem3);
-        continue_m $ (random, i + 1)
-    ).try(eprintln)
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod(a.@nat, b.@nat)).lift_io;
+        let (quo3, rem3) = *timeit("(quo3, rem3)", |_| _divmod3(a.@nat, b.@nat)).lift_io;
+        assert_equal("quo", quo1, quo3).lift_iofail;;
+        assert_equal("rem", rem1, rem3).lift_iofail;;
+        pure()
+    ).eval_state_t(random)
+    .try(eprintln)
 );
 
 test_perf_div: IO ();
@@ -718,8 +731,8 @@ test_perf_div = (
         let prec10 = (i+1) * 1000;
         let bits = (prec10.to_F64 / 0.3010).to_I64;
         let random = Random::init_by_seed(12345_U64);
-        let (random, a) = random.generate_bigint(2*bits);
-        let (random, b) = random.generate_bigint(bits);
+        let (random, a) = generate_bigint(2*bits).run_state(random);
+        let (random, b) = generate_bigint(bits).run_state(random);
         timeit("_divmod: prec10="+prec10.to_string, |_|
                     let c = _divmod(a.@nat, b.@nat);      // currently the cost of `_divmod` is O(n^3)
                     ());;
@@ -741,8 +754,8 @@ test_perf_karatsuba = (
         let prec10 = (i+1) * 1000;
         let bits = (prec10.to_F64 / 0.3010).to_I64;
         let random = Random::init_by_seed((321 + i * 13).to_U64); // time.to_U64);
-        let (random, a) = random.generate_bigint(bits);
-        let (random, b) = random.generate_bigint(bits);
+        let (random, a) = generate_bigint(bits).run_state(random);
+        let (random, b) = generate_bigint(bits).run_state(random);
         let _ = *timeit("mul:           prec10="+prec10.to_string, |_|
                     let c = mul(a, b);
                     ());
@@ -837,14 +850,13 @@ main = (
     test_divmod;;
     test_exp;;
     test_shift_right;;
-    test_divmod2;;
-    //prof_divmod2;;
-    test_divmod3;;
-    //prof_divmod3;;
-    test_perf_div;;
-    test_perf_karatsuba;;
     */
-    test_divmod4;;
+    //test_divmod2;;
+    //prof_divmod(_divmod2);;
+    //test_divmod3;;
+    //test_perf_div;;
+    test_perf_karatsuba;;
+    //test_divmod4;;
     //test_divmod4_spec;;
     //prof_divmod4;;
     pure()

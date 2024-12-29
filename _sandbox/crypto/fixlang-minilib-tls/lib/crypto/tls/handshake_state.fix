@@ -389,10 +389,17 @@ namespace AfterServerHello {
         eval log_debug("validating certificate signatures");
         eval *do {
             let array_lazy: Array (Lazy (Result ErrMsg ())) = @validate_certificate_signatures_mt(cert_path_api, ());
+            //let semaphoe: Var I64 = *Var::make(1).lift;
+            let semaphoe: Var I64 = *Var::make(number_of_processors).lift;
             let tasks: Array (IOTask (Result ErrMsg ())) = *array_lazy.map_m(|lazy|
                 lift $ AsyncIOTask::make $ do {
                     eval *pure();
-                    pure $ lazy()
+                    semaphoe.wait_and_lock(|n| n > 0, |n|
+                        semaphoe.Var::set(n - 1)
+                    );;
+                    let res = lazy();
+                    semaphoe.mod(|n| n + 1);;
+                    pure $ res
                 }
             );
             tasks.foreach_m(|task| task.get.from_io_result)

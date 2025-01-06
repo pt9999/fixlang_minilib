@@ -1,0 +1,71 @@
+module Main;
+
+//import Std hiding {Iterator::*, Array::to_iter, String::split};
+import Iterator;
+
+
+loop_loop: I64 -> I64;
+loop_loop = |n| (
+    loop(
+        (0, 0), |(sum, i)|
+        if i >= n { break $ sum };
+        continue $ (sum + i, i + 1)
+    )
+);
+
+loop_rec: I64 -> I64 -> I64;
+loop_rec = |sum, n| (
+    if n <= 0 { sum };
+    loop_rec(sum + (n - 1), n - 1)
+);
+
+loop_rec2: I64 -> I64 -> I64;
+loop_rec2 = |n, sum| (
+    if n <= 0 { sum };
+    loop_rec(n - 1, sum + (n - 1))
+);
+
+loop_fix: I64 -> I64;
+loop_fix = |n| (
+    let f = fix $ |f, sum, n| (
+        if n <= 0 { sum };
+        f(sum + (n - 1), n - 1)
+    );
+    f(0, n)
+);
+
+loop_fold: I64 -> I64;
+loop_fold = |n| (
+    ::Iterator::range(0, n).fold(0, |sum, i| sum + i)
+);
+
+loop_std_fold: I64 -> I64;
+loop_std_fold = |n| (
+    Std::Iterator::range(0, n).Std::Iterator::fold(0, |sum, i| sum + i)
+);
+
+bench: String -> I64 -> I64 -> (I64 -> I64) -> IO ();
+bench = |name, times, n, f| (
+    let (result, time) = *consumed_time_while_io(
+        pure();;
+        pure $ loop(
+            (f(n), 0), |(sum, i)|
+            if i >= times - 1 { break $ sum };
+            let ans = f(n);
+            continue $ (sum, i + 1)
+        ));
+    println(name + ": result="+result.to_string+" time="+time.to_string)
+);
+
+main: IO ();
+main = (
+    let times = 100;
+    let n = 1000000;
+    let _ = *bench("loop_loop", times, n, loop_loop);
+    let _ = *bench("loop_rec", times, n, loop_rec(0));
+    let _ = *bench("loop_rec2", times, n, |n| loop_rec2(n, 0));
+    //let _ = *bench("loop_fix", times, n, loop_fix);
+    let _ = *bench("loop_fold", times, n, loop_fold);
+    let _ = *bench("loop_std_fold", times, n, loop_std_fold);
+    pure()
+);

@@ -6,7 +6,7 @@ FIXAUTOLINK = $(TOPDIR)/bin/fixautolink
 FIXAUTOTEST = $(TOPDIR)/bin/fixautotest
 LIBS = -I $(TOPDIR)/lib -I $(TOPDIR)/_sandbox/crypto
 
-OPT = separated
+OPT = basic
 OPT_BUILD = --opt-level $(OPT)
 OPT_RUN = --opt-level $(OPT)
 OPT_TESTS = --opt-level $(OPT)

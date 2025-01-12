@@ -6,9 +6,9 @@ GLUE_LIB = lib$(GLUE_NAME).a
 LIBS = -L . -s $(GLUE_NAME) -d curl
 
 %.out: %.fix $(GLUE_LIB)
-	$(TOPDIR)/bin/fixautolink build -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
+	$(TOPDIR)/bin/fixautolink build -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O basic
 %.run: %.fix $(GLUE_LIB)
-	$(TOPDIR)/bin/fixautolink run -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O separated
+	$(TOPDIR)/bin/fixautolink run -o $@ -I $(TOPDIR)/lib -I . $(LIBS) -f $< -O basic
 
 all: test
 

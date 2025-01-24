@@ -76,7 +76,7 @@ It has been mainly tested in the following environment.
 - rustup 1.26.0
 - rustc 1.72.1
 - llvm 12.0.1
-- latest Fix program (2024/10/26)
+- latest Fix program
 
 ## Minilib Development
 

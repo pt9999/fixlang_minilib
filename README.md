@@ -17,18 +17,18 @@ For example, `minilib-common` is stored in [fixlang-minilib-common](https://gith
 
 | Name   | Description |
 |--------|-------------|
-|[minilib-common](https://github.com/pt9999/fixlang-minilib-common)| Common modules (StringEx, UnitTest etc.)|
+|[minilib-common](https://github.com/pt9999/fixlang-minilib-common)| Common modules (UnitTest, Assertion, String extension etc.)|
 |[minilib-text](https://github.com/pt9999/fixlang-minilib-text)| Text handling (SimpleParser, Unicode etc.)|
-|[minilib-binary](https://github.com/pt9999/fixlang-minilib-binary)| Binary handling|
-|[minilib-io](https://github.com/pt9999/fixlang-minilib-io)| IO operations (File System, Platform Info)|
-|[minilib-collection](https://github.com/pt9999/fixlang-minilib-collection)| Collections  (Red-Black tree, Double-ended queue etc.)|
+|[minilib-binary](https://github.com/pt9999/fixlang-minilib-binary)| Binary handling (ByteBuffer, BASE64, Hex string)|
+|[minilib-io](https://github.com/pt9999/fixlang-minilib-io)| IO operations (File System, Platform Info etc.)|
+|[minilib-collection](https://github.com/pt9999/fixlang-minilib-collection)| Collections (TreeSet, TreeMap, OrderedMap, Deque etc.)|
 |[minilib-monad](https://github.com/pt9999/fixlang-minilib-monad)| Monads (State/Reader/Writer monad, Monad transformer etc.)|
 |[minilib-comonad](https://github.com/pt9999/fixlang-minilib-comonad)| Comonads (Env/Traced comonad etc.)|
 |[minilib-random](https://github.com/pt9999/fixlang-minilib-random)| Random monad etc. |
-|[minilib-thread](https://github.com/pt9999/fixlang-minilib-thread)| Multithreading (Task pool etc.) |
+|[minilib-thread](https://github.com/pt9999/fixlang-minilib-thread)| Multithreading (Task pool, Channel etc.) |
 |[minilib-net](https://github.com/pt9999/fixlang-minilib-net)| Networks (TCP/IP, HTTP etc.) |
 |[minilib-math](https://github.com/pt9999/fixlang-minilib-math)| Math (Complex number, BigInt, BigFloat, Algebra etc.)|
-|[minilib-crypto](https://github.com/pt9999/fixlang-minilib-crypto)| Cryptography  (AES, SHA-1, SHA-256, HMAC etc.)|
+|[minilib-crypto](https://github.com/pt9999/fixlang-minilib-crypto)| Cryptography (AES, SHA-1, SHA-256, HMAC etc.)|
 |[minilib-app](https://github.com/pt9999/fixlang-minilib-app)| Application Support (CommandLine parser etc.) |
 |[minilib-media](https://github.com/pt9999/fixlang-minilib-media)| Multimedia (PNG image etc.) |
 |[minilib-json](https://github.com/pt9999/fixlang-minilib-json)| JSON encoder/decoder |

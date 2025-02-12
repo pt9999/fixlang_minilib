@@ -1,7 +1,7 @@
 ## Overview
 
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
-The latest Fix program (2025/01/23) is required.
+The latest Fix program (2025/02/11) is required.
 This library is still in alpha stage.
 
 Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
@@ -30,9 +30,9 @@ For example, `minilib-common` is stored in [fixlang-minilib-common](https://gith
 |[minilib-math](https://github.com/pt9999/fixlang-minilib-math)| Math (Complex number, BigInt, BigFloat, Algebra etc.)|
 |[minilib-crypto](https://github.com/pt9999/fixlang-minilib-crypto)| Cryptography (AES, SHA-1, SHA-256, HMAC etc.)|
 |[minilib-app](https://github.com/pt9999/fixlang-minilib-app)| Application Support (CommandLine parser etc.) |
-|[minilib-media](https://github.com/pt9999/fixlang-minilib-media)| Multimedia (PNG image etc.) |
 |[minilib-json](https://github.com/pt9999/fixlang-minilib-json)| JSON encoder/decoder |
 |[minilib-xml](https://github.com/pt9999/fixlang-minilib-xml)| XML encoder/decoder |
+|[minilib-media](https://github.com/pt9999/fixlang-minilib-media)| Multimedia (PNG image etc.) |
 
 ### Subproject dependency diagram
 

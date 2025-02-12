@@ -338,7 +338,7 @@ namespace AfterServerHello {
     _check_handshakes_order: [m: MonadError] Array Handshake -> m ();
     _check_handshakes_order = |handshakes| (
         let size = handshakes.get_size;
-        let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |i, _| i + 1);
+        let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |_, i| i + 1);
         let get_order: (Handshake -> Bool) -> I64 = |f| handshakes.find_by(f).as_some_or(-1);
         let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
         eval *(get_count(Handshake::is_encrypted_extensions) == 1).or_error;
@@ -356,8 +356,7 @@ namespace AfterServerHello {
         eval log_debug("_update_handshake_context: " +
                 handshakes.get_sub(start, end).to_iter.map(|(h,_)| h.get_msg_type_as_string).join(", "));
         handshakes.get_sub(start, end).map(@1).to_iter.fold(
-            protection, |protection, handshake_bytes|
-            protection.add_handshake_context(handshake_bytes)
+            protection, add_handshake_context
         )
     );
 
@@ -612,7 +611,7 @@ namespace AfterFinished {
             let handshakes = *inner_plaintext.split_handshakes.from_result_t;
             eval log_debug("received handshakes:\n" + handshakes.to_iter.map(@0).map(to_string).join("\n"));
             let after_finished = *handshakes.to_iter.fold_m(after_finished,
-                |after_finished, (handshake, handshake_bytes)| after_finished._handle_handshake(handshake)
+                |(handshake, handshake_bytes)| _handle_handshake(handshake)
             );
             // TODO: support KeyUpdate
             eval log_debug("AfterFinished::on_recv_record end");

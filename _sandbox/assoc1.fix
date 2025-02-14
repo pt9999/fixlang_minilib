@@ -16,7 +16,7 @@ type FormatSpec = unbox union {
 trait field: FormatField {
     type Formatter field;
     to_formatter: String -> field -> Formatter field;
-    from_specs: Iterator FormatSpec -> Result ErrMsg field;
+    from_specs: DynIterator FormatSpec -> Result ErrMsg field;
 }
 
 type IntField next = unbox struct { next: next };
@@ -46,7 +46,7 @@ impl String: FormatField {
     from_specs = |specs| (
         specs.advance.map_or(
             err $ "spec not found",
-            |(spec, next)|
+            |(next, spec)|
             if !next.is_empty { err $ "found elements after terminator" };
             if !spec.is_terminator { err $ "not a terminator" };
             ok $ spec.as_terminator
@@ -60,7 +60,7 @@ impl [a: FormatField] IntField a: FormatField {
     from_specs = |specs| (
         specs.advance.map_or(
             err $ "spec not found",
-            |(spec, next)|
+            |(next, spec)|
             if !spec.is_int_field { err $ "not a int field" };
             ok $ IntField::make(*from_specs(next))
         )
@@ -73,7 +73,7 @@ impl [a: FormatField] CharField a: FormatField {
     from_specs = |specs| (
         specs.advance.map_or(
             err $ "spec not found",
-            |(spec, next)|
+            |(next, spec)|
             if !spec.is_char_field { err $ "not a char field" };
             ok $ CharField::make(*from_specs(next))
         )
@@ -85,21 +85,21 @@ impl [a: FormatField] ConstStr a: FormatField {
     from_specs = |specs| (
         specs.advance.map_or(
             err $ "spec not found",
-            |(spec, next)|
+            |(next, spec)|
             if !spec.is_const_str { err $ "not a const str" };
             ok $ ConstStr::make(spec.as_const_str, *from_specs(next))
         )
     );
 }
 
-parse_format_spec: String -> Result ErrMsg (Iterator FormatSpec);
+parse_format_spec: String -> Result ErrMsg (DynIterator FormatSpec);
 parse_format_spec = |input| (
     let end = input.get_size;
     loop_m(
         ([], 0, 0), |(output, begin, pos)|
         if pos >= end {
             let output = output.push_back(terminator(input.get_sub(begin, end)));
-            break_m $ output.to_iter
+            break_m $ output.to_iter.to_dyn
         };
         let c = input.get_bytes.@(pos);
         if c != '%' {
@@ -109,7 +109,7 @@ parse_format_spec = |input| (
         let pos = pos + 1;
         if pos >= end {
             let output = output.push_back(terminator(""));
-            break_m $ output.to_iter
+            break_m $ output.to_iter.to_dyn
         };
         let c = input.get_bytes.@(pos);
         if c == '%' {

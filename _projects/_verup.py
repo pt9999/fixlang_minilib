@@ -45,11 +45,11 @@ class GitHelper(object):
     def __init__(self):
         pass
 
-    def run_subprocess(self, cmd_args):
+    def run_subprocess(self, cmd_args: list[str]) -> None:
         print("+ " + " ".join(cmd_args))
         subprocess.run(cmd_args, check=True)
 
-    def commit_file(self, args, filepath: str, version: str):
+    def commit_file(self, args, filepath: str, version: str) -> None:
         self.run_subprocess(["git", "add", "--verbose", filepath])
         message = "version " + version
         self.run_subprocess(["git", "commit", "--verbose", "-m", message])
@@ -60,6 +60,11 @@ class GitHelper(object):
         if args.push and args.tag:
             self.run_subprocess(["git", "push", "origin", version])
 
+    def is_up_to_date(self, last_version: str) -> bool:
+        cmd_args = ["git", "diff", "--quiet", f"{last_version}..main"]
+        print("+ " + " ".join(cmd_args))
+        proc = subprocess.run(cmd_args, check=False)
+        return proc.returncode == 0
 
 # ---------------------------------------------------
 # Project file editing
@@ -111,6 +116,11 @@ class ProjectFile(object):
 # Upgrading the project version
 # ---------------------------------------------------
 
+def check_up_to_date(old_version: str) -> None:
+    if GitHelper().is_up_to_date(old_version):
+        print(f"Project is up to date with {old_version}")
+        sys.exit(0)
+
 def ask_new_version(new_version: str) -> str:
     answer = input(f"Input new version (default: {new_version}): ")
     if answer != "":
@@ -131,6 +141,8 @@ def upgrade_project_version(args, project_dir):
     project_file_path = f"{project_dir}/fixproj.toml"
     project_file = ProjectFile(filepath=project_file_path)
     old_version = project_file.get_project_version()
+    if not args.force:
+        check_up_to_date(old_version)
     if args.version is None:
         new_version = increment_version(old_version)
     else:
@@ -142,6 +154,11 @@ def upgrade_project_version(args, project_dir):
     if args.commit and new_version != "":
         GitHelper().commit_file(args, project_file_path, new_version)
 
+def print_project_version(project_dir = "."):
+    project_file_path = f"{project_dir}/fixproj.toml"
+    project_file = ProjectFile(filepath=project_file_path)
+    version = project_file.get_project_version()
+    print(version)
 
 # ---------------------------------------------------
 # Main routine
@@ -159,6 +176,8 @@ def parse_args():
         help="push to the remote repository",
         default=False,
     )
+    parser.add_argument("--force", action="store_true", help="Forces even if the project is up-to-date with the last version", default=False)
+    parser.add_argument("--show-current", action="store_true", help="print current version and exit", default=False)
     args = parser.parse_args()
     return args
 
@@ -166,6 +185,9 @@ def parse_args():
 def main():
     args = parse_args()
     project_dir = "."
+    if args.show_current:
+        print_project_version()
+        sys.exit(0)
     upgrade_project_version(args, project_dir)
 
 

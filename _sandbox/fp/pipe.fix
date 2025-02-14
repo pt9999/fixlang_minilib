@@ -15,20 +15,20 @@ type Void = box union {
 };
 
 namespace Pipe {
-    from_iter: Iterator a -> Pipe Void a ();
+    from_iter: [iter: Iterator, Item iter = a] iter -> Pipe Void a ();
     from_iter = |iter| (
         match iter.advance {
             none() => p_pure $ (),
-            some((a, next)) => p_write $ (a, |_| from_iter(next))
+            some((next, a)) => p_write $ (a, |_| from_iter(next))
         }
     );
 
-    to_iter: Pipe a b () -> Iterator b;
+    to_iter: Pipe a b () -> DynIterator b;
     to_iter = |pipe| (
         match pipe {
-            p_pure() => Iterator::empty,
-            p_read(fa) => Iterator::empty,      // no more input
-            p_write((b, next)) => Iterator { next: |_| some $ (b, next().to_iter) },
+            p_pure() => Iterator::empty.to_dyn,
+            p_read(fa) => Iterator::empty.to_dyn,      // no more input
+            p_write((b, next)) => DynIterator { next: |_| some $ (next().to_iter, b) },
         }
     );
 

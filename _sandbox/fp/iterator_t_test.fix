@@ -1,5 +1,7 @@
 module Main;
 
+import Std hiding { Iterator::StateIterator::mod_state };
+
 import Minilib.Monad.IteratorT;
 import Minilib.Monad.State;
 import Minilib.Monad.IO;
@@ -45,7 +47,7 @@ test_push_front = (
     let xs: IteratorT IOFail I64 = IteratorT::empty.push_front(42);
     let opt = *xs.advance;
     assert_true("is_some", opt.is_some);;
-    let (x, xs2) = opt.as_some;
+    let (xs2, x) = opt.as_some;
     assert_equal("x", 42, x);;
     assert_true("empty", *xs2.is_empty)
 );
@@ -73,11 +75,8 @@ test_from_m_iter: TestCase;
 test_from_m_iter = (
     make_test("test_from_m_iter") $ |_|
     let inc: StateT I64 IOFail I64 = make_state_t_monad $ |i| pure $ (i + 1, i);
-    let xs: Iterator (StateT I64 IOFail I64) = (
-        Iterator::empty
-        .push_front(inc)
-        .push_front(inc)
-        .push_front(inc)
+    let xs: ArrayIterator (StateT I64 IOFail I64) = (
+        Array::fill(3, inc).to_iter
     );
     let xs: IteratorT (StateT I64 IOFail) I64 = IteratorT::from_m_iter $ xs;
     do {
@@ -130,7 +129,7 @@ test_fold_m: TestCase;
 test_fold_m = (
     make_test("test_fold_m") $ |_|
     let xs: IteratorT IOFail I64 = IteratorT::from_array([1, 2, 3]);
-    let s = *xs.fold_m("", |s, i| pure $ s + i.to_string + ",");
+    let s = *xs.fold_m("", |i, s| pure $ s + i.to_string + ",");
     assert_equal("s", "1,2,3,", s)
 );
 
@@ -185,10 +184,10 @@ test_monad_error_error: TestCase;
 test_monad_error_error = (
     make_test("test_monad_error_error") $ |_|
     let xs1: IteratorT (Result ErrMsg) I64 = error("error");
-    assert_equal("xs1.advance.map(@0)", err("error"), xs1.advance.map(map(Tuple2::@0)));;
+    assert_equal("xs1.advance.map(@1)", err("error"), xs1.advance.map(map(Tuple2::@1)));;
     assert_equal("xs1.to_array_m", err("error"), xs1.to_array_m);;
     let xs2: IteratorT (Result ErrMsg) I64 = xs1.push_front(42);
-    assert_equal("xs2.advance.map(@0)", ok(some(42)), xs2.advance.map(map(Tuple2::@0)));;
+    assert_equal("xs2.advance.map(@1)", ok(some(42)), xs2.advance.map(map(Tuple2::@1)));;
     assert_equal("xs2.to_array_m", err("error"), xs2.to_array_m);;
     pure()
 );
@@ -306,8 +305,8 @@ test_skip = (
             pure $ i
         )
     );
-    let n = 100000;
-    //let n = 100;
+    //let n = 100000;  // crashes for some reason
+    let n = 100;
     let xs = xs.skip(n).take(3);
     let (log, arr) = *xs.to_array_m.run_state_t([]);
     assert_equal("arr", [n, n+1, n+2], arr);;

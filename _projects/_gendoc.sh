@@ -11,10 +11,8 @@ function gendoc () {
         local modules=$(perl -lne 'print "$1" if /^module\s+([\w\.]+);/' $files)
         echo "=== $dir ==="
         #echo dir=$dir files=$files modules=$modules
+        rm -rf doc docs
         fix docs -m $modules
-        rm -rf doc
-        mkdir -p doc
-        mv -v Minilib.*.md doc
     )
 }
 

@@ -25,7 +25,7 @@ EXAMPLES = \
 SUBPROJECT_MAKEFILE = $$(pwd)/subproject.make
 
 .PHONY: all test examples clean publish
-.SUFFIXES: .test .clean .publish
+.SUFFIXES: .test .clean .document .publish .verup
 
 all:
 
@@ -41,8 +41,12 @@ clean: $(SUBPROJECTS:%=%.clean)
 	$(MAKE) -C fixlang-minilib-examples clean
 
 # Generate documents for all subprojects.
-document:
-	bash _gendoc.sh $(SUBPROJECTS)
+document: $(SUBPROJECTS:%=%.document)
+
+#document:
+#	bash _gendoc.sh $(SUBPROJECTS)
+
+verup-all: $(SUBPROJECTS:%=%.verup)
 
 # Generate a dependency graph (using `dot` program from `graphviz` package).
 dep-graph:
@@ -66,11 +70,18 @@ push-submodules:
 	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
 	git push origin
 
+
 %.test:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean test
 
 %.clean:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean
 
+%.document:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) document
+
 %.publish:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) publish
+
+%.verup:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) verup

@@ -3,6 +3,8 @@ module Main;
 import Subprocess;
 import AsyncTask;
 
+import Minilib.Trait.Traversable;
+
 namespace ExitStatus {
     _to_string: ExitStatus -> String;
     _to_string = |s| (
@@ -72,59 +74,40 @@ impl FileInfo : ToString {
 
 count_line: Path -> IO FileInfo;
 count_line = |path| (
-    eval path.to_string.borrow_c_str(|ptr|
-        FFI_CALL[() perror(Ptr), ptr]
-    );
     with_input_from_file (path, |file_handle|
-        let line_count = *(loop_lines(
+        let line_count = *loop_lines(
             file_handle, 0, |count, line| continue $ (count + 1)
-        ));
+        );
         pure $ FileInfo { path: path, line_count: line_count }
     )
     .try(|e|
-        let _ = *(eprintln("error: " + e));
+        eprintln("error: " + e);;
         pure $ FileInfo::empty
     )
 );
 
-foreach_m : [m : Monad] (a -> m ()) -> Iterator a -> m ();
-foreach_m = |f,itor| itor.fold_m((), |_, a| f(a));
-
 print_file_infos: Array FileInfo -> IO ();
 print_file_infos = |infos| (
-    let _ = *(infos.to_iter.foreach_m(
+    infos.foreach_m(
         |info| println (info.to_string)
-    ));
-    let total_count = infos.to_iter.fold(0, |total, info| total + info.@line_count);
-    let _ = *(println ("Total: " + total_count.to_string));
-    pure()
+    );;
+    let total_count = infos.map(@line_count).to_iter.sum;
+    println ("Total: " + total_count.to_string)
 );
 
-collect: [m: Monad] Array (m a) -> m (Array a);
-collect = |m_array| (
-    m_array.to_iter.fold_m(
-        Array::empty(m_array.get_size), |array, m_elem|
-        pure $ array.push_back(*m_elem)
-    )
-);
-
-count_lines_async: Array String -> IOFail ();
+count_lines_async: Array Path -> IO ();
 count_lines_async = |files| (
-    let paths: Array Path = files.map(|name| name);
-    let tasks: Array (IOTask FileInfo) = *paths.to_iter.fold_m(
-        Array::empty(paths.get_size), |tasks, path|
-        let task = *AsyncIOTask::make(count_line(path)).lift;
-        pure $ tasks.push_back(task)
-    );
-    let infos: Array FileInfo = tasks.map(get);
-    lift $ print_file_infos(infos)
+    println("=== count_lines_async ===");;
+    let tasks: Array (IOTask FileInfo) = *files.map_m(count_line >> AsyncIOTask::make);
+    let infos: Array FileInfo = *tasks.map_m(get);
+    print_file_infos(infos)
 );
 
-count_lines_sync: Array String -> IOFail ();
+count_lines_sync: Array Path -> IO ();
 count_lines_sync = |files| (
-    let paths: Array Path = files.map(|name| name);
-    let infos: Array FileInfo = *(lift $ paths.map(|path| count_line(path)).collect);
-    lift $ print_file_infos(infos)
+    println("=== count_lines_sync ===");;
+    let infos: Array FileInfo = *files.map_m(count_line);
+    print_file_infos(infos)
 );
 
 main: IO ();
@@ -134,10 +117,10 @@ main = (
         println(info.to_string)
     };
     do {
-        let files = *(find_files());
+        let files = *find_files();
         //let _ = *(lift $ println(files.to_iter.map(|f| "file: "+f+"\n").join("")));
-        let _ = *(count_lines_async(files));
-        //let _ = *(count_lines_sync(files));
+        count_lines_async(files).lift;;
+        count_lines_sync(files).lift;;
         pure ()
     }.try(|err| eprintln (err))
 );

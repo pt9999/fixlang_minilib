@@ -18,6 +18,7 @@ import Sandbox.NdArray;
 import Minilib.Monad.State;
 import Minilib.Monad.Error;
 import Minilib.Monad.IO;
+import Minilib.Trait.Traversable;
 
 _EOF: String;
 _EOF = "EOF";
@@ -43,7 +44,7 @@ readline = |prompt| (
 is_all: (a -> Bool) -> Array a -> Bool;
 is_all = |f, array| (
     array.to_iter.fold(
-        true, |b, x|
+        true, |x, b|
         b && f(x)
     )
 );
@@ -417,13 +418,7 @@ namespace Evaluator
     );
 
     _evaluate_array: Array Expr -> EvalEffect (Array Value);
-    _evaluate_array = |array_expr| (
-        array_expr.to_iter.fold_m(
-            [], |array_value, expr|
-            let value = *evaluate(expr);
-            pure $ array_value.push_back(value)
-        )
-    );
+    _evaluate_array = map_m(evaluate);
 
     _eval_ident: String -> EvalEffect Value;
     _eval_ident = |name| (
@@ -452,7 +447,7 @@ namespace Evaluator
     _eval_funcall = |(name, args)| (
         let f = *_eval_ident(name);
         args.to_iter.fold_m(
-            f, |f, arg|
+            f, |arg, f|
             if !f.is_v_func {
                 error $ "invalid func type: " + f.to_string
             };
@@ -548,17 +543,16 @@ namespace Evaluator
             if idx.get_size != ndarray.get_dim {
                 error $ "invalid subsc (idx size)"
             };
-            let tuple2_array = *idx.to_iter.fold_m(
-                [], |tuple2_array, i|
+            let tuple2_array = *idx.map_m(|i|
                 if i.is_v_float {
                     let i = i.as_v_float.to_I64;
-                    pure $ tuple2_array.push_back((i, i + 1))
+                    pure $ (i, i + 1)
                 };
                 if i.is_v_range {
                     let (begin, end) = i.as_v_range;
                     let begin = begin.as_some_or(0);
                     let end = end.as_some_or(I64::maximum);
-                    pure $ tuple2_array.push_back((begin, end))
+                    pure $ (begin, end)
                 };
                 error $ "invalid subsc (idx type): " + i.to_string
             );

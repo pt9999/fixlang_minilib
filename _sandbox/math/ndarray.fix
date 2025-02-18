@@ -170,7 +170,7 @@ namespace NdArray {
     );
 
     // `Ndarray::from_iter(iter)` creates one-dimensional ndarray from `iter`.
-    from_iter: Iterator a -> NdArray a;
+    from_iter: [iter: Iterator, Item iter = a] iter -> NdArray a;
     from_iter = |iter| (
         from_array(iter.to_array)
     );
@@ -201,14 +201,14 @@ namespace NdArray {
     // such as `[begin, begin + 1, ..., end - 1]`.
     arange: I64 -> I64 -> NdArray I64;
     arange = |begin, end| (
-        let iter = if begin < end { Iterator::range(begin, end) } else { Iterator::empty };
+        let iter = Iterator::range(begin, max(begin, end));
         NdArray::from_iter(iter)
     );
 
     // `NdArray::get_size` returns total count of elements in ndarray, which equals to
     // the product of `@shape`.
     get_size: NdArray a -> I64;
-    get_size = |ndarray| ndarray.@shape.to_iter.fold(1, |size, n| size * n);
+    get_size = |ndarray| ndarray.@shape.to_iter.fold(1, mul);
 
     // `NdArray::get_dim` returns the dimension of ndarray.
     get_dim: NdArray a -> I64;
@@ -225,13 +225,14 @@ namespace NdArray {
     // It returns `(size, strides)`.
     _calc_size_and_stride: Array I64 -> (I64, Array I64);
     _calc_size_and_stride = |shape| (
+        // TODO: implement faster algorithm
         let (size, strides) = shape.to_iter.reverse.fold (
-            (1, Iterator::empty), |(size, strides), n|
-            let strides = strides.push_front(size);
+            (1, []), |n, (size, strides)|
+            let strides = strides.push_back(size);
             let size = size * n;
             (size, strides)
         );
-        (size, strides.to_array)
+        (size, strides.to_iter.reverse.to_array)
     );
 
     _calc_offset: Array I64 -> NdArray a -> I64;
@@ -428,8 +429,9 @@ namespace NdArray {
     );
 
     // `ndarray.to_iter` converts n-dimensitional ndarray to an iterator.
-    to_iter: NdArray a -> Iterator a;
+    to_iter: NdArray a -> ArrayIterator a;
     to_iter = |src| (
+        // TODO: implement a faster iterator
         src.to_array.to_iter
     );
 
@@ -491,8 +493,9 @@ namespace NdArray {
         };
         assert_lazy(|_|"shape is empty", shape.get_size > 0) $ |_|
         // check that shape.@(i) >= 0 except for i == 0
+        // TODO: compose multiple assert_lazy() to one
         eval shape.set(0, 0).to_iter.fold (
-            (), |_, n|
+            (), |n, _|
             assert_lazy(|_|"invalid shape: " + n.to_string, n >= 0) $ |_|
             ()
         );
@@ -615,7 +618,7 @@ namespace NdArray {
         let first_child = children.@(0);
         let child_shape = first_child.@shape;
         eval Iterator::range(1, child_count).fold(
-            (), |_, i|
+            (), |i, _|
             let child = children.@(i);
             assert_lazy (|_| "stack: shapes of children must be same", child_shape == child.@shape) $ |_|
             ()
@@ -635,7 +638,7 @@ namespace NdArray {
         let initial_value = first_child.@data.@(0);
         let parent = NdArray::fill(parent_shape, initial_value);
         let parent = Iterator::range(0, child_count).fold(
-            parent, |parent, i|
+            parent, |i, parent|
             let child = children.@(i);
             //eval debug_println("parent.set_sub i="+i.to_string+" child="+child.to_string);
             let child = child.expand_dims(axis);
@@ -706,8 +709,9 @@ impl NdArray: Functor {
 impl [a: Eq] NdArray a: Eq {
     eq = |a,b| (
         a.@shape == b.@shape &&
+        // TODO: implement a faster comparison
         a.to_iter.zip(b.to_iter).loop_iter(
-            true, |_, (a, b)|
+            true, |(a, b), _|
             if a != b { break $ false };
             continue $ true
         )
@@ -741,6 +745,8 @@ impl [a: Rem] NdArray a: Rem {
 //----------------------------------------------------------------------
 // Linalg
 //----------------------------------------------------------------------
+
+// TODO: swap argument order
 
 gen_fold: a -> (a -> a) -> (a -> Bool) -> b -> (b -> a -> b) -> b;
 gen_fold = |arg, next, end, output, f| (

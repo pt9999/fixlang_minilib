@@ -4,7 +4,7 @@ module Main;
 namespace List {
     type List a = box union {
         nil: (),
-        cell: (a, List a)
+        cell: (List a, a)
     };
 
     empty: List a;
@@ -13,7 +13,7 @@ namespace List {
     is_empty: List a -> Bool;
     is_empty = is_nil;
 
-    map_or: b -> ((a, List a) -> b) -> List a -> b;
+    map_or: b -> ((List a, a) -> b) -> List a -> b;
     map_or = |y, f, xs| (
         if xs.is_empty {
             y
@@ -21,7 +21,7 @@ namespace List {
         f(xs.as_cell)
     );
 
-    advance: List a -> Option (a, List a);
+    advance: List a -> Option (List a, a);
     advance = |xs| (
         xs.map_or(
             none(), some
@@ -30,28 +30,25 @@ namespace List {
 
     push_front: a -> List a -> List a;
     push_front = |x, xs| (
-        cell $ (x, xs)
+        cell $ (xs, x)
     );
 
     cons: a -> List a -> List a;
     cons = push_front;
 
-    cons_flip: List a -> a -> List a;
-    cons_flip = |xs, x| cons(x, xs);
-
-    fold: b -> (b -> a -> b) -> List a -> b;
+    fold: b -> (a -> b -> b) -> List a -> b;
     fold = |y, f, xs| (
         if xs.is_empty {
             y
         };
-        let (x, xs) = xs.as_cell;
-        xs.fold(f(y, x), f)     // tail recursion
+        let (xs, x) = xs.as_cell;
+        xs.fold(f(x, y), f)     // tail recursion
     );
 
     reverse: List a -> List a;
     reverse = |xs| (
         xs.fold(
-            List::empty, cons_flip
+            List::empty, cons
         )
     );
 
@@ -59,19 +56,19 @@ namespace List {
     append: List a -> List a -> List a;
     append = |ys, xs| (
         xs.reverse.fold(
-            ys, cons_flip
+            ys, cons
         )
     );
 
-    from_iter: Iterator a -> List a;
+    from_iter: [iter: Iterator, Item iter = a] iter -> List a;
     from_iter = |iter| (
         // not to stack overflow
         iter.fold(
-            List::empty, cons_flip
+            List::empty, cons
         ).reverse
     );
 
-    to_iter: List a -> Iterator a;
+    to_iter: List a -> StateIterator (List a) a;
     to_iter = |xs| (
         Iterator::generate(xs, List::advance)
     );
@@ -80,7 +77,7 @@ namespace List {
 impl [a: ToString] List a: ToString {
     to_string = |xs| (
         let iter = xs.to_iter.map(to_string);
-        let iter = iter.append(pure $ "nil");
+        let iter = iter.append((pure $ "nil"): DynIterator String);
         iter.join(":")
     );
 }
@@ -93,7 +90,7 @@ impl List: Functor {
     map = |f, xs| (
         // not to stack overflow
         xs.reverse.fold(
-            empty, |ys, x|
+            empty, |x, ys|
             cons(f(x), ys)
         )
     );
@@ -103,7 +100,7 @@ impl List: Monad {
     pure = |x| cons(x, empty);
     bind = |f, xs| (
         xs.reverse.fold(
-            empty, |ys, x|
+            empty, |x, ys|
             f(x).append(ys)
         )
     );

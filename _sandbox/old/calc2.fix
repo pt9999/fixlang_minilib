@@ -2,6 +2,8 @@ module Main;
 
 import Character;
 
+import Minilib.Common.IOEx;
+
 type Value = I64;
 
 // box を書かないと stack overflow になる
@@ -112,7 +114,8 @@ evaluate = |expr| (
 //  Read next character from the input. Returns 0_U8 if EOF.
 get_char : IOHandle -> IOFail U8;
 get_char = |input| (
-    let res = FFI_CALL[I32 fgetc(Ptr), input._file_ptr];
+    let file_ptr = *input.get_file_ptr.lift;
+    let res = *FFI_CALL_IO[I32 fgetc(Ptr), file_ptr].lift;
     if res < 0_I32 {    // EOF
         pure(0_U8)
     };
@@ -125,7 +128,8 @@ unget_char = |input, c| (
     if (c == 0_U8) {
         pure()
     };
-    let res = FFI_CALL[I32 ungetc(I32, Ptr), c.to_I32, input._file_ptr];
+    let file_ptr = *input.get_file_ptr.lift;
+    let res = *FFI_CALL_IO[I32 ungetc(I32, Ptr), c.to_I32, file_ptr].lift;
     if res < 0_I32 {    // EOF
         throw $ "ungetc failed"
     };
@@ -140,19 +144,10 @@ peek_char = |input| (
     pure(c)
 );
 
-flush : IOHandle -> IOFail ();
-flush = |handle| (
-    let res = FFI_CALL[I32 fflush(Ptr), handle._file_ptr];
-    if res < 0_I32 {
-        throw("flush failed!: some error occurred in fflush.")
-    };
-    pure()
-);
-
 process_line: IOHandle -> IOHandle -> IOFail Bool;
 process_line = |input, output| (
     let _ = *write_string(output, ">> ");
-    let _ = *flush(output);
+    let _ = *fflush(output);
     let c = *peek_char(input);
     if (c == 0_U8) {
         pure(true)  // EOF

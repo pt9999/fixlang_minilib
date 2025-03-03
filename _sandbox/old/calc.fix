@@ -2,6 +2,8 @@ module Main;
 
 import Character;
 
+import Minilib.Common.IOEx;
+
 type Value = I64;
 
 // box を書かないと stack overflow になる
@@ -13,13 +15,13 @@ type Expr = box union {
     ex_div: (Expr, Expr)
 };
 
-skip_whitespaces: Iterator U8 -> Iterator U8;
+skip_whitespaces: DynIterator U8 -> DynIterator U8;
 skip_whitespaces = |itor| (
     let res = itor.advance;
     if res.is_none {
         itor
     };
-    let (ch, next) = res.as_some;
+    let (next, ch) = res.as_some;
     if (not(is_space(ch))) {
         itor
     };
@@ -27,14 +29,14 @@ skip_whitespaces = |itor| (
 );
 
 
-take_while: (Array a, Iterator a) -> (a -> Bool) -> (Array a, Iterator a);
+take_while: (Array a, DynIterator a) -> (a -> Bool) -> (Array a, DynIterator a);
 take_while = |(arr, itor), filter| (
     loop((arr, itor), |(arr, itor)| (
         let next = itor.advance;
         if next.is_none {
             break $ (arr, itor)
         };
-        let (a, next) = next.as_some;
+        let (next, a) = next.as_some;
         if (not (filter(a))) {
             break $ (arr, itor)
         };
@@ -48,7 +50,7 @@ _unsafe_to_string = |a| (
     String::_unsafe_from_c_str (a.push_back(0_U8))
 );
 
-parse_value: Iterator U8 -> Result ErrMsg (Expr, Iterator U8);
+parse_value: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
 parse_value = |itor| (
     let itor = skip_whitespaces (itor);
     let (arr, itor) = take_while(([], itor), is_digit);
@@ -61,7 +63,7 @@ parse_value = |itor| (
     ok((ex_value(value), itor))
 );
 
-parse_mul_div: Iterator U8 -> Result ErrMsg (Expr, Iterator U8);
+parse_mul_div: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
 parse_mul_div = |itor| (
     let (expr, itor) = *parse_value (itor);
     let itor = skip_whitespaces (itor);
@@ -69,7 +71,7 @@ parse_mul_div = |itor| (
     if next.is_none {
         ok((expr, itor))
     };
-    let (op, next) = next.as_some;
+    let (next, op) = next.as_some;
     if (op != '*' && op != '/') {
         ok((expr, itor))
     };
@@ -82,7 +84,7 @@ parse_mul_div = |itor| (
     }
 );
 
-parse_add_sub: Iterator U8 -> Result ErrMsg (Expr, Iterator U8);
+parse_add_sub: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
 parse_add_sub = |itor| (
     let (expr, itor) = *parse_mul_div (itor);
     let itor = skip_whitespaces (itor);
@@ -90,7 +92,7 @@ parse_add_sub = |itor| (
     if next.is_none {
         ok((expr, itor))
     };
-    let (op, next) = next.as_some;
+    let (next, op) = next.as_some;
     if (op != '+' && op != '-') {
         ok((expr, itor))
     };
@@ -126,7 +128,7 @@ evaluate = |expr| (
 
 calc: String -> String;
 calc = |line| (
-    let res = parse_add_sub (line.get_bytes.to_iter);
+    let res = parse_add_sub (line.get_bytes.to_iter.to_dyn);
     if res.is_err {
         "Error: " + res.as_err.to_string
     };
@@ -135,21 +137,12 @@ calc = |line| (
     value.to_string
 );
 
-flush : IOHandle -> IOFail ();
-flush = |handle| (
-    let res = FFI_CALL[I32 fflush(Ptr), handle._file_ptr];
-    if res < 0_I32 {
-        throw("flush failed!: some error occurred in fflush.")
-    };
-    pure()
-);
-
 main_loop : () -> IOFail ();
 main_loop = |_| (
     let _ = *write_string(stdout, "Calc ver 0.10\n");
     loop_m ((), |_|
         let _ = *write_string(stdout, ">> ");
-        let _ = *flush(stdout);
+        let _ = *fflush(stdout);
         let line = *read_line(IO::stdin);
         if (line == "") {
             break_m $ ()

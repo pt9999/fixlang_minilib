@@ -16,7 +16,7 @@ clean:
 
 document:
 	bash ../_gendoc.sh .
-	git add doc docs
+	git add docs
 	if ! git diff-index --quiet HEAD docs; then \
 		git commit -m 'update document' ; \
 	fi

@@ -4,34 +4,39 @@ module Main;
 import Math;
 
 import Minilib.Common.Assert;
-import Minilib.Media.Svg;
 import Minilib.Encoding.Xml;
-
-//----------------------------------------------------------------------------
-// Test routine
-//----------------------------------------------------------------------------
-
-pi: F64;
-pi = 4.0 * atan(1.0);
+import Minilib.Monad.State;
+import Minilib.Media.Svg;
+import Minilib.Trait.Traversable;
 
 type Point = (F64, F64);
 type Segment = (Point, Point);
 type Segments = Array Segment;
 
-type BBox = (F64, F64, F64, F64);
+type BBox = (F64, F64, F64, F64);   // minx, miny, maxx, maxy
 
 namespace BBox {
     empty: BBox;
     empty = (0.0, 0.0, 0.0, 0.0);
 
-    update_bbox: Point -> BBox -> BBox;
-    update_bbox = |p, bbox| (
+    add_point: Point -> BBox -> BBox;
+    add_point = |p, bbox| (
         (
-            min(bbox.Tuple4::@0, p.Tuple2::@0),
-            min(bbox.Tuple4::@1, p.Tuple2::@1),
-            max(bbox.Tuple4::@2, p.Tuple2::@0),
-            max(bbox.Tuple4::@3, p.Tuple2::@1)
+            min(bbox.@0, p.@0),
+            min(bbox.@1, p.@1),
+            max(bbox.@2, p.@0),
+            max(bbox.@3, p.@1)
         )
+    );
+
+    add_segment: Segment -> BBox -> BBox;
+    add_segment = |seg, bbox| (
+        bbox.add_point(seg.@0).add_point(seg.@1)
+    );
+
+    add_margin: F64 -> BBox -> BBox;
+    add_margin = |margin, bbox| (
+         (bbox.@0 - margin, bbox.@1 - margin, bbox.@2 + margin, bbox.@3 + margin)
     );
 }
 
@@ -42,44 +47,75 @@ type GraphParam = unbox struct {
     scale: F64,
 };
 
-namespace Graph {
-    default_param: GraphParam;
-    default_param = GraphParam {
+namespace GraphParam {
+    default: GraphParam;
+    default = GraphParam {
         max_level: 5,
         num_directions: 4,
         base_size: 20.0,
         scale: 0.48,
     };
+}
 
-    make_graph: GraphParam -> Segments;
-    make_graph = |param| (
-        let output = [];
-        let p = (0.0, 0.0);
-        let level = 0;
-        Iterator::range(0, param.@num_directions).fold(
-            output, |dir, output|
-            make_descendants(p, level, dir, param, output)
+type Graph = unbox struct {
+    param: GraphParam,
+    pathdata: Svg::PathData,
+    bbox: BBox,
+};
+
+namespace Graph {
+
+    make: GraphParam -> Graph;
+    make = |param| (
+        let graph = Graph {
+            param: param,
+            pathdata: Svg::PathData::newpath,
+            bbox: BBox::empty,
+        };
+
+        graph.exec_state $
+        Iterator::range(0, param.@num_directions).to_dyn.foreach_m(|dir|
+            let p = (0.0, 0.0);
+            let level = 0;
+            _make_descendants(p, level, dir)
         )
     );
 
-    make_descendants: Point -> I64 -> I64 -> GraphParam -> Segments -> Segments;
-    make_descendants = |p, level, dir, param, output| (
-        if level >= param.@max_level { output };
-        let q = make_child(p, level, dir, param);
-        let output = output.push_back((p, q));
-        Iterator::range(0, param.@num_directions).fold(
-            output, |d, output|
+    type GraphState a = State Graph a;
+
+    _get_param: GraphState GraphParam;
+    _get_param = get_state.map(@param);
+
+    _add_segment: Segment -> GraphState ();
+    _add_segment = |(p, q)| (
+        State::mod_state(|graph|
+            graph.mod_pathdata(|pathdata|
+                pathdata.moveto(p.@0, p.@1).lineto(q.@0, q.@1)
+            )
+            .mod_bbox(add_segment((p, q)))
+        )
+    );
+
+    _make_descendants: Point -> I64 -> I64 -> GraphState ();
+    _make_descendants = |p, level, dir| (
+        let param = *_get_param;
+        if level >= param.@max_level { pure() };
+        let q = *_make_child(p, level, dir);
+        _add_segment((p, q));;
+        Iterator::range(0, param.@num_directions).to_dyn.foreach_m(|d|
             let n = param.@num_directions;
-            if (d - dir + n) % n == n / 2 { output };
-            make_descendants(q, level + 1, d, param, output)
+            if (d - dir + n) % n == n / 2 { pure() };
+            _make_descendants(q, level + 1, d)
         )
     );
 
-    make_child: Point -> I64 -> I64 -> GraphParam -> Point;
-    make_child = |p, level, dir, param| (
+    _make_child: Point -> I64 -> I64 -> GraphState Point;
+    _make_child = |p, level, dir| (
+        let param = *_get_param;
         let r = param.@base_size * param.@scale.pow(level.to_F64);
-        let th = 2.0 * pi * dir.to_F64 / param.@num_directions.to_F64;
-        (p.@0 + r * cos(th), p.@1 + r * sin(th))
+        let th = 2.0 * Math::pi64 * dir.to_F64 / param.@num_directions.to_F64;
+        let q = (p.@0 + r * cos(th), p.@1 + r * sin(th));
+        pure $ q
     );
 }
 
@@ -100,34 +136,14 @@ point_circle = |r, p| (
 
 figure1: XmlElement;
 figure1 = (
-    let fill = Svg::fill;
-    let gr = group
-        .stroke("transparent").stroke_width(0.1)
-        .fill("transparent");
-    let bbox = (0.0, 0.0, 0.0, 0.0);
-    let update_bbox = |p, bbox| (
-        (
-            min(bbox.Tuple4::@0, p.Tuple2::@0),
-            min(bbox.Tuple4::@1, p.Tuple2::@1),
-            max(bbox.Tuple4::@2, p.Tuple2::@0),
-            max(bbox.Tuple4::@3, p.Tuple2::@1)
-        )
-    );
-    let segs = Graph::make_graph(Graph::default_param);
-    let r = 0.3;
-    let (gr, bbox) = segs.to_iter.fold(
-        (gr, bbox), |seg, (gr, bbox)|
-        let (p, q) = seg;
-        let gr = gr.add(seg.segment_path);
-        //let gr = gr.add(p.point_circle(r));
-        //let gr = gr.add(q.point_circle(r));
-        let bbox = bbox.update_bbox(p);
-        let bbox = bbox.update_bbox(q);
-        (gr, bbox)
-    );
-    let margin = 2.0;
-    let bbox = (bbox.@0 - margin, bbox.@1 - margin, bbox.@2 + margin, bbox.@3 + margin);
-    Svg::svg(600, 600).view_box(bbox.@0, bbox.@1, bbox.@2 - bbox.@0, bbox.@3 - bbox.@1).add(gr)
+    let graph = Graph::make(GraphParam::default);
+    let group = Svg::group
+        .stroke("black")
+        .stroke_width(0.1)
+        .Svg::fill("transparent");
+    let group = group.add(Svg::path(graph.@pathdata));
+    let bbox = graph.@bbox.add_margin(2.0);
+    Svg::svg(600, 600).view_box(bbox.@0, bbox.@1, bbox.@2 - bbox.@0, bbox.@3 - bbox.@1).add(group)
 );
 
 main: IO ();

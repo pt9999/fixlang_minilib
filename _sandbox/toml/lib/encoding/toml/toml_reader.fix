@@ -1,3 +1,6 @@
+// Implementation of TomlReader
+//
+// https://github.com/toml-lang/toml/blob/1.0.0/toml.abnf
 module Minilib.Encoding.Toml.TomlReader;
 
 //import Minilib.Encoding.Toml;
@@ -6,13 +9,17 @@ import Minilib.Text.StringEx;
 
 //parse_toml: Parser Toml;
 
+type TomlChar = U8;
 
 _parse_ws: Parser String;
 _parse_ws = (
     repeat(
-        match_any_char.filter(|c| c == 0x20_U8 || c == 0x09_U8)
+        match_any_char.filter(_is_wschar)
     ).map(_unsafe_to_string)
 );
+
+_is_wschar: TomlChar -> Bool;
+_is_wschar = |c| c == 0x20_U8 || c == 0x09_U8;
 
 _parse_newline: Parser String;
 _parse_newline = (
@@ -25,10 +32,10 @@ _parse_newline = (
     }
 );
 
-_is_non_ascii: U8 -> Bool;
+_is_non_ascii: TomlChar -> Bool;
 _is_non_ascii = |c| (c >= 0x80_U8);
 
-_is_non_eol: U8 -> Bool;
+_is_non_eol: TomlChar -> Bool;
 _is_non_eol = |c| (
     c == 0x09_U8 ||
     (0x20_U8 <= c && c <= 0x7f_U8) ||
@@ -72,6 +79,76 @@ _parse_quoted_key = undefined("");
 
 _parse_dotted_key: Parser ();
 _parse_dotted_key = undefined("");
+
+// Matches a dot separator(`'.'`).
+_parse_dot_sep: Parser ();
+_parse_dot_sep = (
+    _parse_ws;; 
+    match_char(0x2E_U8);;   '.' (period)
+    _parse_ws
+);
+
+// Matches a key-value separator(`'='`).
+_parse_keyval_sep: Parser ();
+_parse_keyval_sep = (
+    _parse_ws;; 
+    match_char(0x3D_U8);;   // '='
+    _parse_ws
+);
+
+_parse_val: Parser ();
+_parse_val = undefined("");
+
+_parse_string: Parser ();
+_parse_string = undefined("");
+
+_parse_basic_string: Parser String;
+_parse_basic_string = (
+    _parse_quotation_mark;;
+    let chars = *repeat(_parse_basic_char);
+    _parse_quotation_mark;;
+    pure $ chars._unsafe_to_string
+);
+
+_parse_quotation_mark: Parser ();
+_parse_quotation_mark = undefined("");
+
+_parse_basic_char: Parser TomlChar;
+_parse_basic_char = (
+    _parse_basic_unescaped.or_elseF $ 
+    _parse_escaped
+);
+
+_parse_basic_unescaped: Parser TomlChar;
+_parse_basic_unescaped = (
+    // TODO: support TomlChar >= 0x100
+    match_any_char.filter(|c|
+        _is_ws_char(c) ||
+        c == 0x21_U8 ||
+        (0x23_U8 <= c && c <= 0x5B_U8) ||
+        (0x5D_U8 <= c && c <= 0x7E_U8) ||
+        _is_non_ascii(c)
+    )
+);
+
+_parse_escaped: Parser ();
+_parse_escaped = undefined("");
+
+_parse_escape: Parser ();
+_parse_escape = match_char(0x5C_U8);    // '\\'
+
+_is_escape_seq_char: TomlChar -> Bool;
+_is_escape_seq_char = |c| (
+    // TODO: support \uXXXX and \UXXXXXXXX
+    // TODO: convert escaped char to unescaped char here?
+    //   For the purpose of TomlReader, it is better to 
+    //   unescape chars here.
+    //   But if the toml is read then immediately written to a new file,
+    //   the escaped string may be changed, since it is unescaped once and
+    //   then escaped back.
+    undefined("")
+);
+
 
 
 

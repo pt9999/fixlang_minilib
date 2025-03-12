@@ -20,7 +20,7 @@ namespace DepGraph {
         child_to_parent: TreeSet::make(),
     };
 
-    to_iter: DepGraph -> Iterator (NodeId, NodeId);
+    to_iter: DepGraph -> DynIterator (NodeId, NodeId);
     to_iter = |graph| graph.@parent_to_child.to_iter;
 
     // Adds a edge from the parent to the child
@@ -43,13 +43,13 @@ namespace DepGraph {
     get_nodes: DepGraph -> TreeSet NodeId;
     get_nodes = |graph| (
         graph.@parent_to_child.to_iter.fold(
-            TreeSet::make(), |ts, (parent, child)|
+            TreeSet::make(), |(parent, child), ts|
             ts.TreeSet::insert(parent).TreeSet::insert(child)
         )
     );
 
     // Finds all the edges from the `key`
-    _find_all: [k: TreeSetElem, k: LessThan, v: TreeSetElem] k -> TreeSet (k, v) -> Iterator v;
+    _find_all: [k: TreeSetElem, k: LessThan, v: TreeSetElem] k -> TreeSet (k, v) -> DynIterator v;
     _find_all = |key, ts| (
         let lt_begin = |(k,v)| less_than(k, key);
         let lt_end   = |(k,v)| !less_than(key, k);
@@ -58,13 +58,13 @@ namespace DepGraph {
     );
 
     // Finds direct parents of the node.
-    find_parents: NodeId -> DepGraph -> Iterator NodeId;
+    find_parents: NodeId -> DepGraph -> DynIterator NodeId;
     find_parents = |child, graph| (
         graph.@child_to_parent._find_all(child)
     );
 
     // Finds direct children of the node.
-    find_children: NodeId -> DepGraph -> Iterator NodeId;
+    find_children: NodeId -> DepGraph -> DynIterator NodeId;
     find_children = |parent, graph| (
         graph.@parent_to_child._find_all(parent)
     );
@@ -74,7 +74,7 @@ namespace DepGraph {
     find_descendants = |node, graph| (
         let inner: NodeId -> State (TreeSet NodeId) () = fix $ |inner, node| (
             if (*get_state).contains(node) { pure() };
-            mod_state(TreeSet::insert(node));;
+            State::mod_state(TreeSet::insert(node));;
             graph.find_children(node).foreach_m(inner)
         );
         inner(node).exec_state(TreeSet::make())
@@ -87,9 +87,9 @@ namespace DepGraph {
         // checks if the node has no children
         let is_free = |node, graph| graph.find_children(node).is_empty;
         // first, find all free nodes
-        let free_nodes: Iterator NodeId = graph.get_nodes.to_iter.filter(
+        let free_nodes: DynIterator NodeId = graph.get_nodes.to_iter.filter(
             |node| graph.is_free(node)
-        ).bang;
+        ).bang.to_dyn;
         loop(
             (graph, free_nodes, []), |(graph, free_nodes, sort_result)|
             // pick a node from the free list
@@ -98,20 +98,20 @@ namespace DepGraph {
                 // if the free list is empty, remaining nodes should be empty. if not, there are circular dependencies.
                 let remaining_nodes = graph.get_nodes.to_iter;
                 if ! remaining_nodes.is_empty {
-                    let message = "toposort failed! remaining = " + remaining_nodes.map(to_string).join(", ");
+                    let message = "toposort failed! remaining = " + remaining_nodes.Iterator::map(to_string).join(", ");
                     undefined(message)
                 };
                 break $ sort_result
             };
-            let (node, free_nodes) = opt.as_some;
+            let (free_nodes, node) = opt.as_some;
             // add the node to the sorted list
             let sort_result = sort_result.push_back(node);
             // find all parents of the node
             let parents = graph.find_parents(node);
             // remove the edges from the node to its parents
-            let graph = parents.fold(graph, |graph, parent| graph.erase(parent, node));
+            let graph = parents.fold(graph, |parent, graph| graph.erase(parent, node));
             // add parents who became free to the free list
-            let free_nodes = parents.filter(|parent| graph.is_free(parent)).append(free_nodes);
+            let free_nodes = parents.filter(|parent| graph.is_free(parent)).append(free_nodes).to_dyn;
             continue $ (graph, free_nodes, sort_result)
         )
     );
@@ -131,14 +131,14 @@ namespace DepGraph {
         // First, determine the topological order of all nodes
         let topo_sorted = graph.toposort.to_iter.reverse.to_array;
         let topo_order: TreeMap NodeId I64 = topo_sorted.to_iter.zip(count_up(0)).fold(
-            TreeMap::make(), |map, (node, order)|
+            TreeMap::make(), |(node, order), map|
             map.insert(node, order)
         );
 
         // Create the reduced graph by updating using the nodes in reverse topological order
         let reduced_graph = DepGraph::empty;
         topo_sorted.to_iter.reverse.fold(
-            reduced_graph, |reduced_graph, parent|
+            reduced_graph, |parent, reduced_graph|
             // Reachable nodes from the parent
             let reachable = TreeSet::make().TreeSet::insert(parent);
             // Find direct children of the parent and sort them in topological order
@@ -148,7 +148,7 @@ namespace DepGraph {
             );
             // For each child, update reachable nodes and the reduced graph
             let (reachable, reduced_graph) = children.to_iter.fold(
-                (reachable, reduced_graph), |(reachable, reduced_graph), child|
+                (reachable, reduced_graph), |child, (reachable, reduced_graph)|
                 if reachable.contains(child) {
                     (reachable, reduced_graph)
                 };

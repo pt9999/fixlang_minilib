@@ -115,6 +115,50 @@ test_primitive_polynomials = (
     )
 );
 
+// `f.subst(x)` substitutes the indeterminate of a polynomial with `x`.
+subst2: [a: Ring] Polynomial a -> Polynomial a -> Polynomial a;
+subst2 = |x, f| (
+    let coeff = f.@coeff;
+    loop(
+        (zero, one, 0), |(result, x_i, i)|
+        if i >= coeff.get_size { break $ result };
+        let result = result + polynomial([coeff.@(i)]) * x_i;
+        let x_i = x_i * x;
+        continue $ (result, x_i, i + 1)
+    )
+);
+
+test_primitive_polynomials2: IO ();
+test_primitive_polynomials2 = (
+    println("----------- test_primitive_polynomials2 -----------");;
+    let p = 2;
+    let m = 4;
+    let q = p.pow_by_U64(m.to_U64);
+    let mkpoly = |arr| (
+        polynomial(arr.map(|x| modulo(x, p)))
+    );
+    // F(2^4)の0を除く要素からなる乗法群は位数15の巡回群、生成元はφ(15)=8個
+    // そのうち4つはf(x)=0, 残りの 4つはg(x)=0
+    let f = mkpoly([1, 1, 0, 0, 1]); // x^4 + x + 1
+    let g = mkpoly([1, 0, 0, 1, 1]); // x^4 + x^3 + 1
+    let a = polynomial([ modulo(0, p), modulo(1, p) ]);
+    let a = modulo(a, f);
+    //let one_ = modulo(one, f);
+    //let zero_ = modulo(zero, f);
+    println((f,).format("f={}"));;
+    println((g,).format("g={}"));;
+    Iterator::range(1, q).fold_m(
+        a, |i, x|
+        let f_x = modulo(f.subst2(x.@value), f);
+        let g_x = modulo(g.subst2(x.@value), f);
+        println((a, i, x).format("{}^{} = {} (mod f)"));;
+        println((x, f_x).format("  f({}) = {} (mod f)"));;
+        println((x, g_x).format("  g({}) = {} (mod f)"));;
+        pure $ x * a
+    ).forget;;
+    pure()
+);
+
 main: IO ();
 main = (
     test_modular_power;;
@@ -123,5 +167,6 @@ main = (
     test_modular_div;;
     test_polynomial_modular;;
     test_primitive_polynomials;;
+    test_primitive_polynomials2;;
     pure()
 );

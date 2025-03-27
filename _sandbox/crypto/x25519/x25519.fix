@@ -1,5 +1,5 @@
 /**
-    X25519
+    X25519 and X448
 
     RFC7748 Elliptic Curves for Security
     https://datatracker.ietf.org/doc/html/rfc7748
@@ -42,14 +42,19 @@ namespace XECInt {
 
     decode_scalar_25519: Array U8 -> XECInt;
     decode_scalar_25519 = |k_list| (
-        //k_list[0] &= 248
-        //k_list[31] &= 127
-        //k_list[31] |= 64
         let k_list = k_list
             .mod(0, bit_and(248_U8))
             .mod(31, bit_and(127_U8))
             .mod(31, bit_or(64_U8));
         decode_little_endian(k_list, 255)
+    );
+
+    decode_scalar_448: Array U8 -> XECInt;
+    decode_scalar_448 = |k_list| (
+        let k_list = k_list
+            .mod(0, bit_and(252_U8))
+            .mod(55, bit_or(128_U8));
+        decode_little_endian(k_list, 448)
     );
 
     decode_u_coordinate: Array U8 -> I64 -> XECInt;
@@ -70,14 +75,13 @@ namespace XECInt {
         )
     );
 
-    /*
+/*
     // Converts a hex string to an XECInt.
     from_string_hex: String -> Result ErrMsg XECInt;
     from_string_hex = |str| (
         let bytes: Array U8 = *FromStringHex::from_string_hex(str);
         from_bytes(bytes)
     );
-    */
 
     // Converts an XECInt to a byte array with specified length.
     to_n_bytes: I64 -> XECInt -> Array U8;
@@ -94,12 +98,10 @@ namespace XECInt {
     );
 
     // Converts an XECInt to a hex string.
-    /*
     to_string_hex: XECInt -> String;
     to_string_hex = |a| (
         a.to_bytes.to_string_hex
     );
-    */
 
     // Gets an octet string length.
     get_mlen: XECInt -> I64;
@@ -113,7 +115,7 @@ namespace XECInt {
     // `op` is an associative binary operation.
     repeat_by_XECInt: (a -> a -> a) -> a -> a -> XECInt -> a;
     repeat_by_XECInt = repeat_by_BigInt;
-/*
+
     // Generates random XECInt `r` such that `begin <= r && r < end`.
     generate_XECInt_range: [m: MonadRandom] XECInt -> XECInt -> m XECInt;
     generate_XECInt_range = |begin, end| (
@@ -160,6 +162,7 @@ namespace XECField {
         Montgomery::from_I64(i64)
     );
 
+/*
     to_bytes: XECField -> Array U8;
     to_bytes = |a| (
         let a = a.nonneg;               // 1..(q-1)
@@ -167,6 +170,7 @@ namespace XECField {
         let mlen = q.get_mlen;
         a.to_BigInt.to_n_bytes(mlen)
     );
+*/
 }
 
 type XECParam = box struct {
@@ -187,6 +191,17 @@ namespace XECParam {
             ps: MontScheme::make(256_U64, p),
         }
     );
+
+    curve448: XECParam;
+    curve448 = (
+        let p: XECInt = one.shift_left(448_U64) - one.shift_left(224_U64) - one;
+        XECParam {
+            id: "curve448",
+            bits: 448,
+            p: p,
+            ps: MontScheme::make(448_U64, p),
+        }
+    );
 }
 
 // 5.  The X25519 and X448 Functions
@@ -196,14 +211,30 @@ x25519 = |k, u| (
     assert_lazy(|_| "invalid k size", k.get_size == 32) $ |_|
     assert_lazy(|_| "invalid u size", u.get_size == 32) $ |_|
     let param: XECParam = curve25519;
-    let bits: I64 = param.@bits;
-    let ps: MontScheme = param.@ps;
     let k: XECInt = decode_scalar_25519(k);
-    let u: XECInt = decode_u_coordinate(u, bits);
-    let a24: XECField = XECField::make(XECInt::from_I64(121665), ps); // (486662 - 2) / 4
-    let x1: XECField = XECField::make(u, ps);
-    let x2: XECField = XECField::make(one, ps);
-    let z2: XECField = XECField::make(zero, ps);
+    let u: XECInt = decode_u_coordinate(u, param.@bits);
+    let a24: XECField = XECField::make(XECInt::from_I64(121665), param.@ps); // (486662 - 2) / 4
+    let ans: XECInt = _x25519_x448(k, u, a24, param);
+    encode_u_coordinate(ans, param.@bits)
+);
+
+x448: Array U8 -> Array U8 -> Array U8;
+x448 = |k, u| (
+    assert_lazy(|_| "invalid k size", k.get_size == 56) $ |_|
+    assert_lazy(|_| "invalid u size", u.get_size == 56) $ |_|
+    let param: XECParam = curve448;
+    let k: XECInt = decode_scalar_448(k);
+    let u: XECInt = decode_u_coordinate(u, param.@bits);
+    let a24: XECField = XECField::make(XECInt::from_I64(39081), param.@ps); // (156326 - 2) / 4
+    let ans: XECInt = _x25519_x448(k, u, a24, param);
+    encode_u_coordinate(ans, param.@bits)
+);
+
+_x25519_x448: XECInt -> XECInt -> XECField -> XECParam -> XECInt;
+_x25519_x448 = |k, u, a24, param| (
+    let x1: XECField = XECField::make(u, param.@ps);
+    let x2: XECField = XECField::make(one, param.@ps);
+    let z2: XECField = XECField::make(zero, param.@ps);
     let x3: XECField = x1;  // u
     let z3: XECField = x2;  // one
     let swap: I64 = 0;
@@ -212,7 +243,7 @@ x25519 = |k, u| (
         if swap != 0 { (x3, x2) } else { (x2, x3) }
     );
     let (x2, x3, z2, z3, swap) = loop(
-        (x2, x3, z2, z3, swap, bits-1),
+        (x2, x3, z2, z3, swap, param.@bits - 1),
         |(x2, x3, z2, z3, swap, t)|
         if t < 0 {
             break $ (x2, x3, z2, z3, swap)
@@ -244,5 +275,5 @@ x25519 = |k, u| (
     let (z2, z3) = cswap(swap, z2, z3);
     let ans: XECField = x2 / z2;    // = x_2 * (z_2^(p - 2))
     let ans: XECInt = ans.to_XECInt;
-    encode_u_coordinate(ans, bits)
+    ans
 );

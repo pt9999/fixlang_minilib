@@ -6,7 +6,9 @@ import Minilib.Text.Hex;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
-// rfc7748 5.2.  Test Vectors
+// RFC7748 5.2.  Test Vectors
+// "... The first is a pair of test vectors for each function that consist of expected outputs for the given inputs. ..."
+
 test_x25519: TestCase;
 test_x25519 = (
     make_table_test("test_x25519",
@@ -29,10 +31,37 @@ test_x25519 = (
     )
 );
 
+// RFC7748 5.2.  Test Vectors
+// "... The second type of test vector consists of the result of calling the function in question a specified number of times. ..."
+
+test_x25519_2: TestCase;
+test_x25519_2 = (
+    make_table_test("test_x25519_2",
+        [
+            (1, "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079"),
+            (1000, "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51"),
+            //(1000000, "7c3911e0ab2586fd864497297e575e6f3bc601c0883c30df5f4dd2d24f665424"),
+        ],
+        |(iteration, expected)|
+        let input_scalar = "0900000000000000000000000000000000000000000000000000000000000000";
+        let k: Array U8 = *input_scalar.from_string_hex.from_result;
+        let u = k;
+        let result = loop(
+            (k, u, 0), |(k, u, i)|
+            if i >= iteration { break $ k };
+            let res = x25519(k, u);
+            continue $ (res, k, i+1)
+        );
+        let actual: String = result.to_string_hex;
+        assert_equal("eq", expected, actual)
+    )
+);
+
 main: IO ();
 main = (
     [
         test_x25519,
+        //test_x25519_2,  // spends 18.3 second
     ]
     .run_test_driver
 );

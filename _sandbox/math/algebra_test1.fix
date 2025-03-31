@@ -111,21 +111,15 @@ test_primitive_polynomials = (
     );
     generate_primitive_polynomials(p, m)
     .foreach_m(|f|
-        println((f, f.subst(2)).format("{} (decimal={})"))
+        let ff: Polynomial I64 = f.map(|c| c.nonneg.@value);
+        println((f, ff.subst(2)).format("{} (decimal={})"))
     )
 );
 
-// `f.subst(x)` substitutes the indeterminate of a polynomial with `x`.
-subst2: [a: Ring] Polynomial a -> Polynomial a -> Polynomial a;
-subst2 = |x, f| (
-    let coeff = f.@coeff;
-    loop(
-        (zero, one, 0), |(result, x_i, i)|
-        if i >= coeff.get_size { break $ result };
-        let result = result + polynomial([coeff.@(i)]) * x_i;
-        let x_i = x_i * x;
-        continue $ (result, x_i, i + 1)
-    )
+// `f.subst_poly(x)` substitutes the indeterminate of a polynomial with `x`.
+subst_poly: [a: Ring] Polynomial a -> Polynomial a -> Polynomial a;
+subst_poly = |x, f| (
+    f.subst0(x, mul_scalar)
 );
 
 test_primitive_polynomials2: IO ();
@@ -149,8 +143,8 @@ test_primitive_polynomials2 = (
     println((g,).format("g={}"));;
     Iterator::range(1, q).fold_m(
         a, |i, x|
-        let f_x = modulo(f.subst2(x.@value), f);
-        let g_x = modulo(g.subst2(x.@value), f);
+        let f_x = modulo(f.subst_poly(x.@value), f);
+        let g_x = modulo(g.subst_poly(x.@value), f);
         println((a, i, x).format("{}^{} = {} (mod f)"));;
         println((x, f_x).format("  f({}) = {} (mod f)"));;
         println((x, g_x).format("  g({}) = {} (mod f)"));;

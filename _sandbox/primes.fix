@@ -1,0 +1,69 @@
+module Main;
+
+//import Minilib.Math.Types;
+
+primes_upto: I64 -> Array I64;
+primes_upto = |n| (
+    let sieve = Array::fill(n + 1, false);
+    let primes = [];
+    loop(
+        (sieve, primes, 2), |(sieve, primes, p)|
+        if p > n { break $ primes };
+        if sieve.@(p) { continue $ (sieve, primes, p + 1) };
+        let primes = primes.push_back(p);
+        let sieve = loop(
+            (sieve, p), |(sieve, i)|
+            if i > n { break $ sieve };
+            let sieve = sieve.set(i, true);
+            continue $ (sieve, i + p)
+        );
+        continue $ (sieve, primes, p + 1)
+    )
+);
+
+primes_upto_2: I64 -> Array I64;
+primes_upto_2 = |n| (
+    let set_all = fix $ |inner, p, i, sieve| (
+        if i > n { sieve };
+        inner(p, i, sieve.set(i, true))
+    );
+    let (sieve, primes) = Iterator::range(2, n + 1).fold(
+        (Array::fill(n + 1, false), []),
+        |p, (sieve, primes)|
+        if sieve.@(p) { (sieve, primes) };
+        let primes = primes.push_back(p);
+        let sieve = sieve.set_all(p, p);
+        (sieve, primes)
+    );
+    primes
+);
+
+primes_upto_3: I64 -> Array I64;
+primes_upto_3 = |n| (
+    let n = n + 1;
+    let sieve = Array::fill(n, false);
+    let sieve = sieve.set(0, true).set(1, true);
+    let sieve = Iterator::range(2, n).fold(
+        sieve,
+        |p, sieve|
+        if sieve.@(p) { sieve };
+        Iterator::range_step(2 * p, n, p).fold(
+            sieve, |i| Array::set(i, true)
+        )
+    );
+    Iterator::range(2, n).filter(|p| !sieve.@(p)).to_array
+);
+
+main: IO ();
+main = (
+    do {
+        let args = *IO::get_args.lift;
+        let n = *if args.get_size >= 2 {
+            args.@(1).from_string.from_result
+        } else { 
+            pure $ 31
+        };
+        let primes = primes_upto_3(n);
+        println(primes.to_string).lift
+    }.try(eprintln)
+);

@@ -166,19 +166,21 @@ namespace ListView {
     handle_key = |key| (
         let id = *select_state(@id);
 
-        if key == "q" || key == "Q" || key == "KEY_ESC" {
+        //State::mod_state(ListView::set_title("key=" + key));;
+
+        if key == "q" || key == "Q" || key == "KEY_ESC" || key == "^[" {
             pure $ action_quit()
         };
-        if key == "j" || key == "KEY_DOWN" {
+        if key == "j" || key == "^N" || key == "KEY_DOWN" {
             pure $ action_select_next_item(id)
         };
-        if key == "k" || key == "KEY_UP" {
+        if key == "k" || key == "^P" || key == "KEY_UP" {
             pure $ action_select_prev_item(id)
         };
-        if key == "KEY_PPAGE" {
+        if key == "b" || key == "^B" || key == "KEY_PPAGE" {
             pure $ action_page_up(id)
         };
-        if key == "KEY_NPAGE" {
+        if key == "f" || key == "^F" || key == "KEY_NPAGE" {
             pure $ action_page_down(id)
         };
         if key == "^I" {
@@ -282,7 +284,21 @@ namespace FileItem {
         else if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { name + "*" }
         else { name };
         name.pad_right(20, ' ') +
-        stat.st_size.to_string.pad_left(13, ' ')
+        stat.st_size.format_file_size.pad_left(13, ' ')
+    );
+
+    // Convert a file size to a String in human readable format.
+    // Example: 123 => "123  B", 1234 => "1.2 KB", 123456 => "123 KB", 1234567 => "1.2 MB"
+    format_file_size: I64 -> String;
+    format_file_size = |size| (
+        let short = |x:F64| (
+            if x < 10.0 { x.to_string_precision(1_U8) }
+            else { x.to_string_precision(0_U8) }
+        );
+        if size < 1e3 { size.to_string + "  B" };
+        if size < 1e6 { (size.to_F64 / 1.0e3).short + " KB" };
+        if size < 1e9 { (size.to_F64 / 1.0e6).short + " MB" };
+        (size.to_F64 / 1.0e9).short + " GB"
     );
 
     get_attr: FileItem -> ChType;
@@ -366,7 +382,7 @@ namespace FileListView {
         if key == "^J" || key == "KEY_ENTER" {
             pure $ action_open_file()
         };
-        if key == "^" {
+        if key == "." || key == "^" || key == "KEY_BACKSPACE" {
             pure $ action_up_directory()
         };
         pure $ no_action()

@@ -10,6 +10,10 @@ import Time;
 import Cairo;
 import Cairo.ImageSurface;
 
+import Random;
+import Minilib.Monad.Random;
+import Minilib.Monad.State;
+
 window_size : (I64, I64);
 window_size = (1280, 720);
 
@@ -25,8 +29,17 @@ color_blue: RGBColor = (0.0, 0.0, 1.0);
 color_white_a50 : RGBAColor;
 color_white_a50 = (1.0, 1.0, 1.0, 0.5);
 
+random_F64_range: [m: MonadRandom] F64 -> F64 -> m F64;
+random_F64_range = |begin, end| (
+    let r = *random_U64;
+    let r = r.to_F64 / U64::maximum.to_F64;
+    let r = begin + r * (end - begin);
+    pure $ r
+);
+
 type Obj = box struct {
     point: Vec2,
+    velocity: Vec2,
     color: RGBColor,
 };
 
@@ -34,22 +47,72 @@ namespace Obj {
     make: Vec2 -> RGBColor -> Obj;
     make = |p, color| Obj {
         point: p,
+        velocity: Vec2::make(0.0, 0.0),
         color: color,
     };
 
+    generate: [m: MonadRandom] m Obj;
+    generate = (
+        let win_w = window_size.@0.to_F64;
+        let win_h = window_size.@1.to_F64;
+        let x = *random_F64_range(-0.5 * win_w, 0.5 * win_w);
+        let y = *random_F64_range(-0.5 * win_h, 0.5 * win_h);
+        let vx = *random_F64_range(-0.2 * win_w, 0.2 * win_w);
+        let vy = *random_F64_range(-0.2 * win_h, 0.2 * win_h);
+        let c = *random_I64_range(0,3);
+        let color = if c < 1 { color_red } 
+        else if c < 2 { color_green }
+        else { color_blue };
+
+        pure $ Obj {
+            point: Vec2::make(x, y),
+            velocity: Vec2::make(vx, vy),
+            color: color
+        }
+    );
+
     render : Obj -> Cairo -> IO ();
     render = |obj, cairo| (
-        cairo.set_source_rgb(obj.@color);;
         let x = obj.@point.@x;
         let y = obj.@point.@y;
-        let d = 100.0;
-        cairo.move_to((x, y));;
-        cairo.line_to((x+d, y));;
-        cairo.line_to((x+d, y+d));;
-        cairo.line_to((x, y+d));;
-        cairo.line_to((x, y));;
+        let d = 10.0;
+        cairo.arc((x, y), d, 0.0, 2.0 * pi64);;
+        cairo.set_source_rgba(color_white_a50);;
+        cairo.fill_preserve;;
+        //cairo.arc((x, y), d, 0.0, 2.0 * pi64);;
+        cairo.set_source_rgb(obj.@color);;
         cairo.stroke;;
+        /*
+        cairo.move_to((x-d, y-d));;
+        cairo.line_to((x+d, y-d));;
+        cairo.line_to((x+d, y+d));;
+        cairo.line_to((x-d, y+d));;
+        cairo.line_to((x-d, y-d));;
+        cairo.stroke;;
+        */
         pure()
+    );
+
+    move: TimeDelta -> Obj -> Obj;
+    move = |dt, obj| (
+        let g = 150.0;
+        let win_w = window_size.@0.to_F64;
+        let win_h = window_size.@1.to_F64;
+        let (x0, x1) = (-win_w / 2.0, win_w / 2.0);
+        let (y0, y1) = (-win_h / 2.0, win_h / 2.0);
+        let obj = obj.mod_velocity(mod_y(add(g * dt)));
+        let obj = obj.mod_point(add(obj.@velocity.scaled(dt)));
+        let obj = if obj.@point.@x < x0 {
+            obj.mod_velocity(mod_x(mul(-1.0))).mod_point(mod_x(|x| 2.0 * x0 - x))
+        } else if obj.@point.@x > x1 {
+            obj.mod_velocity(mod_x(mul(-1.0))).mod_point(mod_x(|x| 2.0 * x1 - x))
+        } else { obj };
+        let obj = if obj.@point.@y < y0 {
+            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * y0 - y))
+        } else if obj.@point.@y > y1 {
+            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * y1 - y))
+        } else { obj };
+        obj
     );
 
 // type Draw = Cairo -> IO ();
@@ -59,7 +122,7 @@ namespace Obj {
     animate: Obj -> Animation;
     animate = |obj| (
         Machine::from_transition(obj, |dt, obj|
-            let obj = obj.mod_point(mod_x(add(100.0 * dt)));
+            let obj = obj.move(dt);
             (obj, obj.render)
         )
     );
@@ -67,28 +130,22 @@ namespace Obj {
 
 main : IO ();
 main = (
+    let random = Random::init_by_seed((*Time::get_now).to_F64.to_U64);
     let config = Funim::Config::default(window_size);
     //let config = Funim::Config::encode(window_size, 60.0, "frames");
 
+    let n_obj = 50;
+    let (random, objs) = range(0, 50).map(|_| Obj::generate).collect_m.run_state(random);
+    let animation = Animation::stack $ objs.map(animate);
+    /*
     let animation : Animation = Animation::stack $ [
         Obj::make(Vec2::make(0.0, -150.0), color_red).animate,
         Obj::make(Vec2::make(50.0, 0.0), color_blue).animate,
         Obj::make(Vec2::make(0.0, 150.0), color_green).animate,
     ];
+    */
 
     Funim::run_animation(animation, config)
 );
 
-/* Utility functions */
 
-to_string : Matrix -> String;
-to_string = |m| (
-    let ret = "";
-    let ret = ret + m.@xx.to_string + " ";
-    let ret = ret + m.@xy.to_string + " ";
-    let ret = ret + m.@x0.to_string + "\n";
-    let ret = ret + m.@yx.to_string + " ";
-    let ret = ret + m.@yy.to_string + " ";
-    let ret = ret + m.@y0.to_string;
-    ret
-);

@@ -1,0 +1,94 @@
+module Main;
+
+import Funim;
+import Funim.Machine;
+
+import MiscAlgos.Geometry;
+import MiscAlgos.Functional;
+import Math;
+import Time;
+import Cairo;
+import Cairo.ImageSurface;
+
+window_size : (I64, I64);
+window_size = (1280, 720);
+
+type RGBColor = (F64, F64, F64);
+type RGBAColor = (F64, F64, F64, F64);
+
+color_cyan: RGBColor = (0.0, 1.0, 1.0);
+
+color_red: RGBColor = (1.0, 0.0, 0.0);
+color_green: RGBColor = (0.0, 1.0, 0.0);
+color_blue: RGBColor = (0.0, 0.0, 1.0);
+
+color_white_a50 : RGBAColor;
+color_white_a50 = (1.0, 1.0, 1.0, 0.5);
+
+type Obj = box struct {
+    point: Vec2,
+    color: RGBColor,
+};
+
+namespace Obj {
+    make: Vec2 -> RGBColor -> Obj;
+    make = |p, color| Obj {
+        point: p,
+        color: color,
+    };
+
+    render : Obj -> Cairo -> IO ();
+    render = |obj, cairo| (
+        cairo.set_source_rgb(obj.@color);;
+        let x = obj.@point.@x;
+        let y = obj.@point.@y;
+        let d = 100.0;
+        cairo.move_to((x, y));;
+        cairo.line_to((x+d, y));;
+        cairo.line_to((x+d, y+d));;
+        cairo.line_to((x, y+d));;
+        cairo.line_to((x, y));;
+        cairo.stroke;;
+        pure()
+    );
+
+// type Draw = Cairo -> IO ();
+// type Animation = Machine TimeDelta Draw;
+// from_transition : s -> (i -> s -> (s, o)) -> Machine i o;
+
+    animate: Obj -> Animation;
+    animate = |obj| (
+        Machine::from_transition(obj, |dt, obj|
+            let obj = obj.mod_point(mod_x(add(100.0 * dt)));
+            (obj, obj.render)
+        )
+    );
+}
+
+main : IO ();
+main = (
+    let config = Funim::Config::default(window_size);
+    //let config = Funim::Config::encode(window_size, 60.0, "frames");
+
+    let animation : Animation = Animation::stack $ [
+        Obj::make(Vec2::make(0.0, -150.0), color_red).animate,
+        Obj::make(Vec2::make(50.0, 0.0), color_blue).animate,
+        Obj::make(Vec2::make(0.0, 150.0), color_green).animate,
+    ];
+
+    Funim::run_animation(animation, config)
+);
+
+/* Utility functions */
+
+to_string : Matrix -> String;
+to_string = |m| (
+    let ret = "";
+    let ret = ret + m.@xx.to_string + " ";
+    let ret = ret + m.@xy.to_string + " ";
+    let ret = ret + m.@x0.to_string + "\n";
+    let ret = ret + m.@yx.to_string + " ";
+    let ret = ret + m.@yy.to_string + " ";
+    let ret = ret + m.@y0.to_string;
+    ret
+);

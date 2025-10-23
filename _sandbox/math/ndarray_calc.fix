@@ -12,6 +12,7 @@ module Main;
 import Character;
 import HashMap;
 
+import Minilib.Common.Assert;
 import Minilib.Text.StringEx;
 import Minilib.Text.SimpleParser;
 import Sandbox.NdArray;
@@ -25,19 +26,19 @@ _EOF = "EOF";
 
 readline: String -> IOFail String;
 readline = |prompt| (
-    let ptr = prompt.borrow_c_str(|p_prompt|
-        FFI_CALL[Ptr readline(Ptr), p_prompt]
-    );
+    let ptr = *prompt.borrow_c_str_io(|p_prompt|
+        FFI_CALL_IO[Ptr readline(Ptr), p_prompt]
+    ).lift;
     if ptr == nullptr {
         throw $ _EOF
     };
     let str = String::_unsafe_from_c_str_ptr(ptr);
-    let _ = if str.get_size > 0 {
-        FFI_CALL[() add_history(Ptr), ptr]
+    if str.get_size > 0 {
+        FFI_CALL_IO[() add_history(Ptr), ptr].lift
     } else {
-        ()
-    };
-    let _ = FFI_CALL[() free(Ptr), ptr];
+        pure()
+    };;
+    FFI_CALL_IO[() free(Ptr), ptr].lift;;
     pure $ str
 );
 
@@ -116,8 +117,8 @@ namespace Expr {
     parse_expr = |line| (
         let parser = do {
             let ex = *_parse_expr;
-            let _ = *_skip_whitespaces;
-            let _ = *match_end_of_stream;
+            _skip_whitespaces;;
+            match_end_of_stream;;
             pure $ ex
         };
         parser.run_parser_str(line).map(@0)
@@ -125,7 +126,7 @@ namespace Expr {
 
     _parse_expr: Parser Expr;
     _parse_expr = do {
-        let _ = *_skip_whitespaces;
+        _skip_whitespaces;;
         let expr = *(
             _parse_assign
         );
@@ -135,7 +136,7 @@ namespace Expr {
     _parse_assign: Parser Expr;
     _parse_assign = do {
         let lhs = *_parse_range;
-        let _ = *_skip_whitespaces;
+        _skip_whitespaces;;
         let equal = *match_char('=').if_exists;
         if equal.is_none {
             pure $ lhs
@@ -152,7 +153,7 @@ namespace Expr {
             pure $ ex_range $ (none(), rhs)
         };
         let lhs = *_parse_add_sub;
-        let _ = *_skip_whitespaces;
+        _skip_whitespaces;;
         let colon = *match_char(':').if_exists;
         if colon.is_none {
             pure $ lhs
@@ -166,7 +167,7 @@ namespace Expr {
         let lhs = *_parse_mult_div;
         loop_m(
             lhs, |lhs|
-            let _ = *_skip_whitespaces;
+            _skip_whitespaces;;
             let add = *match_char_if_exists('+');
             let sub = *match_char_if_exists('-');
             if add.is_none && sub.is_none {
@@ -183,7 +184,7 @@ namespace Expr {
         let lhs = *_parse_neg;
         loop_m(
             lhs, |lhs|
-            let _ = *_skip_whitespaces;
+            _skip_whitespaces;;
             let mul = *match_char_if_exists('*');
             let div = *match_char_if_exists('/');
             if mul.is_none && div.is_none {
@@ -197,7 +198,7 @@ namespace Expr {
 
     _parse_neg: Parser Expr;
     _parse_neg = do {
-        let _ = *_skip_whitespaces;
+        _skip_whitespaces;;
         let neg = *match_char_if_exists('-');
         let expr = *_parse_term;
         let expr = if neg.is_some { ex_unary $ ("-", expr) } else { expr };
@@ -221,8 +222,8 @@ namespace Expr {
         };
         let a = a.as_some;
         let rest = *repeat(do {
-            let _ = *_skip_whitespaces;
-            let _ = *match_char(',');
+            _skip_whitespaces;;
+            match_char(',');;
             _parse_expr
         });
         pure $ [a].append(rest)
@@ -230,24 +231,24 @@ namespace Expr {
 
     _parse_funcall: Parser Expr;
     _parse_funcall = do {
-        let _ = *_skip_whitespaces;
+        _skip_whitespaces;;
         let name = *_parse_ident;
         let name = name.as_ex_ident;
-        let _ = *_skip_whitespaces;
-        let _ = *match_char('(');
+        _skip_whitespaces;;
+        match_char('(');;
         let args = *_parse_expr_list;
-        let _ = *_skip_whitespaces;
-        let _ = *match_char(')').or_error("')' is missing");
+        _skip_whitespaces;;
+        match_char(')').or_error("')' is missing");;
         pure $ ex_funcall $ (name, args)
     };
 
     _parse_array: Parser Expr;
     _parse_array = do {
-        let _ = *_skip_whitespaces;
-        let _ = *match_char('[');
+        _skip_whitespaces;;
+        match_char('[');;
         let array = *_parse_expr_list;
-        let _ = *_skip_whitespaces;
-        let _ = *match_char(']').or_error("']' is missing");
+        _skip_whitespaces;;
+        match_char(']').or_error("']' is missing");;
         pure $ ex_array(array)
     };
 
@@ -256,23 +257,23 @@ namespace Expr {
         let ident = *_parse_ident;
         loop_m(
             ident, |expr|
-            let _ = *_skip_whitespaces;
+            _skip_whitespaces;;
             let lbracket = *match_char('[').if_exists;
             if lbracket.is_none {
                 break_m $ expr
             };
             let indices = *_parse_expr_list;
-            let _ = *_skip_whitespaces;
-            let _ = *match_char(']').or_error("']' is missing");
+            _skip_whitespaces;;
+            match_char(']').or_error("']' is missing");;
             continue_m $ ex_subsc $ (expr, indices)
         )
     };
 
     _parse_paren: Parser Expr;
     _parse_paren = do {
-        let _ = *match_char('(');
+        match_char('(');;
         let expr = *_parse_expr;
-        let _ = *match_char(')');
+        match_char(')');;
         pure $ expr
     };
 
@@ -295,36 +296,36 @@ namespace Expr {
         let match_zero = match_str("0");
         let match_int = match_zero.or_else(
             do {
-                let _ = *match_digit1_9;
-                let _ = *(repeat(match_digit));
+                match_digit1_9;;
+                repeat(match_digit);;
                 pure $ ()
             }
         );
         let match_exp = do {
-            let _ = *match_e;
-            let _ = *(match_minus.or_else(match_plus).or_else(unit));
-            let _ = *(one_or_more(match_digit));
+            match_e;;
+            match_minus.or_else(match_plus).or_else(unit);;
+            one_or_more(match_digit);;
             pure $ ()
         };
         let match_frac = do {
-            let _ = *match_decimal_point;
-            let _ = *(repeat(match_digit));
+            match_decimal_point;;
+            repeat(match_digit);;
             pure $ ()
         };
         let match_number = do {
-            let _ = *(match_minus.or_else(unit));
-            let _ = *(match_int);
-            let _ = *(match_frac.or_else(unit));
-            let _ = *(match_exp.or_else(unit));
+            match_minus.or_else(unit);;
+            match_int;;
+            match_frac.or_else(unit);;
+            match_exp.or_else(unit);;
             pure $ ()
         };
 
         do {
             let stream_begin = *get_stream;
-            let _ = *match_number;
+            match_number;;
             let stream_end = *get_stream;
             let byte_count = stream_end.@position - stream_begin.@position;
-            eval assert(|_| "number byte count is negative", byte_count >= 0);
+            assert_lazy(|_| "number byte count is negative", byte_count >= 0) $ |_|
             let number_str = stream_begin.read_string(byte_count);
             let res: Result ErrMsg F64 = from_string(number_str);
             if res.is_err {
@@ -413,8 +414,7 @@ namespace Evaluator
         if expr.is_ex_float {
             pure $ v_float $ expr.as_ex_float
         };
-        eval assert (|_| "unknown expr", false);
-        pure $ v_none()
+        undefined("unknown expr")
     );
 
     _evaluate_array: Array Expr -> EvalEffect (Array Value);
@@ -437,7 +437,7 @@ namespace Evaluator
             let rhs = *evaluate(rhs);
             let app_state = *get_state;
             let app_state = app_state.mod_env(insert(lhs, rhs));
-            let _ = *put_state(app_state);
+            put_state(app_state);;
             pure $ v_none()
         };
         error $ "assign type mismatch"
@@ -655,15 +655,15 @@ namespace AppState {
     process_line: String -> AppState -> IO AppState;
     process_line = |line, app_state| (
         do {
-            //eval *println("process_line: " + line).lift_io;
+            //println("process_line: " + line).lift_io;;
             let expr = *parse_expr(line).from_result_t;
             let value = *evaluate(expr);
-            eval *println("--> " + value.to_string).lift_io;
+            println("--> " + value.to_string).lift_io;;
             pure()
         }
         .exec_state_t(app_state)
         .try(|err|
-            eval *eprintln("ERROR: " + err).lift_io;
+            eprintln("ERROR: " + err).lift_io;;
             pure $ app_state
         )
     );

@@ -95,10 +95,11 @@ test1: IO ();
 test1 = (
     let bufsize = 100;
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
-    let (arr, val) = *arr.mutate_boxed_m(|p_arr|
+    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
         FFI_CALL_IO[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
     );
-    println((val, arr).to_string)
+    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    println("gethostname()=" + str + " ret=" + ret.to_string)
 );
 
 test2: IO ();
@@ -107,24 +108,25 @@ test2 = do {
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
     let format = "%d";
     let num = 123;
-    let (arr, val) = *arr.mutate_boxed_m(|p_arr|
+    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
         format.borrow_c_str_m(|p_format|
             FFI_CALL_IO[CInt sprintf(Ptr, Ptr, CInt), p_arr, p_format, num.to_CInt].lift
         )
     );
     let str = arr.push_back(0_U8)._unsafe_from_c_str;
-    println((val, str).to_string).lift
+    println("sprintf(\"%d\", 123)=" + str + " ret=" + ret.to_string).lift
 }.try(eprintln);
 
 test3: IO ();
 test3 = (
     let bufsize = 100;
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
-    let (arr, val) = arr.mutate_boxed_m(|p_arr|
+    let (arr, ret) = arr.mutate_boxed_m(|p_arr|
+        // NOTE: gethostname() might have side effects, but I want to demonstrate `mutate_boxed_m` for Identity monad
         Identity::make $ FFI_CALL[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
     ).get;
     let str = arr.push_back(0_U8)._unsafe_from_c_str;
-    println((val, str).to_string)
+    println("gethostname()=" + str + " ret=" + ret.to_string)
 );
 
 main: IO ();

@@ -3,6 +3,8 @@ module Main;
 import AsyncTask;
 import Random;
 
+import Minilib.Common.TimeEx;
+
 // Task a のラッパー
 type TaskM a = unbox struct {
     data: Task a
@@ -90,6 +92,9 @@ myIOTaskM = |_| (
     pure $ b
 );
 
+_usleep: I64 -> IO ();
+_usleep = |usec| usleep(usec.to_U32).to_result.forget;     // ignore errors
+
 test1: IO ();
 test1 = (
     let x = myTask().map(|x| x + 2).get;
@@ -99,23 +104,12 @@ test1 = (
     pure()
 );
 
-_usleep: I64 -> ();
-_usleep = |usec| (
-    let res = FFI_CALL[I32 usleep(U32), usec.to_U32].to_I64;
-    if res != 0 {
-        debug_eprintln("usleep failed: res=" + res.to_string)
-    } else {
-        ()
-    }
-);
-
 test2: IO ();
 test2 = (
     let complete = *Var::make(false);
     let loop = fix $ |loop, i| (
-        let _ = *println(i.to_string);
-        let usec = 500000;
-        eval _usleep(usec);
+        println(i.to_string);;
+        _usleep(500000);;
         if i >= 10 {
             complete.set(true)
         };
@@ -131,24 +125,24 @@ test3 = (
     let rand_var = *Var::make(Random::init_by_seed(1234_U64));
     let next_u64 = rand_var.lock(|rand|
             let (rand, u64) = rand.generate_U64;
-            let _ = *rand_var.Var::set(rand);
+            rand_var.Var::set(rand);;
             pure $ u64
     );
     let thread_count_var = *Var::make(0);
     let loop = fix $ |loop, i| (
-        let _ = *println(i.to_string);
-        let usec = (*next_u64 % 500000_U64).to_I64;
-        eval _usleep(usec);
+        println(i.to_string);;
+        let usec = *next_u64 % 500000_U64;
+        _usleep(usec.to_I64);;
         let nchild = (*next_u64 % 3_U64).to_I64;
-        let _ = *Iterator::range(0, nchild).to_dyn.fold_m(
+        Iterator::range(0, nchild).to_dyn.fold_m(
             (), |_, _|
             let task = *AsyncIOTask::make(loop(i + 1));
             thread_count_var.mod(|n| n + 1)
-        );
+        );;
         thread_count_var.mod(|n| n - 1)
     );
     let task = *AsyncIOTask::make(loop(0));
-    let _ = *thread_count_var.mod(|n| n + 1);
+    thread_count_var.mod(|n| n + 1);;
     thread_count_var.wait_and_lock(|n|n == 0, |n|pure())
 );
 
@@ -161,8 +155,8 @@ test4: IO ();
 test4 = (
     let loop = fix $ |loop, i| (
         if (false) { pure() };
-        let _ = *println(i.to_string);
-        eval _usleep(1);
+        println(i.to_string);;
+        _usleep(1);;
         if i >= 100 { pure() };
         let next = *Var::make(none());
         let node = Node {

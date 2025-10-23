@@ -70,41 +70,40 @@ set_boxed_value = |index, boxed, curl| (
 
 get_boxed_value: I64 -> Curl -> IOFail (Box a);
 get_boxed_value = |index, curl| (
-    eval *pure();
+    pure();;
     curl._borrow_glue_iofail(|glue|
-        pure $ _get_boxed_value(index, glue)
+        _get_boxed_value(index, glue).lift
     )
 );
 
-_get_boxed_value: I64 -> Ptr -> Box a;
+_get_boxed_value: I64 -> Ptr -> IO (Box a);
 _get_boxed_value = |index, glue| (
-    let retained_ptr = FFI_CALL[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
-    FFI::boxed_from_retained_ptr(retained_ptr)
+    let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
+    pure $ FFI::boxed_from_retained_ptr(retained_ptr)
 );
 
 // NOTE: This function is called from libcurl as a callback, so we can't use an IO monad as its return value.
+//       So we have to use `unsafe_perform`.
 _callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> CSizeT;
 _callback_write_function = |ptr, size, nmemb, userdata| (
-    let glue = userdata;
-    //eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
-    assert_lazy(|_| "invalid size", size == 1.to_CSizeT) $ |_|
-    assert_lazy(|_| "invalid nmemb", nmemb >= 0.to_CSizeT) $ |_|
+    do {
+        let glue = userdata;
+        //eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
+        assert(|_| "invalid size", size == 1.to_CSizeT).lift;;
+        assert(|_| "invalid nmemb", nmemb >= 0.to_CSizeT).lift;;
 
-    let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
-    eval bytes.borrow_boxed(|p_bytes|
-        FFI_CALL[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
-    );
+        let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
+        bytes.borrow_boxed_io(|p_bytes|
+            FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
+        ).lift;;
 
-    let boxed: Box (Destructor WriteFunc) = glue._get_boxed_value(0);
-    boxed.@value.borrow(|write_func|
-        let iof: IOFail I64 = write_func(bytes);
-        let res: Result ErrMsg I64 = iof.to_result.unsafe_perform;
-        if res.is_err {
-            eval debug_eprintln("write_func failed! err=" + res.as_err);
-            0.to_CSizeT
-        };
-        res.as_ok.to_CSizeT
-    )
+        let boxed: Box (Destructor WriteFunc) = *glue._get_boxed_value(0).lift;
+        boxed.@value.borrow_io(|write_func|
+            write_func(bytes).map(to_CSizeT).to_result
+        ).from_io_result
+    }
+    .try(|errmes| eprintln(errmes);; pure $ 0.to_CSizeT)
+    .unsafe_perform
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];
 
@@ -120,7 +119,7 @@ set_write_callback = |func, curl| (
         )
     };
     let boxed = mark_threaded(boxed);
-    eval *curl.set_boxed_value(0, boxed);
+    curl.set_boxed_value(0, boxed);;
     curl._borrow_glue_iofail(|glue|
         glue._check_error(FFI_CALL_IO[CInt curl_glue_set_write_callback(Ptr), glue])
     )

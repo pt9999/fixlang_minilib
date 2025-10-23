@@ -12,19 +12,19 @@ _EOF = "EOF";
 
 readline: String -> IOFail String;
 readline = |prompt| (
-    let ptr = prompt.borrow_c_str(|p_prompt|
-        FFI_CALL[Ptr readline(Ptr), p_prompt]
-    );
+    let ptr = *prompt.borrow_c_str_io(|p_prompt|
+        FFI_CALL_IO[Ptr readline(Ptr), p_prompt]
+    ).lift;
     if ptr == nullptr {
         throw $ _EOF
     };
     let str = String::_unsafe_from_c_str_ptr(ptr);
-    let _ = if str.get_size > 0 {
-        FFI_CALL[() add_history(Ptr), ptr]
+    if str.get_size > 0 {
+        FFI_CALL_IO[() add_history(Ptr), ptr].lift
     } else {
-        ()
-    };
-    let _ = FFI_CALL[() free(Ptr), ptr];
+        pure()
+    };;
+    FFI_CALL_IO[() free(Ptr), ptr].lift;;
     pure $ str
 );
 

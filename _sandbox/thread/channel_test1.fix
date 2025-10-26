@@ -4,6 +4,7 @@ import AsyncTask;
 import Random;
 
 //import Minilib.Collection.Deque;
+import Minilib.Common.TimeEx;
 import Minilib.Common.IOEx;
 import Minilib.Thread.Channel;
 import Minilib.Thread.Future;
@@ -24,51 +25,44 @@ parallel_map_m = |pool, f, arr| (
     )
 );
 
-_usleep: I64 -> ();
-_usleep = |usec| (
-    let res = FFI_CALL[I32 usleep(U32), usec.to_U32].to_I64;
-    if res != 0 {
-        debug_eprintln("usleep failed: res=" + res.to_string)
-    } else {
-        ()
-    }
-);
+_usleep: I64 -> IO ();
+_usleep = |usec| usleep(usec.to_U32).try(eprintln);
 
 sleep_random: Var Random -> IO ();
 sleep_random = |rand_var| (
     let u64 = *rand_var.lock(|rand|
         let (rand, u64) = rand.generate_U64;
-        let _ = *rand_var.Var::set(rand);
+        rand_var.Var::set(rand);;
         pure $ u64
     );
-    eval _usleep((u64 % 5000000_U64).to_I64);
+    _usleep((u64 % 5000000_U64).to_I64);;
     pure()
 );
 
 test1: IO ();
 test1 = (
     do {
-        let _ = *eprintln("start").lift;
+        eprintln("start").lift;;
         let rand_var: Var Random = *Var::make(Random::init_by_seed(123_U64)).lift;
         let pool = *TaskPool::make(3).lift;
         let arr: Array I64 = Iterator::range(0, 30).to_array;
         let f = |i| (
-            let _ = *pure();
-            let thr = FFI_CALL[U32 pthread_self()];
-            let _ = *eprintln(thr.to_string + ": " + i.to_string + ": start");
-            let _ = *sleep_random(rand_var);
-            let _ = *eprintln(thr.to_string + ": " + i.to_string + ": end");
+            pure();;
+            let thr = *FFI_CALL_IO[U32 pthread_self()];
+            eprintln(thr.to_string + ": " + i.to_string + ": start");;
+            sleep_random(rand_var);;
+            eprintln(thr.to_string + ": " + i.to_string + ": end");;
             pure()
         );
         let futures = *arr.map_m(
             |a| Future::make(pool, f(a))
         );
-        //let _ = *arr.parallel_map_m(pool, f);
+        //arr.parallel_map_m(pool, f);;
         let pool = *pool.shutdown.lift;
-        let _ = *futures.map_m(
+        futures.map_m(
             |future| future.get
-        );
-        let _ = *eprintln("end").lift;
+        );;
+        eprintln("end").lift;;
         pure()
     }.try(eprintln)
 );

@@ -3,6 +3,8 @@ module Main;
 import AsyncTask;
 import Random;
 
+import Minilib.Common.TimeEx;
+
 parallel_map: (a -> b) -> Array a -> Array b;
 parallel_map = |f, arr| (
     let tasks = arr.to_iter.fold(
@@ -35,24 +37,15 @@ parallel_map_m = |f, arr| (
 //---------------------------------------------------
 
 _usleep: I64 -> IO ();
-_usleep = |usec| (
-    pure();;
-    println("_usleep: " + usec.to_string);;
-    let res = *FFI_CALL_IO[I32 usleep(U32), usec.to_U32];
-    println("_usleep done: " + usec.to_string);;
-    when(res != 0_I32, eprintln("usleep failed: res=" + res.to_string));;
-    pure()
-);
+_usleep = |usec| usleep(usec.to_U32).try(eprintln);
 
 test1: IO ();
 test1 = (
-    let _ = *pure();
     let rand_var = *Var::make(Random::init_by_seed(123_U64));
     let sleep_random: IO () = (
-        //pure();;  // これがないとなぜか毎回乱数が同じ結果になる
         let u64 = *rand_var.lock(|rand|
             let (rand, u64) = rand.generate_U64;
-            let _ = *rand_var.Var::set(rand);
+            rand_var.Var::set(rand);;
             pure $ u64
         );
         _usleep((u64 % 5000000_U64).to_I64);;
@@ -60,10 +53,10 @@ test1 = (
     );
     let arr: Array I64 = Iterator::range(0, 100).to_array;
     let arr: Array (IO String) = arr.parallel_map(to_string >> pure);
-    let _ = *arr.parallel_map_m(|str|
-        let _ = *sleep_random;
+    arr.parallel_map_m(|str|
+        sleep_random;;
         print(str + "\n")
-    );
+    );;
     pure()
 );
 

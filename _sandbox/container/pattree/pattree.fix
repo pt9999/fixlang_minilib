@@ -61,8 +61,11 @@ lookup = |key, node| (
         leaf((k,x)) => if k == key { some(x) } else { none() },
         branch((prefix, m, t0, t1)) => (
             if !key._match_prefix(prefix, m) { none() };
-            if key._zero_bit(m) { lookup(key, t0) }
-            else { lookup(key, t1) }
+            if key <= prefix { // key._zero_bit(m)
+                lookup(key, t0) 
+            } else { 
+                lookup(key, t1) 
+            }
         )
     }
 );
@@ -144,7 +147,7 @@ insert = |combine, new_key, new_value, old_node| (
         ),
         branch((prefix, m, left, right)) => (
             if new_key._match_prefix(prefix, m) {
-                if new_key._zero_bit(m) {
+                if new_key <= prefix { // new_key._zero_bit(m)
                     let left = left.insert(combine, new_key, new_value);
                     //old_node.mod_branch(set_2(left))
                     branch $ (prefix, m, left, right) 
@@ -184,7 +187,7 @@ merge = |combine, new_node, old_node| (
         };
         if new_mask < old_mask && old_prefix._match_prefix(new_prefix, new_mask) {
             // old_prefix contains new_prefix
-            if old_prefix._zero_bit(new_mask) { 
+            if old_prefix <= new_prefix { //old_prefix._zero_bit(new_mask)
                 branch((new_prefix, new_mask, mrg(new_left, old_node), new_right)) 
             } else { 
                 branch((new_prefix, new_mask, new_left, mrg(new_right, old_node))) 
@@ -192,7 +195,7 @@ merge = |combine, new_node, old_node| (
         };
         if (old_mask < new_mask && new_prefix._match_prefix(old_prefix, old_mask)) {
             // new_prefix contains old_prefix
-            if new_prefix._zero_bit(old_mask) { 
+            if new_prefix <= old_prefix { //new_prefix._zero_bit(old_mask)
                 branch((old_prefix, old_mask, mrg(new_node, old_left), old_right)) 
             } else { 
                 branch((old_prefix, old_mask, old_left, mrg(new_node, old_right))) 

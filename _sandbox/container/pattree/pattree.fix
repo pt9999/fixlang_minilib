@@ -94,7 +94,7 @@ _lowest_bit: Mask -> Mask;
 _lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
 
 insert: Combine a -> Key -> a -> PNode a -> PNode a;
-insert = |combine, new_key, new_value, node| (
+insert = |combine, new_key, new_value, old_node| (
     let ins: PNode a -> PNode a = fix $ |ins, old_node| (
         match old_node {
             empty() => leaf $ (new_key, new_value),
@@ -119,7 +119,50 @@ insert = |combine, new_key, new_value, node| (
             ),
         }
     );
-    ins(node)
+    ins(old_node)
+);
+
+merge: Combine a -> PNode a -> PNode a -> PNode a;
+merge = |combine, new_node, old_node| (
+    let mrg: PNode a -> PNode a -> PNode a = fix $ |mrg, new_node, old_node| (
+        if new_node.is_empty { old_node };
+        if old_node.is_empty { new_node };
+        if new_node.is_leaf { 
+            let (new_key, new_value) = new_node.as_leaf;
+            old_node.insert(combine, new_key, new_value)
+        };
+        if old_node.is_leaf { 
+            let (old_key, old_value) = old_node.as_leaf;
+            new_node.insert(|x,y| combine(y,x), old_key, old_value)
+        };
+        let (new_prefix, new_mask, new_left, new_right) = new_node.as_branch;
+        let (old_prefix, old_mask, old_left, old_right) = old_node.as_branch;
+        if new_mask == old_mask && new_prefix == old_prefix {
+            // same prefix
+            let left = mrg(new_left, old_left);
+            let right = mrg(new_right, old_right);
+            branch((new_prefix, new_mask, left, right))
+        };
+        if new_mask < old_mask && old_prefix._match_prefix(new_prefix, new_mask) {
+            // old_prefix contains new_prefix
+            if old_prefix._zero_bit(new_mask) { 
+                branch((new_prefix, new_mask, mrg(new_left, old_node), new_right)) 
+            } else { 
+                branch((new_prefix, new_mask, new_left, mrg(new_right, old_node))) 
+            }
+        };
+        if (old_mask < new_mask && new_prefix._match_prefix(old_prefix, old_mask)) {
+            // new_prefix contains old_prefix
+            if new_prefix._zero_bit(old_mask) { 
+                branch((old_prefix, old_mask, mrg(new_node, old_left), old_right)) 
+            } else { 
+                branch((old_prefix, old_mask, old_left, mrg(new_node, old_right))) 
+            }
+        };
+        // the prefixes disagree.
+        _join(new_prefix, new_node, old_prefix, old_node)
+    );
+    mrg(new_node, old_node)
 );
 
 main: IO ();
@@ -134,5 +177,12 @@ main = (
     let node = node.insert(c, 2_U64, "aaa");
     println(node.to_string);;
     println(node.lookup(2_U64).to_string);;
+    let node2: PNode String = empty();
+    let node2 = node2.insert(c, 1_U64, "xxx");
+    let node2 = node2.insert(c, 3_U64, "yyy");
+    let node = node.merge(c, node2);
+    println(node.to_string);;
+    println(node.lookup(3_U64).to_string);;
+
     pure()
 );

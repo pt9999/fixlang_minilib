@@ -1,0 +1,138 @@
+/*
+
+Patricia Tree
+
+This module was inspired by Haskell's `Data.IntMap` package.
+https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
+
+In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
+
+Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
+https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
+
+*/
+//module Sandbox.PatTree;
+module Main;
+
+type Key = U64;
+type Prefix = U64;
+type Mask = U64;
+
+// A type of combining function that resolves collisions.
+// `combine(old_value, new_value)` returns a combined value.
+type Combine a = a -> a -> a;
+
+type PNode a = box union {
+    empty: (),
+    // key, data
+    leaf: (Key, a),
+    // (prefix, branching bit (power of two), left, right)
+    branch: (Prefix, Mask, PNode a, PNode a),
+};
+
+impl [a: ToString] PNode a: ToString {
+    to_string = |node| match node {
+        empty() => "()",
+        leaf((key,value)) => "leaf(" + key.to_string + ":" + value.to_string + ")",
+        branch((prefix,mask,left,right)) => "branch(" + prefix.to_string + "/" + mask.to_string + ":" +
+            left.to_string + "/" + right.to_string + ")",
+    };
+}
+
+_empty: PNode a;
+_empty = empty();
+
+lookup: Key -> PNode a -> Option a;
+lookup = |key, node| (
+    match node {
+        empty() => none(),
+        leaf((k,x)) => if k == key { some(x) } else { none() },
+        branch((prefix, m, t0, t1)) => (
+            if !key._match_prefix(prefix, m) { none() };
+            if key._zero_bit(m) { lookup(key, t0) }
+            else { lookup(key, t1) }
+        )
+    }
+);
+
+_zero_bit: Mask -> Key -> Bool;
+_zero_bit = |mask, key| (
+    key.bit_and(mask) == 0_U64
+);
+
+_mask: Mask -> Key -> Mask;
+_mask = |m, key| (
+    // little-endian mask
+    key.bit_and(m - 1_U64)
+    // big-endian mask
+    //key.bit_or(m - 1_U64).bit_and(bit_not(m))
+);
+
+_match_prefix: Prefix -> Mask -> Key -> Bool;
+_match_prefix = |prefix, m, key| (
+    key._mask(m) == prefix
+);
+
+make_branch: Prefix -> Mask -> PNode a -> PNode a -> PNode a;
+make_branch = |prefix, m, t0, t1| (
+    if t0.is_empty  { t1 };
+    if t1.is_empty { t0 };
+    branch $ (prefix, m, t0, t1)
+);
+
+_join: Prefix -> PNode a -> Prefix -> PNode a -> PNode a;
+_join = |p0, t0, p1, t1| (
+    let m = _branching_bit(p0, p1);
+    if p0._zero_bit(m) { branch $ (p0._mask(m), m, t0, t1) }
+    else { branch $ (p0._mask(m), m, t1, t0) }
+);
+
+_branching_bit: Prefix -> Prefix -> Mask;
+_branching_bit = |p0, p1| p0.bit_xor(p1)._lowest_bit;
+
+_lowest_bit: Mask -> Mask;
+_lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
+
+insert: Combine a -> Key -> a -> PNode a -> PNode a;
+insert = |combine, new_key, new_value, node| (
+    let ins: PNode a -> PNode a = fix $ |ins, old_node| (
+        match old_node {
+            empty() => leaf $ (new_key, new_value),
+            leaf((old_key, old_value)) => (
+                if old_key == new_key { leaf((new_key, combine(old_value, new_value))) }
+                else { 
+                    let new_node = leaf((new_key, new_value));
+                    _join(new_key, new_node, old_key, old_node)
+                }
+            ),
+            branch((prefix, m, left, right)) => (
+                if new_key._match_prefix(prefix, m) {
+                    if new_key._zero_bit(m) { 
+                        branch((prefix, m, ins(left), right)) 
+                    } else { 
+                        branch((prefix, m, left, ins(right))) 
+                    }
+                } else { 
+                    let new_node = leaf((new_key, new_value));
+                    _join(new_key, new_node, prefix, old_node)
+                }
+            ),
+        }
+    );
+    ins(node)
+);
+
+main: IO ();
+main = (
+    let node: PNode String = empty();
+    //let c: Combine String = |old_value, new_value| new_value;
+    //let c: Combine String = add;
+    let c: Combine String = |old_value, new_value| add(old_value, new_value);
+    let node = node.insert(c, 1_U64, "111");
+    let node = node.insert(c, 2_U64, "222");
+    let node = node.insert(c, 3_U64, "333");
+    let node = node.insert(c, 2_U64, "aaa");
+    println(node.to_string);;
+    println(node.lookup(2_U64).to_string);;
+    pure()
+);

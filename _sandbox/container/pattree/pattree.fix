@@ -86,8 +86,11 @@ make_branch = |prefix, m, t0, t1| (
 _join: Prefix -> PNode a -> Prefix -> PNode a -> PNode a;
 _join = |p0, t0, p1, t1| (
     let m = _branching_bit(p0, p1);
-    if p0._zero_bit(m) { branch $ (p0._mask(m), m, t0, t1) }
-    else { branch $ (p0._mask(m), m, t1, t0) }
+    if p0._zero_bit(m) { 
+        branch $ (p0._mask(m), m, t0, t1) 
+    } else { 
+        branch $ (p0._mask(m), m, t1, t0) 
+    }
 );
 
 _branching_bit: Prefix -> Prefix -> Mask;
@@ -98,31 +101,35 @@ _lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
 
 insert: Combine a -> Key -> a -> PNode a -> PNode a;
 insert = |combine, new_key, new_value, old_node| (
-    let ins: PNode a -> PNode a = fix $ |ins, old_node| (
-        match old_node {
-            empty() => leaf $ (new_key, new_value),
-            leaf((old_key, old_value)) => (
-                if old_key == new_key { leaf((new_key, combine(old_value, new_value))) }
-                else { 
-                    let new_node = leaf((new_key, new_value));
-                    _join(new_key, new_node, old_key, old_node)
-                }
-            ),
-            branch((prefix, m, left, right)) => (
-                if new_key._match_prefix(prefix, m) {
-                    if new_key._zero_bit(m) { 
-                        branch((prefix, m, ins(left), right)) 
-                    } else { 
-                        branch((prefix, m, left, ins(right))) 
-                    }
+    match old_node {
+        empty() => (
+            leaf $ (new_key, new_value)
+        ),
+        leaf((old_key, old_value)) => (
+            if old_key == new_key { 
+                leaf $ (new_key, combine(old_value, new_value)) 
+            } else { 
+                let new_node = leaf $ (new_key, new_value);
+                _join(new_key, new_node, old_key, old_node)
+            }
+        ),
+        branch((prefix, m, left, right)) => (
+            if new_key._match_prefix(prefix, m) {
+                if new_key._zero_bit(m) {
+                    let left = left.insert(combine, new_key, new_value);
+                    //old_node.mod_branch(set_2(left))
+                    branch $ (prefix, m, left, right) 
                 } else { 
-                    let new_node = leaf((new_key, new_value));
-                    _join(new_key, new_node, prefix, old_node)
+                    let right = right.insert(combine, new_key, new_value);
+                    //old_node.mod_branch(set_3(right))
+                    branch $ (prefix, m, left, right)
                 }
-            ),
-        }
-    );
-    ins(old_node)
+            } else { 
+                let new_node = leaf $ (new_key, new_value);
+                _join(new_key, new_node, prefix, old_node)
+            }
+        ),
+    }
 );
 
 merge: Combine a -> PNode a -> PNode a -> PNode a;

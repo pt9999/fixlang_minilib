@@ -13,6 +13,8 @@ https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/
 */
 module Minilib.Collection.PatTree;
 
+import Minilib.Text.Hex;
+
 type Key = U64;
 type Prefix = U64;
 type Mask = U64;
@@ -34,8 +36,8 @@ type PNode a = box union {
 impl [a: ToString] PNode a: ToString {
     to_string = |node| match node {
         empty() => "()",
-        leaf((key,value)) => "leaf(" + key.to_string + ":" + value.to_string + ")",
-        branch((prefix,mask,left,right)) => "branch(" + prefix.to_string + "/" + mask.to_string + ":" +
+        leaf((key,value)) => "leaf(" + key.to_string_hex + ":" + value.to_string + ")",
+        branch((prefix,mask,left,right)) => "branch(" + prefix.to_string_hex + "/" + mask.to_string_hex + ":" +
             left.to_string + "/" + right.to_string + ")",
     };
 }
@@ -66,9 +68,9 @@ _zero_bit = |mask, key| (
 _mask: Mask -> Key -> Mask;
 _mask = |m, key| (
     // little-endian mask
-    key.bit_and(m - 1_U64)
+    //key.bit_and(m - 1_U64)
     // big-endian mask
-    //key.bit_or(m - 1_U64).bit_and(bit_not(m))
+    key.bit_or(m - 1_U64).bit_and(bit_not(m))
 );
 
 _match_prefix: Prefix -> Mask -> Key -> Bool;
@@ -83,9 +85,9 @@ make_branch = |prefix, m, t0, t1| (
     branch $ (prefix, m, t0, t1)
 );
 
-_join: Prefix -> PNode a -> Prefix -> PNode a -> PNode a;
-_join = |p0, t0, p1, t1| (
-    let m = _branching_bit(p0, p1);
+_join: Prefix -> Mask -> PNode a -> Prefix -> Mask -> PNode a -> PNode a;
+_join = |p0, m0, t0, p1, m1, t1| (
+    let m = _branching_bit(p0, m0, p1, m1);
     if p0._zero_bit(m) { 
         branch $ (p0._mask(m), m, t0, t1) 
     } else { 
@@ -93,11 +95,31 @@ _join = |p0, t0, p1, t1| (
     }
 );
 
-_branching_bit: Prefix -> Prefix -> Mask;
-_branching_bit = |p0, p1| p0.bit_xor(p1)._lowest_bit;
+_branching_bit: Prefix -> Mask -> Prefix -> Mask -> Mask;
+//_branching_bit = |p0, p1| p0.bit_xor(p1)._lowest_bit;
+_branching_bit = |p0, m0, p1, m1| (
+    _highest_bit(p0.bit_xor(p1), max(1_U64, 2_U64 * max(m0, m1)))
+);
 
-_lowest_bit: Mask -> Mask;
+_lowest_bit: Prefix -> Mask;
 _lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
+
+_highb: Prefix -> Mask;
+_highb = |x| (
+    let m = x._lowest_bit;
+    if x == m { m };
+    _highb(x - m)
+);
+
+_highest_bit: Prefix -> Mask -> Mask;
+_highest_bit = |x, m| (
+    // zero all bits below m
+    let xx = x.bit_and((m - 1_U64).bit_not);
+    //eval debug_eprintln("(x,m)=" + x.to_string_hex + "," + m.to_string_hex + " xx=" + xx.to_string_hex);
+    let b = _highb(xx);
+    //eval debug_eprintln("_highb(" + xx.to_string_hex + ")=" + b.to_string_hex);
+    b
+);
 
 insert: Combine a -> Key -> a -> PNode a -> PNode a;
 insert = |combine, new_key, new_value, old_node| (
@@ -110,7 +132,7 @@ insert = |combine, new_key, new_value, old_node| (
                 leaf $ (new_key, combine(old_value, new_value)) 
             } else { 
                 let new_node = leaf $ (new_key, new_value);
-                _join(new_key, new_node, old_key, old_node)
+                _join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
             }
         ),
         branch((prefix, m, left, right)) => (
@@ -126,7 +148,7 @@ insert = |combine, new_key, new_value, old_node| (
                 }
             } else { 
                 let new_node = leaf $ (new_key, new_value);
-                _join(new_key, new_node, prefix, old_node)
+                _join(new_key, 0_U64, new_node, prefix, m, old_node)
             }
         ),
     }
@@ -170,7 +192,7 @@ merge = |combine, new_node, old_node| (
             }
         };
         // the prefixes disagree.
-        _join(new_prefix, new_node, old_prefix, old_node)
+        _join(new_prefix, new_mask, new_node, old_prefix, old_mask, old_node)
     );
     mrg(new_node, old_node)
 );

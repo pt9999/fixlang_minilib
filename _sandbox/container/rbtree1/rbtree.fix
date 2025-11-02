@@ -44,11 +44,24 @@ namespace RBNode {
     _less_than: [a: LessThan, a: RBNodeElem] a -> a -> Bool;
     _less_than = |x, y| x < y;
 
+    type RBColor = U8;
+
+    namespace RBColor {
+        black: RBColor = 0_U8;
+        red: RBColor = 1_U8;
+    }
+
+    type RBNodeData a = unbox struct {
+        color: RBColor,
+        left: RBNode a,
+        elem: a,
+        right: RBNode a,
+    };
+
     // A type of red-black tree node.
     type RBNode a = box union {
         empty: (),
-        red:  (RBNode a, a, RBNode a),
-        black: (RBNode a, a, RBNode a)
+        data: RBNodeData a,
     };
 
     // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
@@ -67,7 +80,7 @@ namespace RBNode {
     level_nonvalidate = |node| (
         if node.is_empty { 1 };
         let this_count = if node.is_black { 1 } else { 0 };
-        let (left, elem, right) = node.get_triplet;
+        let (left, right) = node.get_left_right;
         let left_level = left.level_nonvalidate;
         let right_level = right.level_nonvalidate;
         max(left_level, right_level) + this_count
@@ -79,7 +92,7 @@ namespace RBNode {
     level = |node| (
         if node.is_empty { 1 };
         let this_count = if node.is_black { 1 } else { 0 };
-        let (left, elem, right) = node.get_triplet;
+        let (left, right) = node.get_left_right;
         let left_level = left.level;
         let right_level = right.level;
         assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
@@ -141,33 +154,52 @@ namespace RBNode {
         left.get_size + 1 + right.get_size
     );
 
+    get_left_right: RBNode a -> (RBNode a, RBNode a);
+    get_left_right = |node| (
+        let data = node.as_data;
+        (data.@left, data.@right)
+    );
+
+    set_left_right: (RBNode a, RBNode a) -> RBNode a -> RBNode a;
+    set_left_right = |(left, right), node| (
+        node.mod_data(set_left(left) >> set_right(right))
+    );
+
     // If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.
     // If the node is empty, it will abort.
     get_triplet: RBNode a -> (RBNode a, a, RBNode a);
     get_triplet = |node| (
-        if node.is_red { node.as_red } else { node.as_black }
+        let data = node.as_data;
+        (data.@left, data.@elem, data.@right)
     );
 
     set_triplet: (RBNode a, a, RBNode a) -> RBNode a -> RBNode a;
-    set_triplet = |triplet, node| (
-        if node.is_red { red $ triplet } else { black $ triplet }
+    set_triplet = |(left, elem, right), node| (
+        node.mod_data(|data| data.set_left(left).set_elem(elem).set_right(right))
     );
 
-    get_color: RBNode a -> ((RBNode a, a, RBNode a) -> RBNode a);
-    get_color = |node| (
-        if node.is_black { black } else { red }
+    set_quad: (RBColor, RBNode a, a, RBNode a) -> RBNode a -> RBNode a;
+    set_quad = |(color, left, elem, right), node| (
+        node.mod_data(|data| data.set_color(color).set_left(left).set_elem(elem).set_right(right))
     );
 
-    set_color: ((RBNode a, a, RBNode a) -> RBNode a) -> RBNode a -> RBNode a;
-    set_color = |color, node| (
-        color(node.get_triplet)
-    );
+    is_black: RBNode a -> Bool;
+    is_black = |node| node.is_data && node.get_color == black;
+
+    is_red: RBNode a -> Bool;
+    is_red = |node| node.is_data && node.get_color == red;
+
+    get_color: RBNode a -> RBColor;
+    get_color = |node| node.as_data.@color;
+
+    set_color: RBColor -> RBNode a -> RBNode a;
+    set_color = |color, node| node.mod_data(set_color(color));
 
     get_left: RBNode a -> RBNode a;
-    get_left = |node| node.get_triplet.@0;
+    get_left = |node| node.as_data.@left;
 
     get_right: RBNode a -> RBNode a;
-    get_right = |node| node.get_triplet.@2;
+    get_right = |node| node.as_data.@right;
 
     //====================================================================
     // Finding
@@ -264,18 +296,19 @@ namespace RBNode {
     _balance: RBNode a -> RBNode a;
     _balance = |node| (
         if node.is_empty || node.is_red { node };
-        let (left, _, right) = node.as_black;
+        let (left, right) = node.get_left_right;
         if left.is_red && left.get_left.is_red {
-            let (left, e3, n4) = node.as_black;
-            let (left_left, e2, n3) = left.as_red;
-            let (n1, e1, n2) = left_left.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-        };
+            let (left, e3, n4) = node.get_triplet; //.as_black;
+            let (left_left, e2, n3) = left.get_triplet; //.as_red;
+            let (n1, e1, n2) = left_left.get_triplet; //.as_red;
+            left.set_quad((red, left_left.set_quad((black, n1, e1, n2)), e2, node.set_quad((black, n3, e3, n4))))
+        }; 
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         if left.is_red && left.get_right.is_red {
-            let (left, e3, n4) = node.as_black;
-            let (n1, e1, left_right) = left.as_red;
-            let (n2, e2, n3) = left_right.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (left, e3, n4) = node.get_triplet; //.as_black;
+            let (n1, e1, left_right) = left.get_triplet; //.as_red;
+            let (n2, e2, n3) = left_right.get_triplet; //.as_red;
+            left_right.set_quad((left.set_quad((black, n1, e1, n2)), e2, node.set_quad((black, n3, e3, n4))))
         };
         if right.is_red && right.get_left.is_red {
             let (n1, e1, right) = node.as_black;

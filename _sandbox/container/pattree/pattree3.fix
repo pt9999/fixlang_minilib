@@ -1,0 +1,224 @@
+/*
+
+Patricia Tree
+
+This module was inspired by Haskell's `Data.IntMap` package.
+https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
+
+In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
+
+Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
+https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
+
+*/
+module Minilib.Collection.PatTree3;
+
+import Minilib.Text.Hex;
+
+type Key = U64;
+type Prefix = U64;
+type Mask = U64;
+
+// A type of combining function that resolves collisions.
+// `combine(old_value, new_value)` returns a combined value.
+type Combine a = a -> a -> a;
+
+namespace Combine {
+    overwrite: Combine a = |old_value, new_value| new_value;
+    append: [a: Add] Combine a = add;
+}
+
+type PNode a = unbox union {
+    empty: (),
+    // key, data
+    leaf: (Key, a),
+    // (prefix, branching bit (power of two), left, right)
+    branch: (Prefix, Mask, PNodeIndex, PNodeIndex),
+};
+
+// PNodeIndex is just an index of PNode array.
+type PNodeIndex = I64;
+
+namespace PNodeIndex {
+    // An empty node.
+    empty: PNodeIndex = -1;
+}
+
+// Patricia Tree.
+type PTree a = unbox struct {
+    _root: PNodeIndex,
+    _combine: Combine a,
+    _nodes: Array (PNode a),
+};
+
+namespace PTree {
+    empty: PTree a;
+    empty = PTree {
+        _root: PNodeIndex::empty,
+        _combine: overwrite,
+        _nodes: [],
+    };
+
+    make_branch: Prefix -> Mask -> PNodeIndex -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    make_branch = |prefix, mask, left, right, tree| (
+        let node = tree.@_nodes.get_size;
+        let tree = tree.mod__nodes(push_back(
+            branch $ (prefix, mask, left, right)
+        ));
+        (tree, node)
+    );
+
+    make_leaf: Key -> a -> PTree a -> (PTree a, PNodeIndex);
+    make_leaf = |key, value, tree| (
+        let node = tree.@_nodes.get_size;
+        let tree = tree.mod__nodes(push_back(
+            leaf $ (key, value)
+        ));
+        (tree, node)
+    );
+
+    get_node: PNodeIndex -> PTree a -> PNode a;
+    get_node = |node, tree| (
+        if node == PNodeIndex::empty { empty() };
+        tree.@_nodes.@(node)
+    );
+
+    set_node: PNodeIndex -> PNode a -> PTree a -> PTree a;
+    set_node = |node, data, tree| (
+        tree.mod__nodes(set(node, data))
+    );
+
+    find: Key -> PTree a -> Option a;
+    find = |key, tree| (
+        let root = tree.@_root;
+        tree._lookup(key, root)
+    );
+
+    _lookup: Key -> PNodeIndex -> PTree a -> Option a;
+    _lookup = |key, node, tree| (
+        match tree.get_node(node) {
+            empty() => none(),
+            leaf((k, x)) => if k == key { some(x) } else { none() },
+            branch((prefix, m, left, right)) => (
+                if !key._match_prefix(prefix, m) { none() };
+                if key <= prefix { // key._zero_bit(m)
+                    tree._lookup(key, left) 
+                } else { 
+                    tree._lookup(key, right)
+                }
+            )
+        }
+    );
+
+    _zero_bit: Mask -> Key -> Bool;
+    _zero_bit = |mask, key| (
+        key.bit_and(mask) == 0_U64
+    );
+
+    _mask: Mask -> Key -> Mask;
+    _mask = |m, key| (
+        // little-endian mask
+        //key.bit_and(m - 1_U64)
+        // big-endian mask
+        key.bit_or(m - 1_U64).bit_and(bit_not(m))
+    );
+
+    _match_prefix: Prefix -> Mask -> Key -> Bool;
+    _match_prefix = |prefix, m, key| (
+        key._mask(m) == prefix
+    );
+
+    _join: Prefix -> Mask -> PNodeIndex -> Prefix -> Mask -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _join = |p0, m0, t0, p1, m1, t1, tree| (
+        let m = _branching_bit(p0, m0, p1, m1);
+        if p0._zero_bit(m) { 
+            tree.make_branch(p0._mask(m), m, t0, t1)
+        } else { 
+            tree.make_branch(p0._mask(m), m, t1, t0)
+        }
+    );
+
+    _branching_bit: Prefix -> Mask -> Prefix -> Mask -> Mask;
+    //_branching_bit = |p0, p1| p0.bit_xor(p1)._lowest_bit;
+    _branching_bit = |p0, m0, p1, m1| (
+        _highest_bit(p0.bit_xor(p1), max(1_U64, 2_U64 * max(m0, m1)))
+    );
+
+    _lowest_bit: Prefix -> Mask;
+    _lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
+
+    _highb: Prefix -> Mask;
+    _highb = |x| (
+        let m = x._lowest_bit;
+        if x == m { m };
+        _highb(x - m)
+    );
+
+    _highest_bit: Prefix -> Mask -> Mask;
+    _highest_bit = |x, m| (
+        // zero all bits below m
+        let xx = x.bit_and((m - 1_U64).bit_not);
+        //eval debug_eprintln("(x,m)=" + x.to_string_hex + "," + m.to_string_hex + " xx=" + xx.to_string_hex);
+        let b = _highb(xx);
+        //eval debug_eprintln("_highb(" + xx.to_string_hex + ")=" + b.to_string_hex);
+        b
+    );
+
+    insert: Key -> a -> PTree a -> PTree a;
+    insert = |new_key, new_value, tree| (
+        let root = tree.@_root;
+        let (tree, root) = tree._insert(new_key, new_value, root);
+        tree.set__root(root)
+    );
+
+    _insert: Key -> a -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _insert = |new_key, new_value, old_node, tree| (
+        match tree.get_node(old_node) {
+            empty() => tree.make_leaf(new_key, new_value),
+            leaf((old_key, old_value)) => (
+                if old_key == new_key { 
+                    let value = (tree.@_combine)(old_value, new_value);
+                    tree.make_leaf(new_key, value)
+                } else { 
+                    let (tree, new_node) = tree.make_leaf(new_key, new_value);
+                    tree._join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
+                }
+            ),
+            branch((prefix, m, left, right)) => (
+                if new_key._match_prefix(prefix, m) {
+                    if new_key <= prefix { // new_key._zero_bit(m)
+                        let (tree, left) = tree._insert(new_key, new_value, left);
+                        let tree = tree.set_node(old_node, branch $ (prefix, m, left, right));
+                        (tree, old_node)
+                    } else { 
+                        let (tree, right) = tree._insert(new_key, new_value, right);
+                        let tree = tree.set_node(old_node, branch $ (prefix, m, left, right));
+                        (tree, old_node)
+                    }
+                } else { 
+                    let (tree, new_node) = tree.make_leaf(new_key, new_value);
+                    tree._join(new_key, 0_U64, new_node, prefix, m, old_node)
+                }
+            ),
+        }
+    );
+
+} // namespace PTree
+
+impl [a: ToString] PTree a: ToString {
+    to_string = |tree| tree._node_to_string(0, tree.@_root);
+}
+
+_node_to_string: [a: ToString] I64 -> PNodeIndex -> PTree a -> String;
+_node_to_string = |indent, node, tree| (
+    let indent_str: String = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
+    match tree.get_node(node) {
+        empty() => indent_str + "()",
+        leaf((key, value)) => indent_str + "leaf(key=" + key.to_string + ", value=" + value.to_string + ")",
+        branch((prefix,mask,left,right)) => (
+            indent_str + "branch(prefix=" + prefix.to_string + ", mask=" + mask.to_string + ")\n" +
+                tree._node_to_string(indent + 1, left) + "\n" + 
+                tree._node_to_string(indent + 1, right)
+        )
+    }
+);

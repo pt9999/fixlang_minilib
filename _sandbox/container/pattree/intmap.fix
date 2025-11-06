@@ -1,18 +1,18 @@
 /*
-Simple Integer Trie
+Simple Trie using U64 as a key
 */
-module Minilib.Collection.IntTrie;
+module Minilib.Collection.IntMap;
 
 type Key = U64;
 
-rbits: U64;
-rbits = 8_U64;
+_bits: U64;
+_bits = 8_U64;
 
-rmask: U64;
-rmask = 1_U64.shift_left(rbits) - 1_U64;
+_branch_size: U64;
+_branch_size = 1_U64.shift_left(_bits);
 
-rlevels: U64;
-rlevels = (64_U64 + rbits - 1_U64) / rbits;
+_num_levels: U64;
+_num_levels = (64_U64 + _bits - 1_U64) / _bits;
 
 // A type of combining function that resolves collisions.
 // `combine(old_value, new_value)` returns a combined value.
@@ -20,20 +20,24 @@ type Combine a = a -> a -> a;
 
 overwrite: Combine a = |old_value, new_value| new_value;
 
-type RNode a = unbox union {
-    empty: (),
-    leaf: a,
-    branch: Array (RNode a),
+type IntMap a = unbox struct {
+    root: TrieNode a,
 };
 
-_empty_branch: RNode a;
-_empty_branch = branch(Array::fill((rmask + 1_U64).to_I64, empty()));
+type TrieNode a = unbox union {
+    empty: (),
+    leaf: a,
+    branch: Array (TrieNode a),
+};
 
-impl [a: ToString] RNode a: ToString {
+_empty_branch: TrieNode a;
+_empty_branch = branch(Array::fill(_branch_size.to_I64, empty()));
+
+impl [a: ToString] TrieNode a: ToString {
     to_string = |node| node._node_to_string(0);
 }
 
-_node_to_string: [a: ToString] I64 -> RNode a -> String;
+_node_to_string: [a: ToString] I64 -> TrieNode a -> String;
 _node_to_string = |indent, node| (
     let indent_str: String = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
     match node {
@@ -47,32 +51,32 @@ _node_to_string = |indent, node| (
     }
 );
 
-_empty: RNode a;
-_empty = empty();
+empty: IntMap a;
+empty = IntMap { root: TrieNode::empty() };
 
-find: Key -> RNode a -> Option a;
-find = |key, node| (
-    node._lookup(rbits * (rlevels - 1_U64), key)
+find: Key -> IntMap a -> Option a;
+find = |key, map| (
+    map.@root._lookup(_bits * (_num_levels - 1_U64), key)
 );
 
-_lookup: U64 -> Key -> RNode a -> Option a;
+_lookup: U64 -> Key -> TrieNode a -> Option a;
 _lookup = |shift, key, node| (
     match node {
         empty() => none(),
         leaf(value) => some(value),
         branch(children) => (
-            let i = key.shift_right(shift).bit_and(rmask);
-            children.@(i.to_I64)._lookup(shift - rbits, key)
+            let i = key.shift_right(shift).bit_and(_branch_size - 1_U64);
+            children.@(i.to_I64)._lookup(shift - _bits, key)
         )
     }
 );
 
-insert: Combine a -> Key -> a -> RNode a -> RNode a;
-insert = |combine, key, new_value, node| (
-    node._ins(rbits * (rlevels - 1_U64), combine, key, new_value)
+insert: Combine a -> Key -> a -> IntMap a -> IntMap a;
+insert = |combine, key, new_value, map| (
+    map.mod_root(_ins(_bits * (_num_levels - 1_U64), combine, key, new_value))
 );
 
-_ins: U64 -> Combine a -> Key -> a -> RNode a -> RNode a;
+_ins: U64 -> Combine a -> Key -> a -> TrieNode a -> TrieNode a;
 _ins = |shift, combine, key, new_value, node| (
     if shift.to_I64 < 0 {
         match node {
@@ -86,7 +90,7 @@ _ins = |shift, combine, key, new_value, node| (
             leaf(_) => undefined("leaf found in level non-0"),
             branch(_) => node,
         };
-        let i = key.shift_right(shift).bit_and(rmask);
-        node.mod_branch(mod(i.to_I64, _ins(shift - rbits, combine, key, new_value)))
+        let i = key.shift_right(shift).bit_and(_branch_size - 1_U64);
+        node.mod_branch(mod(i.to_I64, _ins(shift - _bits, combine, key, new_value)))
     }
 );

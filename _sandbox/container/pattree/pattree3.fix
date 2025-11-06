@@ -88,6 +88,11 @@ namespace PTree {
         tree.mod__nodes(set(node, data))
     );
 
+    mod_node: PNodeIndex -> (PNode a -> PNode a) -> PTree a -> PTree a;
+    mod_node = |node, f, tree| (
+        tree.mod__nodes(mod(node, f))
+    );
+
     find: Key -> PTree a -> Option a;
     find = |key, tree| (
         let root = tree.@_root;
@@ -154,12 +159,40 @@ namespace PTree {
         _highb(x - m)
     );
 
+    _highb16: Prefix -> Mask;
+    _highb16 = |x| (
+        let hi = x.shift_right(8_U64);
+        if hi != 0_U64 {
+           _highb(hi).shift_left(8_U64)
+        };
+        _highb(x)
+    );
+
+    _highb32: Prefix -> Mask;
+    _highb32 = |x| (
+        let hi = x.shift_right(16_U64);
+        if hi != 0_U64 {
+           _highb16(hi).shift_left(16_U64)
+        };
+        _highb16(x)
+    );
+
+    _highb64: Prefix -> Mask;
+    _highb64 = |x| (
+        let hi = x.shift_right(32_U64);
+        if hi != 0_U64 {
+           _highb32(hi).shift_left(32_U64)
+        };
+        _highb32(x)
+    );
+
     _highest_bit: Prefix -> Mask -> Mask;
     _highest_bit = |x, m| (
         // zero all bits below m
         let xx = x.bit_and((m - 1_U64).bit_not);
         //eval debug_eprintln("(x,m)=" + x.to_string_hex + "," + m.to_string_hex + " xx=" + xx.to_string_hex);
         let b = _highb(xx);
+        //let b = _highb64(xx);
         //eval debug_eprintln("_highb(" + xx.to_string_hex + ")=" + b.to_string_hex);
         b
     );
@@ -176,9 +209,16 @@ namespace PTree {
         match tree.get_node(old_node) {
             empty() => tree.make_leaf(new_key, new_value),
             leaf((old_key, old_value)) => (
-                if old_key == new_key { 
-                    let value = (tree.@_combine)(old_value, new_value);
-                    tree.make_leaf(new_key, value)
+                if old_key == new_key {
+                    let combine = tree.@_combine;
+                    let tree = tree.mod_node(old_node, 
+                        mod_leaf(
+                            |(key, old_value)|
+                            let value = combine(old_value, new_value);
+                            (key, value)
+                        )
+                    );
+                    (tree, old_node)
                 } else { 
                     let (tree, new_node) = tree.make_leaf(new_key, new_value);
                     tree._join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
@@ -187,12 +227,12 @@ namespace PTree {
             branch((prefix, m, left, right)) => (
                 if new_key._match_prefix(prefix, m) {
                     if new_key <= prefix { // new_key._zero_bit(m)
-                        let (tree, left) = tree._insert(new_key, new_value, left);
-                        let tree = tree.set_node(old_node, branch $ (prefix, m, left, right));
+                        let (tree, left2) = tree._insert(new_key, new_value, left);
+                        let tree = if left != left2 { tree.set_node(old_node, branch $ (prefix, m, left2, right)) } else { tree };
                         (tree, old_node)
                     } else { 
-                        let (tree, right) = tree._insert(new_key, new_value, right);
-                        let tree = tree.set_node(old_node, branch $ (prefix, m, left, right));
+                        let (tree, right2) = tree._insert(new_key, new_value, right);
+                        let tree = if right != right2 { tree.set_node(old_node, branch $ (prefix, m, left, right2)) } else { tree };
                         (tree, old_node)
                     }
                 } else { 

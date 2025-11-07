@@ -1,0 +1,89 @@
+module Main;
+
+//import Minilib.Trait.Semigroup;
+//import Minilib.Trait.Monoid;
+//import Minilib.Monad.Writer;
+//import Minilib.Trait.Traversable;
+
+type Yield e a = unbox union {
+    y_pure: a,
+    y_yield: (e, () -> Yield e a),
+};
+
+impl Yield e: Monad {
+    pure = y_pure;
+    bind = |f, ma| (
+        match ma {
+            y_pure(a) => f(a),
+            y_yield((e, next)) => y_yield((e, next >> bind(f))),
+        }
+    );
+}
+
+impl Yield e: Functor {
+    map = |f| bind(f >> pure);
+}
+
+yield: e -> Yield e ();
+yield = |e| y_yield $ (e, |_| pure());
+
+map_yield: (d -> e) -> Yield d a -> Yield e a;
+map_yield = |f, ma| (
+    match ma {
+        y_pure(a) => y_pure(a),
+        y_yield((d, next)) => y_yield((f(d), next >> map_yield(f))),
+    }
+);
+
+to_iter: Yield e a -> DynIterator e;
+to_iter = |ma| (
+    match ma {
+        y_pure(a) => DynIterator { next: |_| none() },     // `a` is discarded
+        y_yield((e, next)) => DynIterator { next: |_| some $ (next().to_iter, e) },
+    }
+);
+
+take_array: I64 -> Yield e a -> (Array e, Yield e a);
+take_array = |n, ma| (
+    loop(
+        ([], ma), |(arr,ma)|
+        if arr.get_size >= n { break $ (arr, ma) };
+        match ma {
+            y_pure(a) => break $ (arr, y_pure(a)),
+            y_yield((e, next)) => continue $ (arr.push_back(e), next()),
+        }
+    )
+);
+
+//------------------------------------
+
+yield3: I64 -> Yield I64 ();
+yield3 = |i| (
+    yield(i);;
+    yield(i+1);;
+    yield(i+2);;
+    pure()
+);
+
+collatz: I64 -> Yield I64 ();
+collatz = |i| (
+    yield(i);;
+    if i <= 1 { pure() };
+    if i % 2 == 0 { collatz(i/2) } else { collatz(3 * i + 1) }
+);
+
+test1: IO ();
+test1 = (
+    let ma: Yield I64 () = count_up(0).fold_m(
+        (), |i, _|
+        //yield(i).when(i % 7 == 0)
+        //yield3(i)
+        collatz(i)
+    );
+    let (arr, ma) = ma.take_array(100);
+    println(arr.to_iter.Iterator::map(to_string).join(","));;
+    let itor = ma.map_yield(to_string).to_iter.take(100);
+    println(itor.join(","))
+);
+
+main: IO () = test1;

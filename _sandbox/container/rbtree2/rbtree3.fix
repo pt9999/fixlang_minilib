@@ -44,11 +44,24 @@ namespace RBNode {
     _less_than: [a: LessThan, a: RBNodeElem] a -> a -> Bool;
     _less_than = |x, y| x < y;
 
+    type RBColor = U8;
+
+    namespace RBColor {
+        black: RBColor = 0_U8;
+        red: RBColor = 1_U8;
+    }
+
+    type RBBranch a = unbox struct {
+        color: RBColor,
+        left: RBNode a,
+        elem: a,
+        right: RBNode a,
+    };
+
     // A type of red-black tree node.
     type RBNode a = box union {
         empty: (),
-        red:  (RBNode a, a, RBNode a),
-        black: (RBNode a, a, RBNode a)
+        branch: RBBranch a,
     };
 
     // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
@@ -137,37 +150,72 @@ namespace RBNode {
     get_size: RBNode a -> I64;
     get_size = |node| (
         if node.is_empty { 0 };
-        let (left, elem, right) = node.get_triplet;
+        let (left, right) = node.get_left_right;
         left.get_size + 1 + right.get_size
     );
 
-    // If the node is black or red, `node.get_triplet` returns a triplet `(left, elem, right)`.
+    // If the node is a branch, `node.get_triplet` returns a triplet `(left, elem, right)`.
     // If the node is empty, it will abort.
     get_triplet: RBNode a -> (RBNode a, a, RBNode a);
     get_triplet = |node| (
-        if node.is_red { node.as_red } else { node.as_black }
+        let b = node.as_branch;
+        (b.@left, b.@elem, b.@right)
     );
 
-    set_triplet: (RBNode a, a, RBNode a) -> RBNode a -> RBNode a;
-    set_triplet = |triplet, node| (
-        if node.is_red { red $ triplet } else { black $ triplet }
+    set_triplet: RBNode a -> a -> RBNode a -> RBNode a -> RBNode a;
+    set_triplet = |left, elem, right, node| (
+        node.mod_branch(|b| b.set_left(left).set_elem(elem).set_right(right))
     );
 
-    get_color: RBNode a -> ((RBNode a, a, RBNode a) -> RBNode a);
+    get_quad: RBNode a -> (RBColor, RBNode a, a, RBNode a);
+    get_quad = |node| (
+        let b = node.as_branch;
+        (b.@color, b.@left, b.@elem, b.@right)
+    );
+
+    set_quad: RBColor -> RBNode a -> a -> RBNode a -> RBNode a -> RBNode a;
+    set_quad = |color, left, elem, right, node| (
+        node.mod_branch(|b| b.set_color(color).set_left(left).set_elem(elem).set_right(right))
+    );
+
+    from_quad: RBColor -> RBNode a -> a -> RBNode a -> RBNode a;
+    from_quad = |color, left, elem, right| (
+        branch $ RBBranch { color:color, left:left, elem:elem, right:right }
+    );
+
+    is_red: RBNode a -> Bool;
+    is_red = |node| node.is_branch && node.as_branch.@color == red;
+
+    is_black: RBNode a -> Bool;
+    is_black = |node| node.is_branch && node.as_branch.@color == black;
+
+    get_color: RBNode a -> RBColor;
     get_color = |node| (
-        if node.is_black { black } else { red }
+        node.as_branch.@color
     );
 
-    set_color: ((RBNode a, a, RBNode a) -> RBNode a) -> RBNode a -> RBNode a;
+    set_color: RBColor -> RBNode a -> RBNode a;
     set_color = |color, node| (
-        color(node.get_triplet)
+        node.mod_branch(set_color(color))
+    );
+
+    get_left_right: RBNode a -> (RBNode a, RBNode a);
+    get_left_right = |node| (
+        let b = node.as_branch;
+        (b.@left, b.@right)
     );
 
     get_left: RBNode a -> RBNode a;
-    get_left = |node| node.get_triplet.@0;
+    get_left = |node| node.as_branch.@left;
+
+    set_left: RBNode a -> RBNode a -> RBNode a;
+    set_left = |left, node| node.mod_branch(set_left(left));
 
     get_right: RBNode a -> RBNode a;
-    get_right = |node| node.get_triplet.@2;
+    get_right = |node| node.as_branch.@right;
+
+    set_right: RBNode a -> RBNode a -> RBNode a;
+    set_right = |right, node| node.mod_branch(set_right(right));
 
     //====================================================================
     // Finding
@@ -264,30 +312,46 @@ namespace RBNode {
     _balance: RBNode a -> RBNode a;
     _balance = |node| (
         if node.is_empty || node.is_red { node };
-        let (left, _, right) = node.as_black;
+        let (left, right) = node.get_left_right;
         if left.is_red && left.get_left.is_red {
-            let (left, e3, n4) = node.as_black;
-            let (left_left, e2, n3) = left.as_red;
-            let (n1, e1, n2) = left_left.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (left, e3, n4) = node.get_triplet; // as_black;
+            let (left_left, e2, n3) = left.get_triplet; //as_red;
+            let (n1, e1, n2) = left_left.get_triplet; //as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let node = node.set_quad(black, n3, e3, n4);
+            let left_left = left_left.set_quad(black, n1, e1, n2);
+            let left = left.set_quad(red, left_left, e2, node);
+            left
         };
         if left.is_red && left.get_right.is_red {
-            let (left, e3, n4) = node.as_black;
-            let (n1, e1, left_right) = left.as_red;
-            let (n2, e2, n3) = left_right.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (left, e3, n4) = node.get_triplet; // .as_black;
+            let (n1, e1, left_right) = left.get_triplet; // .as_red;
+            let (n2, e2, n3) = left_right.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let node = node.set_quad(black, n3, e3, n4);
+            let left = left.set_quad(black, n1, e1, n2);
+            let left_right = left_right.set_quad(red, left, e2, node);
+            left_right
         };
         if right.is_red && right.get_left.is_red {
-            let (n1, e1, right) = node.as_black;
-            let (right_left, e3, n4) = right.as_red;
-            let (n2, e2, n3) = right_left.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (n1, e1, right) = node.get_triplet; // .as_black;
+            let (right_left, e3, n4) = right.get_triplet; // .as_red;
+            let (n2, e2, n3) = right_left.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let node = node.set_quad(black, n1, e1, n2);
+            let right = right.set_quad(black, n3, e3, n4);
+            let right_left = right_left.set_quad(red, node, e2, right);
+            right_left
         };
         if right.is_red && right.get_right.is_red {
-            let (n1, e1, right) = node.as_black;
-            let (n2, e2, right_right) = right.as_red;
-            let (n3, e3, n4) = right_right.as_red;
-            red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (n1, e1, right) = node.get_triplet; // .as_black;
+            let (n2, e2, right_right) = right.get_triplet; // .as_red;
+            let (n3, e3, n4) = right_right.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let node = node.set_quad(black, n1, e1, n2);
+            let right_right = right_right.set_quad(black, n3, e3, n4);
+            let right = right.set_quad(red, node, e2, right_right);
+            right
         };
         node
     );
@@ -296,23 +360,23 @@ namespace RBNode {
     _upsert_inner = |x, updater, less_than, node| (
         if node.is_empty {
             // if `x` is not found, insert `x`.
-            let node = red $ (node, x, node);
+            let empty = node;
+            let node = from_quad(red, empty, x, empty);
             (1, node)
         };
-        let color = if node.is_red { red } else { black }; // constructor
         let (left, elem, right) = node.get_triplet;
         if less_than(x, elem) {
             let (dsize, left) = left._upsert_inner(x, updater, less_than);
-            let node = color $ (left, elem, right);
+            let node = node.set_left(left);
             (dsize, node._balance)
         };
         if less_than(elem, x) {
             let (dsize, right) = right._upsert_inner(x, updater, less_than);
-            let node = color $ (left, elem, right);
+            let node = node.set_right(right);
             (dsize, node._balance)
         };
         // If neither `x < elem` nor `elem < x` holds, replace `elem` with `updater(elem)`.
-        let node = color $ (left, updater(elem), right);
+        let node = node.mod_branch(mod_elem(updater));
         (0, node)
     );
 
@@ -325,7 +389,7 @@ namespace RBNode {
     upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNode a -> (I64, RBNode a);
     upsert_lt = |x, updater, less_than, node| (
         let (dsize, inserted) = node._upsert_inner(x, updater, less_than);
-        let inserted = black $ inserted.get_triplet;
+        let inserted = inserted.set_color(black);
         eval if _Debug { let _ = inserted.validate(less_than); () } else { () };
         (dsize, inserted)
     );
@@ -430,7 +494,7 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         let left_result = if !elem.lt_begin {
             let (active, left) = *left._try_remove_range(lt_begin, lt_end);
-            let node = node.set_triplet((left, elem, right));
+            let node = node.set_left(left);
             let (active, node) = _remove_fix_left $ (active, node);
             some $ (active, node)
         } else {
@@ -442,7 +506,7 @@ namespace RBNode {
 
         let right_result = if elem.lt_end {
             let (active, right) = *right._try_remove_range(lt_begin, lt_end);
-            let node = node.set_triplet((left, elem, right));
+            let node = node.set_right(right);
             let (active, node) = _remove_fix_right $ (active, node);
             some $ (active, node)
         } else {
@@ -459,14 +523,14 @@ namespace RBNode {
                 eval _debug_eprintln_lazy(|_| "left is nonempty");
                 let (active, left, max) = left._remove_max;
                 eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
-                let node = node.set_triplet((left, max, right));
+                let node = node.set_triplet(left, max, right);
                 let (active, node) = _remove_fix_left $ (active, node);
                 some $ (active, node)
             };
             if !right.is_empty {
                 eval _debug_eprintln_lazy(|_| "right is nonempty");
                 let (active, right, min) = right._remove_min;
-                let node = node.set_triplet((left, min, right));
+                let node = node.set_triplet(left, min, right);
                 let (active, node) = _remove_fix_right $ (active, node);
                 eval _debug_eprintln_lazy(|_| "done");
                 some $ (active, node)
@@ -491,7 +555,7 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         if !right.is_empty {
             let (active, right, max) = right._remove_max;
-            let node = node.set_triplet((left, elem, right));
+            let node = node.set_right(right);
             let (active, node) = _remove_fix_right $ (active, node);
             (active, node, max)
         };
@@ -512,7 +576,7 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         if !left.is_empty {
             let (active, left, min) = left._remove_min;
-            let node = node.set_triplet((left, elem, right));
+            let node = node.set_left(left);
             let (active, node) = _remove_fix_left $ (active, node);
             (active, node, min)
         };
@@ -546,7 +610,7 @@ namespace RBNode {
         if fixed.is_empty {
             (active, fixed)
         };
-        let (left, elem, right) = node.get_triplet;
+        //let (left, elem, right) = node.get_triplet;
         _debug_assert_level_diff("_remove_fix_left postcheck",
             "fixed", fixed, "node", node,
             if active { 1 } else { 0 }
@@ -563,8 +627,8 @@ namespace RBNode {
         };
         eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+node.to_string);
         let u = node;
-        let u_was_black = u.is_black;
         let u_color = u.get_color;
+        let u_was_black = (u_color == black);
         let (t1, u_elem, v) = u.get_triplet;
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
         _debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1) $ |_|
@@ -575,9 +639,9 @@ namespace RBNode {
                 let (t2, w_elem, t3) = w.get_triplet;
                 _debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0) $ |_|
                 _debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0) $ |_|
-                let u = black $ (t1, u_elem, t2);
-                let v = black $ (t3, v_elem, t4);
-                let w = u_color $ (u, w_elem, v);
+                let u = u.set_quad(black, t1, u_elem, t2);
+                let v = v.set_quad(black, t3, v_elem, t4);
+                let w = w.set_quad(u_color, u, w_elem, v);
                 let active = false;
                 (active, w)
             } else if v.get_right.is_red {
@@ -586,17 +650,17 @@ namespace RBNode {
                 let (t3, w_elem, t4) = w.get_triplet;
                 _debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0) $ |_|
                 _debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0) $ |_|
-                let u = black $ (t1, u_elem, t2);
-                let w = black $ (t3, w_elem, t4);
-                let v = u_color $ (u, v_elem, w);
+                let u = u.set_quad(black, t1, u_elem, t2);
+                let w = w.set_quad(black, t3, w_elem, t4);
+                let v = v.set_quad(u_color, u, v_elem, w);
                 let active = false;
                 (active, v)
             } else {
                 // pattern L3
                 let (t2, v_elem, t3) = v.get_triplet;
-                let v = red $ (t2, v_elem, t3);
+                let v = v.set_quad(red, t2, v_elem, t3);
                 _debug_assert_level_diff("L3", "t1", t1, "v", v, 0) $ |_|
-                let u = black $ (t1, u_elem, v);
+                let u = u.set_quad(black, t1, u_elem, v);
                 let active = u_was_black;
                 (active, u)
             }
@@ -604,11 +668,11 @@ namespace RBNode {
             // pattern L4
             assert_lazy(|_| "L4: u_was_black", u_was_black) $ |_|
             let (t2, v_elem, t3) = v.get_triplet;
-            let u = red $ (t1, u_elem, t2);
+            let u = u.set_quad(red, t1, u_elem, t2);
             let active = true;
             let (active, u) = _remove_fix_left $ (active, u);
             _debug_assert_level_diff("L4", "u", u, "t3", t3, 0) $ |_|
-            let v = black $ (u, v_elem, t3);
+            let v = v.set_quad(black, u, v_elem, t3);
             (active, v)
         }
     );
@@ -638,8 +702,8 @@ namespace RBNode {
             (active, node)
         };
         let u = node;
-        let u_was_black = u.is_black;
         let u_color = u.get_color;
+        let u_was_black = (u_color == black);
         let (v, u_elem, t4) = u.get_triplet;
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
         _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1) $ |_|
@@ -651,9 +715,9 @@ namespace RBNode {
                 let (t2, w_elem, t3) = w.get_triplet;
                 _debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0) $ |_|
                 _debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0) $ |_|
-                let v = black $ (t1, v_elem, t2);
-                let u = black $ (t3, u_elem, t4);
-                let w = u_color $ (v, w_elem, u);
+                let v = v.set_quad(black, t1, v_elem, t2);
+                let u = u.set_quad(black, t3, u_elem, t4);
+                let w = w.set_quad(u_color, v, w_elem, u);
                 let active = false;
                 (active, w)
             } else if v.get_left.is_red {
@@ -663,9 +727,9 @@ namespace RBNode {
                 let (t1, w_elem, t2) = w.get_triplet;
                 _debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0) $ |_|
                 _debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0) $ |_|
-                let w = black $ (t1, w_elem, t2);
-                let u = black $ (t3, u_elem, t4);
-                let v = u_color $ (w, v_elem, u);
+                let w = w.set_quad(black, t1, w_elem, t2);
+                let u = u.set_quad(black, t3, u_elem, t4);
+                let v = v.set_quad(u_color, w, v_elem, u);
                 let active = false;
                 (active, v)
             } else {
@@ -673,9 +737,9 @@ namespace RBNode {
                 // pattern R3
                 let (t1, v_elem, t2) = v.get_triplet;
                 let t3 = t4;
-                let v = red $ (t1, v_elem, t2);
+                let v = v.set_quad(red, t1, v_elem, t2);
                 _debug_assert_level_diff("R3", "v", v, "t3", t3, 0) $ |_|
-                let u = black $ (v, u_elem, t3);
+                let u = u.set_quad(black, v, u_elem, t3);
                 let active = u_was_black;
                 (active, u)
             }
@@ -685,11 +749,11 @@ namespace RBNode {
             assert_lazy(|_| "R4: u_was_black", u_was_black) $ |_|
             let (t1, v_elem, t2) = v.get_triplet;
             let t3 = t4;
-            let u = red $ (t2, u_elem, t3);
+            let u = u.set_quad(red, t2, u_elem, t3);
             let active = true;
             let (active, u) = _remove_fix_right $ (active, u);
             _debug_assert_level_diff("R4", "t1", t1, "u", u, 0) $ |_|
-            let v = black $ (t1, v_elem, u);
+            let v = v.set_quad(black, t1, v_elem, u);
             (active, v)
         }
     );

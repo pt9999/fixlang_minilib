@@ -90,7 +90,7 @@ type RBTree a = unbox struct {
 namespace RBTree {
     // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
     _Debug: Bool;
-    _Debug = false;
+    _Debug = true;
 
     // Prints to stderr if the debug flag is set.
     _debug_eprintln_lazy: (() -> String) -> ();
@@ -102,12 +102,11 @@ namespace RBTree {
     // This function does not validate, so an unbalanced node can be specified.
     level_nonvalidate: [a: RBNodeElem] RBNodeIndex -> RBTree a -> I64;
     level_nonvalidate = |node, tree| (
-        if tree.is_empty(node) { 1 };
+        if node.is_empty { 1 };
         let branch = tree.get_branch(node);
-        let this_count = if branch.is_black { 1 } else { 0 };
-        let (left, right) = branch.get_left_right;
-        let left_level = tree.level_nonvalidate(left);
-        let right_level = tree.level_nonvalidate(right);
+        let this_count = if branch.@color == black { 1 } else { 0 };
+        let left_level = tree.level_nonvalidate(branch.@left);
+        let right_level = tree.level_nonvalidate(branch.@right);
         max(left_level, right_level) + this_count
     );
 
@@ -792,33 +791,34 @@ namespace RBTree {
         (active, fixed)
     );
 
-    _remove_fix_right_inner: [a: RBNodeElem] (Bool, RBNodeIndex) -> (Bool, RBNodeIndex);
-    _remove_fix_right_inner = |(active, node)| (
+    _remove_fix_right_inner: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
+    _remove_fix_right_inner = |(active, tree, node)| (
         // see http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
         eval _debug_eprintln_lazy(|_| "_remove_fix_right: active="+active.to_string + " node="+node.to_string);
         if !active {
-            (active, node)
+            (active, tree, node)
         };
         let u = node;
-        let u_color = u.get_color;
+        let u_color = tree.get_color(u);
         let u_was_black = (u_color == black);
-        let (v, u_elem, t4) = u.get_triplet;
+        let (v, u_elem, t4) = tree.get_triplet(u);
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
         _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1) $ |_|
-        if v.is_black {
-            if v.get_right.is_red {
+        if tree.is_black(v) {
+            let (v_left, v_right) = tree.get_left_right(v);
+            if tree.is_red(v_right) {
                 eval _debug_eprintln_lazy(|_| "R1");
                 // pattern R1
-                let (t1, v_elem, w) = v.get_triplet;
-                let (t2, w_elem, t3) = w.get_triplet;
+                let (t1, v_elem, w) = tree.get_triplet(v);
+                let (t2, w_elem, t3) = tree.get_triplet(w);
                 _debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0) $ |_|
                 _debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0) $ |_|
-                let v = v.set_quad(black, t1, v_elem, t2);
-                let u = u.set_quad(black, t3, u_elem, t4);
-                let w = w.set_quad(u_color, v, w_elem, u);
+                let tree = tree.set_quad(v, (black, t1, v_elem, t2));
+                let tree = tree.set_quad(u, (black, t3, u_elem, t4));
+                let tree = tree.set_quad(w, (u_color, v, w_elem, u));
                 let active = false;
-                (active, w)
-            } else if v.get_left.is_red {
+                (active, tree, w)
+            } else if tree.is_red(v_left) {
                 eval _debug_eprintln_lazy(|_| "R2");
                 // pattern R2
                 let (w, v_elem, t3) = v.get_triplet;
@@ -855,7 +855,7 @@ namespace RBTree {
             (active, v)
         }
     );
-    */
+*/
 
     _to_array_inner: [a: RBNodeElem] RBNodeIndex -> Array a -> RBTree a -> Array a;
     _to_array_inner = |node, arr, tree| (

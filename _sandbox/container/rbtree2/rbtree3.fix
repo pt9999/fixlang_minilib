@@ -80,7 +80,7 @@ namespace RBNode {
     level_nonvalidate = |node| (
         if node.is_empty { 1 };
         let this_count = if node.is_black { 1 } else { 0 };
-        let (left, elem, right) = node.get_triplet;
+        let (left, right) = node.get_left_right;
         let left_level = left.level_nonvalidate;
         let right_level = right.level_nonvalidate;
         max(left_level, right_level) + this_count
@@ -92,7 +92,7 @@ namespace RBNode {
     level = |node| (
         if node.is_empty { 1 };
         let this_count = if node.is_black { 1 } else { 0 };
-        let (left, elem, right) = node.get_triplet;
+        let (left, right) = node.get_left_right;
         let left_level = left.level;
         let right_level = right.level;
         assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
@@ -314,43 +314,49 @@ namespace RBNode {
         if node.is_empty || node.is_red { node };
         let (left, right) = node.get_left_right;
         if left.is_red && left.get_left.is_red {
-            let (left, e3, n4) = node.get_triplet; // as_black;
-            let (left_left, e2, n3) = left.get_triplet; //as_red;
-            let (n1, e1, n2) = left_left.get_triplet; //as_red;
+            //let (left, e3, n4) = node.get_triplet; // as_black;
+            //let (left_left, e2, n3) = left.get_triplet; //as_red;
+            //let (n1, e1, n2) = left_left.get_triplet; //as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let node = node.set_quad(black, n3, e3, n4);
-            let left_left = left_left.set_quad(black, n1, e1, n2);
-            let left = left.set_quad(red, left_left, e2, node);
+            let (left_left, n3) = left.get_left_right;
+            let node = node.mod_branch(|b| b.set_left(n3));
+            let left_left = left_left.mod_branch(set_color(black));
+            let left = left.mod_branch(|b| b.set_left(left_left).set_right(node));
             left
         };
         if left.is_red && left.get_right.is_red {
-            let (left, e3, n4) = node.get_triplet; // .as_black;
-            let (n1, e1, left_right) = left.get_triplet; // .as_red;
-            let (n2, e2, n3) = left_right.get_triplet; // .as_red;
+            //let (left, e3, n4) = node.get_triplet; // .as_black;
+            //let (n1, e1, left_right) = left.get_triplet; // .as_red;
+            //let (n2, e2, n3) = left_right.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let node = node.set_quad(black, n3, e3, n4);
-            let left = left.set_quad(black, n1, e1, n2);
-            let left_right = left_right.set_quad(red, left, e2, node);
+            let left_right = left.get_right;
+            let (n2, n3) = left_right.get_left_right;
+            let node = node.mod_branch(|b| b.set_left(n3));
+            let left = left.mod_branch(|b| b.set_color(black).set_right(n2));
+            let left_right = left_right.mod_branch(|b| b.set_left(left).set_right(node));
             left_right
         };
         if right.is_red && right.get_left.is_red {
-            let (n1, e1, right) = node.get_triplet; // .as_black;
-            let (right_left, e3, n4) = right.get_triplet; // .as_red;
-            let (n2, e2, n3) = right_left.get_triplet; // .as_red;
+            //let (n1, e1, right) = node.get_triplet; // .as_black;
+            //let (right_left, e3, n4) = right.get_triplet; // .as_red;
+            //let (n2, e2, n3) = right_left.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let node = node.set_quad(black, n1, e1, n2);
-            let right = right.set_quad(black, n3, e3, n4);
-            let right_left = right_left.set_quad(red, node, e2, right);
+            let right_left = right.get_left;
+            let (n2, n3) = right_left.get_left_right;
+            let node = node.mod_branch(|b| b.set_right(n2));
+            let right = right.mod_branch(|b| b.set_color(black).set_left(n3));
+            let right_left = right_left.mod_branch(|b| b.set_left(node).set_right(right));
             right_left
         };
         if right.is_red && right.get_right.is_red {
-            let (n1, e1, right) = node.get_triplet; // .as_black;
-            let (n2, e2, right_right) = right.get_triplet; // .as_red;
-            let (n3, e3, n4) = right_right.get_triplet; // .as_red;
+            //let (n1, e1, right) = node.get_triplet; // .as_black;
+            //let (n2, e2, right_right) = right.get_triplet; // .as_red;
+            //let (n3, e3, n4) = right_right.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let node = node.set_quad(black, n1, e1, n2);
-            let right_right = right_right.set_quad(black, n3, e3, n4);
-            let right = right.set_quad(red, node, e2, right_right);
+            let (n2, right_right) = right.get_left_right;
+            let node = node.mod_branch(|b| b.set_right(n2));
+            let right_right = right_right.mod_branch(|b| b.set_color(black));
+            let right = right.mod_branch(|b| b.set_left(node).set_right(right_right));
             right
         };
         node

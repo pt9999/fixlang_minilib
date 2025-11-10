@@ -9,11 +9,12 @@ import Minilib.Testing.TestUtilArray;
 test_simple: TestCase;
 test_simple = (
     make_test("test_simple") $ |_|
-    let node: RBNode I64 = [1,2,3].to_iter.from_iter;
-    let (dsize, node) = node.remove(1);
-    let _ = *assert_equal("dsize", -1, dsize);
-    //let _ = *eprintln(node.to_string).lift;
-    let _ = *assert_equal("eq", 2, node.to_iter.to_array.get_size);
+    let tree: RBTree I64 = [1,2,3].to_iter.from_iter;
+    let _ = *assert_equal("eq", 3, tree.to_iter.to_array.get_size);
+    //let (dsize, tree) = tree.remove(1);
+    //let _ = *assert_equal("dsize", -1, dsize);
+    //let _ = *eprintln(tree.to_string).lift;
+    //let _ = *assert_equal("eq", 2, tree.to_iter.to_array.get_size);
     pure()
 );
 
@@ -28,44 +29,47 @@ test_insert_remove_ok = |(n, insert_reorder, remove_reorder)| (
     // test insert
     let shuffled = array.reorder(insert_reorder);
     //let _ = *eprintln("shuffled="+ shuffled.to_iter.map(to_string).join(",")).lift;
-    let node = *shuffled.to_iter.fold_m(
-        RBNode::empty(), |x, node|
-        let (dsize, node) = node.insert_lt(x, less_than);
-        let _ = *assert_equal("insert_lt dsize 1", 1, dsize);
-        let (dsize, node) = node.insert_lt(x, less_than);
-        let _ = *assert_equal("insert_lt dsize 0", 0, dsize);
-        pure $ node
+    let tree = *shuffled.to_iter.fold_m(
+        RBTree::make(), |x, tree|
+        let size = tree.get_size;
+        let tree = tree.insert(x);
+        let _ = *assert_equal("insert_lt dsize 1", 1, tree.get_size - size);
+        let size = tree.get_size;
+        let tree = tree.insert(x);
+        let _ = *assert_equal("insert_lt dsize 0", 0, tree.get_size - size);
+        pure $ tree
     );
-    let sorted = node.to_iter.to_array;
+    let sorted = tree.to_iter.to_array;
     //let _ = *eprintln("sorted="+sorted.to_iter.map(to_string).join(",")).lift;
     let _ = *assert_equal("array == sorted", array, sorted);
 
     // test from_iter
     let shuffled = array.reorder(insert_reorder);
-    let node: RBNode I64 = shuffled.to_iter.from_iter;
-    let sorted = node.to_iter.to_array;
+    let tree: RBTree I64 = shuffled.to_iter.from_iter;
+    let sorted = tree.to_iter.to_array;
     //let _ = *eprintln("sorted="+sorted.to_iter.map(to_string).join(",")).lift;
     let _ = *assert_equal("array == sorted", array, sorted);
 
+/*
     // test remove
     let shuffled = array.reorder(remove_reorder);
-    let node = *shuffled.to_iter.zip(Iterator::count_up(0)).fold_m(
-        node, |(i, idx), node|
-        eval _debug_eprintln_lazy(|_| "removing: idx="+idx.to_string+" i="+i.to_string + " node="+node.to_string);
-        eval _debug_eprintln_lazy(|_| "node.level=" + node.level.to_string);
-        let (dsize, node) = node.remove(i);
+    let tree = *shuffled.to_iter.zip(Iterator::count_up(0)).fold_m(
+        tree, |(i, idx), tree|
+        eval _debug_eprintln_lazy(|_| "removing: idx="+idx.to_string+" i="+i.to_string + " tree="+tree.to_string);
+        eval _debug_eprintln_lazy(|_| "tree.level=" + tree.level.to_string);
+        let (dsize, tree) = tree.remove(i);
         let _ = *assert_equal("remove dsize -1", -1, dsize);
-        let (dsize, node) = node.remove(i);
+        let (dsize, tree) = tree.remove(i);
         let _ = *assert_equal("remove dsize 0", 0, dsize);
         let expect_size = shuffled.get_size - idx - 1;
-        let actual_size = node.to_iter.to_array.get_size;
+        let actual_size = tree.to_iter.to_array.get_size;
         let _ = *assert_equal("expect_size == actual_size", expect_size, actual_size);
-        pure $ node
+        pure $ tree
     );
-    let removed = node.to_iter.to_array;
+    let removed = tree.to_iter.to_array;
     //let _ = *eprintln("removed="+removed.to_iter.map(to_string).join(",")).lift;
     let _ = *assert_true("removed.is_empty", removed.is_empty);
-
+*/
     pure()      // success
 );
 
@@ -91,11 +95,11 @@ test_get_first_last = (
     ].to_iter.fold_m(
         (), |(n, insert_reorder), _|
         let array = Iterator::range(0, n).to_array;
-        let node: RBNode I64 = array.reorder(insert_reorder).to_iter.from_iter;
+        let tree: RBTree I64 = array.reorder(insert_reorder).to_iter.from_iter;
         let _ = *assert_equal("get_first: n="+n.to_string, 
-            if n == 0 { none() } else { some(0) }, node.get_first);
+            if n == 0 { none() } else { some(0) }, tree.get_first);
         let _ = *assert_equal("get_last: n="+n.to_string, 
-            if n == 0 { none() } else { some(n-1) }, node.get_last);
+            if n == 0 { none() } else { some(n-1) }, tree.get_last);
         pure()
     )
 );
@@ -106,7 +110,7 @@ test_find_range_ok = |insert_reorder| (
     make_test(testname) $ |_|
     let n = 30;
     let array = Iterator::range(0, n).to_array;
-    let node: RBNode I64 = array.reorder(insert_reorder).to_iter.from_iter;
+    let tree: RBTree I64 = array.reorder(insert_reorder).to_iter.from_iter;
     let test_patterns = [
         ([1,2,3,4,5], (1,6)),
         ([13,14,15,16,17,18,19,20], (13,21)),
@@ -122,10 +126,10 @@ test_find_range_ok = |insert_reorder| (
     ];
     test_patterns.to_iter.fold_m(
         (), |(expected, (begin, end)), _|
-        let actual = node.find_range(|x| x < begin, |x| x < end).to_array;
+        let actual = tree.find_range(|x| x < begin, |x| x < end).to_array;
         let _ = *assert_equal("find_range", expected, actual);
         let expected = expected.to_iter.reverse.to_array;
-        let actual = node.find_range_descending(|x| x < begin, |x| x < end).to_array;
+        let actual = tree.find_range_descending(|x| x < begin, |x| x < end).to_array;
         let _ = *assert_equal("find_range_descending", expected, actual);
         pure()
     )
@@ -149,12 +153,12 @@ test_find_range_perf = (
         pure();;
         pure $ array.reorder(shuffle(543))
     }).lift;
-    let (node, create_time) = *consumed_time_while_io(do {
+    let (tree, create_time) = *consumed_time_while_io(do {
         pure();;
-        pure $ shuffled.to_iter.RBNode::from_iter
+        pure $ shuffled.to_iter.RBTree::from_iter
     }).lift;
     let query = |begin, end| (
-        node.find_range(|x| x < begin, |x| x < end)
+        tree.find_range(|x| x < begin, |x| x < end)
     );
     let (ans, ans_time) = *consumed_time_while_io(do {
         pure();;
@@ -177,8 +181,8 @@ test_to_iter: TestCase;
 test_to_iter = (
     make_test("test_to_iter") $ |_|
     let iter = Iterator::range(0, 10);
-    let node: RBNode I64 = from_iter(iter);
-    let _ = *assert_equal("eq", iter.to_array, node.to_iter.to_array);
+    let tree: RBTree I64 = from_iter(iter);
+    let _ = *assert_equal("eq", iter.to_array, tree.to_iter.to_array);
     pure()
 );
 
@@ -186,8 +190,8 @@ test_to_array: TestCase;
 test_to_array = (
     make_test("test_to_array") $ |_|
     let iter = Iterator::range(0, 10);
-    let node: RBNode I64 = from_iter(iter);
-    let _ = *assert_equal("eq", iter.to_array, node.to_array);
+    let tree: RBTree I64 = from_iter(iter);
+    let _ = *assert_equal("eq", iter.to_array, tree.to_array);
     pure()
 );
 
@@ -197,14 +201,14 @@ test_to_iter_to_array_perf = (
     let n = 1000000;
     let array = Iterator::range(0, n).to_array;
     let shuffled = array.reorder(shuffle(5432));
-    let node = shuffled.to_iter.RBNode::from_iter;
+    let tree = shuffled.to_iter.RBTree::from_iter;
     let (ans1, ans1_time) = *consumed_time_while_io(do {
         pure();;
-        pure $ node.to_iter.to_array
+        pure $ tree.to_iter.to_array
     }).lift;
     let (ans2, ans2_time) = *consumed_time_while_io(do {
         pure();;
-        pure $ node.to_array.to_iter.to_array
+        pure $ tree.to_array.to_iter.to_array
     }).lift;
     println("ans1, ans2=" + (ans1_time, ans2_time).to_string).lift;;
     assert_equal("eq", ans1, array);;

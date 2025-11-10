@@ -61,7 +61,7 @@ type RBBranch a = unbox struct {
 namespace RBBranch {
     empty: RBBranch a;
     empty = RBBranch {
-        color: black,
+        color: red,
         left: RBNodeIndex::empty,
         elem: none(),
         right: RBNodeIndex::empty,
@@ -82,6 +82,7 @@ namespace RBNodeIndex {
 type RBTree a = unbox struct {
     less_than: a -> a -> Bool,
     root: RBNodeIndex,
+    size: I64, 
     free_list: Array RBNodeIndex,
     _branches: Array (RBBranch a),
 };
@@ -115,8 +116,8 @@ namespace RBTree {
     level: [a: RBNodeElem] RBNodeIndex -> RBTree a -> I64;
     level = |node, tree| (
         if node.is_empty { 1 };
-        let this_count = if node.is_black { 1 } else { 0 };
-        let (left, right) = node.get_left_right;
+        let this_count = if tree.is_black(node) { 1 } else { 0 };
+        let (left, right) = tree.get_left_right(node);
         let left_level = left.level;
         let right_level = right.level;
         assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
@@ -126,7 +127,7 @@ namespace RBTree {
                 + "\nright="+right.to_string,
             left_level == right_level
         ) $ |_|
-        assert_lazy(|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red))) $ |_|
+        assert_lazy(|_| "Red duplicates", !(tree.is_red(node) && (tree.is_red(left) || tree.is_red(right)))) $ |_|
         left_level + this_count
     );
 
@@ -137,13 +138,13 @@ namespace RBTree {
     // - elem < min of right node
     // Returns `(level, min, max)`.
     // Panicks if validation failed.
-    validate: [a: RBNodeElem] (a -> a -> Bool) -> RBNodeIndex -> RBTree a -> (I64, Option a, Option a);
-    validate = |less_than, node, tree| (
+    validate: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (I64, Option a, Option a);
+    validate = |node, tree| (
         if node.is_empty { (1, none(), none()) };
-        let this_count = if node.is_black { 1 } else { 0 };
-        let (left, elem, right) = node.get_triplet;
-        let (left_level, left_min, left_max) = left.validate(less_than);
-        let (right_level, right_min, right_max) = right.validate(less_than);
+        let this_count = if tree.is_black(node) { 1 } else { 0 };
+        let (left, elem, right) = tree.get_triplet(node);
+        let (left_level, left_min, left_max) = tree.validate(left);
+        let (right_level, right_min, right_max) = tree.validate(right);
         assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
                 + " left=" + left_level.to_string
                 + " right=" + right_level.to_string
@@ -151,17 +152,17 @@ namespace RBTree {
                 + "\nright="+right.to_string,
             left_level == right_level
         ) $ |_|
-        assert_lazy(|_| "Red duplicates", !(node.is_red && (left.is_red || right.is_red))) $ |_|
+        assert_lazy(|_| "Red duplicates", !(tree.is_red(node) && (tree.is_red(left) || tree.is_red(right)))) $ |_|
         assert_lazy(|_| "not left_max < elem"
                 + "\nleft_max="+left_max.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            left_max.is_none || less_than(left_max.as_some, elem)) $ |_|
+            left_max.is_none || (tree.@less_than)(left_max.as_some, elem)) $ |_|
         assert_lazy(|_| "not elem < right_min"
                 + "\nright_min="+right_min.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            right_min.is_none || less_than(elem, right_min.as_some)) $ |_|
+            right_min.is_none || (tree.@less_than)(elem, right_min.as_some)) $ |_|
 
         let level = left_level + this_count;
         let min = if left_min.is_some { left_min } else { some(elem) };
@@ -176,9 +177,10 @@ namespace RBTree {
     make_lt = |less_than| RBTree {
         less_than: less_than,
         root: RBNodeIndex::empty,
+        size: 0,
         free_list: [],
         _branches: [],
-    }
+    };
 
     _make_node: RBBranch a -> RBTree a -> (RBTree a, RBNodeIndex);
     _make_node = |branch, tree| (
@@ -186,11 +188,13 @@ namespace RBTree {
             some(node) => (
                 let tree = tree.mod_free_list(pop_back);
                 let tree = tree.mod__branches(set(node, branch));
+                let tree = tree.mod_size(add(1));
                 (tree, node)
             ),
             none() => (
                 let node = tree.@_branches.get_size;
                 let tree = tree.mod__branches(push_back(branch));
+                let tree = tree.mod_size(add(1));
                 (tree, node)
             )
         }
@@ -200,6 +204,7 @@ namespace RBTree {
     _free_node = |node, tree| (
         let tree = tree.mod_branch(node, set_elem(none()));
         let tree = tree.mod_free_list(push_back(node));
+        let tree = tree.mod_size(add(-1));
         tree
     );
 
@@ -222,13 +227,18 @@ namespace RBTree {
     );
 
     // Gets the number of elements.
-    // The time complexity of this function is O(n).
+    // The time complexity of this function is O(1).
+    get_size: RBTree a -> I64;
+    get_size = @size;
+
+    /*
     get_size: RBNodeIndex -> RBTree a -> I64;
     get_size = |node, tree| (
         if node.is_empty { 0 };
         let (left, right) = tree.get_left_right(node);
         tree.get_size(left) + 1 + tree.get_size(right)
     );
+    */
 
     // If the node is a branch, `tree.get_triplet(node)` returns a triplet `(left, elem, right)`.
     // If the node is empty, it will abort.
@@ -291,7 +301,7 @@ namespace RBTree {
     //====================================================================
 
     // `tree.find(x)` finds an element `elem` that is equivalent to `x`,
-    // ie. `!less_than(elem, x) && !less_than(x, elem)` is true.
+    // ie. `!(tree.@less_than)(elem, x) && !(tree.@less_than)(x, elem)` is true.
     find: a -> RBTree a -> Option a;
     find = |x, tree| (
         let lt_begin = |elem| (tree.@less_than)(elem, x);
@@ -331,8 +341,8 @@ namespace RBTree {
     // such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
     // NOTE: `lt_begin` and `lt_end` must meet following condition:
     // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
-    find_range_descending: (a -> Bool) -> (a -> Bool) -> RBNodeIndex -> DynIterator a;
-    find_range_descending = |lt_begin, lt_end, node| (
+    find_range_descending: (a -> Bool) -> (a -> Bool) -> RBTree a -> DynIterator a;
+    find_range_descending = |lt_begin, lt_end, tree| (
         tree._find_range_descending(tree.@root, lt_begin, lt_end)
     );
 
@@ -340,7 +350,7 @@ namespace RBTree {
     _find_range_descending = |node, lt_begin, lt_end, tree| (
         if node.is_empty { DynIterator::empty };
         let next = |_| (
-            let (left, elem, right) = node.get_triplet;
+            let (left, elem, right) = tree.get_triplet(node);
             if elem.lt_begin {         // elem < begin
                 tree._find_range_descending(right, lt_begin, lt_end)
             } else if elem.lt_end {    // begin <= elem && elem < end
@@ -381,15 +391,15 @@ namespace RBTree {
     );
 
     // Gets the last element (that is, the largest element) of the tree.
-    get_last: RBNodeIndex -> RBTree a -> Option a;
-    get_last = |node| (
+    get_last: RBTree a -> Option a;
+    get_last = |tree| (
         tree._get_last(tree.@root)
     );
 
     _get_last: RBNodeIndex -> RBTree a -> Option a;
     _get_last = |node, tree| (
         if node.is_empty { none() };
-        let (left, elem, right) = node.get_triplet;
+        let (left, elem, right) = tree.get_triplet(node);
         if right.is_empty { some(elem) };
         tree._get_last(right)
     );
@@ -400,7 +410,7 @@ namespace RBTree {
 
     _balance: RBNodeIndex -> RBTree a -> (RBTree a, RBNodeIndex);
     _balance = |node, tree| (
-        if node.is_empty || tree.is_red(node) { node };
+        if node.is_empty || tree.is_red(node) { (tree, node) };
         let (left, right) = tree.get_left_right(node);
         if !tree.is_red(left) {
             tree._balance_right(node, right)
@@ -414,18 +424,18 @@ namespace RBTree {
             let tree = tree.mod_branch(node, |b| b.set_left(left_right));
             let tree = tree.mod_branch(left_left, set_color(black));
             let tree = tree.mod_branch(left, |b| b.set_left(left_left).set_right(node));
-            left
+            (tree, left)
         };
         if tree.is_red(left_right) {
             //let (left, e3, n4) = node.get_triplet; // .as_black;
             //let (n1, e1, left_right) = left.get_triplet; // .as_red;
             //let (n2, e2, n3) = left_right.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let (n2, n3) = left_right.get_left_right;
-            let node = node.mod_branch(|b| b.set_left(n3));
-            let left = left.mod_branch(|b| b.set_color(black).set_right(n2));
-            let left_right = left_right.mod_branch(|b| b.set_left(left).set_right(node));
-            left_right
+            let (n2, n3) = tree.get_left_right(left_right);
+            let tree = tree.mod_branch(node, |b| b.set_left(n3));
+            let tree = tree.mod_branch(left, |b| b.set_color(black).set_right(n2));
+            let tree = tree.mod_branch(left_right, |b| b.set_left(left).set_right(node));
+            (tree, left_right)
         };
         tree._balance_right(node, right)
     );
@@ -441,7 +451,7 @@ namespace RBTree {
             //let (right_left, e3, n4) = right.get_triplet; // .as_red;
             //let (n2, e2, n3) = right_left.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
-            let (n2, n3) = right_left.get_left_right;
+            let (n2, n3) = tree.get_left_right(right_left);
             let tree = tree.mod_branch(node, |b| b.set_right(n2));
             let tree = tree.mod_branch(right, |b| b.set_color(black).set_left(n3));
             let tree = tree.mod_branch(right_left, |b| b.set_left(node).set_right(right));
@@ -460,84 +470,68 @@ namespace RBTree {
          (tree, node)
     );
 
-    _upsert_inner: a -> (a -> a) -> (a -> a -> Bool) -> RBNodeIndex -> (I64, RBNodeIndex);
-    _upsert_inner = |x, updater, less_than, node| (
+    _upsert_inner: RBNodeIndex -> a -> (a -> a) -> RBTree a -> (RBTree a, RBNodeIndex);
+    _upsert_inner = |node, x, updater, tree| (
         if node.is_empty {
             // if `x` is not found, insert `x`.
-            let empty = node;
-            let node = from_quad(red, empty, x, empty);
-            (1, node)
+            tree._make_node(
+                RBBranch{
+                    color: red,
+                    left: RBNodeIndex::empty,
+                    elem: some $ x,
+                    right: RBNodeIndex::empty,
+                }
+            )
         };
-        let (left, elem, right) = node.get_triplet;
-        if less_than(x, elem) {
-            let (dsize, left) = left._upsert_inner(x, updater, less_than);
-            let node = node.set_left(left);
-            (dsize, node._balance)
+        let (left, elem, right) = tree.get_triplet(node);
+        if (tree.@less_than)(x, elem) {
+            let (tree, left) = tree._upsert_inner(left, x, updater);
+            let tree = tree.set_left(node, left);
+            tree._balance(node)
         };
-        if less_than(elem, x) {
-            let (dsize, right) = right._upsert_inner(x, updater, less_than);
-            let node = node.set_right(right);
-            (dsize, node._balance)
+        if (tree.@less_than)(elem, x) {
+            let (tree, right) = tree._upsert_inner(right, x, updater);
+            let tree = tree.set_right(node, right);
+            tree._balance(node)
         };
         // If neither `x < elem` nor `elem < x` holds, replace `elem` with `updater(elem)`.
-        let node = node.mod_branch(mod_elem(updater));
-        (0, node)
+        let tree = tree.mod_branch(node, mod_elem(map(updater)));
+        (tree, node)
     );
 
-    // `node.upsert_lt(x, updater, less_than)` inserts or updates using `less_than` ordering.
-    // Returns the size difference and the changed node.
-    // If `node` does not contain an element equivalent to `x`, `x` is inserted.
-    // If `node` already contains an element `y` equivalent to `x`,
-    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // `tree.upsert(x, updater)` inserts or updates using `tree.@less_than` ordering.
+    // Returns the changed tree.
+    // If `tree` does not contain an element equivalent to `x`, `x` is inserted.
+    // If `tree` already contains an element `y` equivalent to `x`,
+    // ie. `!(tree.@less_than)(x,y) && !(tree.@less_than)(y,x)` is true,
     // then `y` is updated with `updater(y)`.
-    upsert_lt: [a: RBNodeElem] a -> (a -> a) -> (a -> a -> Bool) -> RBNodeIndex -> (I64, RBNodeIndex);
-    upsert_lt = |x, updater, less_than, node| (
-        let (dsize, inserted) = node._upsert_inner(x, updater, less_than);
-        let inserted = inserted.set_color(black);
-        eval if _Debug { let _ = inserted.validate(less_than); () } else { () };
-        (dsize, inserted)
-    );
-
-    // `node.upsert(x, updater)` inserts or updates using default `LessThan` ordering.
-    // Returns the size difference and the changed node.
-    // If `node` does not contain an element equivalent to `x`, `x` is inserted.
-    // If `node` already contains an element `y` equivalent to `x`,
-    // ie. `!(x < y) && !(y < x)` is true,
-    // then `y` is updated with `updater(y)`.
-    upsert: [a: LessThan, a: RBNodeElem] a -> (a -> a) -> RBNodeIndex -> (I64, RBNodeIndex);
-    upsert = |x, updater, node| (
-        node.upsert_lt(x, updater, _less_than)
+    upsert: [a: RBNodeElem] a -> (a -> a) ->  RBTree a -> RBTree a;
+    upsert = |x, updater, tree| (
+        let (tree, root) = tree._upsert_inner(tree.@root, x, updater);
+        let tree = tree.set_color(root, black);
+        eval if _Debug { let _ = tree.validate(root); () } else { () };
+        let tree = tree.set_root(root);
+        tree
     );
 
     //====================================================================
     // Insertion
     //====================================================================
 
-    // `node.insert_lt(x, less_than)` inserts an element `x` using `less_than` ordering.
-    // Returns the size difference and the changed node.
-    // If `node` already contains an element `y` equivalent to `x`,
-    // ie. `!less_than(x,y) && !less_than(y,x)` is true,
+    // `tree.insert(x)` inserts an element `x` using `tree.@less_than` ordering.
+    // Returns the changed tree.
+    // If `tree` already contains an element `y` equivalent to `x`,
+    // ie. `!(tree.@less_than)(x,y) && !(tree.@less_than)(y,x)` is true,
     // then `y` is replaced with `x`.
-    insert_lt: [a: RBNodeElem] a -> (a -> a -> Bool) -> RBNodeIndex -> (I64, RBNodeIndex);
-    insert_lt = |x, less_than, node| (
-        node.upsert_lt(x, |_| x, less_than)
+    insert: [a: RBNodeElem] a -> RBTree a -> RBTree a;
+    insert = |x, tree| (
+        tree.upsert(x, |_| x)
     );
-
-    // `node.insert(x)` inserts an element `x` using default `LessThan` ordering.
-    // Returns the size difference and the changed node.
-    // If `node` already contains an element `y` equivalent to `x`,
-    // ie. `!(x < y) && !(y < x)` is true,
-    // then `y` is replaced with `x`.
-    insert: [a: LessThan, a: RBNodeElem] a -> RBNodeIndex -> (I64, RBNodeIndex);
-    insert = |x, node| (
-        node.insert_lt(x, _less_than)
-    );
-
 
     //====================================================================
     // Removal
     //====================================================================
-
+/*
     // `node.remove(x)` removes any element `y` equivalent to `x`,
     // ie. `!(x < y) && !(y < x)` is true.
     // Returns the size difference and the changed node.
@@ -861,51 +855,61 @@ namespace RBTree {
             (active, v)
         }
     );
+    */
 
-    _to_array_inner: [a: RBNodeElem] Array a -> RBNodeIndex -> Array a;
-    _to_array_inner = |arr, node| (
+    _to_array_inner: [a: RBNodeElem] RBNodeIndex -> Array a -> RBTree a -> Array a;
+    _to_array_inner = |node, arr, tree| (
         if node.is_empty { arr };
-        let (left, elem, right) = node.get_triplet;
-        let arr = left._to_array_inner(arr);
+        let (left, elem, right) = tree.get_triplet(node);
+        let arr = tree._to_array_inner(left, arr);
         let arr = arr.push_back(elem);
-        let arr = right._to_array_inner(arr);
+        let arr = tree._to_array_inner(right, arr);
         arr
     );
 
-    to_array: [a: RBNodeElem] RBNodeIndex -> Array a;
-    to_array = |node| (
-        node._to_array_inner([])
+    to_array: [a: RBNodeElem] RBTree a -> Array a;
+    to_array = |tree| (
+        tree._to_array_inner(tree.@root, [])
     );
 
-    to_iter: [a: RBNodeElem] RBNodeIndex -> DynIterator a;
-    to_iter = |node| (
+    to_iter: [a: RBNodeElem] RBTree a -> DynIterator a;
+    to_iter = |tree| (
+        tree._to_iter_inner(tree.@root)
+    );
+
+    _to_iter_inner: [a: RBNodeElem] RBNodeIndex -> RBTree a -> DynIterator a;
+    _to_iter_inner = |node, tree| (
         if node.is_empty { DynIterator::empty };
-        let (left, elem, right) = node.get_triplet;
-        left.to_iter._fast_append(right.to_iter.push_front(elem).to_dyn)
-    );
-
-    from_iter_lt: [a: RBNodeElem, it: Iterator, Item it = a] (a -> a -> Bool) -> it -> RBNodeIndex;
-    from_iter_lt = |less_than, iter| (
-        iter.fold(
-            empty(), |x, node|
-            let (dsize, node) = node.insert_lt(x, less_than);
-            node
+        let (left, elem, right) = tree.get_triplet(node);
+        tree._to_iter_inner(left)
+        ._fast_append(
+            tree._to_iter_inner(right)
+            .push_front(elem).to_dyn
         )
     );
 
-    from_iter: [a: LessThan, a: RBNodeElem, it: Iterator, Item it = a] it -> RBNodeIndex;
+    from_iter_lt: [a: RBNodeElem, it: Iterator, Item it = a] (a -> a -> Bool) -> it -> RBTree a;
+    from_iter_lt = |less_than, iter| (
+        let tree = RBTree::make_lt(less_than);
+        iter.fold(tree, insert)
+    );
+
+    from_iter: [a: LessThan, a: RBNodeElem, it: Iterator, Item it = a] it -> RBTree a;
     from_iter = |iter| (
         iter.from_iter_lt(_less_than)
     );
 
 }
 
-impl [a: RBNodeElem, a: ToString] RBNodeIndex: ToString {
-    to_string = |node| (
-        if node.is_empty { "E" };
-        let level = node.level_nonvalidate;
-        let color = if node.is_black { "B" } else { "R" };
-        let (left, elem, right) = node.get_triplet;
-        color + "(" + left.to_string + "," + elem.to_string + "," + right.to_string + ")"
-    );
+impl [a: RBNodeElem, a: ToString] RBTree a: ToString {
+    to_string = |tree| tree._to_string(tree.@root);
 }
+
+_to_string: [a: RBNodeElem, a: ToString] RBNodeIndex -> RBTree a -> String;
+_to_string = |node, tree| (
+    if node.is_empty { "E" };
+    let level = tree.level_nonvalidate(node);
+    let color = if tree.is_black(node) { "B" } else { "R" };
+    let (left, elem, right) = tree.get_triplet(node);
+    color + "(" + tree._to_string(left) + "," + elem.to_string + "," + tree._to_string(right) + ")"
+);

@@ -566,9 +566,11 @@ namespace RBTree {
     // Returns `none()` if removal is failed.
     _try_remove_range: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> Option (Bool, RBTree a, RBNodeIndex);
     _try_remove_range = |node, lt_begin, lt_end, tree| (
-        //eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + node.to_string);
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + tree._to_string(node));
         let opt = tree._try_remove_range_inner(node, lt_begin, lt_end);
-        //eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + opt.to_string);
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + 
+            opt.map(|(active, tree, node)| (active, tree._to_string(node))).to_string
+        );
         opt
     );
 
@@ -681,15 +683,31 @@ namespace RBTree {
     _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNodeIndex -> String -> RBNodeIndex -> I64 -> RBTree a -> Lazy b -> b;
     _debug_assert_level_diff = |prefix, name1, node1, name2, node2, diff, tree, lazy| (
         if !_Debug { lazy() };
-        let level1 = tree.level_nonvalidate(node1);
-        let level2 = tree.level_nonvalidate(node2);
+        let opt1 = tree._save_current_level(name1, node1);
+        let opt2 = tree._save_current_level(name2, node2);
+        _debug_assert_saved_level_diff(prefix, opt1, opt2, diff, lazy)
+    );
+
+    _save_current_level: [a: RBNodeElem] String -> RBNodeIndex -> RBTree a -> Option (String, I64, String);
+    _save_current_level = |name, node, tree| (
+        if !_Debug { none() };
+        let level = tree.level_nonvalidate(node);
+        let node_str = tree._to_string(node);
+        some $ (name, level, node_str)
+    );
+
+    _debug_assert_saved_level_diff: String -> Option (String, I64, String) -> Option (String, I64, String) -> I64 -> Lazy b -> b;
+    _debug_assert_saved_level_diff = |prefix, opt1, opt2, diff, lazy| (
+        if !_Debug { lazy() };
+        let (name1, level1, node1_str) = opt1.as_some;
+        let (name2, level2, node2_str) = opt2.as_some;
         if !(level1 + diff == level2) {
             undefined(
                 "_debug_assert_level_diff(" + prefix + ") failed:\n" +
                 "  " + name1 + ".level(" + level1.to_string + ") + " + diff.to_string + " != " +
                        name2 + ".level(" + level2.to_string + ")\n" +
-                "  " + name1 + " = " + tree._to_string(node1) + "\n" +
-                "  " + name2 + " = " + tree._to_string(node2))
+                "  " + name1 + " = " + node1_str + "\n" +
+                "  " + name2 + " = " + node2_str)
         };
         lazy()
     );
@@ -699,13 +717,15 @@ namespace RBTree {
     // and `active` is true iff `fixed.level = node.level - 1`.
     _remove_fix_left: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
     _remove_fix_left = |(active, tree, node)| (
+        let node_level = tree._save_current_level("node", node);
         let (active, tree, fixed) = _remove_fix_left_inner $ (active, tree, node);
         if fixed.is_empty {
             (active, tree, fixed)
         };
         //let (left, elem, right) = tree.get_triplet(node);
-        tree._debug_assert_level_diff("_remove_fix_left postcheck",
-            "fixed", fixed, "node", node,
+        let fixed_level = tree._save_current_level("fixed", fixed);
+        _debug_assert_saved_level_diff("_remove_fix_left postcheck",
+            fixed_level, node_level,
             if active { 1 } else { 0 }
         ) $ |_|
         eval _debug_eprintln_lazy(|_| "_remove_fix_left done: active="+active.to_string + " fixed="+fixed.to_string);
@@ -718,7 +738,7 @@ namespace RBTree {
         if !active {
             (active, tree, node)
         };
-        eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+node.to_string);
+        eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+tree._to_string(node));
         let u = node;
         let u_color = tree.get_color(u);
         let u_was_black = (u_color == black);
@@ -776,13 +796,15 @@ namespace RBTree {
     // and `active` is true iff `fixed.level = node.level - 1`.
     _remove_fix_right: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
     _remove_fix_right = |(active, tree, node)| (
+        let node_level = tree._save_current_level("node", node);
         let (active, tree, fixed) = _remove_fix_right_inner $ (active, tree, node);
         if fixed.is_empty {
             (active, tree, fixed)
         };
-        let (left, elem, right) = tree.get_triplet(node);
-        tree._debug_assert_level_diff("_remove_fix_right postcheck",
-            "fixed", fixed, "node", node,
+        //let (left, elem, right) = tree.get_triplet(node);
+        let fixed_level = tree._save_current_level("fixed", fixed);
+        _debug_assert_saved_level_diff("_remove_fix_right postcheck",
+            fixed_level, node_level,
             if active { 1 } else { 0 }
         ) $ |_|
         (active, tree, fixed)

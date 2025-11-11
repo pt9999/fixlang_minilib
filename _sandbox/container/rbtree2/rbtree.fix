@@ -1,4 +1,4 @@
-// Red-Black Tree (version 2).
+// Red-Black Tree.
 // (This is an internal module of `TreeMap` and `TreeSet`.)
 //
 // Ported from Japanese translation of the book below:
@@ -14,7 +14,7 @@
 // - Transitivity:  for all `x, y, z`, if `less_than(x,y)` is true and `less_than(y,z)` is true,
 //                  then `less_than(x,z)` must be true.
 //
-module Minilib.Collection.RBTree2;
+module Minilib.Collection.RBTree;
 
 // 上記の和訳:
 //
@@ -36,7 +36,7 @@ module Minilib.Collection.RBTree2;
 
 import Minilib.Common.Assert;
 
-namespace RBTree2 {
+namespace RBNode {
     // A trait of the element. Currently `ToString` is required.
     trait RBNodeElem = ToString;
 
@@ -44,121 +44,12 @@ namespace RBTree2 {
     _less_than: [a: LessThan, a: RBNodeElem] a -> a -> Bool;
     _less_than = |x, y| x < y;
 
-    type RBColor = U8;
-
-    namespace RBColor {
-        black: RBColor = 0_U8;
-        red: RBColor = 1_U8;
-    }
-
     // A type of red-black tree node.
-    type RBNode = I64;
-
-    namespace RBNode {
-        _empty: RBNode = -1;
-
-        _is_empty: RBNode -> Bool;
-        _is_empty = eq(_empty);
-    }
-
-    // A type of red-black tree.
-    type RBTree a = unbox struct {
-        root: RBNode,
-        free_list: RBNode,
-        color: Array RBColor,
-        left: Array RBNode,
-        value: Array (Option a),
-        right: Array RBNode,
+    type RBNode a = box union {
+        empty: (),
+        red:  (RBNode a, a, RBNode a),
+        black: (RBNode a, a, RBNode a)
     };
-
-    namespace RBTree {
-
-        empty: RBTree a;
-        empty = RBTree {
-            root: _empty,
-            free_list: _empty,
-            color: [],
-            left: [],
-            value: [],
-            right: [],
-        };
-
-        _make_node: RBTree a -> (RBTree a, RBNode);
-        _make_node = |tree| (
-            tree._make_node_of(black, _empty, none(), _empty)
-        );
-
-        _make_node_of: RBColor -> RBNode -> Option a -> RBNode -> RBTree a -> (RBTree a, RBNode);
-        _make_node_of = |color, left, value, right, tree| (
-            if tree.@free_list != _empty {
-                let node = tree.@free_list;
-                let tree = tree.set_free_list(tree._get_left(node));
-                let tree = tree._set_color(node, color)
-                ._set_left(node, left)
-                ._set_value(node, value)
-                ._set_right(node, right);
-                (tree, node)
-            };
-            let node = tree.@color.get_size;
-            let tree = tree.mod_color(push_back(color))
-            .mod_left(push_back(left))
-            .mod_value(push_back(value))
-            .mod_right(push_back(right));
-            (tree, node)
-        );
-
-        _free_node: RBNode -> RBTree a -> RBTree a;
-        _free_node = |node, tree| (
-            let tree = tree._set_value(node, none())
-            ._set_left(node, tree.@free_list);
-            ._set_right(node, _empty)
-            .set_free_list(node);
-            tree
-        );
-
-        _get_color: RBNode -> RBTree a -> RBColor;
-        _get_color = |node, tree| (
-            tree.@color.@(node)
-        );
-
-        _set_color: RBNode -> RBColor -> RBTree a -> RBTree a;
-        _set_color = |node, color, tree| (
-            tree.mod_color(set(node, color))
-        );
-
-        _get_left: RBNode -> RBTree a -> RBNode;
-        _get_left = |node, tree| (
-            tree.@left.@(node)
-        );
-
-        _set_left: RBNode -> RBNode -> RBTree a -> RBTree a;
-        _set_left = |node, child, tree| (
-            tree.mod_left(set(node, child))
-        );
-
-        _get_value: RBNode -> RBTree a -> Option a;
-        _get_value = |node, tree| (
-            tree.@value.@(node)
-        );
-
-        _set_value: RBNode -> Option a -> RBTree a -> RBTree a;
-        _set_value = |node, value, tree| (
-            tree.mod_value(set(node, value))
-        );
-
-        _get_right: RBNode -> RBTree a -> RBNode;
-        _get_right = |node, tree| (
-            tree.@right.@(node)
-        );
-
-        _set_right: RBNode -> RBNode -> RBTree a -> RBTree a;
-        _set_right = |node, child, tree| (
-            tree.mod_right(set(node, child))
-        );
-
-
-    }
-
 
     // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
     _Debug: Bool;

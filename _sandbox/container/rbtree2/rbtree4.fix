@@ -152,16 +152,17 @@ namespace RBTree {
             left_level == right_level
         ) $ |_|
         assert_lazy(|_| "Red duplicates", !(tree.is_red(node) && (tree.is_red(left) || tree.is_red(right)))) $ |_|
+        let lt = tree.@less_than;
         assert_lazy(|_| "not left_max < elem"
                 + "\nleft_max="+left_max.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            left_max.is_none || (tree.@less_than)(left_max.as_some, elem)) $ |_|
+            left_max.is_none || lt(left_max.as_some, elem)) $ |_|
         assert_lazy(|_| "not elem < right_min"
                 + "\nright_min="+right_min.as_some.to_string + " elem="+elem.to_string
                 + "\nleft="+left.to_string
                 + "\nright="+right.to_string,
-            right_min.is_none || (tree.@less_than)(elem, right_min.as_some)) $ |_|
+            right_min.is_none || lt(elem, right_min.as_some)) $ |_|
 
         let level = left_level + this_count;
         let min = if left_min.is_some { left_min } else { some(elem) };
@@ -180,6 +181,11 @@ namespace RBTree {
         free_list: [],
         _branches: [],
     };
+
+    _check_unique: Lazy String -> RBTree a -> RBTree a;
+    _check_unique = |msg, tree| (
+        tree.mod__branches(assert_unique(msg))
+    );
 
     _make_node: RBBranch a -> RBTree a -> (RBTree a, RBNodeIndex);
     _make_node = |branch, tree| (
@@ -303,8 +309,9 @@ namespace RBTree {
     // ie. `!(tree.@less_than)(elem, x) && !(tree.@less_than)(x, elem)` is true.
     find: a -> RBTree a -> Option a;
     find = |x, tree| (
-        let lt_begin = |elem| (tree.@less_than)(elem, x);
-        let lt_end   = |elem| !(tree.@less_than)(x, elem);
+        let lt = tree.@less_than;
+        let lt_begin = |elem| lt(elem, x);
+        let lt_end   = |elem| !lt(x, elem);
         let iter = tree.find_range(lt_begin, lt_end);
         iter.get_first
     );
@@ -483,12 +490,13 @@ namespace RBTree {
             )
         };
         let (left, elem, right) = tree.get_triplet(node);
-        if (tree.@less_than)(x, elem) {
+        let lt = tree.@less_than;
+        if lt(x, elem) {
             let (tree, left) = tree._upsert_inner(left, x, updater);
             let tree = tree.set_left(node, left);
             tree._balance(node)
         };
-        if (tree.@less_than)(elem, x) {
+        if lt(elem, x) {
             let (tree, right) = tree._upsert_inner(right, x, updater);
             let tree = tree.set_right(node, right);
             tree._balance(node)
@@ -536,8 +544,10 @@ namespace RBTree {
     // Returns the changed tree.
     remove: [a: RBNodeElem] a -> RBTree a -> RBTree a;
     remove = |x, tree| (
-        let lt_begin = |elem| (tree.@less_than)(elem, x);
-        let lt_end   = |elem| !(tree.@less_than)(x, elem);
+        //let tree = tree._check_unique(|_| "remove");
+        let lt = tree.@less_than;
+        let lt_begin = |elem| lt(elem, x);
+        let lt_end   = |elem| !lt(x, elem);
         tree.remove_range(lt_begin, lt_end)
     );
 
@@ -548,9 +558,10 @@ namespace RBTree {
     // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
     remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBTree a -> RBTree a;
     remove_range = |lt_begin, lt_end, tree| (
-        let opt = tree._try_remove_range(tree.@root, lt_begin, lt_end);
+        //let tree = tree._check_unique(|_| "remove_range");
+        let (tree, opt) = tree._try_remove_range(tree.@root, lt_begin, lt_end);
         if opt.is_none { tree };
-        let (active, tree, root) = opt.as_some;
+        let (active, root) = opt.as_some;
         let tree = tree.set_root(root);
         eval if _Debug { let _ = tree.validate(tree.@root); () } else { () };
         tree.remove_range(lt_begin, lt_end)  // repeat recursively
@@ -560,51 +571,59 @@ namespace RBTree {
     // where `!elem.lt_begin && elem.lt_end` is true.
     // Even if there are several elements that holds the condition, only one of them
     // are removed.
-    // Returns `some((active, tree, removed))` if removal is succeeded
+    // Returns `(tree, some $ (active, removed))` if removal is succeeded
     // where `removed` is the node after removal,
     // and `active` is true iff `removed.level == node.level - 1`.
-    // Returns `none()` if removal is failed.
-    _try_remove_range: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> Option (Bool, RBTree a, RBNodeIndex);
+    // Returns `(tree, none())` if removal is failed, i.e. there is no element such that
+    // `!elem.lt_begin && elem.lt_end` is true.
+    _try_remove_range: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
     _try_remove_range = |node, lt_begin, lt_end, tree| (
+        //let tree = tree._check_unique(|_| "_try_remove_range");
         eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + tree._to_string(node));
-        let opt = tree._try_remove_range_inner(node, lt_begin, lt_end);
+        let (tree, opt) = tree._try_remove_range_inner(node, lt_begin, lt_end);
         eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + 
-            opt.map(|(active, tree, node)| (active, tree._to_string(node))).to_string
+            opt.map(|(active, node)| (active, tree._to_string(node))).to_string
         );
-        opt
+        (tree, opt)
     );
 
-    _try_remove_range_inner: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> Option (Bool, RBTree a, RBNodeIndex);
+    _try_remove_range_inner: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
     _try_remove_range_inner = |node, lt_begin, lt_end, tree| (
+        //let tree = tree._check_unique(|_| "_try_remove_range_inner");
         if node.is_empty {
-            none()
+            (tree, none())
         };
         let (left, elem, right) = tree.get_triplet(node);
-        let left_result = if !elem.lt_begin {
-            let (active, tree, left) = *tree._try_remove_range(left, lt_begin, lt_end);
+        let (tree, left_result) = if !elem.lt_begin {
+            let (tree, opt) = tree._try_remove_range(left, lt_begin, lt_end);
+            if opt.is_none { (tree, none()) };
+            let (active, left) = opt.as_some;
             let tree = tree.set_left(node, left);
             let (active, tree, node) = _remove_fix_left $ (active, tree, node);
-            some $ (active, tree, node)
+            (tree, some $ (active, node))
         } else {
-            none()
+            (tree, none())
         };
         if left_result.is_some {
-            left_result
+            (tree, left_result)
         };
 
-        let right_result = if elem.lt_end {
-            let (active, tree, right) = *tree._try_remove_range(right, lt_begin, lt_end);
+        let (tree, right_result) = if elem.lt_end {
+            let (tree, opt) = tree._try_remove_range(right, lt_begin, lt_end);
+            if opt.is_none { (tree, none()) };
+            let (active, right) = opt.as_some;
             let tree = tree.set_right(node, right);
             let (active, tree, node) = _remove_fix_right $ (active, tree, node);
-            some $ (active, tree, node)
+            (tree, some $ (active, node))
         } else {
-            none()
+            (tree, none())
         };
         if right_result.is_some {
-            right_result
+            (tree, right_result)
         };
 
-        let this_result = if !elem.lt_begin && elem.lt_end {
+        // this result
+        if !elem.lt_begin && elem.lt_end {
             // remove this node
             eval _debug_eprintln_lazy(|_| "remove this node: node="+node.to_string);
             if !left.is_empty {
@@ -613,7 +632,7 @@ namespace RBTree {
                 eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
                 let tree = tree.set_triplet(node, (left, max, right));
                 let (active, tree, node) = _remove_fix_left $ (active, tree, node);
-                some $ (active, tree, node)
+                (tree, some $ (active, node))
             };
             if !right.is_empty {
                 eval _debug_eprintln_lazy(|_| "right is nonempty");
@@ -621,17 +640,16 @@ namespace RBTree {
                 let tree = tree.set_triplet(node, (left, min, right));
                 let (active, tree, node) = _remove_fix_right $ (active, tree, node);
                 eval _debug_eprintln_lazy(|_| "done");
-                some $ (active, tree, node)
+                (tree, some $ (active, node))
             };
             eval _debug_eprintln_lazy(|_| "both left and right is empty");
             let node_was_black = tree.is_black(node);
             let tree = tree._free_node(node);
             eval _debug_eprintln_lazy(|_| "free done");
-            some $ (node_was_black, tree, RBNodeIndex::empty)
+            (tree, some $ (node_was_black, RBNodeIndex::empty))
         } else {
-            none()
-        };
-        this_result
+            (tree, none())
+        }
     );
 
     // `tree._remove_max(node)` removes an maximum element.
@@ -641,6 +659,7 @@ namespace RBTree {
     _remove_max: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
     _remove_max = |node, tree| (
         eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
+        //let tree = tree._check_unique(|_| "_remove_max");
         assert_lazy(|_| "_remove_max: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = tree.get_triplet(node);
         if !right.is_empty {
@@ -664,6 +683,7 @@ namespace RBTree {
     _remove_min: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
     _remove_min = |node, tree| (
         eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
+        //let tree = tree._check_unique(|_| "_remove_min");
         assert_lazy(|_| "_remove_min: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = tree.get_triplet(node);
         if !left.is_empty {

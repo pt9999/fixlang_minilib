@@ -1,0 +1,51 @@
+// 開発中の RBTree4 を簡略化したプログラム
+module Main;
+
+type Node a = unbox struct {
+    elem: a,
+};
+
+type Tree a = unbox struct {
+    nodes: Array (Node a),
+    less_than: a -> a -> Bool,
+};
+
+namespace Tree {
+    make: (a -> a -> Bool) -> Tree a;
+    make = |less_than| Tree {
+        nodes: [],
+        less_than: less_than
+    };
+
+    insert: a -> Tree a -> Tree a;
+    insert = |x, tree| (
+        tree.mod_nodes(push_back(Node { elem: x }))
+    );
+
+    remove_range: (a -> Bool) -> (a -> Bool) -> Tree a -> Tree a;
+    remove_range = |lt_begin, lt_end, tree| (
+        let tree = tree.mod_nodes(assert_unique(|_| "nodes"));  // unique のはずなのにエラーになる
+        tree.mod_nodes(|nodes|
+            nodes.to_iter.filter(|node|
+                lt_begin(node.@elem) || !lt_end(node.@elem)
+            ).to_array
+        )
+    );
+
+    remove: [a:LessThan] a -> Tree a -> Tree a;
+    remove = |x, tree| (
+        let lt = tree.@less_than;               // ローカル変数に格納しているだけなので、tree の参照カウンタは1のままのはずだが
+        let lt_begin = |elem| lt(elem, x);      // 最適化によって lt が tree.@less_than に置き換わる？
+        let lt_end   = |elem| !lt(x, elem);
+        tree.remove_range(lt_begin, lt_end)
+    );
+}
+
+main: IO ();
+main = (
+    pure();;
+    let tree: Tree I64 = Tree::make(less_than);
+    let tree = tree.insert(1).insert(2);
+    let tree = tree.remove(2);
+    println(tree.@nodes.get_size.to_string)
+);

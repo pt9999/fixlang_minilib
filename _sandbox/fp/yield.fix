@@ -1,9 +1,13 @@
-module Main;
+module Minilib.Monad.Yield;
 
-//import Minilib.Trait.Semigroup;
-//import Minilib.Trait.Monoid;
-//import Minilib.Monad.Writer;
-//import Minilib.Trait.Traversable;
+import Minilib.Monad.Trans;
+
+trait MonadYield = Functor + Monad + MonadYieldIF;
+
+trait [m: * -> *] m: MonadYieldIF {
+    type YieldType m;
+    yield: YieldType m -> m ();
+}
 
 type Yield e a = unbox union {
     y_pure: a,
@@ -24,8 +28,11 @@ impl Yield e: Functor {
     map = |f| bind(f >> pure);
 }
 
-yield: e -> Yield e ();
-yield = |e| y_yield $ (e, |_| pure());
+impl Yield e: MonadYieldIF {
+    type YieldType (Yield e) = e;
+    // yield: e -> Yield e ();
+    yield = |e| y_yield $ (e, |_| pure());
+}
 
 map_yield: (d -> e) -> Yield d a -> Yield e a;
 map_yield = |f, ma| (
@@ -55,35 +62,22 @@ take_array = |n, ma| (
     )
 );
 
+/*
 //------------------------------------
+type [m: * -> *] Wrap m a = unbox struct {
+    data: m a
+};
 
-yield3: I64 -> Yield I64 ();
-yield3 = |i| (
-    yield(i);;
-    yield(i+1);;
-    yield(i+2);;
-    pure()
-);
+namespace Wrap {
+    wrap: [m: *-> *] m a -> Wrap m a;
+    wrap = |ma| Wrap { data: ma };
 
-collatz: I64 -> Yield I64 ();
-collatz = |i| (
-    yield(i);;
-    if i <= 1 { pure() };
-    if i % 2 == 0 { collatz(i/2) } else { collatz(3 * i + 1) }
-);
+    get: Wrap m a -> m a;
+    get = @data;
+}
 
-test1: IO ();
-test1 = (
-    let ma: Yield I64 () = count_up(0).fold_m(
-        (), |i, _|
-        //yield(i).when(i % 7 == 0)
-        //yield3(i)
-        collatz(i)
-    );
-    let (arr, ma) = ma.take_array(100);
-    println(arr.to_iter.Iterator::map(to_string).join(","));;
-    let itor = ma.map_yield(to_string).to_iter.take(100);
-    println(itor.join(","))
-);
+impl [m: MonadYieldIF] Wrap m: MonadYieldIF {
+    yield = |a| wrap $ yield(a);
+}
+*/
 
-main: IO () = test1;

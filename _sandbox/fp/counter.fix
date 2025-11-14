@@ -1,0 +1,129 @@
+// Counter as a monad
+// It acts as a free abelian group
+module Main;
+
+import Hash;
+import HashMap;
+
+type Counter a = unbox struct {
+    map: HashMap a I64
+};
+
+namespace Counter {
+    empty: [a: HashKey] Counter a;
+    empty = Counter {
+        map: HashMap::empty(10)
+    };
+
+    add_count: [a: HashKey] a -> I64 -> Counter a -> Counter a;
+    add_count = |a, n, ca| (
+        ca.mod_map(|map| map.insert(a, map.find(a).as_some_or(0) + n))
+    );
+
+    add_one: [a: HashKey] a -> Counter a -> Counter a;
+    add_one = |a, ca| (
+        ca.add_count(a, 1)
+    );
+
+    sub_one: [a: HashKey] a -> Counter a -> Counter a;
+    sub_one = |a, ca| (
+        ca.add_count(a, -1)
+    );
+
+    get_count: [a: HashKey] a -> Counter a -> I64;
+    get_count = |a, ca| (
+        ca.@map.find(a).as_some_or(0)
+    );
+
+    to_iter: [a: HashKey] Counter a -> HashMapIterator (a, I64);
+    to_iter = |ca| ca.@map.to_iter;
+
+    cmul: [a: HashKey] I64 -> Counter a -> Counter a;
+    cmul = |n, ca| (
+        ca.to_iter.fold(
+            empty, |(k, v), ca2|
+            ca2.add_count(k, n * v)
+        )
+    );
+
+    // almost same as Functor::map, but requires [a: HashKey, b:HashKey]
+    cmap: [a: HashKey, b: HashKey] (a -> b) -> Counter a -> Counter b;
+    cmap = |f, ca| (
+        ca.to_iter.fold(
+            empty, |(k, v), cb|
+            cb.add_count(f(k), v)
+        )
+    );
+
+    // almost same as Monad::pure, but requires [a: HashKey]
+    cpure: [a: HashKey] a -> Counter a;
+    cpure = |a| Counter::empty.add_one(a);
+
+    // almost same as Monad::bind, but requires [a: HashKey, b:HashKey]
+    cbind: [a: HashKey, b: HashKey] (a -> Counter b) -> Counter a -> Counter b;
+    cbind = |f, ca| (
+        ca.to_iter.fold(
+            empty, |(k, v), cb|
+            cb + f(k).cmul(v)
+        )
+    );
+
+}
+
+impl [a: HashKey] Counter a: Eq {
+    eq = |c1, c2| (
+        c1.to_iter.check_all(|(k,v)| c2.get_count(k) == v) &&
+        c2.to_iter.check_all(|(k,v)| c1.get_count(k) == v)
+    );
+}
+
+impl [a: HashKey] Counter a: Hash {
+    hash = |ca| (
+        ca.to_iter.fold(
+            0_U64, |(k, v), h|
+            if v == 0 { h };
+            h.bit_xor(k.hash.bit_xor(0x123456789abcdef_U64) * v.to_U64.bit_xor(0xfedcba987654321_U64))
+        )
+    );
+}
+
+// Counter as a free abelian group
+impl [a: HashKey] Counter a: Zero {
+    zero = empty;
+}
+
+impl [a: HashKey] Counter a: Add {
+    add = |c1, c2| (
+        let (c1, c2) = if c1.@map.get_size > c2.@map.get_size { (c1, c2) } else { (c2, c1) };
+        c2.to_iter.fold(
+            c1, |(k, v), c1|
+            c1.add_count(k, c2.get_count(k))
+        )
+    );
+}
+
+impl [a: HashKey] Counter a: Neg {
+    neg = |ca| (
+        ca.to_iter.fold(
+            empty, |(k, v), d|
+            d.add_count(k, -v)
+        )
+    );
+}
+
+main: IO ();
+main = (
+    let c: Counter I64 = empty;
+    let c = c.add_one(10);
+    let c = c.add_one(11);
+    let c = c.add_one(10);
+    let c = c + c;
+    // Counter is a functor
+    let c: Counter (Array I64) = c.cmap(|a| [a, a]);
+    // Counter is a monad
+    let c: Counter String = c.cbind(|a| 
+        Counter::empty.add_count("a" + a.to_string, 2).add_count("b" + a.to_string, 3)
+    );
+    let c = c + cpure("abc");
+    println $ c.to_iter.map(to_string).join(",")
+);

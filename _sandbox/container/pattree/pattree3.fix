@@ -1,42 +1,35 @@
-/*
-
-Patricia Tree
-
-This module was inspired by Haskell's `Data.IntMap` package.
-https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
-
-In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
-
-Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
-https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
-
-*/
+// Simple map using Patricia Tree.
+// The type of key is U64, and the type of value is any type.
+// 
+// This module was inspired by Haskell's `Data.IntMap` package.
+// https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
+// 
+// In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
+// 
+// Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
+// https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
 module Minilib.Collection.PatTree3;
 
-// The key type of a patricia tree.
+// The key type of Patricia Trees.
 type Key = U64;
 
+// The prefix type. (used internally)
 type Prefix = U64;
+
+// The mask type. (used internally)
 type Mask = U64;
 
-// A type of combining function that resolves collisions.
-// `combine(old_value, new_value)` returns a combined value.
-type Combine a = a -> a -> a;
-
-namespace Combine {
-    overwrite: Combine a = |old_value, new_value| new_value;
-    append: [a: Add] Combine a = add;
-}
-
+// The type of tree nodes.
 type PNode a = unbox union {
+    // An empty node.
     empty: (),
-    // key, data
+    // A leaf node. (key, data)
     leaf: (Key, a),
-    // (prefix, branching bit (power of two), left, right)
+    // A branch node. (prefix, mask of the branching bit, left, right)
     branch: (Prefix, Mask, PNodeIndex, PNodeIndex),
 };
 
-// PNodeIndex is just an index of PNode array.
+// The type of index of the node array. 
 type PNodeIndex = I64;
 
 namespace PNodeIndex {
@@ -44,7 +37,7 @@ namespace PNodeIndex {
     empty: PNodeIndex = -1;
 }
 
-// Patricia tree.
+// The type of Patricia Trees.
 type PTree a = unbox struct {
     _root: PNodeIndex,
     _size: I64,
@@ -54,7 +47,7 @@ type PTree a = unbox struct {
 };
 
 namespace PTree {
-    // An empty patricia tree.
+    // An empty Patricia Tree.
     empty: PTree a;
     empty = PTree {
         _root: PNodeIndex::empty,
@@ -120,13 +113,20 @@ namespace PTree {
         tree.mod__nodes(mod(node, f))
     );
 
+    // Checks whether the Patricia Tree is empty.
     is_empty: PTree a -> Bool;
     is_empty = |tree| tree.@_size == 0;
 
+    // Gets size (number of key-value pairs) of a Patricia Tree.
     get_size: PTree a -> I64;
     get_size = @_size;
 
-    // Finds an element from a patricia tree.
+    // Finds the value which is associated with the key.
+    //
+    // # Parameters
+    //
+    // * `key` - The key to find.
+    // * `tree` - A Patricia Tree.
     find: Key -> PTree a -> Option a;
     find = |key, tree| (
         let root = tree.@_root;
@@ -228,12 +228,13 @@ namespace PTree {
         b
     );
 
-    // Inserts an element into a patricia tree.
+    // Inserts a key-value pair into a Patricia Tree.
     //
     // # Parameters
     //
     // * `new_key` - The key to insert.
     // * `new_value` - The value to insert.
+    // * `tree` - A Patricia Tree.
     insert: Key -> a -> PTree a -> PTree a;
     insert = |new_key, new_value, tree| (
         let root = tree.@_root;
@@ -282,6 +283,13 @@ namespace PTree {
         }
     );
 
+    // Erases a key-value pair from a Patricia Tree.
+    // If there is no key-value pair which matches the specified key, this function does nothing.
+    //
+    // # Parameters
+    //
+    // * `key` - The key to erase.
+    // * `tree` - A Patricia Tree.
     erase: Key ->  PTree a -> PTree a;
     erase = |key, tree| (
         let root = tree.@_root;
@@ -325,6 +333,12 @@ namespace PTree {
         }
     );
 
+    // Converts a Patricia Tree into an array of key-value pairs.
+    // The key-value pairs are sorted in ascending order of keys.
+    //
+    // # Parameters
+    //
+    // * `tree` - A Patricia Tree.
     to_array: PTree a -> Array (Key, a);
     to_array = |tree| (
         tree._to_array(tree.@_root, [])
@@ -343,6 +357,7 @@ namespace PTree {
         }
     );
 
+    // Shows the hierarchy of the tree. (for debugging)
     _show_tree: [a: ToString] PTree a -> String;
     _show_tree = |tree| (
         tree._show_tree_node(0, tree.@_root)
@@ -368,5 +383,16 @@ impl [a: ToString] PTree a: ToString {
     to_string = |tree| (
         "PTree{ " + tree.to_array.to_string + " }"
     );
+}
+
+// The type of combining functions that resolve collisions.
+// `combine(old_value, new_value)` should return a value combined from `old_value` and `new_value`.
+type Combine a = a -> a -> a;
+
+namespace Combine {
+    // A combining function that replaces the old value into the new value.
+    overwrite: Combine a = |old_value, new_value| new_value;
+    // A combining function that appends the new value after the old value.
+    append: [a: Add] Combine a = add;
 }
 

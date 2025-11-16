@@ -46,8 +46,9 @@ publish:
 
 # Version up.
 # - Increment the patch version of `[general]version` in `fixproj.toml`
+# - Update document (Run `make -f ../subproject.make document`)
 # - Commit `fixproj.toml` to the local git repository
 # - Add tag to the local git repository
 # - Push to the remote git repository
 verup:
-	python3 ../_verup.py --commit --tag --push
+	python3 ../_verup.py --update-document --commit --tag --push

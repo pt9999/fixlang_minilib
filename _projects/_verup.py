@@ -41,30 +41,36 @@ def increment_version(version: str) -> str:
     return f"{major}.{minor}.{patch}{prerelease}{metadata}"
 
 
+def run_subprocess(cmd_args: list[str]) -> None:
+    print("+ " + " ".join(cmd_args))
+    subprocess.run(cmd_args, check=True)
+
 class GitHelper(object):
     def __init__(self):
         pass
 
-    def run_subprocess(self, cmd_args: list[str]) -> None:
-        print("+ " + " ".join(cmd_args))
-        subprocess.run(cmd_args, check=True)
-
     def commit_file(self, args, filepath: str, version: str) -> None:
-        self.run_subprocess(["git", "add", "--verbose", filepath])
+        run_subprocess(["git", "add", "--verbose", filepath])
         message = "version " + version
-        self.run_subprocess(["git", "commit", "--verbose", "-m", message])
+        run_subprocess(["git", "commit", "--verbose", "-m", message])
         if args.tag:
-            self.run_subprocess(["git", "tag", version])
+            run_subprocess(["git", "tag", version])
         if args.push:
-            self.run_subprocess(["git", "push"])
+            run_subprocess(["git", "push"])
         if args.push and args.tag:
-            self.run_subprocess(["git", "push", "origin", version])
+            run_subprocess(["git", "push", "origin", version])
 
     def is_up_to_date(self, last_version: str) -> bool:
         cmd_args = ["git", "diff", "--quiet", f"{last_version}..main"]
         print("+ " + " ".join(cmd_args))
         proc = subprocess.run(cmd_args, check=False)
         return proc.returncode == 0
+
+class DocumentHelper(object):
+    def __init__(self):
+        pass
+    def update_document(self) -> None:
+        run_subprocess(["make", "-f", "../subproject.make", "document"])
 
 # ---------------------------------------------------
 # Project file editing
@@ -151,6 +157,8 @@ def upgrade_project_version(args, project_dir):
     confirm_upgrade(old_version, new_version)
     project_file.set_project_version(new_version)
     project_file.save()
+    if args.update_document:
+        DocumentHelper().update_document()
     if args.commit and new_version != "":
         GitHelper().commit_file(args, project_file_path, new_version)
 
@@ -168,6 +176,7 @@ def print_project_version(project_dir = "."):
 def parse_args():
     parser = argparse.ArgumentParser(prog="verup")
     parser.add_argument("version", help="version", nargs="?", default=None)
+    parser.add_argument("--update-document", action="store_true", help="upate document", default=False)
     parser.add_argument("--commit", action="store_true", help="commit", default=False)
     parser.add_argument("--tag", action="store_true", help="add tag", default=False)
     parser.add_argument(

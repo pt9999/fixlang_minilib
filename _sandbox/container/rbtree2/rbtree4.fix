@@ -184,7 +184,10 @@ namespace RBTree {
 
     _check_unique: Lazy String -> RBTree a -> RBTree a;
     _check_unique = |msg, tree| (
-        tree.mod__branches(assert_unique(msg))
+        tree
+        .assert_unique(msg)
+        .mod__branches(assert_unique(msg))
+        .mod_free_list(assert_unique(msg))
     );
 
     _make_node: RBBranch a -> RBTree a -> (RBTree a, RBNodeIndex);
@@ -490,14 +493,8 @@ namespace RBTree {
             )
         };
         let (left, elem, right) = tree.get_triplet(node);
-        // reconstruct tree
-        let RBTree { less_than: less_than, root: root,
-                    size: size, free_list: free_list, _branches: _branches } = tree;
-        let tree = RBTree {
-            less_than: less_than, root: root,
-            size: size, free_list: free_list, _branches: _branches
-        };
         let tree = tree._check_unique(|_| "_upsert_inner");
+        let less_than = tree.@less_than;
         if less_than(x, elem) {
             let (tree, left) = tree._upsert_inner(left, x, updater);
             let tree = tree.set_left(node, left);
@@ -551,17 +548,11 @@ namespace RBTree {
     // Returns the changed tree.
     remove: [a: RBNodeElem] a -> RBTree a -> RBTree a;
     remove = |x, tree| (
-        // reconstruct tree
-        let RBTree { less_than: less_than, root: root,
-                    size: size, free_list: free_list, _branches: _branches } = tree;
-        let tree = RBTree {
-            less_than: less_than, root: root,
-            size: size, free_list: free_list, _branches: _branches
-        };
-        let tree = tree._check_unique(|_| "remove");
+        //let tree = tree._check_unique(|_| "remove");
+        let less_than = tree.@less_than;
         let lt_begin = |elem| less_than(elem, x);
         let lt_end   = |elem| !less_than(x, elem);
-        let tree = tree._check_unique(|_| "remove2");
+        //let tree = tree._check_unique(|_| "remove2");
         tree.remove_range(lt_begin, lt_end)
     );
 
@@ -592,7 +583,7 @@ namespace RBTree {
     // `!elem.lt_begin && elem.lt_end` is true.
     _try_remove_range: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
     _try_remove_range = |node, lt_begin, lt_end, tree| (
-        //let tree = tree._check_unique(|_| "_try_remove_range");
+        let tree = tree._check_unique(|_| "_try_remove_range");
         eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + tree._to_string(node));
         let (tree, opt) = tree._try_remove_range_inner(node, lt_begin, lt_end);
         eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + 
@@ -603,7 +594,7 @@ namespace RBTree {
 
     _try_remove_range_inner: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
     _try_remove_range_inner = |node, lt_begin, lt_end, tree| (
-        //let tree = tree._check_unique(|_| "_try_remove_range_inner");
+        let tree = tree._check_unique(|_| "_try_remove_range_inner");
         if node.is_empty {
             (tree, none())
         };
@@ -673,7 +664,7 @@ namespace RBTree {
     _remove_max: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
     _remove_max = |node, tree| (
         eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
-        //let tree = tree._check_unique(|_| "_remove_max");
+        let tree = tree._check_unique(|_| "_remove_max");
         assert_lazy(|_| "_remove_max: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = tree.get_triplet(node);
         if !right.is_empty {
@@ -697,7 +688,7 @@ namespace RBTree {
     _remove_min: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
     _remove_min = |node, tree| (
         eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
-        //let tree = tree._check_unique(|_| "_remove_min");
+        let tree = tree._check_unique(|_| "_remove_min");
         assert_lazy(|_| "_remove_min: !node.is_empty", !node.is_empty) $ |_|
         let (left, elem, right) = tree.get_triplet(node);
         if !left.is_empty {

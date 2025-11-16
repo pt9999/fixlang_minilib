@@ -103,7 +103,7 @@ namespace TLSSession {
     act_hstate = |f| (
         let hstate = *get_hstate;
         let (a, hstate) = *f(hstate);
-        eval *set_hstate(hstate);
+        set_hstate(hstate);;
         pure $ a
     );
 
@@ -116,7 +116,7 @@ namespace TLSSession {
     // Then it sends a Finished message.
     establish_handshake: StateTLSSession ();
     establish_handshake = (
-        eval *pure();
+        pure();;
         let hstate = *get_hstate;
         if hstate.is_after_finished {
             pure () // already established
@@ -124,16 +124,16 @@ namespace TLSSession {
         if !hstate.is_before_client_hello {
             error $ "establish_handshake: wrong state"
         };
-        eval *_send_client_hello;
-        eval *_recv_server_hello;
-        eval *_recv_server_params;
-        eval *HandshakeState::start_worker.lift_hstate;
+        _send_client_hello;;
+        _recv_server_hello;;
+        _recv_server_params;;
+        HandshakeState::start_worker.lift_hstate;;
         pure()
     );
 
     finish_handshake: StateTLSSession ();
     finish_handshake = (
-        eval *HandshakeState::finish_worker.lift_hstate;
+        HandshakeState::finish_worker.lift_hstate;;
         pure()
     );
 
@@ -156,43 +156,43 @@ namespace TLSSession {
 
     _send_client_hello: StateTLSSession ();
     _send_client_hello =  (
-        eval *pure();
+        pure();;
         let session = *get_state;
         let hs_init_param = session.@hs_init_param;
-        eval *(HandshakeState::start_handshake(hs_init_param) >> lift_random).lift_hstate;
-        eval *HandshakeState::send_records.lift_hstate;
+        (HandshakeState::start_handshake(hs_init_param) >> lift_random).lift_hstate;;
+        HandshakeState::send_records.lift_hstate;;
         pure()
     );
 
     _recv_server_hello: StateTLSSession ();
     _recv_server_hello = (
-        eval *HandshakeState::recv_record.lift_hstate;
+        HandshakeState::recv_record.lift_hstate;;
         pure()
     );
 
     _recv_server_params: StateTLSSession ();
     _recv_server_params = (
-        eval *HandshakeState::recv_record.lift_hstate;
+        HandshakeState::recv_record.lift_hstate;;
         if !(*get_hstate).is_after_finished {
             _recv_server_params  // try again
         };
-        eval *HandshakeState::send_records.lift_hstate;
+        HandshakeState::send_records.lift_hstate;;
         pure()
     );
 
     // Sends an application data.
     send_appdata: Array U8 -> StateTLSSession ();
     send_appdata = |appdata| (
-        eval *HandshakeState::send_appdata(appdata).lift_hstate;
-        eval *HandshakeState::send_records.lift_hstate;
+        HandshakeState::send_appdata(appdata).lift_hstate;;
+        HandshakeState::send_records.lift_hstate;;
         pure()
     );
 
     // Receives an application data.
     recv_appdata: StateTLSSession (Array U8);
     recv_appdata = (
-        eval *HandshakeState::send_records.lift_hstate;
-        eval *HandshakeState::recv_record.lift_hstate;
+        HandshakeState::send_records.lift_hstate;;
+        HandshakeState::recv_record.lift_hstate;;
         let appdata = *HandshakeState::pop_appdata_received.act_hstate;
         if appdata.is_empty {
             // try again

@@ -81,7 +81,7 @@ namespace HandshakeState {
     send_records: [m: MonadBytesIO] HandshakeState -> m HandshakeState;
     send_records = |hstate| (
         let (records, hstate) = *hstate.pop_records_to_send;
-        eval *TLSRecord::send_records(records);
+        TLSRecord::send_records(records);;
         pure $ hstate
     );
 
@@ -326,8 +326,8 @@ namespace AfterServerHello {
         );
 
         // check finished
-        eval *_check_handshakes_order(handshakes.map(@0));
-        eval *_verify_server_finished(handshakes, protection);
+        _check_handshakes_order(handshakes.map(@0));;
+        _verify_server_finished(handshakes, protection);;
         let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
         //let protection = protection.mod_server_tk(increment_sequence_number);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
@@ -341,13 +341,13 @@ namespace AfterServerHello {
         let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |_, i| i + 1);
         let get_order: (Handshake -> Bool) -> I64 = |f| handshakes.find_by(f).as_some_or(-1);
         let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
-        eval *(get_count(Handshake::is_encrypted_extensions) == 1).or_error;
-        eval *(get_count(Handshake::is_certificate_request) <= 1).or_error;
-        eval *(get_count(Handshake::is_certificate) == 1).or_error;
-        eval *(get_count(Handshake::is_certificate_verify) == 1).or_error;
-        eval *(get_count(Handshake::is_finished) == 1).or_error;
-        eval *(get_order(Handshake::is_encrypted_extensions) == 0).or_error;
-        eval *(get_order(Handshake::is_finished) == size - 1).or_error;
+        (get_count(Handshake::is_encrypted_extensions) == 1).or_error;;
+        (get_count(Handshake::is_certificate_request) <= 1).or_error;;
+        (get_count(Handshake::is_certificate) == 1).or_error;;
+        (get_count(Handshake::is_certificate_verify) == 1).or_error;;
+        (get_count(Handshake::is_finished) == 1).or_error;;
+        (get_order(Handshake::is_encrypted_extensions) == 0).or_error;;
+        (get_order(Handshake::is_finished) == size - 1).or_error;;
         pure()
     );
 
@@ -362,7 +362,7 @@ namespace AfterServerHello {
 
     _verify_certificate: Array (Handshake, Array U8) -> Protection -> HandshakeInitParam -> IOFail ();
     _verify_certificate = |handshakes, protection, init_param| (
-        eval *pure();   // make it lazy
+        pure();;   // make it lazy
         eval log_debug("_verify_certificate");
         // find Certificate and CertificateVerify Handshake record
         let opt_certificate = handshakes.find_by(|(h,_)| h.is_certificate);
@@ -383,7 +383,7 @@ namespace AfterServerHello {
         let cert_path_api = *@build_cert_path(cert_api, cert_data_array).from_result_t;
 
         eval log_debug("validating date");
-        eval *@validate_date(cert_path_api, init_param.@session_start_time).from_result_t;
+        @validate_date(cert_path_api, init_param.@session_start_time).from_result_t;;
 
         eval log_debug("validating certificate signatures");
         eval *do {
@@ -392,7 +392,7 @@ namespace AfterServerHello {
             let semaphoe: Var I64 = *Var::make(number_of_processors).lift;
             let tasks: Array (IOTask (Result ErrMsg ())) = *array_lazy.map_m(|lazy|
                 lift $ AsyncIOTask::make $ do {
-                    eval *pure();
+                    pure();;
                     semaphoe.wait_and_lock(|n| n > 0, |n|
                         semaphoe.Var::set(n - 1)
                     );;
@@ -416,10 +416,10 @@ namespace AfterServerHello {
         let protection = _update_handshake_context(handshakes, (0, opt_certificate.as_some + 1), protection);
         let content = *protection.calc_certificate_verify_content(TrafficKeyType::server_tk()).from_result_t;
         let sig_scheme = SignatureScheme::_to_string(sig_scheme);
-        eval *@verify_signature_by_subject_public_key(cerficate_api, content, sig_scheme, signature).from_result_t;
+        @verify_signature_by_subject_public_key(cerficate_api, content, sig_scheme, signature).from_result_t;;
 
         eval log_debug("verifying certificate identity");
-        eval *@verify_certificate_identity(cerficate_api, init_param.@server_name).from_result_t;
+        @verify_certificate_identity(cerficate_api, init_param.@server_name).from_result_t;;
         pure()
     );
 

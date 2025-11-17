@@ -723,13 +723,13 @@ namespace RBTree {
         (node_was_black, tree, right, min)
     );
 
-    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNodeIndex -> String -> RBNodeIndex -> I64 -> RBTree a -> Lazy b -> b;
+    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNodeIndex -> String -> RBNodeIndex -> I64 -> RBTree a -> ();
     _debug_assert_level_diff = (
-        if !_Debug { |prefix, name1, node1, name2, node2, diff, tree, lazy| lazy() };
-        |prefix, name1, node1, name2, node2, diff, tree, lazy|
+        if !_Debug { |prefix, name1, node1, name2, node2, diff, tree| () };
+        |prefix, name1, node1, name2, node2, diff, tree|
         let opt1 = tree._save_current_level(name1, node1);
         let opt2 = tree._save_current_level(name2, node2);
-        _debug_assert_saved_level_diff(prefix, opt1, opt2, diff, lazy)
+        _debug_assert_saved_level_diff(prefix, opt1, opt2, diff)
     );
 
     _save_current_level: [a: RBNodeElem] String -> RBNodeIndex -> RBTree a -> Option (String, I64, String);
@@ -741,10 +741,10 @@ namespace RBTree {
         some $ (name, level, node_str)
     );
 
-    _debug_assert_saved_level_diff: String -> Option (String, I64, String) -> Option (String, I64, String) -> I64 -> Lazy b -> b;
+    _debug_assert_saved_level_diff: String -> Option (String, I64, String) -> Option (String, I64, String) -> I64 -> ();
     _debug_assert_saved_level_diff = (
-        if !_Debug { |prefix, opt1, opt2, diff, lazy| lazy() };
-        |prefix, opt1, opt2, diff, lazy|
+        if !_Debug { |prefix, opt1, opt2, diff| () };
+        |prefix, opt1, opt2, diff|
         let (name1, level1, node1_str) = opt1.as_some;
         let (name2, level2, node2_str) = opt2.as_some;
         if !(level1 + diff == level2) {
@@ -755,7 +755,7 @@ namespace RBTree {
                 "  " + name1 + " = " + node1_str + "\n" +
                 "  " + name2 + " = " + node2_str)
         };
-        lazy()
+        ()
     );
 
     // Called when `node.left.level == node.right.level - 1`.
@@ -770,10 +770,10 @@ namespace RBTree {
         };
         //let (left, elem, right) = tree.get_triplet(node);
         let fixed_level = tree._save_current_level("fixed", fixed);
-        _debug_assert_saved_level_diff("_remove_fix_left postcheck",
+        eval _debug_assert_saved_level_diff("_remove_fix_left postcheck",
             fixed_level, node_level,
             if active { 1 } else { 0 }
-        ) $ |_|
+        );
         eval _debug_eprintln_lazy(|_| "_remove_fix_left done: active="+active.to_string + " fixed="+fixed.to_string);
         (active, tree, fixed)
     );
@@ -790,15 +790,15 @@ namespace RBTree {
         let u_was_black = (u_color == black);
         let (t1, u_elem, v) = tree.get_triplet(u);
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
-        tree._debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1) $ |_|
+        eval tree._debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1);
         if tree.is_black(v) {
             let (v_left, v_right) = tree.get_left_right(v);
             if tree.is_red(v_left) {
                 // pattern L1
                 let (w, v_elem, t4) = tree.get_triplet(v);
                 let (t2, w_elem, t3) = tree.get_triplet(w);
-                tree._debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0) $ |_|
-                tree._debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0) $ |_|
+                eval tree._debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0);
                 let tree = tree.set_quad(u, (black, t1, u_elem, t2));
                 let tree = tree.set_quad(v, (black, t3, v_elem, t4));
                 let tree = tree.set_quad(w, (u_color, u, w_elem, v));
@@ -808,8 +808,8 @@ namespace RBTree {
                 // pattern L2
                 let (t2, v_elem, w) = tree.get_triplet(v);
                 let (t3, w_elem, t4) = tree.get_triplet(w);
-                tree._debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0) $ |_|
-                tree._debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0) $ |_|
+                eval tree._debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0);
                 let tree = tree.set_quad(u, (black, t1, u_elem, t2));
                 let tree = tree.set_quad(w, (black, t3, w_elem, t4));
                 let tree = tree.set_quad(v, (u_color, u, v_elem, w));
@@ -819,7 +819,7 @@ namespace RBTree {
                 // pattern L3
                 let (t2, v_elem, t3) = tree.get_triplet(v);
                 let tree = tree.set_quad(v, (red, t2, v_elem, t3));
-                tree._debug_assert_level_diff("L3", "t1", t1, "v", v, 0) $ |_|
+                eval tree._debug_assert_level_diff("L3", "t1", t1, "v", v, 0);
                 let tree = tree.set_quad(u, (black, t1, u_elem, v));
                 let active = u_was_black;
                 (active, tree, u)
@@ -831,7 +831,7 @@ namespace RBTree {
             let tree = tree.set_quad(u, (red, t1, u_elem, t2));
             let active = true;
             let (active, tree, u) = _remove_fix_left $ (active, tree, u);
-            tree._debug_assert_level_diff("L4", "u", u, "t3", t3, 0) $ |_|
+            eval tree._debug_assert_level_diff("L4", "u", u, "t3", t3, 0);
             let tree = tree.set_quad(v, (black, u, v_elem, t3));
             (active, tree, v)
         }
@@ -849,10 +849,10 @@ namespace RBTree {
         };
         //let (left, elem, right) = tree.get_triplet(node);
         let fixed_level = tree._save_current_level("fixed", fixed);
-        _debug_assert_saved_level_diff("_remove_fix_right postcheck",
+        eval _debug_assert_saved_level_diff("_remove_fix_right postcheck",
             fixed_level, node_level,
             if active { 1 } else { 0 }
-        ) $ |_|
+        );
         (active, tree, fixed)
     );
 
@@ -868,7 +868,7 @@ namespace RBTree {
         let u_was_black = (u_color == black);
         let (v, u_elem, t4) = tree.get_triplet(u);
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
-        tree._debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1) $ |_|
+        eval tree._debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1);
         if tree.is_black(v) {
             let (v_left, v_right) = tree.get_left_right(v);
             if tree.is_red(v_right) {
@@ -876,8 +876,8 @@ namespace RBTree {
                 // pattern R1
                 let (t1, v_elem, w) = tree.get_triplet(v);
                 let (t2, w_elem, t3) = tree.get_triplet(w);
-                tree._debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0) $ |_|
-                tree._debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0) $ |_|
+                eval tree._debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0);
                 let tree = tree.set_quad(v, (black, t1, v_elem, t2));
                 let tree = tree.set_quad(u, (black, t3, u_elem, t4));
                 let tree = tree.set_quad(w, (u_color, v, w_elem, u));
@@ -888,8 +888,8 @@ namespace RBTree {
                 // pattern R2
                 let (w, v_elem, t3) = tree.get_triplet(v);
                 let (t1, w_elem, t2) = tree.get_triplet(w);
-                tree._debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0) $ |_|
-                tree._debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0) $ |_|
+                eval tree._debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0);
                 let tree = tree.set_quad(w, (black, t1, w_elem, t2));
                 let tree = tree.set_quad(u, (black, t3, u_elem, t4));
                 let tree = tree.set_quad(v, (u_color, w, v_elem, u));
@@ -901,7 +901,7 @@ namespace RBTree {
                 let (t1, v_elem, t2) = tree.get_triplet(v);
                 let t3 = t4;
                 let tree = tree.set_quad(v, (red, t1, v_elem, t2));
-                tree._debug_assert_level_diff("R3", "v", v, "t3", t3, 0) $ |_|
+                eval tree._debug_assert_level_diff("R3", "v", v, "t3", t3, 0);
                 let tree = tree.set_quad(u, (black, v, u_elem, t3));
                 let active = u_was_black;
                 (active, tree, u)
@@ -915,7 +915,7 @@ namespace RBTree {
             let tree = tree.set_quad(u, (red, t2, u_elem, t3));
             let active = true;
             let (active, tree, u) = _remove_fix_right $ (active, tree, u);
-            tree._debug_assert_level_diff("R4", "t1", t1, "u", u, 0) $ |_|
+            eval tree._debug_assert_level_diff("R4", "t1", t1, "u", u, 0);
             let tree = tree.set_quad(v, (black, t1, v_elem, u));
             (active, tree, v)
         }

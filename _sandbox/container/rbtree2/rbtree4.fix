@@ -92,6 +92,9 @@ namespace RBTree {
     _Debug: Bool;
     _Debug = false;
 
+    _EnableAssertUnique: Bool;
+    _EnableAssertUnique = true;
+
     // Prints to stderr if the debug flag is set.
     _debug_eprintln_lazy: (() -> String) -> ();
     _debug_eprintln_lazy = (
@@ -182,16 +185,21 @@ namespace RBTree {
         _branches: [],
     };
 
+    _assert_unique: Lazy String -> a -> a;
+    _assert_unique = if _EnableAssertUnique { assert_unique } else { |msg, a| a };
+
     _check_unique: Lazy String -> RBTree a -> RBTree a;
     _check_unique = |msg, tree| (
         tree
-        .assert_unique(msg)
-        .mod__branches(assert_unique(msg))
-        .mod_free_list(assert_unique(msg))
+        ._assert_unique(msg)
+        .mod__branches(_assert_unique(msg))
+        .mod_free_list(_assert_unique(msg))
     );
 
     _make_node: RBBranch a -> RBTree a -> (RBTree a, RBNodeIndex);
     _make_node = |branch, tree| (
+        let size = tree.@_branches.get_size;
+        let tree = tree._check_unique(|_| "_make_node");
         match tree.@free_list.get_last {
             some(node) => (
                 let tree = tree.mod_free_list(pop_back);
@@ -200,7 +208,7 @@ namespace RBTree {
                 (tree, node)
             ),
             none() => (
-                let node = tree.@_branches.get_size;
+                let node = size; // tree.@_branches.get_size;
                 let tree = tree.mod__branches(push_back(branch));
                 let tree = tree.mod_size(add(1));
                 (tree, node)
@@ -210,6 +218,7 @@ namespace RBTree {
 
     _free_node: RBNodeIndex -> RBTree a -> RBTree a;
     _free_node = |node, tree| (
+        let tree = tree._check_unique(|_| "_free_node");
         let tree = tree.mod_branch(node, set_elem(none()));
         let tree = tree.mod_free_list(push_back(node));
         let tree = tree.mod_size(add(-1));
@@ -225,13 +234,13 @@ namespace RBTree {
     set_branch: RBNodeIndex -> RBBranch a -> RBTree a -> RBBranch a;
     set_branch = |node, branch, tree| (
         if node == RBNodeIndex::empty { undefined("set_branch: empty") };
-        tree.mod__branches(set(node, branch))
+        tree.mod__branches(_assert_unique(|_| "set_branch") >> set(node, branch))
     );
 
     mod_branch: RBNodeIndex -> (RBBranch a -> RBBranch a) -> RBTree a -> RBTree a;
     mod_branch = |node, f, tree| (
         if node == RBNodeIndex::empty { undefined("mod_branch: empty") };
-        tree.mod__branches(mod(node, f))
+        tree.mod__branches(_assert_unique(|_| "mod_branch") >> mod(node, f))
     );
 
     // Gets the number of elements.
@@ -631,6 +640,7 @@ namespace RBTree {
         if !elem.lt_begin && elem.lt_end {
             // remove this node
             eval _debug_eprintln_lazy(|_| "remove this node: node="+node.to_string);
+            let tree = tree._check_unique(|_| "_try_remove_range_inner remove this node");
             if !left.is_empty {
                 eval _debug_eprintln_lazy(|_| "left is nonempty");
                 let (active, tree, left, max) = tree._remove_max(left);
@@ -648,7 +658,9 @@ namespace RBTree {
                 (tree, some $ (active, node))
             };
             eval _debug_eprintln_lazy(|_| "both left and right is empty");
+            let tree = tree._check_unique(|_| "_try_remove_range_inner before free 1");
             let node_was_black = tree.is_black(node);
+            let tree = tree._check_unique(|_| "_try_remove_range_inner before free 2");
             let tree = tree._free_node(node);
             eval _debug_eprintln_lazy(|_| "free done");
             (tree, some $ (node_was_black, RBNodeIndex::empty))

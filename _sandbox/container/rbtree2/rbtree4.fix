@@ -93,7 +93,7 @@ namespace RBTree {
     _Debug = false;
 
     _EnableAssertUnique: Bool;
-    _EnableAssertUnique = true;
+    _EnableAssertUnique = false;
 
     // Prints to stderr if the debug flag is set.
     _debug_eprintln_lazy: (() -> String) -> ();
@@ -186,10 +186,15 @@ namespace RBTree {
     };
 
     _assert_unique: Lazy String -> a -> a;
-    _assert_unique = if _EnableAssertUnique { assert_unique } else { |msg, a| a };
+    _assert_unique = (
+        if !_EnableAssertUnique { |msg, a| a };
+        assert_unique
+    );
 
     _check_unique: Lazy String -> RBTree a -> RBTree a;
-    _check_unique = |msg, tree| (
+    _check_unique = (
+        if !_EnableAssertUnique { |msg, tree| tree };
+        |msg, tree|
         tree
         ._assert_unique(msg)
         .mod__branches(_assert_unique(msg))
@@ -233,14 +238,16 @@ namespace RBTree {
 
     set_branch: RBNodeIndex -> RBBranch a -> RBTree a -> RBBranch a;
     set_branch = |node, branch, tree| (
+        let tree = tree._check_unique(|_| "set_branch");
         if node == RBNodeIndex::empty { undefined("set_branch: empty") };
-        tree.mod__branches(_assert_unique(|_| "set_branch") >> set(node, branch))
+        tree.mod__branches(set(node, branch))
     );
 
     mod_branch: RBNodeIndex -> (RBBranch a -> RBBranch a) -> RBTree a -> RBTree a;
     mod_branch = |node, f, tree| (
+        let tree = tree._check_unique(|_| "mod_branch");
         if node == RBNodeIndex::empty { undefined("mod_branch: empty") };
-        tree.mod__branches(_assert_unique(|_| "mod_branch") >> mod(node, f))
+        tree.mod__branches(mod(node, f))
     );
 
     // Gets the number of elements.
@@ -718,24 +725,27 @@ namespace RBTree {
     );
 
     _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNodeIndex -> String -> RBNodeIndex -> I64 -> RBTree a -> Lazy b -> b;
-    _debug_assert_level_diff = |prefix, name1, node1, name2, node2, diff, tree, lazy| (
-        if !_Debug { lazy() };
+    _debug_assert_level_diff = (
+        if !_Debug { |prefix, name1, node1, name2, node2, diff, tree, lazy| lazy() };
+        |prefix, name1, node1, name2, node2, diff, tree, lazy|
         let opt1 = tree._save_current_level(name1, node1);
         let opt2 = tree._save_current_level(name2, node2);
         _debug_assert_saved_level_diff(prefix, opt1, opt2, diff, lazy)
     );
 
     _save_current_level: [a: RBNodeElem] String -> RBNodeIndex -> RBTree a -> Option (String, I64, String);
-    _save_current_level = |name, node, tree| (
-        if !_Debug { none() };
+    _save_current_level = (
+        if !_Debug { |name, node, tree| none() };
+        |name, node, tree|
         let level = tree.level_nonvalidate(node);
         let node_str = tree._to_string(node);
         some $ (name, level, node_str)
     );
 
     _debug_assert_saved_level_diff: String -> Option (String, I64, String) -> Option (String, I64, String) -> I64 -> Lazy b -> b;
-    _debug_assert_saved_level_diff = |prefix, opt1, opt2, diff, lazy| (
-        if !_Debug { lazy() };
+    _debug_assert_saved_level_diff = (
+        if !_Debug { |prefix, opt1, opt2, diff, lazy| lazy() };
+        |prefix, opt1, opt2, diff, lazy|
         let (name1, level1, node1_str) = opt1.as_some;
         let (name2, level2, node2_str) = opt2.as_some;
         if !(level1 + diff == level2) {

@@ -1,3 +1,5 @@
+// `Yield e a` is a computation which generates a sequence of type `e`,
+// and a final result of type `a`.
 module Minilib.Monad.Yield;
 
 import Minilib.Monad.Trans;
@@ -9,6 +11,7 @@ trait [m: * -> *] m: MonadYieldIF {
     yield: YieldType m -> m ();
 }
 
+//
 type Yield e a = unbox union {
     y_pure: a,
     y_yield: (e, () -> Yield e a),
@@ -34,6 +37,20 @@ impl Yield e: MonadYieldIF {
     yield = |e| y_yield $ (e, |_| pure());
 }
 
+// `Yield e a` can be used as an Iterator of `e`.
+// Note that iterators do not return the final state, so `a` is discarded.
+impl Yield e a: Iterator {
+    type Item (Yield e a) = e;
+    advance = |ma| (
+        match ma {
+            y_pure(a) => none(),     // `a` is discarded
+            y_yield((e, next)) => some $ (next(), e),
+        }
+    );
+}
+
+// `map_yield(f)` converts `Yield d a` to `Yield e a`, where the type of `f` is `d -> e`.
+// This is almost same functionality as `Iterator::map`.
 map_yield: (d -> e) -> Yield d a -> Yield e a;
 map_yield = |f, ma| (
     match ma {
@@ -42,14 +59,7 @@ map_yield = |f, ma| (
     }
 );
 
-to_iter: Yield e a -> DynIterator e;
-to_iter = |ma| (
-    match ma {
-        y_pure(a) => DynIterator { next: |_| none() },     // `a` is discarded
-        y_yield((e, next)) => DynIterator { next: |_| some $ (next().to_iter, e) },
-    }
-);
-
+// Returns at most `n` yielded elements and the remaining state.
 take_array: I64 -> Yield e a -> (Array e, Yield e a);
 take_array = |n, ma| (
     loop(
@@ -62,22 +72,11 @@ take_array = |n, ma| (
     )
 );
 
-/*
-//------------------------------------
-type [m: * -> *] Wrap m a = unbox struct {
-    data: m a
-};
-
-namespace Wrap {
-    wrap: [m: *-> *] m a -> Wrap m a;
-    wrap = |ma| Wrap { data: ma };
-
-    get: Wrap m a -> m a;
-    get = @data;
-}
-
-impl [m: MonadYieldIF] Wrap m: MonadYieldIF {
-    yield = |a| wrap $ yield(a);
-}
-*/
+fold_yield: s -> (e -> s -> s) -> (a -> s -> s) -> Yield e a -> s;
+fold_yield = |s, f, g, ma| (
+    match ma {
+        y_pure(a) => g(a, s),
+        y_yield((e, next)) => next().fold_yield(f(e), f, g),
+    }
+);
 

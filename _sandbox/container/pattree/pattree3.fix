@@ -1,14 +1,16 @@
 // Simple map using Patricia Tree.
 // The type of key is U64, and the type of value is any type.
-// 
+//
 // This module was inspired by Haskell's `Data.IntMap` package.
 // https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
-// 
+//
 // In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
-// 
+//
 // Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
 // https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
 module Minilib.Collection.PatTree3;
+
+import Minilib.Monad.Yield;
 
 // The key type of Patricia Trees.
 type Key = U64;
@@ -29,7 +31,7 @@ type PNode a = unbox union {
     branch: (Prefix, Mask, PNodeIndex, PNodeIndex),
 };
 
-// The type of index of the node array. 
+// The type of index of the node array.
 type PNodeIndex = I64;
 
 namespace PNodeIndex {
@@ -141,8 +143,8 @@ namespace PTree {
             branch((prefix, m, left, right)) => (
                 if !key._match_prefix(prefix, m) { none() };
                 if key <= prefix { // key._zero_bit(m)
-                    tree._lookup(key, left) 
-                } else { 
+                    tree._lookup(key, left)
+                } else {
                     tree._lookup(key, right)
                 }
             )
@@ -168,9 +170,9 @@ namespace PTree {
     _join: Prefix -> Mask -> PNodeIndex -> Prefix -> Mask -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
     _join = |p0, m0, t0, p1, m1, t1, tree| (
         let m = _branching_bit(p0, m0, p1, m1);
-        if p0._zero_bit(m) { 
+        if p0._zero_bit(m) {
             tree._make_branch(p0._mask(m), m, t0, t1)
-        } else { 
+        } else {
             tree._make_branch(p0._mask(m), m, t1, t0)
         }
     );
@@ -252,7 +254,7 @@ namespace PTree {
             leaf((old_key, old_value)) => (
                 if old_key == new_key {
                     let combine = tree.@_combine;
-                    let tree = tree._mod_node(old_node, 
+                    let tree = tree._mod_node(old_node,
                         mod_leaf(
                             |(key, old_value)|
                             let value = combine(old_value, new_value);
@@ -260,7 +262,7 @@ namespace PTree {
                         )
                     );
                     (tree, old_node)
-                } else { 
+                } else {
                     let (tree, new_node) = tree._make_leaf(new_key, new_value);
                     tree._join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
                 }
@@ -274,7 +276,7 @@ namespace PTree {
                     let (tree, left2) = tree._insert(new_key, new_value, left);
                     let tree = if left != left2 { tree._set_node(old_node, branch $ (prefix, m, left2, right)) } else { tree };
                     (tree, old_node)
-                } else { 
+                } else {
                     let (tree, right2) = tree._insert(new_key, new_value, right);
                     let tree = if right != right2 { tree._set_node(old_node, branch $ (prefix, m, left, right2)) } else { tree };
                     (tree, old_node)
@@ -320,7 +322,7 @@ namespace PTree {
                     };
                     let tree = if left != left2 { tree._set_node(node, branch $ (prefix, m, left2, right)) } else { tree };
                     (tree, node)
-                } else { 
+                } else {
                     let (tree, right2) = tree._erase(new_key, right);
                     if right2 == PNodeIndex::empty {
                         let tree = tree._free_branch(node);
@@ -357,6 +359,23 @@ namespace PTree {
         }
     );
 
+    to_iter: PTree a -> Yield (Key, a) ();
+    to_iter = |tree| (
+        tree._to_iter(tree.@_root)
+    );
+
+    _to_iter: PNodeIndex -> PTree a -> Yield (Key, a) ();
+    _to_iter = |node, tree| (
+        match tree._get_node(node) {
+            leaf((key, value)) => yield $ (key, value),
+            branch((prefix, m, left, right)) => (
+                tree._to_iter(left);;
+                tree._to_iter(right)
+            ),
+            _ => pure()
+        }
+    );
+
     // Shows the hierarchy of the tree. (for debugging)
     _show_tree: [a: ToString] PTree a -> String;
     _show_tree = |tree| (
@@ -371,7 +390,7 @@ namespace PTree {
             leaf((key, value)) => indent_str + "leaf(key=" + key.to_string + ", value=" + value.to_string + ")",
             branch((prefix,mask,left,right)) => (
                 indent_str + "branch(prefix=" + prefix.to_string + ", mask=" + mask.to_string + ")\n" +
-                    tree._show_tree_node(indent + 1, left) + "\n" + 
+                    tree._show_tree_node(indent + 1, left) + "\n" +
                     tree._show_tree_node(indent + 1, right)
             )
         }

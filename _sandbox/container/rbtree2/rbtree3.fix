@@ -164,7 +164,7 @@ namespace RBNode {
 
     set_triplet: RBNode a -> a -> RBNode a -> RBNode a -> RBNode a;
     set_triplet = |left, elem, right, node| (
-        node.mod_branch(|b| b.set_left(left).set_elem(elem).set_right(right))
+        branch $ node.as_branch.set_left(left).set_elem(elem).set_right(right)
     );
 
     get_quad: RBNode a -> (RBColor, RBNode a, a, RBNode a);
@@ -175,7 +175,7 @@ namespace RBNode {
 
     set_quad: RBColor -> RBNode a -> a -> RBNode a -> RBNode a -> RBNode a;
     set_quad = |color, left, elem, right, node| (
-        node.mod_branch(|b| b.set_color(color).set_left(left).set_elem(elem).set_right(right))
+        branch $ node.as_branch.set_color(color).set_left(left).set_elem(elem).set_right(right)
     );
 
     from_quad: RBColor -> RBNode a -> a -> RBNode a -> RBNode a;
@@ -196,7 +196,7 @@ namespace RBNode {
 
     set_color: RBColor -> RBNode a -> RBNode a;
     set_color = |color, node| (
-        node.mod_branch(set_color(color))
+        branch $ node.as_branch.set_color(color)
     );
 
     get_left_right: RBNode a -> (RBNode a, RBNode a);
@@ -209,13 +209,13 @@ namespace RBNode {
     get_left = |node| node.as_branch.@left;
 
     set_left: RBNode a -> RBNode a -> RBNode a;
-    set_left = |left, node| node.mod_branch(set_left(left));
+    set_left = |left, node| branch $ node.as_branch.set_left(left);
 
     get_right: RBNode a -> RBNode a;
     get_right = |node| node.as_branch.@right;
 
     set_right: RBNode a -> RBNode a -> RBNode a;
-    set_right = |right, node| node.mod_branch(set_right(right));
+    set_right = |right, node| branch $ node.as_branch.set_right(right);
 
     //====================================================================
     // Finding
@@ -319,9 +319,9 @@ namespace RBNode {
             //let (n1, e1, n2) = left_left.get_triplet; //as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
             let (left_left, n3) = left.get_left_right;
-            let node = node.mod_branch(|b| b.set_left(n3));
-            let left_left = left_left.mod_branch(set_color(black));
-            let left = left.mod_branch(|b| b.set_left(left_left).set_right(node));
+            let node = branch $ node.as_branch.set_left(n3);
+            let left_left = branch $ left_left.as_branch.set_color(black);
+            let left = branch $ left.as_branch.set_left(left_left).set_right(node);
             left
         };
         if left.is_red && left.get_right.is_red {
@@ -331,9 +331,9 @@ namespace RBNode {
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
             let left_right = left.get_right;
             let (n2, n3) = left_right.get_left_right;
-            let node = node.mod_branch(|b| b.set_left(n3));
-            let left = left.mod_branch(|b| b.set_color(black).set_right(n2));
-            let left_right = left_right.mod_branch(|b| b.set_left(left).set_right(node));
+            let node = branch $ node.as_branch.set_left(n3);
+            let left = branch $ left.as_branch.set_color(black).set_right(n2);
+            let left_right = branch $ left_right.as_branch.set_left(left).set_right(node);
             left_right
         };
         if right.is_red && right.get_left.is_red {
@@ -343,9 +343,9 @@ namespace RBNode {
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
             let right_left = right.get_left;
             let (n2, n3) = right_left.get_left_right;
-            let node = node.mod_branch(|b| b.set_right(n2));
-            let right = right.mod_branch(|b| b.set_color(black).set_left(n3));
-            let right_left = right_left.mod_branch(|b| b.set_left(node).set_right(right));
+            let node = branch $ node.as_branch.set_right(n2);
+            let right = branch $ right.as_branch.set_color(black).set_left(n3);
+            let right_left = branch $ right_left.as_branch.set_left(node).set_right(right);
             right_left
         };
         if right.is_red && right.get_right.is_red {
@@ -354,9 +354,9 @@ namespace RBNode {
             //let (n3, e3, n4) = right_right.get_triplet; // .as_red;
             //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
             let (n2, right_right) = right.get_left_right;
-            let node = node.mod_branch(|b| b.set_right(n2));
-            let right_right = right_right.mod_branch(|b| b.set_color(black));
-            let right = right.mod_branch(|b| b.set_left(node).set_right(right_right));
+            let node = branch $ node.as_branch.set_right(n2);
+            let right_right = branch $ right_right.as_branch.set_color(black);
+            let right = branch $ right.as_branch.set_left(node).set_right(right_right);
             right
         };
         node
@@ -382,7 +382,7 @@ namespace RBNode {
             (dsize, node._balance)
         };
         // If neither `x < elem` nor `elem < x` holds, replace `elem` with `updater(elem)`.
-        let node = node.mod_branch(mod_elem(updater));
+        let node = branch $ node.as_branch.mod_elem(updater);
         (0, node)
     );
 
@@ -500,7 +500,7 @@ namespace RBNode {
         let (left, elem, right) = node.get_triplet;
         let left_result = if !left.is_empty && !elem.lt_begin {
             let (active, left) = *left._try_remove_range(lt_begin, lt_end);
-            let node = node.set_left(left);
+            let node = branch $ node.as_branch.set_left(left);
             let (active, node) = _remove_fix_left $ (active, node);
             some $ (active, node)
         } else {
@@ -512,7 +512,7 @@ namespace RBNode {
 
         let right_result = if !right.is_empty && elem.lt_end {
             let (active, right) = *right._try_remove_range(lt_begin, lt_end);
-            let node = node.set_right(right);
+            let node = branch $ node.as_branch.set_right(right);
             let (active, node) = _remove_fix_right $ (active, node);
             some $ (active, node)
         } else {
@@ -529,14 +529,14 @@ namespace RBNode {
                 eval _debug_eprintln_lazy(|_| "left is nonempty");
                 let (active, left, max) = left._remove_max;
                 eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
-                let node = node.set_triplet(left, max, right);
+                let node = branch $ node.as_branch.set_left(left).set_elem(max);
                 let (active, node) = _remove_fix_left $ (active, node);
                 some $ (active, node)
             };
             if !right.is_empty {
                 eval _debug_eprintln_lazy(|_| "right is nonempty");
                 let (active, right, min) = right._remove_min;
-                let node = node.set_triplet(left, min, right);
+                let node = branch $ node.as_branch.set_right(right).set_elem(min);
                 let (active, node) = _remove_fix_right $ (active, node);
                 eval _debug_eprintln_lazy(|_| "done");
                 some $ (active, node)
@@ -637,9 +637,8 @@ namespace RBNode {
         };
         eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+node.to_string);
         let u = node;
-        let u_color = u.get_color;
+        let (u_color, t1, u_elem, v) = u.get_quad;
         let u_was_black = (u_color == black);
-        let (t1, u_elem, v) = u.get_triplet;
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
         eval _debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1);
         if v.is_black {
@@ -716,9 +715,8 @@ namespace RBNode {
             (active, node)
         };
         let u = node;
-        let u_color = u.get_color;
+        let (u_color, v, u_elem, t4) = u.get_quad;
         let u_was_black = (u_color == black);
-        let (v, u_elem, t4) = u.get_triplet;
         assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
         eval _debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1);
         if v.is_black {

@@ -1,40 +1,20 @@
 module Main;
 
-
+import Minilib.Monad.Free;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Identity;
 //import Minilib.Text.Hex;
 
-// Free Monad
-// https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
-// https://eed3si9n.com/herding-cats/ja/Free-monads.html
-type [f: *->*] Free f a = box union {
-    pure_f: a,
-    free_f: f (Free f a)
+type Wrap a = unbox struct {
+    data: a
 };
 
-namespace Free {
-    lift_f: [f: Functor] f a -> Free f a;
-    lift_f = |command| free_f $ command.map(pure_f);
-}
+namespace Wrap {
+    wrap: a -> Wrap a;
+    wrap = |a| Wrap { data: a };
 
-impl [f: Functor] Free f: Functor {
-    map = |g, ma| (
-        match ma {
-            pure_f(value) => pure_f(g(value)),
-            free_f(fma) => free_f(fma.map(map(g))),
-        }
-    );
-}
-
-impl [f: Functor] Free f: Monad {
-    pure = pure_f;
-    bind = |g, ma| (
-        match ma {
-            pure_f(value) => g(value),
-            free_f(fma) => free_f(fma.map(bind(g))),
-        }
-    );
+    unwrap: Wrap a -> a;
+    unwrap = @data;
 }
 
 //-------------------------------------------
@@ -65,49 +45,49 @@ test_toy_1 = (
     pure()
 );
 
-impl [a: ToString] Free Toy a: ToString {
-    to_string = |ma| (
-        match ma {
-            free_f(toy) => match toy {
-                output((x, next)) => "output " + x + "\n" + next.to_string,
-                bell(next) => "bell\n" + next.to_string,
+impl [a: ToString] Wrap (Free Toy a): ToString {
+    to_string = |wma| (
+        match wma.unwrap {
+            f_free(toy) => match toy {
+                output((x, next)) => "output " + x + "\n" + next.wrap.to_string,
+                bell(next) => "bell\n" + next.wrap.to_string,
                 done() => "done\n",
             },
-            pure_f(value) => "pure " + value.to_string + "\n",
+            f_pure(value) => "pure " + value.to_string + "\n",
         }
     );
 }
 
 foutput: String -> Free Toy ();
-foutput = |x| free_f $ output $ (x, pure());
+foutput = |x| f_free $ output $ (x, pure());
 
 fbell: Free Toy ();
-fbell = free_f $ bell $ pure();
+fbell = f_free $ bell $ pure();
 
 fdone: Free Toy ();
-fdone = free_f $ done();
+fdone = f_free $ done();
 
 output_: String -> next -> Toy next;
 output_ = |x, next| output $ (x, next);
 
-test_toy_free_f: IO ();
-test_toy_free_f = (
-    println("=== test_toy_free_f ===");;
+test_toy_f_free: IO ();
+test_toy_f_free = (
+    println("=== test_toy_f_free ===");;
     let toy = do {
         output_("A",()).lift_f;;
         bell().lift_f;;
         done_.lift_f;;
         pure()
     };
-    print(toy.to_string)
+    print(toy.wrap.to_string)
 );
 
-test_toy_free_f2: IO ();
-test_toy_free_f2 = (
-    println("=== test_toy_free_f2 ===");;
+test_toy_f_free2: IO ();
+test_toy_f_free2 = (
+    println("=== test_toy_f_free2 ===");;
     let pretty = |x| (
         println("------------");;
-        print(x.to_string)
+        print(x.wrap.to_string)
     );
     pretty(foutput("A"));;
     pretty(pure("A").bind(foutput));;
@@ -124,7 +104,7 @@ type StrParser = Free (ReaderT String Identity);
 
 parse_text1: StrParser (Array String);
 parse_text1 = (
-    free_f $ reader $ |line| (
+    f_free $ reader $ |line| (
         let lines = [line];
         parse_text2 $ lines
     )
@@ -132,7 +112,7 @@ parse_text1 = (
 
 parse_text2: Array String -> StrParser (Array String);
 parse_text2 = |lines| (
-    free_f $ reader $ |line| (
+    f_free $ reader $ |line| (
         let lines = lines.push_back(line);
         parse_text3 $ lines
     )
@@ -140,9 +120,9 @@ parse_text2 = |lines| (
 
 parse_text3: Array String -> StrParser (Array String);
 parse_text3 = |lines| (
-    free_f $ reader $ |line| (
+    f_free $ reader $ |line| (
         let lines = lines.push_back(line);
-        pure_f $ lines
+        f_pure $ lines
     )
 );
 
@@ -153,11 +133,11 @@ test_str_parser = (
     loop_m(
         (parser, 0), |(parser, i)|
         match parser {
-            pure_f(value) => (
-                println(value.to_string);; 
+            f_pure(value) => (
+                println(value.to_string);;
                 break_m $ ()
             ),
-            free_f(reader) => (
+            f_free(reader) => (
                 let parser = reader.run_reader(i.to_string);
                 continue_m $ (parser, i + 1)
             ),
@@ -193,17 +173,17 @@ impl Comm: Functor {
 }
 
 impl Free Comm: MonadCommIF {
-    send_bytes = |bytes| free_f $ comm_send_bytes $ (bytes, pure);
-    recv_bytes = |length| free_f $ comm_recv_bytes $ (length, pure);
-    gen_bytes = |length| free_f $ comm_gen_bytes $ (length, pure);
+    send_bytes = |bytes| f_free $ comm_send_bytes $ (bytes, pure);
+    recv_bytes = |length| f_free $ comm_recv_bytes $ (length, pure);
+    gen_bytes = |length| f_free $ comm_gen_bytes $ (length, pure);
 }
 
 namespace FreeComm {
     interpret: [m: MonadComm] Free Comm a -> m a;
     interpret = |free| (
         match free {
-            pure_f(value) => pure(value),
-            free_f(comm) => match comm {
+            f_pure(value) => pure(value),
+            f_free(comm) => match comm {
                 comm_send_bytes((bytes, cont)) => cont(*send_bytes(bytes)).interpret,
                 comm_recv_bytes((length, cont)) => cont(*recv_bytes(length)).interpret,
                 comm_gen_bytes((length, cont)) => cont(*gen_bytes(length)).interpret,
@@ -250,8 +230,8 @@ test_monad_comm = (
 
 main: IO ();
 main = (
-    test_toy_free_f;;
-    test_toy_free_f2;;
+    test_toy_f_free;;
+    test_toy_f_free2;;
     test_str_parser;;
     test_monad_comm;;
     pure()

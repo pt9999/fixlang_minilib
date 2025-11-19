@@ -1,0 +1,34 @@
+module Minilib.Monad.Free;
+
+// Free Monad
+// https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
+// https://eed3si9n.com/herding-cats/ja/Free-monads.html
+type [f: *->*] Free f a = box union {
+    f_pure: a,
+    f_free: f (Free f a)
+};
+
+namespace Free {
+    lift_f: [f: Functor] f a -> Free f a;
+    lift_f = |command| f_free $ command.map(f_pure);
+}
+
+impl [f: Functor] Free f: Functor {
+    map = |g, ma| (
+        match ma {
+            f_pure(value) => f_pure(g(value)),
+            f_free(fma) => f_free(fma.map(map(g))),
+        }
+    );
+}
+
+impl [f: Functor] Free f: Monad {
+    pure = f_pure;
+    bind = |g, ma| (
+        match ma {
+            f_pure(value) => g(value),
+            f_free(fma) => f_free(fma.map(bind(g))),
+        }
+    );
+}
+

@@ -102,45 +102,31 @@ test_toy_f_free2 = (
 //-------------------------------------------
 // Free monad as a coroutine
 
-type StrParser = Free (ReaderT String Iden);
+type StrParser = Free (Reader String);
 
-parse_text1: StrParser (Array String);
-parse_text1 = (
-    f_free $ reader $ |line| (
-        let lines = [line];
-        parse_text2 $ lines
-    )
-);
-
-parse_text2: Array String -> StrParser (Array String);
-parse_text2 = |lines| (
-    f_free $ reader $ |line| (
-        let lines = lines.push_back(line);
-        parse_text3 $ lines
-    )
-);
-
-parse_text3: Array String -> StrParser (Array String);
-parse_text3 = |lines| (
-    f_free $ reader $ |line| (
-        let lines = lines.push_back(line);
-        f_pure $ lines
-    )
+parse_text123: StrParser (Array String);
+parse_text123 = (
+    // Readerモナドでは MonadReaderIF::ask の結果は毎回同じだが、Free Reader にすることでaskの結果を毎回変えられる
+    let line1 = *ask.lift_f;    
+    let line2 = *ask.lift_f;
+    let line3 = *ask.lift_f;
+    pure $ [line1, line2, line3]
 );
 
 test_str_parser: IO ();
 test_str_parser = (
     println("=== test_str_parser ===");;
-    let parser = parse_text1;
+    let parser = parse_text123;
     loop_m(
-        (parser, 0), |(parser, i)|
+        (parser, 1), |(parser, i)|
         match parser {
             f_pure(value) => (
                 println(value.to_string);;
                 break_m $ ()
             ),
             f_free(reader) => (
-                let parser = reader.run_reader(i.to_string);
+                // ここで1ステップごとに ask の中身を変える
+                let parser = reader.run_reader("Line " + i.to_string);
                 continue_m $ (parser, i + 1)
             ),
         }

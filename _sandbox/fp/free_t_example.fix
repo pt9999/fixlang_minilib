@@ -1,0 +1,81 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.FreeT;
+import Minilib.Monad.Iden;
+
+type Toy next = box union {
+    t_output: (String, next),
+    t_bell: next,
+    t_done: ()
+};
+
+impl Toy: Functor {
+    map = |f, toy| (
+        match toy {
+            t_output((x, next)) => t_output((x, f(next))),
+            t_bell(next) => t_bell(f(next)),
+            t_done() => t_done(),   // t_done()にはnextがないため、fは呼び出されない。
+        }
+    );
+}
+
+// orphan rule のため、Free f a : ToString は Free モジュールの外部では定義できない。
+// また、[f a: ToString] という条件も書けない。
+// このため、to_string_ として定義する。
+to_string_: [a: ToString, m: Monad] FreeT Toy m a -> m String;
+to_string_ = |wma| (
+    match *wma.@data {
+        f_free(toy) => match toy {
+            t_output((x, next)) => pure $ "output " + x + "\n" + *next.to_string_,
+            t_bell(next) => pure $ "bell\n" + *next.to_string_,
+            t_done() => pure $ "done\n",
+        },
+        f_pure(value) => pure $ "pure " + value.to_string + "\n",
+    }
+);
+
+output: [m: Monad] String -> FreeT Toy m ();
+output = |x| t_output((x, ())).lift_f;
+
+bell: [m: Monad] FreeT Toy m ();
+bell = t_bell().lift_f;
+
+done: [m: Monad] FreeT Toy m ();
+done = t_done().lift_f;
+
+test_toy_f_free: IO ();
+test_toy_f_free = (
+    println("=== test_toy_f_free ===");;
+    let toy : Free Toy I64 = do {
+        output("A");;
+        bell;;
+        //done;;  // doneがあるとそれ以降は何をbindしても捨てられる。実行されない
+        bell;;
+        output("B");;
+        pure $ 123
+    };
+    print(toy.to_string_.get)
+);
+
+test_toy_f_free2: IO ();
+test_toy_f_free2 = (
+    println("=== test_toy_f_free2 ===");;
+    let pretty = |toy: Free Toy ()| (
+        println("------------");;
+        print(toy.to_string_.get)
+    );
+    pretty(output("A"));;
+    pretty(pure("A").bind(output));;
+    pretty(output("A").bind(pure));;
+    pretty(output("A");; output("B"));;
+    pretty(output("A");; done;; output("B"));;
+    pure()
+);
+
+main: IO ();
+main = (
+    test_toy_f_free;;
+    test_toy_f_free2;;
+    pure()
+);

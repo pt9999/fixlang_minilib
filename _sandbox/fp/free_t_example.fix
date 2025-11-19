@@ -3,8 +3,9 @@ module Main;
 import Minilib.Common.Common;
 import Minilib.Monad.FreeT;
 import Minilib.Monad.Iden;
+import Minilib.Monad.IO;
 
-type Toy next = box union {
+type Toy next = unbox union {
     t_output: (String, next),
     t_bell: next,
     t_done: ()
@@ -20,20 +21,27 @@ impl Toy: Functor {
     );
 }
 
-// orphan rule のため、Free f a : ToString は Free モジュールの外部では定義できない。
-// また、[f a: ToString] という条件も書けない。
-// このため、to_string_ として定義する。
-to_string_: [a: ToString, m: Monad] FreeT Toy m a -> m String;
-to_string_ = |wma| (
-    match *wma.@data {
-        f_free(toy) => match toy {
-            t_output((x, next)) => pure $ "output " + x + "\n" + *next.to_string_,
-            t_bell(next) => pure $ "bell\n" + *next.to_string_,
-            t_done() => pure $ "done\n",
-        },
-        f_pure(value) => pure $ "pure " + value.to_string + "\n",
-    }
-);
+namespace FreeToyToString {
+
+    // Free モナドは用途に合わせて利用する。 (interpreter パターン)
+    // ここでは、Free モナドを命令列を表す文字列に変換する。
+    interpret: [a: ToString, m: Monad] FreeT Toy m a -> m String;
+    interpret = |wma| (
+        match wma {
+            f_free(toy) => match toy {
+                t_output((x, next)) => pure $ "output " + x + "\n" + *next.interpret,
+                t_bell(next) => pure $ "bell\n" + *next.interpret,
+                t_done() => pure $ "done\n",
+            },
+            f_monad(ma) => ma.bind(interpret),
+            f_pure(value) => pure $ "pure " + value.to_string + "\n",
+        }
+    );
+    // なお、`impl FreeT Toy Iden a : ToString` としたいところだが、orphan rule のため、Minilib.Monad.FreeT モジュールの外部では定義できない。
+    // また、ToString の実装には `f a: ToString` が必要になるが、Minilib.Monad.FreeT モジュールの内部では、
+    // f が確定しないため制約を書けない。(`[f a: ToString]`という制約は文法エラー)
+}
+
 
 output: [m: Monad] String -> FreeT Toy m ();
 output = |x| t_output((x, ())).lift_f;
@@ -50,32 +58,33 @@ test_toy_f_free = (
     let toy : Free Toy I64 = do {
         output("A");;
         bell;;
-        //done;;  // doneがあるとそれ以降は何をbindしても捨てられる。実行されない
+        //done;;  // done以降は実行されない。Result::err, Option::none, IOFail::throw と同様。
         bell;;
+        output("B");;
+        pure $ 123  // 正常終了したときの値。 Result::ok と同様。
+    };
+    print(toy.interpret.get)
+);
+
+test_toy_f_free_io: IO ();
+test_toy_f_free_io = (
+    println("=== test_toy_f_free_io ===");;
+    let toy : FreeT Toy IO I64 = do {
+        output("ABC");;
+        println("this is printed").lift_io;;
+        bell;;
+        done;;  // done以降は実行されない。Result::err, Option::none, IOFail::throw と同様。
+        println("this is not printed").lift_io;;
         output("B");;
         pure $ 123
     };
-    print(toy.to_string_.get)
-);
-
-test_toy_f_free2: IO ();
-test_toy_f_free2 = (
-    println("=== test_toy_f_free2 ===");;
-    let pretty = |toy: Free Toy ()| (
-        println("------------");;
-        print(toy.to_string_.get)
-    );
-    pretty(output("A"));;
-    pretty(pure("A").bind(output));;
-    pretty(output("A").bind(pure));;
-    pretty(output("A");; output("B"));;
-    pretty(output("A");; done;; output("B"));;
-    pure()
+    let str = *toy.interpret;   // "this is printed" はこのタイミングで表示される
+    print(str)                  // 命令列を表す文字列が表示される
 );
 
 main: IO ();
 main = (
     test_toy_f_free;;
-    test_toy_f_free2;;
+    test_toy_f_free_io;;
     pure()
 );

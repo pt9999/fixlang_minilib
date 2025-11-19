@@ -1,49 +1,52 @@
 module Minilib.Monad.FreeT;
 
 import Minilib.Monad.Iden;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
 
 // Free Monad
 // https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
 // https://eed3si9n.com/herding-cats/ja/Free-monads.html
-type [f: *->*, m: *->*] FreeT f m a = box struct {
-    data: m (FreeU f m a),
-};
-
-type [f: *->*, m: *->*] FreeU f m a = unbox union {
+type [f: *->*, m: *->*] FreeT f m a = box union {
     f_pure: a,
-    f_free: f (FreeT f m a)
+    f_monad: m (FreeT f m a),
+    f_free: f (FreeT f m a),
 };
 
 type [f: *->*] Free f = FreeT f Iden;
 
-namespace FreeT {
-    make: [f: Functor, m: Monad] m (FreeU f m a) -> FreeT f m a;
-    make = |ma| FreeT { data: ma };
-}
-
 lift_f: [f: Functor, m: Monad] f a -> FreeT f m a;
-lift_f = |command| FreeT::make $ pure $ f_free $ command.map(pure);
+lift_f = |command| f_free $ command.map(f_pure);
 
 impl [f: Functor, m: Monad] FreeT f m: Functor {
     map = |g, ma| (
-        FreeT::make $ do {
-            match *ma.@data {
-                f_pure(value) => pure $ f_pure(g(value)),
-                f_free(fma) => pure $ f_free(fma.map(map(g))),
-            }
+        match ma {
+            f_pure(value) => f_pure(g(value)),
+            f_monad(ma) => f_monad(ma.bind(g >> pure)),
+            f_free(fma) => f_free(fma.map(map(g))),
         }
     );
 }
 
 impl [f: Functor, m: Monad] FreeT f m: Monad {
-    pure = |a| FreeT::make $ pure $ f_pure(a);
+    pure = f_pure;
     bind = |g, ma| (
-        FreeT::make $ do {
-            match *ma.@data {
-                f_pure(value) => g(value).@data,
-                f_free(fma) => pure $ f_free(fma.map(bind(g))),
-            }
+        match ma {
+            f_pure(value) => g(value),
+            f_monad(ma) => f_monad(ma.bind(bind(g) >> pure)),
+            f_free(fma) => f_free(fma.map(bind(g))),
         }
     );
 }
 
+impl [f: Functor] FreeT f: MonadTrans {
+    lift_t = |ma| f_monad(ma.bind(pure >> pure));
+}
+
+impl [f: Functor, m: MonadIO] FreeT f m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [f: Functor, m: MonadIOFail] FreeT f m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
+}

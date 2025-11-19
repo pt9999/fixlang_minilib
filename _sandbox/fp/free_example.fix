@@ -1,10 +1,12 @@
 module Main;
 
+import Minilib.Common.Common;
 import Minilib.Monad.Free;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Iden;
 //import Minilib.Text.Hex;
 
+/*
 type Wrap a = unbox struct {
     data: a
 };
@@ -16,84 +18,84 @@ namespace Wrap {
     unwrap: Wrap a -> a;
     unwrap = @data;
 }
+*/
 
 //-------------------------------------------
 
 type Toy next = box union {
-    output: (String, next),
-    bell: next,
-    done: ()
+    t_output: (String, next),
+    t_bell: next,
+    t_done: () 
 };
-
-done_: Toy ();
-done_ = done();
 
 impl Toy: Functor {
     map = |f, toy| (
         match toy {
-            output((x, next)) => output((x, f(next))),
-            bell(next) => bell(f(next)),
-            done() => done(),
+            t_output((x, next)) => t_output((x, f(next))),
+            t_bell(next) => t_bell(f(next)),
+            t_done() => t_done(),   // t_done()にはnextがないため、fは呼び出されない。
         }
     );
 }
+
+// orphan rule のため、Free f a : ToString は Free モジュールの外部では定義できない。
+// また、[f a: ToString] という条件も書けない。
+// このため、to_string_ として定義する。
+to_string_: [a: ToString] Free Toy a -> String;
+to_string_ = |wma| (
+    match wma {
+        f_free(toy) => match toy {
+            t_output((x, next)) => "output " + x + "\n" + next.to_string_,
+            t_bell(next) => "bell\n" + next.to_string_,
+            t_done() => "done\n",
+        },
+        f_pure(value) => "pure " + value.to_string + "\n",
+    }
+);
 
 test_toy_1: IO ();
 test_toy_1 = (
-    let toy1: Toy (Toy ()) = output $ ("A", done());
-    let toy2: Toy (Toy (Toy ()))  = bell $ output $ ("A", done());
+    let toy1: Toy (Toy ()) = t_output $ ("A", t_done());
+    let toy2: Toy (Toy (Toy ()))  = t_bell $ t_output $ ("A", t_done());
     pure()
 );
 
-impl [a: ToString] Wrap (Free Toy a): ToString {
-    to_string = |wma| (
-        match wma.unwrap {
-            f_free(toy) => match toy {
-                output((x, next)) => "output " + x + "\n" + next.wrap.to_string,
-                bell(next) => "bell\n" + next.wrap.to_string,
-                done() => "done\n",
-            },
-            f_pure(value) => "pure " + value.to_string + "\n",
-        }
-    );
-}
 
-foutput: String -> Free Toy ();
-foutput = |x| f_free $ output $ (x, pure());
+output: String -> Free Toy ();
+output = |x| t_output((x, ())).lift_f;
 
-fbell: Free Toy ();
-fbell = f_free $ bell $ pure();
+bell: Free Toy ();
+bell = t_bell().lift_f;
 
-fdone: Free Toy ();
-fdone = f_free $ done();
-
-output_: String -> next -> Toy next;
-output_ = |x, next| output $ (x, next);
+done: Free Toy ();
+done = t_done().lift_f;
 
 test_toy_f_free: IO ();
 test_toy_f_free = (
     println("=== test_toy_f_free ===");;
-    let toy = do {
-        output_("A",()).lift_f;;
-        bell().lift_f;;
-        done_.lift_f;;
-        pure()
+    let toy : Free Toy I64 = do {
+        output("A");;
+        bell;;
+        //done;;  // doneがあるとそれ以降は何をbindしても捨てられる。実行されない
+        bell;;
+        output("B");;
+        pure $ 123
     };
-    print(toy.wrap.to_string)
+    print(toy.to_string_)
 );
 
 test_toy_f_free2: IO ();
 test_toy_f_free2 = (
     println("=== test_toy_f_free2 ===");;
-    let pretty = |x| (
+    let pretty = |toy| (
         println("------------");;
-        print(x.wrap.to_string)
+        print(toy.to_string_)
     );
-    pretty(foutput("A"));;
-    pretty(pure("A").bind(foutput));;
-    pretty(foutput("A").bind(pure));;
-    pretty(foutput("A");; foutput("B"));;
-    pretty(foutput("A");; fdone;; foutput("B"));;
+    pretty(output("A"));;
+    pretty(pure("A").bind(output));;
+    pretty(output("A").bind(pure));;
+    pretty(output("A");; output("B"));;
+    pretty(output("A");; done;; output("B"));;
     pure()
 );
 

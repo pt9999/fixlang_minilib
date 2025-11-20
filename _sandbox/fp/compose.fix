@@ -1,5 +1,8 @@
 module Minilib.Functor.Compose;
 
+import Minilib.Common.Common;
+import Minilib.Trait.Traversable;
+
 type [f: * -> *, g: * -> *] Compose f g a = unbox struct {
     data: f (g a)
 };
@@ -24,17 +27,40 @@ impl [f: Functor, g: Functor] Compose f g: Functor {
     If g is traversable, above condition holds.
 */
 
-impl [f: Monad, g: Monad, g: Traversable] Compose f g: Functor {
+impl [f: Monad, g: Monad, g: Traversable] Compose f g: Monad {
     pure = |a| Compose::make $ pure $ pure $ a;
     bind = |h, comp| (
         Compose::make $ do {
             let fga: f (g a) = comp.run_compose;
-            let fgb: f (g (f (g b))) = fga.bind(|ga| ga.bind(h).pure);
-            let fgb: f (f (g (g b))) = fgb.map(sequence);
+            let ga: g a = *fga;
+            let gfgb: g (f (g b)) = ga.bind(|a|
+                let comp_b: Compose f g b = h(a);
+                let fgb: f (g b) = comp_b.run_compose;
+                pure $ fgb
+            );
+            let fggb: f (g (g b)) = gfgb.sequence;
+            let ggb: g (g b) = *fggb;
+            let gb: g b = ggb.bind(id);
+            pure $ gb
+        }
+/*
+        Compose::make $ do {
+            let h: a -> Compose f g b = h;
+            let fga: f (g a) = comp.run_compose;
+            let fgb: f (g (f (g b))) = fga.bind(|ga: g a|
+                 let gfgb = ga.bind(|a|
+                    let comp_b: Compose f g b = h(a);
+                    let fgb: f (g b) = comp_b.run_compose;
+                    pure $ fgb
+                ) : g (f (g b));
+                pure $ gfgb
+            );
+            let fgb: f (f (g (g b))) = fgb.bind(sequence >> pure);
             let fgb: f (g (g b)) = fgb.bind(|x|x);
             let fgb: f (g b) = fgb.bind(bind(|x|x) >> pure);
             fgb
         }
+*/
     );
 }
 

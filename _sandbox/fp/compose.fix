@@ -21,6 +21,21 @@ impl [f: Functor, g: Functor] Compose f g: Functor {
     `f (g (f (g b))`.
     If f and g are transposable, ie. there is a function of type `g (f x) -> f (g x)`,
     the above can be `f (f (g (g b)))`, so `bind` can be implemented using `flatten`.
+    If g is traversable, above condition holds.
 */
+
+impl [f: Monad, g: Monad, g: Traversable] Compose f g: Functor {
+    pure = |a| Compose::make $ pure $ pure $ a;
+    bind = |h, comp| (
+        Compose::make $ do {
+            let fga: f (g a) = comp.run_compose;
+            let fgb: f (g (f (g b))) = fga.bind(|ga| ga.bind(h).pure);
+            let fgb: f (f (g (g b))) = fgb.map(sequence);
+            let fgb: f (g (g b)) = fgb.bind(|x|x);
+            let fgb: f (g b) = fgb.bind(bind(|x|x) >> pure);
+            fgb
+        }
+    );
+}
 
 

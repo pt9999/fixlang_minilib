@@ -1,0 +1,174 @@
+module Minilib.Collection.Treap2;
+
+import Minilib.Common.Common;
+import Minilib.Text.StringEx;
+
+// The priority type. (used internally)
+type Priority = U64;
+
+// The type of treap nodes.
+type TNode k = box struct {
+    prio: Priority, 
+    key: k, 
+    left: Option (TNode k),
+    right: Option (TNode k),
+};
+
+type TNodeOpt k = Option (TNode k);
+
+// The type of Treap.
+type Treap k = box struct {
+    root_opt: TNodeOpt k,
+    less_than: k -> k -> Bool,
+    size: I64,
+    seed: Priority,
+};
+
+namespace Treap {
+    empty: [k: LessThan] Treap k;
+    empty = (
+        Treap::make(less_than)
+    );
+
+    make: (k -> k -> Bool) -> Treap k;
+    make = |less_than| Treap {
+        root_opt: none(),
+        less_than: less_than,
+        size: 0,
+        seed: 0x0123456789abcdef_U64,
+    };
+
+    _generate_random_priority: Treap k -> (Treap k, Priority);
+    _generate_random_priority = |treap| (
+        treap.act_seed(|x|
+            // generate random number using XORSHIFT
+            let x = x.bit_xor(x.shift_left(13_U64));
+            let x = x.bit_xor(x.shift_right(7_U64));
+            let x = x.bit_xor(x.shift_left(17_U64));
+            (x, x)
+        ).swap
+    );
+
+    get_size: Treap k -> I64;
+    get_size = @size;
+
+    insert: k -> Treap k -> Treap k;
+    insert = |key, treap| (
+        let (treap, prio) = treap._generate_random_priority;
+        let root_opt = treap.@root_opt;
+        let treap = treap.set_root_opt(none());
+        let (treap, root) = treap._insert(prio, key, root_opt);
+        treap.set_root_opt(some $ root)
+    );
+
+    _insert: Priority -> k -> TNodeOpt k -> Treap k -> (Treap k, TNode k);
+    _insert = |new_prio, new_key, node_opt, treap| (
+        if node_opt.is_none {
+            let new_node = TNode { prio:new_prio, key:new_key, left:none(), right:none() };
+            let treap = treap.mod_size(add(1));
+            (treap, new_node)
+        };
+        let node = node_opt.as_some;
+        let less_than = treap.@less_than;
+        if less_than(node.@key, new_key) { // node_key < new_key
+            let (treap, up) = treap._insert(new_prio, new_key, node.@right);
+            if node.@prio < up.@prio {
+                let node = node.set_right(up.@left);
+                let up = up.set_left(some $ node);
+                (treap, up)
+            } else {
+                let node = node.set_right(some $ up);
+                (treap, node)
+            }
+        } else if less_than(new_key, node.@key) { // new_key < node_key
+            let (treap, up) = treap._insert(new_prio, new_key, node.@left);
+            if node.@prio < up.@prio {
+                let node = node.set_left(up.@right);
+                let up = up.set_right(some $ node);
+                (treap, up)
+            } else {
+                let node = node.set_left(some $ up);
+                (treap, node)
+            }
+        } else {    // replace key
+            let node = node.set_key(new_key);
+            (treap, node)
+        }
+    );
+
+    remove: k -> Treap k -> Treap k;
+    remove = |key, treap| (
+        let root_opt = treap.@root_opt;
+        let treap = treap.set_root_opt(none());
+        let (treap, root_opt) = treap._remove(key, root_opt);
+        treap.set_root_opt(root_opt)
+    );
+
+    _remove: k -> TNodeOpt k -> Treap k -> (Treap k, TNodeOpt k);
+    _remove = |key, node_opt, treap| (
+        if node_opt.is_none { (treap, none()) };
+        let node = node_opt.as_some;
+        let less_than = treap.@less_than;
+        if less_than(node.@key, key) { // node_key < key
+            let (treap, right_opt) = treap._remove(key, node.@right);
+            let node = node.set_right(right_opt);
+            (treap, some $ node)
+        } else if less_than(key, node.@key) { // key < node_key
+            let (treap, left_opt) = treap._remove(key, node.@left);
+            let node = node.set_left(left_opt);
+            (treap, some $ node)
+        } else {    // remove this node
+            let treap = treap.mod_size(add(-1));
+            let node_opt = _join(node.@left, node.@right);
+            (treap, node_opt)
+        }
+    );
+
+    _join: TNodeOpt k -> TNodeOpt k -> TNodeOpt k;
+    _join = |left_opt, right_opt| (
+        if left_opt.is_none { right_opt };
+        if right_opt.is_none { left_opt };
+        let left = left_opt.as_some;
+        let right = right_opt.as_some;
+        if left.@prio >= right.@prio {
+            some $ left.set_right(_join(left.@right, right_opt))
+        } else {
+            some $ right.set_left(_join(left_opt, right.@left))
+        }
+    );
+
+    to_array: Treap k -> Array k;
+    to_array = |treap| (
+        let inner = fix $ |inner, node_opt, arr| (
+            if node_opt.is_none { arr };
+            let node = node_opt.as_some;
+            let arr = inner(node.@left, arr);
+            let arr = arr.push_back(node.@key);
+            let arr = inner(node.@right, arr);
+            arr
+        );
+        inner(treap.@root_opt, [])
+    );
+
+    _debug_to_string: [k: ToString] Treap k -> String;
+    _debug_to_string = |treap| (
+        let inner = fix $ |inner, indent, node_opt, str: String| (
+            if node_opt.is_none { str };
+            let node = node_opt.as_some;
+            let s_indent = Array::fill(indent, ' ')._unsafe_to_string;
+            let str: String = inner(indent + 2, node.@left, str);
+            let str: String = str + s_indent + (node.@prio, node.@key).format("prio={} key={}\n");
+            let str: String = inner(indent + 2, node.@right, str);
+            str
+        );
+        inner(0, treap.@root_opt, "")
+    );
+
+    from_iter: [k: LessThan, i: Iterator, Item i = k] i -> Treap k;
+    from_iter = |iter| (
+        iter.fold(
+            Treap::empty, insert
+        )
+    );
+}
+

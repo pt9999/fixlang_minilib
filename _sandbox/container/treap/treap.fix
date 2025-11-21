@@ -132,6 +132,9 @@ namespace Treap {
         ).swap
     );
 
+    get_size: Treap kc k -> I64;
+    get_size = @size;
+
     insert: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
     insert = |key, treap| (
         let (treap, prio) = treap._generate_random_priority : (Treap kc k, Priority);
@@ -170,6 +173,51 @@ namespace Treap {
         } else {    // replace key
             let treap = treap[old_node][^key].iset(some $ new_key);
             (treap, old_node)
+        }
+    );
+
+    remove: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
+    remove = |key, treap| (
+        let (treap, root) = treap._remove(key, treap.@root);
+        treap.set_root(root)
+    );
+
+    _remove: [kc: KeyCompare, Key kc = k] k -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _remove = |key, old_node, treap| (
+        if old_node == TNodeIndex::empty {
+            (treap, TNodeIndex::empty)
+        };
+        let (old_prio, old_key, left, right) = treap[old_node].iget.to_quad;
+        if treap.@kc.compare(old_key, key) { // old_key < key
+            let (treap, right2) = treap._remove(key, right);
+            let treap = if right == right2 { treap } else { treap[old_node][^right].iset(right2) };
+            (treap, old_node)
+        } else if treap.@kc.compare(key, old_key) { // key < old_key
+            let (treap, left2) = treap._remove(key, left);
+            let treap = if left == left2 { treap } else { treap[old_node][^left].iset(left2) };
+            (treap, old_node)
+        } else {    // remove this node
+            let treap = treap._free_branch(old_node);
+            treap._join(left, right)
+        }
+    );
+
+    _join: [kc: KeyCompare, Key kc = k] TNodeIndex -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _join = |left, right, treap| (
+        if left == TNodeIndex::empty { (treap, right) };
+        if right == TNodeIndex::empty { (treap, left) };
+        let left_prio = treap[left][^priority].iget;
+        let right_prio = treap[right][^priority].iget;
+        if left_prio >= right_prio {
+            let left_right = treap[left][^right].iget;
+            let (treap, left_right) = treap._join(left_right, right);
+            let treap = treap[left][^right].iset(left_right);
+            (treap, left)
+        } else {
+            let right_left = treap[right][^left].iget;
+            let (treap, right_left) = treap._join(left, right_left);
+            let treap = treap[right][^left].iset(right_left);
+            (treap, right)
         }
     );
 

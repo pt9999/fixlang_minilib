@@ -55,44 +55,42 @@ namespace Treap {
     insert: k -> Treap k -> Treap k;
     insert = |key, treap| (
         let (treap, prio) = treap._generate_random_priority;
-        let root_opt = treap.@root_opt;
-        let treap = treap.set_root_opt(none());
-        let (treap, root) = treap._insert(prio, key, root_opt);
-        treap.set_root_opt(some $ root)
+        let less_than = treap.@less_than;
+        let (dsize, treap) = treap.act_root_opt(|root_opt| 
+            _insert(prio, key, less_than, root_opt)
+            .map(some)
+        );
+        treap.mod_size(add(dsize))
     );
 
-    _insert: Priority -> k -> TNodeOpt k -> Treap k -> (Treap k, TNode k);
-    _insert = |new_prio, new_key, node_opt, treap| (
+    _insert: Priority -> k -> (k -> k -> Bool) -> TNodeOpt k -> (I64, TNode k);
+    _insert = |new_prio, new_key, less_than, node_opt| (
         if node_opt.is_none {
             let new_node = TNode { prio:new_prio, key:new_key, left:none(), right:none() };
-            let treap = treap.mod_size(add(1));
-            (treap, new_node)
+            (1, new_node)
         };
         let node = node_opt.as_some;
-        let less_than = treap.@less_than;
         if less_than(node.@key, new_key) { // node_key < new_key
-            let (treap, up) = treap._insert(new_prio, new_key, node.@right);
+            let (dsize, up) = _insert(new_prio, new_key, less_than, node.@right);
             if node.@prio < up.@prio {
-                let node = node.set_right(up.@left);
-                let up = up.set_left(some $ node);
-                (treap, up)
+                let up = up.mod_left(|left| some $ node.set_right(left));
+                (dsize, up)
             } else {
                 let node = node.set_right(some $ up);
-                (treap, node)
+                (dsize, node)
             }
         } else if less_than(new_key, node.@key) { // new_key < node_key
-            let (treap, up) = treap._insert(new_prio, new_key, node.@left);
+            let (dsize, up) = _insert(new_prio, new_key, less_than, node.@left);
             if node.@prio < up.@prio {
-                let node = node.set_left(up.@right);
-                let up = up.set_right(some $ node);
-                (treap, up)
+                let up = up.mod_right(|right| some $ node.set_left(right));
+                (dsize, up)
             } else {
                 let node = node.set_left(some $ up);
-                (treap, node)
+                (dsize, node)
             }
         } else {    // replace key
             let node = node.set_key(new_key);
-            (treap, node)
+            (0, node)
         }
     );
 
@@ -100,27 +98,22 @@ namespace Treap {
     remove = |key, treap| (
         let root_opt = treap.@root_opt;
         let treap = treap.set_root_opt(none());
-        let (treap, root_opt) = treap._remove(key, root_opt);
-        treap.set_root_opt(root_opt)
+        let less_than = treap.@less_than;
+        let (dsize, root_opt) = _remove(key, less_than, root_opt);
+        treap.set_root_opt(root_opt).mod_size(add(dsize))
     );
 
-    _remove: k -> TNodeOpt k -> Treap k -> (Treap k, TNodeOpt k);
-    _remove = |key, node_opt, treap| (
-        if node_opt.is_none { (treap, none()) };
+    _remove: k -> (k -> k -> Bool) -> TNodeOpt k -> (I64, TNodeOpt k);
+    _remove = |key, less_than, node_opt| (
+        if node_opt.is_none { (0, none()) };
         let node = node_opt.as_some;
-        let less_than = treap.@less_than;
         if less_than(node.@key, key) { // node_key < key
-            let (treap, right_opt) = treap._remove(key, node.@right);
-            let node = node.set_right(right_opt);
-            (treap, some $ node)
+            node.act_right(|right| _remove(key, less_than, right)).map(some)
         } else if less_than(key, node.@key) { // key < node_key
-            let (treap, left_opt) = treap._remove(key, node.@left);
-            let node = node.set_left(left_opt);
-            (treap, some $ node)
+            node.act_left(|left| _remove(key, less_than, left)).map(some)
         } else {    // remove this node
-            let treap = treap.mod_size(add(-1));
             let node_opt = _join(node.@left, node.@right);
-            (treap, node_opt)
+            (-1, node_opt)
         }
     );
 

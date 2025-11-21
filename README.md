@@ -1,19 +1,27 @@
 ## Overview
 
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
-The latest Fix program (v1.1.0, 2025-09-04) is required.
 This library is still in alpha stage.
+
+The Fix program v1.1.0 (2025-09-04) or above is required.
+The latest Fix program v1.2.0-alpha (2025-11-20) is recommended.
 
 Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
 
-## Subprojects
+## Projects
 
-Minilib is split into several FixLang subprojects whose names start with `minilib-`.
+Minilib is split into several FixLang projects whose names start with `"minilib-"`.
+Each project is stored in a separated GitHub repository.
 
-Each subproject is stored in a separated GitHub repository whose names start with `fixlang-minilib-`.
-For example, `minilib-common` is stored in [fixlang-minilib-common](https://github.com/pt9999/fixlang-minilib-common) repository.
+### How to use FixLang projects in your program
 
-### List of subprojects
+You can add dependencies using `fix deps add` command.
+
+For example:
+```bash
+fix deps add minilib-common minilib-binary
+```
+### List of projects
 
 | Name   | Description |
 |--------|-------------|
@@ -34,11 +42,11 @@ For example, `minilib-common` is stored in [fixlang-minilib-common](https://gith
 |[minilib-xml](https://github.com/pt9999/fixlang-minilib-xml)| XML encoder/decoder |
 |[minilib-media](https://github.com/pt9999/fixlang-minilib-media)| Multimedia (PNG image etc.) |
 
-### Subproject dependency diagram
+### Project dependency diagram
 
 NOTE: Redundant dependencies are not displayed.
 
-![Subproject dependencies](_projects/dependencies.png)
+![Project dependencies](_projects/dependencies.png)
 
 ### Example programs
 
@@ -48,19 +56,19 @@ For details, see README.md in [fixlang-minilib-examples](https://github.com/pt99
 
 ### Registy File
 
-You might want to add [registry.toml](registry.toml) to your `${HOME}/.fixconfig.toml`.
+Minilib is registered in [default registry.toml file](https://raw.githubusercontent.com/tttmmmyyyy/fixlang-registry/refs/heads/main/registry.toml), so you don't have to edit your `${HOME}/.fixconfig.toml`.
+
+<!--
+
+In some case, you might want to add [registry.toml](registry.toml) to your `${HOME}/.fixconfig.toml`.
 For example:
 ```toml:~/.fixconfig.toml
 registries = [
     "https://raw.githubusercontent.com/pt9999/fixlang_minilib/refs/heads/main/registry.toml"
 ]
 ```
+-->
 
-Then, you can specify the names of subprojects in `fix deps add` command.
-For example:
-```bash
-fix deps add minilib-common minilib-binary
-```
 
 ## Target Platform
 
@@ -73,9 +81,9 @@ It has been mainly tested in the following environment.
 - Ubuntu-22.04 on WSL 2
 - gcc 11.4.0
 - GNU make 4.3
-- rustup 1.26.0
-- rustc 1.72.1
-- llvm 12.0.1
+- rustup 1.28.2
+- rustc 1.88.0
+- llvm 17.0.6
 - latest Fix program
 
 ## Minilib Development
@@ -85,14 +93,14 @@ This section describes how to develop Minilib.  If you are a Minilib user, you d
 ### Directory structure
 
 ```
-/_projects  ... Minilib subprojects are placed here as Git submodules
+/_projects  ... Minilib projects are placed here as Git submodules
 /_sandbox   ... Experimental source code (Not included in the library itself)
 /tools      ... Tools code
 ```
 
 ### Fetch Git submodules
 
-During Minilib development, Minilib subprojects are placed as Git submodules under the `_projects` directory.
+During Minilib development, Minilib projects are placed as Git submodules under the `_projects` directory.
 
 To fetch all Git submodules from GitHub repositories, execute the following command:
 ```bash
@@ -102,7 +110,7 @@ This will clone the Git submodules from their respective GitHub repositories and
 
 ### Run test codes
 
-To run test codes for all subprojects, execute the following command:
+To run test codes for all projects, execute the following command:
 ```bash
 make test -C _projects
 ```

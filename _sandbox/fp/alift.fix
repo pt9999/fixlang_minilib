@@ -4,6 +4,9 @@ module Main;
 import Minilib.Monad.Iden;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
+import Minilib.Monad.Option;
+import Minilib.Monad.Trans;
+//import Minilib.Monad.Error;
 
 // A trait which converts a value of a type to a value of another type.
 trait lf: ALifter {
@@ -46,6 +49,13 @@ impl [m: MonadIOFail] ALifterImpl (IOFail a) (m a): ALifter {
     alift_from = |iof, alifter| iof.lift_iofail;
 }
 
+impl [m: Monad, t: MonadTrans] ALifterImpl (m a) (t m a): ALifter {
+    type ALiftFrom (ALifterImpl (m a) (t m a)) = m a;
+    type ALiftTo (ALifterImpl (m a) (t m a)) = t m a;
+    alifter = ALifterImpl{};
+    alift_from = |ma, alifter| ma.lift_t;
+}
+
 trait [n: *->*] n: ALift {
     type [m: *->*] ALifterType n m a;
 }
@@ -65,6 +75,11 @@ impl IOFail: ALift
     type ALifterType IOFail m a = ALifterImpl (IOFail a) (m a);
 }
 
+impl [n: Monad] OptionT n: ALift
+{
+    type ALifterType (OptionT n) m a = ALifterImpl (OptionT n a) (m a);
+}
+
 alift: [
         n: ALift, 
         m: Monad, 
@@ -77,8 +92,7 @@ alift: [
     lf.alift_from(na)
 );
 
-main: IO ();
-main = (
+test1: IO () = (
     let sm: StateT String IOFail () = do {
         let s = *get_state;
         let a = *Iden::make(42).alift;
@@ -89,4 +103,21 @@ main = (
     
     sm.eval_state_t("start")
     .try(eprintln)
+);
+
+test2: IO () = (
+    let sm: StateT String (OptionT IO) () = do {
+        let str = *get_state;
+        let opt: OptionT IO String = some(" test2").lift_option;
+        let str2 = *opt.alift;
+        println(str + str2).alift;;
+        put_state("end")
+    };
+    sm.eval_state_t("start")
+    .run_option_t
+    .forget
+);
+
+main: IO () = (
+    test1;; test2
 );

@@ -82,41 +82,30 @@ namespace Treap {
         freelist: [],
     };
 
-    _make_node: TNode k -> Treap kc k -> (Treap kc k, TNodeIndex);
-    _make_node = |nodedata, treap| (
+    _make_branch: TNode k -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _make_branch = |b, treap| (
+        let treap = treap.mod_size(|size| size + 1);
         match treap.@freelist.get_last {
             some(node) => (
-                let treap = treap.mod_freelist(pop_back);
-                let treap = treap.mod_nodes(|nodes| nodes.set(node, nodedata));
+                let treap = treap.mod_freelist(|f| f.pop_back);
+                let treap = treap.mod_nodes(|nodes| nodes.set(node, b));
                 (treap, node)
             ),
             none() => (
                 let node = treap.@nodes.get_size;
-                let treap = treap.mod_nodes(|nodes| nodes.push_back(nodedata));
+                let treap = treap.mod_nodes(|nodes| nodes.push_back(b));
                 (treap, node)
             )
         }
     );
 
-    _free_node: TNodeIndex -> Treap kc k -> Treap kc k;
-    _free_node = |node, treap| (
-        treap.mod_nodes(|nodes| nodes
+    _free_branch: TNodeIndex -> Treap kc k -> Treap kc k;
+    _free_branch = |node, treap| (
+        treap.mod_size(|size| size - 1)
+        .mod_nodes(|nodes| nodes
             .mod(node, |b| b.set_key(none()))
         )
         .mod_freelist(push_back(node))
-    );
-
-    _make_branch: Priority -> k -> TNodeIndex -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
-    _make_branch = |priority, key, left, right, treap| (
-        let treap = treap.mod_size(add(1));
-        let b = (priority, some $ key, left, right);
-        treap._make_node(b)
-    );
-
-    _free_branch: TNodeIndex -> Treap kc k -> Treap kc k;
-    _free_branch = |node, treap| (
-        let treap = treap.mod_size(add(-1));
-        treap._free_node(node)
     );
 
     _generate_random_priority: Treap kc k -> (Treap kc k, Priority);
@@ -143,7 +132,8 @@ namespace Treap {
     _insert: [kc: KeyCompare, Key kc = k] Priority -> k -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
     _insert = |new_prio, new_key, old_node, treap| (
         if old_node == TNodeIndex::empty {
-            treap._make_branch(new_prio, new_key, TNodeIndex::empty, TNodeIndex::empty)
+            let b = (new_prio, some $ new_key, TNodeIndex::empty, TNodeIndex::empty);
+            treap._make_branch(b)
         };
         let (old_prio, old_key, left, right) = treap.@nodes.@(old_node);
         let old_key = old_key.as_some;

@@ -1,0 +1,282 @@
+module Minilib.Collection.Treap3;
+
+import Minilib.Common.Common;
+import Minilib.Text.StringEx;
+
+trait kc : KeyCompare {
+    type Key kc;
+    // Returns false iff the first key should appear after the second key.
+    compare : Key kc -> Key kc -> kc -> Bool;
+}
+
+type KeyLessThan k = unbox struct {};
+
+impl [k: LessThan] KeyLessThan k: KeyCompare {
+    type Key (KeyLessThan k) = k;
+    compare = |x, y, kc| x < y;
+}
+
+type KeyLessThanOrEq k = unbox struct {};
+
+impl [k: LessThanOrEq] KeyLessThanOrEq k: KeyCompare {
+    type Key (KeyLessThanOrEq k) = k;
+    compare = |x, y, kc| x <= y;
+}
+
+type KeyGreaterThan k = unbox struct {};
+
+impl [k: LessThan] KeyGreaterThan k: KeyCompare {
+    type Key (KeyGreaterThan k) = k;
+    compare = |x, y, kc| y < x;
+}
+
+// The priority type. (used internally)
+type Priority = U64;
+
+// The type of treap nodes. (priority, key, left, right)
+type TNode k = (Priority, Option k, TNodeIndex, TNodeIndex);
+
+namespace TNode {
+    get_priority: TNode k -> Priority = Tuple4::@0;
+    get_key: TNode k -> Option k = Tuple4::@1;
+    get_left: TNode k -> TNodeIndex = Tuple4::@2;
+    get_right: TNode k -> TNodeIndex = Tuple4::@3;
+
+    set_priority: Priority -> TNode k -> TNode k = Tuple4::set_0;
+    set_key: Option k -> TNode k -> TNode k = Tuple4::set_1;
+    set_left: TNodeIndex -> TNode k -> TNode k = Tuple4::set_2;
+    set_right: TNodeIndex -> TNode k -> TNode k = Tuple4::set_3;
+}
+
+// The type of index of the node array.
+type TNodeIndex = I64;
+
+namespace TNodeIndex {
+    // A special index which represents an empty node.
+    empty: TNodeIndex = -1;
+}
+
+// The type of Treap.
+type Treap kc k = box struct {
+    root: TNodeIndex,
+    kc: kc,
+    size: I64,
+    seed: Priority,
+    nodes: Array (TNode k),
+    freelist: Array TNodeIndex,
+};
+
+namespace Treap {
+    empty: [k: LessThan] Treap (KeyLessThan k) k;
+    empty = (
+        Treap::make(KeyLessThan{})
+    );
+
+    make: [kc: KeyCompare, Key kc = k] kc -> Treap kc k;
+    make = |kc| Treap {
+        root: TNodeIndex::empty,
+        kc: kc,
+        size: 0,
+        seed: 0x0123456789abcdef_U64,
+        nodes: [],
+        freelist: [],
+    };
+
+    _make_node: TNode k -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _make_node = |nodedata, treap| (
+        match treap.@freelist.get_last {
+            some(node) => (
+                let treap = treap.mod_freelist(pop_back);
+                let treap = treap.mod_nodes(|nodes| nodes.set(node, nodedata));
+                (treap, node)
+            ),
+            none() => (
+                let node = treap.@nodes.get_size;
+                let treap = treap.mod_nodes(|nodes| nodes.push_back(nodedata));
+                (treap, node)
+            )
+        }
+    );
+
+    _free_node: TNodeIndex -> Treap kc k -> Treap kc k;
+    _free_node = |node, treap| (
+        treap.mod_nodes(|nodes| nodes
+            .mod(node, |b| b.set_key(none()))
+        )
+        .mod_freelist(push_back(node))
+    );
+
+    _make_branch: Priority -> k -> TNodeIndex -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _make_branch = |priority, key, left, right, treap| (
+        let treap = treap.mod_size(add(1));
+        let b = (priority, some $ key, left, right);
+        treap._make_node(b)
+    );
+
+    _free_branch: TNodeIndex -> Treap kc k -> Treap kc k;
+    _free_branch = |node, treap| (
+        let treap = treap.mod_size(add(-1));
+        treap._free_node(node)
+    );
+
+    _generate_random_priority: Treap kc k -> (Treap kc k, Priority);
+    _generate_random_priority = |treap| (
+        treap.act_seed(|x|
+            // generate random number using XORSHIFT
+            let x = x.bit_xor(x.shift_left(13_U64));
+            let x = x.bit_xor(x.shift_right(7_U64));
+            let x = x.bit_xor(x.shift_left(17_U64));
+            (x, x)
+        ).swap
+    );
+
+    get_size: Treap kc k -> I64;
+    get_size = @size;
+
+    insert: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
+    insert = |key, treap| (
+        let (treap, prio) = treap._generate_random_priority : (Treap kc k, Priority);
+        let (treap, root) = treap._insert(prio, key, treap.@root) : (Treap kc k, TNodeIndex);
+        treap.set_root(root)
+    );
+
+    _insert: [kc: KeyCompare, Key kc = k] Priority -> k -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _insert = |new_prio, new_key, old_node, treap| (
+        if old_node == TNodeIndex::empty {
+            treap._make_branch(new_prio, new_key, TNodeIndex::empty, TNodeIndex::empty)
+        };
+        let (old_prio, old_key, left, right) = treap.@nodes.@(old_node);
+        let old_key = old_key.as_some;
+        if treap.@kc.compare(old_key, new_key) { // old_key < new_key
+            let (treap, up_node) = treap._insert(new_prio, new_key, right);
+            let (up_prio, up_key, up_left, up_right) = treap.@nodes.@(up_node);
+            let up_key = up_key.as_some;
+            if old_prio < up_prio {
+                let treap = treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_right(up_left))
+                    .mod(up_node, |b| b.set_left(old_node))
+                );
+                (treap, up_node)
+            } else {
+                let treap = treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_right(up_node))
+                );
+                (treap, old_node)
+            }
+        } else if treap.@kc.compare(new_key, old_key) { // new_key < old_key
+            let (treap, up_node) = treap._insert(new_prio, new_key, left);
+            let (up_prio, up_key, up_left, up_right) = treap.@nodes.@(up_node);
+            let up_key = up_key.as_some;
+            if old_prio < up_prio {
+                let treap = treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_left(up_right))
+                    .mod(up_node, |b| b.set_right(old_node))
+                );
+                (treap, up_node)
+            } else {
+                let treap = treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_left(up_node))
+                );
+                (treap, old_node)
+            }
+        } else {    // replace key
+            let treap = treap.mod_nodes(|nodes| nodes
+                .mod(old_node, |b| b.set_key(some $ new_key))
+            );
+            (treap, old_node)
+        }
+    );
+
+    remove: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
+    remove = |key, treap| (
+        let (treap, root) = treap._remove(key, treap.@root);
+        treap.set_root(root)
+    );
+
+    _remove: [kc: KeyCompare, Key kc = k] k -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _remove = |key, old_node, treap| (
+        if old_node == TNodeIndex::empty {
+            (treap, TNodeIndex::empty)
+        };
+        let (old_prio, old_key, left, right) = treap.@nodes.@(old_node);
+        let old_key = old_key.as_some;
+        if treap.@kc.compare(old_key, key) { // old_key < key
+            let (treap, right2) = treap._remove(key, right);
+            let treap = if right == right2 { treap } else { 
+                treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_right(right2))
+                )
+            };
+            (treap, old_node)
+        } else if treap.@kc.compare(key, old_key) { // key < old_key
+            let (treap, left2) = treap._remove(key, left);
+            let treap = if left == left2 { treap } else { 
+                treap.mod_nodes(|nodes| nodes
+                    .mod(old_node, |b| b.set_left(left2))
+                )
+            };
+            (treap, old_node)
+        } else {    // remove this node
+            let treap = treap._free_branch(old_node);
+            treap._join(left, right)
+        }
+    );
+
+    _join: [kc: KeyCompare, Key kc = k] TNodeIndex -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
+    _join = |left, right, treap| (
+        if left == TNodeIndex::empty { (treap, right) };
+        if right == TNodeIndex::empty { (treap, left) };
+        let left_prio = treap.@nodes.@(left).get_priority;
+        let right_prio = treap.@nodes.@(right).get_priority;
+        if left_prio >= right_prio {
+            let left_right = treap.@nodes.@(left).get_right;
+            let (treap, left_right) = treap._join(left_right, right);
+            let treap = treap.mod_nodes(|nodes| nodes
+                .mod(left, |b| b.set_right(left_right))
+            );
+            (treap, left)
+        } else {
+            let right_left = treap.@nodes.@(right).get_left;
+            let (treap, right_left) = treap._join(left, right_left);
+            let treap = treap.mod_nodes(|nodes| nodes
+                .mod(right, |b| b.set_left(right_left))
+            );
+            (treap, right)
+        }
+    );
+
+    to_array: Treap kc k -> Array k;
+    to_array = |treap| (
+        let inner = fix $ |inner, node, arr| (
+            if node == TNodeIndex::empty { arr };
+            let (prio, key, left, right) = treap.@nodes.@(node);
+            let arr = inner(left, arr);
+            let arr = arr.push_back(key.as_some);
+            let arr = inner(right, arr);
+            arr
+        );
+        inner(treap.@root, [])
+    );
+
+    _debug_to_string: [k: ToString] Treap kc k -> String;
+    _debug_to_string = |treap| (
+        let inner = fix $ |inner, indent, node, str: String| (
+            if node == TNodeIndex::empty { str };
+            let (prio, key, left, right) = treap.@nodes.@(node);
+            let s_indent = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
+            let str: String = inner(indent + 2, left, str);
+            let str: String = str + s_indent + (prio, key.as_some).format("prio={} key={}\n");
+            let str: String = inner(indent + 2, right, str);
+            str
+        );
+        inner(0, treap.@root, "")
+    );
+
+    from_iter: [k: LessThan, i: Iterator, Item i = k] i -> Treap (KeyLessThan k) k;
+    from_iter = |iter| (
+        iter.fold(
+            Treap::empty, insert
+        )
+    );
+}
+

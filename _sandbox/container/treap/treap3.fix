@@ -33,20 +33,13 @@ impl [k: LessThan] KeyGreaterThan k: KeyCompare {
 // The priority type. (used internally)
 type Priority = U64;
 
-// The type of treap nodes. (priority, key, left, right)
-type TNode k = (Priority, Option k, TNodeIndex, TNodeIndex);
-
-namespace TNode {
-    get_priority: TNode k -> Priority = Tuple4::@0;
-    get_key: TNode k -> Option k = Tuple4::@1;
-    get_left: TNode k -> TNodeIndex = Tuple4::@2;
-    get_right: TNode k -> TNodeIndex = Tuple4::@3;
-
-    set_priority: Priority -> TNode k -> TNode k = Tuple4::set_0;
-    set_key: Option k -> TNode k -> TNode k = Tuple4::set_1;
-    set_left: TNodeIndex -> TNode k -> TNode k = Tuple4::set_2;
-    set_right: TNodeIndex -> TNode k -> TNode k = Tuple4::set_3;
-}
+// The type of treap nodes.
+type TNode k = unbox struct {
+    prio: Priority,
+    key: Option k,
+    left: TNodeIndex,
+    right: TNodeIndex,
+};
 
 // The type of index of the node array.
 type TNodeIndex = I64;
@@ -132,14 +125,14 @@ namespace Treap {
     _insert: [kc: KeyCompare, Key kc = k] Priority -> k -> TNodeIndex -> Treap kc k -> (Treap kc k, TNodeIndex);
     _insert = |new_prio, new_key, old_node, treap| (
         if old_node == TNodeIndex::empty {
-            let b = (new_prio, some $ new_key, TNodeIndex::empty, TNodeIndex::empty);
+            let b = TNode { prio:new_prio, key:some(new_key), left:TNodeIndex::empty, right:TNodeIndex::empty };
             treap._make_branch(b)
         };
-        let (old_prio, old_key, left, right) = treap.@nodes.@(old_node);
+        let TNode { prio:old_prio, key:old_key, left:left, right:right } = treap.@nodes.@(old_node);
         let old_key = old_key.as_some;
         if treap.@kc.compare(old_key, new_key) { // old_key < new_key
             let (treap, up_node) = treap._insert(new_prio, new_key, right);
-            let (up_prio, up_key, up_left, up_right) = treap.@nodes.@(up_node);
+            let TNode { prio:up_prio, key:up_key, left:up_left, right:up_right } = treap.@nodes.@(up_node);
             let up_key = up_key.as_some;
             if old_prio < up_prio {
                 let treap = treap.mod_nodes(|nodes| nodes
@@ -155,7 +148,7 @@ namespace Treap {
             }
         } else if treap.@kc.compare(new_key, old_key) { // new_key < old_key
             let (treap, up_node) = treap._insert(new_prio, new_key, left);
-            let (up_prio, up_key, up_left, up_right) = treap.@nodes.@(up_node);
+            let TNode { prio:up_prio, key:up_key, left:up_left, right:up_right } = treap.@nodes.@(up_node);
             let up_key = up_key.as_some;
             if old_prio < up_prio {
                 let treap = treap.mod_nodes(|nodes| nodes
@@ -188,11 +181,11 @@ namespace Treap {
         if old_node == TNodeIndex::empty {
             (treap, TNodeIndex::empty)
         };
-        let (old_prio, old_key, left, right) = treap.@nodes.@(old_node);
+        let TNode{ prio:old_prio, key:old_key, left:left, right:right } = treap.@nodes.@(old_node);
         let old_key = old_key.as_some;
         if treap.@kc.compare(old_key, key) { // old_key < key
             let (treap, right2) = treap._remove(key, right);
-            let treap = if right == right2 { treap } else { 
+            let treap = if right == right2 { treap } else {
                 treap.mod_nodes(|nodes| nodes
                     .mod(old_node, |b| b.set_right(right2))
                 )
@@ -200,7 +193,7 @@ namespace Treap {
             (treap, old_node)
         } else if treap.@kc.compare(key, old_key) { // key < old_key
             let (treap, left2) = treap._remove(key, left);
-            let treap = if left == left2 { treap } else { 
+            let treap = if left == left2 { treap } else {
                 treap.mod_nodes(|nodes| nodes
                     .mod(old_node, |b| b.set_left(left2))
                 )
@@ -216,17 +209,15 @@ namespace Treap {
     _join = |left, right, treap| (
         if left == TNodeIndex::empty { (treap, right) };
         if right == TNodeIndex::empty { (treap, left) };
-        let left_prio = treap.@nodes.@(left).get_priority;
-        let right_prio = treap.@nodes.@(right).get_priority;
+        let TNode { prio:left_prio, right:left_right } = treap.@nodes.@(left);
+        let TNode { prio:right_prio, left:right_left } = treap.@nodes.@(right);
         if left_prio >= right_prio {
-            let left_right = treap.@nodes.@(left).get_right;
             let (treap, left_right) = treap._join(left_right, right);
             let treap = treap.mod_nodes(|nodes| nodes
                 .mod(left, |b| b.set_right(left_right))
             );
             (treap, left)
         } else {
-            let right_left = treap.@nodes.@(right).get_left;
             let (treap, right_left) = treap._join(left, right_left);
             let treap = treap.mod_nodes(|nodes| nodes
                 .mod(right, |b| b.set_left(right_left))
@@ -239,7 +230,7 @@ namespace Treap {
     to_array = |treap| (
         let inner = fix $ |inner, node, arr| (
             if node == TNodeIndex::empty { arr };
-            let (prio, key, left, right) = treap.@nodes.@(node);
+            let TNode { prio:prio, key:key, left:left, right:right } = treap.@nodes.@(node);
             let arr = inner(left, arr);
             let arr = arr.push_back(key.as_some);
             let arr = inner(right, arr);
@@ -252,7 +243,7 @@ namespace Treap {
     _debug_to_string = |treap| (
         let inner = fix $ |inner, indent, node, str: String| (
             if node == TNodeIndex::empty { str };
-            let (prio, key, left, right) = treap.@nodes.@(node);
+            let TNode { prio:prio, key:key, left:left, right:right } = treap.@nodes.@(node);
             let s_indent = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
             let str: String = inner(indent + 2, left, str);
             let str: String = str + s_indent + (prio, key.as_some).format("prio={} key={}\n");

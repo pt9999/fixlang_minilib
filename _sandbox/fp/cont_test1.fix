@@ -2,6 +2,7 @@ module Main;
 
 import Minilib.Common.IOEx;
 import Minilib.Monad.Cont;
+import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
 
 type [cm: * -> *] Label cm a b = box struct {
@@ -37,10 +38,54 @@ test_label = (
     cont.run_cont_t(|_| pure())
 );
 
+// `postpone(g)` adds `g` as a postprocess function of `r`.
+// Note that `postpone(f);; postpone(g)` is equivalent to `postpone(g >> f)`.
+postpone: [m: Monad] (r -> r) -> ContT r m ();
+postpone = |g| (
+    cont_t $ |f: () -> m r| f().bind(g >> pure)
+);
+
+test_postpone: IOFail ();
+test_postpone = (
+    println("=== test_postpone ===").lift;;
+    let cont: ContT (Array String) IOFail (Array String) = do {
+        //postpone(reverse);;
+        postpone(push_back("third"));;
+        postpone(push_back("second"));;
+        pure $ [ "first" ]
+    };
+    let arr = *cont.run_cont_t(|arr| pure $ arr);
+    println(arr.to_string).lift
+);
+
+// Exits the continuation. The following part is ignored.
+// The argument of `run_cont_t` is also ignored.
+// Note that if you call `postpone` before `exit_cont`, the postponed functions will be executed.
+exit_cont: [m: Monad] r -> ContT r m ();
+exit_cont = |r| (
+    cont_t $ |f: () -> m r| pure $ r
+);
+
+test_exit_cont: IOFail ();
+test_exit_cont = (
+    println("=== test_exit_cont ===").lift;;
+    let cont: ContT (Array String) IOFail (Array String) = do {
+        postpone(push_back("third"));;
+        exit_cont $ [ "aborted" ];;
+        postpone(push_back("second"));;
+        pure $ [ "first" ]
+    };
+    let arr = *cont.run_cont_t(|arr| pure $ arr);
+    println(arr.to_string).lift
+);
+
 main: IO ();
 main = do {
     set_unbuffered_mode(stdout).lift;;
-    test_label
+    test_postpone;;
+    test_exit_cont;;
+    //test_label;;
+    pure()
 }.try(eprintln);
 
 /*

@@ -1,0 +1,35 @@
+module Main;
+
+// `iter_iter.transpose` transposes an iterator of iterators.
+// For example, [[0, 1, 2], [3, 4, 5], [6, 7, 8]] ==> [[0, 3, 6], [1, 4, 7], [2, 5, 8]].
+// Note that `iter_iter` must be finite.
+// This function is very similar to `zip` function of Python.
+transpose : [i2 : Iterator, i : Iterator, Item i2 = i] i2 -> TransposeIterator i;
+transpose = |iter_iter| TransposeIterator { iters: iter_iter.to_array };
+
+type TransposeIterator i = unbox struct { iters : Array i };
+impl [i : Iterator] TransposeIterator i : Iterator {
+    type Item (TransposeIterator i) = ArrayIterator (Item i);
+    advance = |TransposeIterator { iters : iters }| (
+        let advanced = iters.map(advance);
+        if advanced.to_iter.check_any(is_none) { none() };
+        let iters = advanced.map(as_some >> Tuple2::@0);
+        let arr = advanced.map(as_some >> Tuple2::@1);
+        some $ (TransposeIterator { iters : iters }, arr.to_iter)
+    );
+}
+
+test_transpose: IO ();
+test_transpose = (
+    let arr = [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+    ];
+    let iter_iter = arr.to_iter.map(to_iter);
+    let trans = iter_iter.transpose;
+    let arr2 = trans.map(to_array).to_array;
+    println(arr2.to_string)
+);
+
+main: IO () = test_transpose;

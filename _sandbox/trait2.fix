@@ -15,7 +15,7 @@ impl TTrue: Default {
 }
 
 impl TTrue: ToString {
-    to_string = "true";
+    to_string = |_| "true";
 }
 
 impl TTrue: TBool {
@@ -29,7 +29,7 @@ impl TFalse: Default {
 }
 
 impl TFalse: ToString {
-    to_string = "false";
+    to_string = |_| "false";
 }
 
 impl TFalse: TBool {
@@ -38,38 +38,38 @@ impl TFalse: TBool {
 
 type Wrap a = struct {};
 
-type EqPred a b c = struct {};
+type EqType3 a b c = struct {};
 
-impl EqPred a b c: Default {
-    default = EqPred {};
+impl EqType3 a b c: Default {
+    default = EqType3 {};
 }
 
-trait t: TPredicate {
-    type PredVal t;
-    pred_val: t -> Bool;
+impl EqType3 (Wrap a) (Wrap a) c: TBool {
+    type IfElse (EqType3 (Wrap a) (Wrap a) c) t f = t;
 }
 
-impl EqPred a (Wrap a) c: TPredicate {
-    type PredVal (EqPred a (Wrap a) c) = TTrue;
-    pred_val = |_| true;
+impl EqType3 (Wrap a) (Wrap a) c: ToString {
+    to_string = |_| "true";
 }
 
-impl EqPred a b (Wrap c): TPredicate {
-    type PredVal (EqPred a b (Wrap c)) = TFalse;
-    pred_val = |_| false;
+impl EqType3 a b (Wrap c): TBool {
+    type IfElse (EqType3 a b (Wrap c)) t f = f;
 }
 
-type EqType a b = EqPred a (Wrap b) (Wrap ());
+impl EqType3 a b (Wrap c): ToString {
+    to_string = |_| "false";
+}
 
-//type IfEq a b t f = IfElse (PredVal (EqType a b)) t f; // error
+type EqType a b = EqType3 (Wrap a) (Wrap b) (Wrap ());
 
 test_eqtype: IO ();
 test_eqtype = (
     let p: EqType I64 I64 = default;
-    println("EqType I64 I64 = " + p.pred_val.to_string);;
+    println("EqType I64 I64 = " + p.to_string);;
     let p: EqType I64 I32 = default;
-    println("EqType I64 I32 = " + p.pred_val.to_string);;
-    let q: IfElse (PredVal (EqType I64 I32)) String (Option I64) = some(1);
+    println("EqType I64 I32 = " + p.to_string);;
+    let q: IfElse (EqType I64 I64) String (Option I64) = "abc";
+    let q: IfElse (EqType I64 I32) String (Option I64) = some(1);
     pure()
 );
 
@@ -98,12 +98,12 @@ impl TCons car cdr: Default {
 }
 
 impl [cdr: TList] TCons car cdr: TList {
-    type TContains (TCons car cdr) a = IfElse (PredVal (EqType car a)) TTrue (TContains cdr a);
-    type TAdd (TCons car cdr) a = IfElse (PredVal (EqType car a)) (TCons car cdr) (TCons car (TAdd cdr a));
-    type TRemove (TCons car cdr) a = IfElse (PredVal (EqType car a)) cdr (TCons car (TRemove cdr a));
+    type TContains (TCons car cdr) a = IfElse (EqType car a) TTrue (TContains cdr a);
+    type TAdd (TCons car cdr) a = IfElse (EqType car a) (TCons car cdr) (TCons car (TAdd cdr a));
+    type TRemove (TCons car cdr) a = IfElse (EqType car a) (TRemove cdr a) (TCons car (TRemove cdr a)); 
 }
 
-show_contains: [l: TList] a -> String -> l -> IO ();
+show_contains: [l: TList, r: Default, r: ToString, TContains l a = r] a -> String -> l -> IO ();
 show_contains = |_, label, _| (
     let b: TContains l a = default;
     println(label + ": " + b.to_string)
@@ -120,7 +120,8 @@ test_tlist: IO () = (
     l.show_contains(123, "contains([U8, I32], I64)");;
     l.show_contains(123_I32, "contains([U8, I32], I32)");;
     let l = l.tadd(123);
-    let l = l.tremove(234_I32);
+    let l = l.tadd(123.0);
+    //let l = l.tremove(234);   //error
     l.show_contains(123, "contains([U8, I64], I64)");;
     l.show_contains(123_I32, "contains([U8, I64], I32)");;
     pure()

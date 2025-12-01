@@ -21,6 +21,7 @@ impl [i : Iterator] TransposeIterator i : Iterator {
 
 test_transpose: IO ();
 test_transpose = (
+    println("=== test_transpose ===");;
     let arr = [
         [0, 1, 2],
         [3, 4, 5],
@@ -28,8 +29,47 @@ test_transpose = (
     ];
     let iter_iter = arr.to_iter.map(to_iter);
     let trans = iter_iter.transpose;
-    let arr2 = trans.map(to_array).to_array;
-    println(arr2.to_string)
+    let actual = trans.map(to_array).to_array;
+    println("arr=" + arr.to_string);;
+    println("transpose=" + actual.to_string)
 );
 
-main: IO () = test_transpose;
+//-------------------------------------------------------------------------
+
+type AdjacentIterator a = unbox struct { arr : Array a, idx : I64 };
+
+impl AdjacentIterator a : Iterator {
+    type Item (AdjacentIterator a) = (a, a);
+    advance = |AdjacentIterator { arr : arr, idx : idx }| (
+        if idx + 1 >= arr.get_size { none() };
+        let u = arr.@(idx);
+        let v = arr.@(idx + 1);
+        some((AdjacentIterator { arr: arr, idx: idx + 1 }, (u, v)))
+    );
+}
+
+adjacent: Array a -> AdjacentIterator a;
+adjacent = |arr| AdjacentIterator { arr: arr, idx: 0 };
+
+test_adjacent: IO ();
+test_adjacent = (
+    println("=== test_adjacent ===");;
+    [
+        ([1, 2, 3, 4, 5], [(1, 2), (2, 3), (3, 4), (4, 5)]),
+        ([1], []),
+        ([], []),
+    ]
+    .to_iter.fold_m(
+        (), |(arr, expected), _|
+        let actual = arr.adjacent.to_array;
+        println("arr=" + arr.to_string);;
+        println("adjacent=" + actual.to_string);;
+        assert_eq(|_| "eq", expected, actual)
+    )
+);
+
+main: IO () = (
+    test_transpose;;
+    test_adjacent;;
+    pure()
+);

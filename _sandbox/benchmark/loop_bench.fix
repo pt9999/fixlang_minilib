@@ -36,22 +36,6 @@ loop_fold = |n| (
     Iterator::range(0, n).fold(0, |sum, i| sum + i)
 );
 
-    fold2 : b -> (b -> a -> b) -> Iterator a -> b;
-    fold2 = |init, op, iter| (
-        let next = iter.advance;
-        if next.is_none {
-            init
-        } else {
-            let (next, iter) = next.as_some;
-            iter.fold2(op(init, next), op)
-        }
-    );
-
-loop_fold2: I64 -> I64;
-loop_fold2 = |n| (
-    Iterator::range(0, n).fold2(0, |sum, i| sum + i)
-);
-
 bench: String -> I64 -> I64 -> (I64 -> I64) -> IO ();
 bench = |name, times, n, f| (
     let (result, time) = *consumed_time_while_io(
@@ -59,7 +43,7 @@ bench = |name, times, n, f| (
         pure $ loop(
             (f(n), 0), |(sum, i)|
             if i >= times - 1 { break $ sum };
-            let ans = f(n);
+            let ans = f(n);     // maybe erased by optimization?
             continue $ (sum, i + 1)
         ));
     println(name + ": result="+result.to_string+" time="+time.to_string)
@@ -74,14 +58,14 @@ main = (
     bench("loop_rec2", times, n, |n| loop_rec2(n, 0));;
     bench("loop_fix", times, n, loop_fix);;
     bench("loop_fold", times, n, loop_fold);;
-    bench("loop_fold2", times, n, loop_fold2);;
     pure()
 );
 
 /*
-    times = 100, n = 1000000
-    loop_loop: result=499999500000 time=0.464619
-    loop_rec: result=499999500000 time=0.000002
-    loop_fix: result=499999500000 time=3.820138
-    loop_fold: result=499999500000 time=3.706885
+    times = 100, n = 1000000, -O max
+    loop_loop: result=499999500000 time=0.000646
+    loop_rec: result=499999500000 time=0.000001
+    loop_rec2: result=499999500000 time=0.000001
+    loop_fix: result=499999500000 time=0.036755
+    loop_fold: result=499999500000 time=0.000319
 */

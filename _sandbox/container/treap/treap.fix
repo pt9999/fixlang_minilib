@@ -255,11 +255,53 @@ namespace Treap {
         iter.from_iter_kc(KeyLessThan{})
     );
 
-    from_iter_kc: [kc: KeyCompare, Key kc = k, i: Iterator, Item i = k] kc -> i -> Treap kc k;
-    from_iter_kc = |kc, iter| (
+    from_iter_kc_non_optimized: [kc: KeyCompare, Key kc = k, i: Iterator, Item i = k] kc -> i -> Treap kc k;
+    from_iter_kc_non_optimized = |kc, iter| (
         iter.fold(
             Treap::make(kc), insert
         )
+    );
+
+    from_iter_kc: [kc: KeyCompare, Key kc = k, i: Iterator, Item i = k] kc -> i -> Treap kc k;
+    from_iter_kc = |kc, iter| (
+        let treap = Treap::make(kc);
+        let (treap, arr) = iter.fold(
+            (treap, []), |k, (treap, arr)|
+            let (treap, prio) = treap._generate_random_priority : (Treap kc k, Priority);
+            (treap, arr.push_back((prio, k)))
+        );
+        // sort by priority descending
+        let arr = arr.sort_by(|((prio0, k0), (prio1, k1))| prio0 > prio1);
+        arr.to_iter.fold(
+            treap, |(new_prio, new_key), treap|
+            treap._insert_to_leaf(new_prio, new_key, treap.@root, TNodeIndex::empty, 0_I8)
+        )
+    );
+
+    _insert_to_leaf: [kc: KeyCompare, Key kc = k] Priority -> k -> TNodeIndex -> TNodeIndex -> I8 -> Treap kc k -> Treap kc k;
+    _insert_to_leaf = |new_prio, new_key, old_node, parent_node, dir, treap| (
+        if old_node == TNodeIndex::empty {
+            let (treap, new_node) = treap._make_branch(new_prio, new_key, TNodeIndex::empty, TNodeIndex::empty);
+            let treap = if parent_node == TNodeIndex::empty {
+                treap.set_root(new_node)
+            } else {
+                if dir > 0_I8 {
+                    treap[parent_node][^right].iset(new_node)
+                } else {
+                    treap[parent_node][^left].iset(new_node)
+                }
+            };
+            treap
+        };
+        let (old_prio, old_key, left, right) = treap[old_node].iget.to_quad;
+        if treap.@kc.compare(old_key, new_key) { // old_key < new_key
+            treap._insert_to_leaf(new_prio, new_key, right, old_node, 1_I8)
+        } else if treap.@kc.compare(new_key, old_key) { // new_key < old_key
+            treap._insert_to_leaf(new_prio, new_key, left, old_node, -1_I8)
+        } else {    // replace key
+            let treap = treap[old_node][^key].iset(some $ new_key);
+            treap
+        }
     );
 }
 

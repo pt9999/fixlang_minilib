@@ -3,6 +3,33 @@ module Minilib.Collection.Treap2;
 import Minilib.Common.Common;
 import Minilib.Text.StringEx;
 
+trait kc : KeyCompare {
+    type Key kc;
+    // Returns false iff the first key should appear after the second key.
+    compare : Key kc -> Key kc -> kc -> Bool;
+}
+
+type KeyLessThan k = unbox struct {};
+
+impl [k: LessThan] KeyLessThan k: KeyCompare {
+    type Key (KeyLessThan k) = k;
+    compare = |x, y, kc| x < y;
+}
+
+type KeyLessThanOrEq k = unbox struct {};
+
+impl [k: LessThanOrEq] KeyLessThanOrEq k: KeyCompare {
+    type Key (KeyLessThanOrEq k) = k;
+    compare = |x, y, kc| x <= y;
+}
+
+type KeyGreaterThan k = unbox struct {};
+
+impl [k: LessThan] KeyGreaterThan k: KeyCompare {
+    type Key (KeyGreaterThan k) = k;
+    compare = |x, y, kc| y < x;
+}
+
 // The priority type. (used internally)
 type Priority = U64;
 
@@ -17,28 +44,28 @@ type TNode k = box struct {
 type TNodeOpt k = Option (TNode k);
 
 // The type of Treap.
-type Treap k = box struct {
+type Treap kc k = box struct {
     root_opt: TNodeOpt k,
-    less_than: k -> k -> Bool,
+    kc: kc,
     size: I64,
     seed: Priority,
 };
 
 namespace Treap {
-    empty: [k: LessThan] Treap k;
+    empty: [k: LessThan] Treap (KeyLessThan k) k;
     empty = (
-        Treap::make(less_than)
+        Treap::make(KeyLessThan{})
     );
 
-    make: (k -> k -> Bool) -> Treap k;
-    make = |less_than| Treap {
+    make: [kc: KeyCompare, Key kc = k] kc -> Treap kc k;
+    make = |kc| Treap {
         root_opt: none(),
-        less_than: less_than,
+        kc: kc,
         size: 0,
         seed: 0x0123456789abcdef_U64,
     };
 
-    _generate_random_priority: Treap k -> (Treap k, Priority);
+    _generate_random_priority: Treap kc k -> (Treap kc k, Priority);
     _generate_random_priority = |treap| (
         treap.act_seed(|x|
             // generate random number using XORSHIFT
@@ -49,29 +76,29 @@ namespace Treap {
         ).swap
     );
 
-    get_size: Treap k -> I64;
+    get_size: Treap kc k -> I64;
     get_size = @size;
 
-    insert: k -> Treap k -> Treap k;
+    insert: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
     insert = |key, treap| (
         let (treap, prio) = treap._generate_random_priority;
-        let less_than = treap.@less_than;
+        let kc = treap.@kc;
         let (dsize, treap) = treap.act_root_opt(|root_opt| 
-            _insert(prio, key, less_than, root_opt)
+            _insert(prio, key, kc, root_opt)
             .map(some)
         );
         treap.mod_size(add(dsize))
     );
 
-    _insert: Priority -> k -> (k -> k -> Bool) -> TNodeOpt k -> (I64, TNode k);
-    _insert = |new_prio, new_key, less_than, node_opt| (
+    _insert: [kc: KeyCompare, Key kc = k] Priority -> k -> kc -> TNodeOpt k -> (I64, TNode k);
+    _insert = |new_prio, new_key, kc, node_opt| (
         if node_opt.is_none {
             let new_node = TNode { prio:new_prio, key:new_key, left:none(), right:none() };
             (1, new_node)
         };
         let node = node_opt.as_some;
-        if less_than(node.@key, new_key) { // node_key < new_key
-            let (dsize, up) = _insert(new_prio, new_key, less_than, node.@right);
+        if kc.compare(node.@key, new_key) { // node_key < new_key
+            let (dsize, up) = _insert(new_prio, new_key, kc, node.@right);
             if node.@prio < up.@prio {
                 let up = up.mod_left(|left| some $ node.set_right(left));
                 (dsize, up)
@@ -79,8 +106,8 @@ namespace Treap {
                 let node = node.set_right(some $ up);
                 (dsize, node)
             }
-        } else if less_than(new_key, node.@key) { // new_key < node_key
-            let (dsize, up) = _insert(new_prio, new_key, less_than, node.@left);
+        } else if kc.compare(new_key, node.@key) { // new_key < node_key
+            let (dsize, up) = _insert(new_prio, new_key, kc, node.@left);
             if node.@prio < up.@prio {
                 let up = up.mod_right(|right| some $ node.set_left(right));
                 (dsize, up)
@@ -94,23 +121,23 @@ namespace Treap {
         }
     );
 
-    remove: k -> Treap k -> Treap k;
+    remove: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
     remove = |key, treap| (
         let root_opt = treap.@root_opt;
         let treap = treap.set_root_opt(none());
-        let less_than = treap.@less_than;
-        let (dsize, root_opt) = _remove(key, less_than, root_opt);
+        let kc = treap.@kc;
+        let (dsize, root_opt) = _remove(key, kc, root_opt);
         treap.set_root_opt(root_opt).mod_size(add(dsize))
     );
 
-    _remove: k -> (k -> k -> Bool) -> TNodeOpt k -> (I64, TNodeOpt k);
-    _remove = |key, less_than, node_opt| (
+    _remove: [kc: KeyCompare, Key kc = k] k -> kc -> TNodeOpt k -> (I64, TNodeOpt k);
+    _remove = |key, kc, node_opt| (
         if node_opt.is_none { (0, none()) };
         let node = node_opt.as_some;
-        if less_than(node.@key, key) { // node_key < key
-            node.act_right(|right| _remove(key, less_than, right)).map(some)
-        } else if less_than(key, node.@key) { // key < node_key
-            node.act_left(|left| _remove(key, less_than, left)).map(some)
+        if kc.compare(node.@key, key) { // node_key < key
+            node.act_right(|right| _remove(key, kc, right)).map(some)
+        } else if kc.compare(key, node.@key) { // key < node_key
+            node.act_left(|left| _remove(key, kc, left)).map(some)
         } else {    // remove this node
             let node_opt = _join(node.@left, node.@right);
             (-1, node_opt)
@@ -130,7 +157,7 @@ namespace Treap {
         }
     );
 
-    to_array: Treap k -> Array k;
+    to_array: Treap kc k -> Array k;
     to_array = |treap| (
         let inner = fix $ |inner, node_opt, arr| (
             if node_opt.is_none { arr };
@@ -192,7 +219,7 @@ namespace Treap {
     // such that `!elem.lt_begin && elem.lt_end` is true.
     // NOTE: `lt_begin` and `lt_end` must meet following condition:
     // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
-    find_range: (k -> Bool) -> (k -> Bool) -> Treap k -> TreapIterator k;
+    find_range: (k -> Bool) -> (k -> Bool) -> Treap kc k -> TreapIterator k;
     find_range = |lt_begin, lt_end, treap| (
         TreapIterator {
             lt_begin: lt_begin,
@@ -206,7 +233,7 @@ namespace Treap {
     // such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
     // NOTE: `lt_begin` and `lt_end` must meet following condition:
     // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
-    find_range_descending: (k -> Bool) -> (k -> Bool) -> Treap k -> TreapIterator k;
+    find_range_descending: (k -> Bool) -> (k -> Bool) -> Treap kc k -> TreapIterator k;
     find_range_descending = |lt_begin, lt_end, treap| (
         TreapIterator {
             lt_begin: lt_begin,
@@ -216,24 +243,24 @@ namespace Treap {
         }
     );
 
-    to_iter: Treap k -> TreapIterator k;
+    to_iter: Treap kc k -> TreapIterator k;
     to_iter = |treap| (
         treap.find_range(|_| false, |_| true)
     );
 
-    to_iter_descending: Treap k -> TreapIterator k;
+    to_iter_descending: Treap kc k -> TreapIterator k;
     to_iter_descending = |treap| (
         treap.find_range_descending(|_| false, |_| true)
     );
 
-    contains: k -> Treap k -> Bool;
+    contains: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Bool;
     contains = |key, treap| (
-        let less_than = treap.@less_than;
-        let iter = treap.find_range(|x| less_than(x, key), |x| !less_than(key, x));
+        let kc = treap.@kc;
+        let iter = treap.find_range(|x| kc.compare(x, key), |x| !kc.compare(key, x));
         ! iter.is_empty
     );
 
-    _debug_to_string: [k: ToString] Treap k -> String;
+    _debug_to_string: [k: ToString] Treap kc k -> String;
     _debug_to_string = |treap| (
         let inner = fix $ |inner, indent, node_opt, str: String| (
             if node_opt.is_none { str };
@@ -247,7 +274,7 @@ namespace Treap {
         inner(0, treap.@root_opt, "")
     );
 
-    from_iter: [k: LessThan, i: Iterator, Item i = k] i -> Treap k;
+    from_iter: [k: LessThan, i: Iterator, Item i = k] i -> Treap (KeyLessThan k) k;
     from_iter = |iter| (
         iter.fold(
             Treap::empty, insert

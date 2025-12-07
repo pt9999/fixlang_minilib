@@ -82,7 +82,44 @@ test_typename = (
     pure()
 );
 
+type TypedPtr = unbox struct {
+    typename: String,
+    ptr: Ptr,   // retained ptr of `Box a`
+};
+
+namespace TypedPtr {
+    to_typed_ptr: [a: ToTypename] a -> TypedPtr;
+    to_typed_ptr = |a| (
+        TypedPtr {
+            typename: (phantom: Phantom a).to_typename,
+            ptr: Box::make(a).boxed_to_retained_ptr
+        }
+    );
+
+    from_typed_ptr: [a: ToTypename] TypedPtr -> a;
+    from_typed_ptr = |typed_ptr| (
+        let typename = (phantom: Phantom a).to_typename;
+        if typename != typed_ptr.@typename {
+            undefined("from_typed_ptr: type mismatch: typed_ptr:" + typed_ptr.@typename + " target:" + typename)
+        };
+        let ba: Box a = typed_ptr.@ptr.boxed_from_retained_ptr;
+        ba.@value
+    );
+}
+
+test_typed_ptr: IO ();
+test_typed_ptr = (
+    println("=== test_typed_ptr ===");;
+    let pa = 42.to_typed_ptr;
+    let pb = "abc".to_typed_ptr;
+    let i: I64 = pa.from_typed_ptr;
+    let s: String = pb.from_typed_ptr;
+    println("i="+ i.to_string + " s=" + s.to_string);;
+    pure()
+);
+
 main: IO () = (
     test_typename;;
+    test_typed_ptr;;
     pure()
 );

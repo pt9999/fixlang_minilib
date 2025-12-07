@@ -29,19 +29,11 @@ update-deps:
 	fi
 
 # Publish a subproject.
-# - Update dependencies
 # - Run test
-# - Commit `fixdeps.lock`
 # - Push to the remote repository
 publish:
-	git checkout main
 	fix clean
-	fix deps update
 	fix test
-	git add fixdeps.lock
-	if ! git diff-index --quiet --cached HEAD; then \
-		git commit -m 'update deps' ; \
-	fi
 	git push
 
 # Version up.

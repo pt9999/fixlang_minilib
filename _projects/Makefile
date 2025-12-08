@@ -25,12 +25,14 @@ EXAMPLES = \
 SUBPROJECT_MAKEFILE = $$(pwd)/subproject.make
 
 .PHONY: all test examples clean publish
-.SUFFIXES: .test .clean .document .update-deps .publish .verup
+.SUFFIXES: .test .test-document .clean .document .update-deps .publish .verup
 
 all:
 
 # Test all subprojects (except examples).
 test: $(SUBPROJECTS:%=%.test)
+
+test-document: $(SUBPROJECTS:%=%.test-document)
 
 # Build all examples.
 examples:
@@ -76,6 +78,9 @@ push-submodules:
 
 %.test:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean test
+
+%.test-document:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) test-document
 
 %.clean:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean

@@ -9,7 +9,7 @@ function gendoc () {
         if [ ! -d lib ]; then return; fi
         local files=$(find lib -name ".fixlang" -prune -o -name "*.fix")
         local modules=$(perl -lne 'print "$1" if /^module\s+([\w\.]+);/' $files)
-        echo "=== $dir ==="
+        echo "--- Generating documents for '$dir' ---"
         #echo dir=$dir files=$files modules=$modules
         rm -rf doc docs
         fix docs -m $modules

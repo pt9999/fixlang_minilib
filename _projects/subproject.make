@@ -13,14 +13,14 @@ test-fix:
 	fix test
 
 test-document:
-	bash ../_gendoc.sh .
+	fix docs -o docs
 
 clean:
 	fix clean
 	rm -rf *.out
 
 document:
-	bash ../_gendoc.sh .
+	fix docs -o docs
 	if ! git diff --quiet HEAD -- docs; then \
 		git add docs; \
 		git commit -m 'update document' -- docs; \

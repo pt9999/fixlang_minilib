@@ -16,25 +16,35 @@ clean:
 
 document:
 	bash ../_gendoc.sh .
-	git add docs
-	if ! git diff-index --quiet HEAD docs; then \
-		git commit -m 'update document' ; \
+	if ! git diff --quiet HEAD -- docs; then \
+		git add docs; \
+		git commit -m 'update document' -- docs; \
 	fi
 
 update-deps:
 	fix deps update
-	git add fixdeps.lock
-	if ! git diff-index --quiet HEAD fixdeps.lock; then \
-		git commit -m 'update deps' ; \
+	if ! git diff --quiet HEAD -- fixdeps.lock; then \
+		git add fixdeps.lock; \
+		git commit -m 'update deps' -- fixdeps.lock; \
 	fi
 
 # Publish a subproject.
+# - Clean
+# - Update deps
 # - Run test
-# - Push to the remote repository
+# - Commit fixdeps.lock if needed
+# - Version up and push if needed
 publish:
+	# git diff --exit-code HEAD											# Check if uncommit files exist
+	/usr/bin/test "$$(git rev-parse --abbrev-ref HEAD)" == "main"		# Check if current branch is main
 	fix clean
+	fix deps update
 	fix test
-	git push
+	if ! git diff --quiet HEAD -- fixdeps.lock; then \
+		git add fixdeps.lock; \
+		git commit -m 'update deps' -- fixdeps.lock; \
+	fi
+	python3 ../_verup.py --update-document --commit --tag --push
 
 # Version up.
 # - Increment the patch version of `[general]version` in `fixproj.toml`

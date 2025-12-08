@@ -25,7 +25,7 @@ EXAMPLES = \
 SUBPROJECT_MAKEFILE = $$(pwd)/subproject.make
 
 .PHONY: all test examples clean publish
-.SUFFIXES: .test .clean .document .publish .verup
+.SUFFIXES: .test .clean .document .update-deps .publish .verup
 
 all:
 
@@ -42,6 +42,9 @@ clean: $(SUBPROJECTS:%=%.clean)
 
 # Generate documents for all subprojects.
 document: $(SUBPROJECTS:%=%.document)
+
+# Update dependencies
+update-deps: $(SUBPROJECTS:%=%.update-deps)
 
 #document:
 #	bash _gendoc.sh $(SUBPROJECTS)
@@ -79,6 +82,9 @@ push-submodules:
 
 %.document:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) document
+
+%.update-deps:
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) update-deps
 
 %.publish:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) publish

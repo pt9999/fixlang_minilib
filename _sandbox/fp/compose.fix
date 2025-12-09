@@ -2,6 +2,7 @@ module Minilib.Functor.Compose;
 
 import Minilib.Common.Common;
 import Minilib.Trait.Traversable;
+import Minilib.Trait.Applicative;
 
 type [f: * -> *, g: * -> *] Compose f g a = unbox struct {
     data: f (g a)
@@ -17,6 +18,23 @@ impl [f: Functor, g: Functor] Compose f g: Functor {
     map = |h, comp| Compose::make $ comp.run_compose.map(map(h));
 }
 
+impl [f: Applicative, g: Applicative] Compose f g: Applicative {
+    pure_a: a -> Compose f g a = |a| (
+        Compose::make $ pure_a $ pure_a $ a
+    );
+    app_a: Compose f g (a -> b) -> Compose f g a -> Compose f g b = |ch, ca| (
+        Compose::make $ (
+            let fgh: f (g (a -> b)) = ch.run_compose;
+            let fga: f (g a) = ca.run_compose;
+            let fgk: f (g a -> g b) = fgh.app_a(
+                pure_a $ |gab: g (a -> b)| 
+                |ga: g a| ga.app_a(gab)
+            );
+            fga.app_a(fgk)
+        )
+    );
+}
+
 /*
     NOTE: `Compose f g` is generally not a monad.
     Because `bind` must be implmented such as
@@ -28,8 +46,10 @@ impl [f: Functor, g: Functor] Compose f g: Functor {
 */
 
 impl [f: Monad, g: Monad, g: Traversable] Compose f g: Monad {
-    pure = |a| Compose::make $ pure $ pure $ a;
-    bind = |h, comp| (
+    pure: a -> Compose f g a = |a| (
+        Compose::make $ pure $ pure $ a
+    );
+    bind: (a -> Compose f g b) -> Compose f g a -> Compose f g b = |h, comp| (
         Compose::make $ do {
             let fga: f (g a) = comp.run_compose;
             let ga: g a = *fga;

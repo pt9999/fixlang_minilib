@@ -1,0 +1,130 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.Free;
+import Minilib.Monad.State;
+import Minilib.Monad.Iden;
+
+//--------------------------------------------------
+// Interface
+
+trait MonadApp = Monad + MonadAppIF;
+
+trait [m: *->*] m: MonadAppIF {
+    users: m (Users m),
+    logger: m (Logger m),
+}
+
+type [m: *->*] Users m = unbox struct {
+    list_users: m (Array String),
+    add_user: String -> m (),
+};
+
+namespace Users {
+    list_users: [m:Monad] m (Users m) -> m (Array String);
+    list_users = bind(@list_users);
+
+    add_user: [m:Monad] String -> m (Users m) -> m ();
+    add_user = |name, users| (users.@add_user)(name);
+}
+
+type [m: *->*] Logger m = unbox struct {
+    write_log: String -> m ()
+};
+
+namespace Logger {
+    write_log: [m: Monad] String -> m (Logger m) -> m ();
+    write_log = |str, logger| (logger.@write_log)(str);
+}
+
+//--------------------------------------------------
+// Implementation (App)
+
+type AppState = StateT AppImpl IOFail a;
+
+type AppImpl = unbox struct {
+    users: UsersImpl,
+    logger: LoggerImpl,
+};
+
+//--------------------------------------------------
+// Implementation (Users)
+
+type UsersImpl = unbox struct {
+    users: Array UserImpl,
+};
+
+namespace UsersImpl {
+    // TODO: lens_state を使って m (Users m) を m' (Users m) には変換できるが、m' (Users m') には変換できない。
+
+    api: [m: MonadState, StateType m = UsersImpl] m (Users m);
+    api = (
+        pure $ Users {
+            add_user: _add_user,
+            list_users: _list_users,
+        }
+    );
+    _add_user: [m: MonadState, StateType m = UsersImpl] String -> m ();
+    _add_user = |name| State::mod_state(mod_users(push_back(UserImpl::make(name))));
+
+    _list_users: [m: MonadState, StateType m = UsersImpl] m (Array String);
+    _list_users: get_state.map(|ui| ui.@users.map(@name));
+}
+
+type UserImpl = unbox struct {
+    name: String,
+    last_login: I64,
+};
+
+namespace UserImpl {
+    make: String -> UserImpl;
+    make = |name| UserImpl { name: name, last_login: -1 };
+}
+
+//--------------------------------------------------
+// Implementation (Logger)
+
+type LoggerImpl = unbox struct {
+    messages: Array String,
+};
+
+namespace LoggerImpl {
+    _write_log: [m: MonadState, StateType m = LoggerImpl] String -> m ();
+    _write_log = |str| State::mod_state(mod_messages(push_back(str));
+};
+
+impl [m: Monad] StateT AppImpl m: MonadAppIF {
+    users = do {
+        let app = *get_state;
+        pure $ Users {
+            list_user: do {
+            },
+            add_user: |name|
+        }
+    }
+
+    logger = bind(@logger);
+}
+
+
+//--------------------------------------------------
+// Usage
+
+
+test_app: AppState ();
+test_app = (
+    logger.write_log("add users");;
+    users.add_user("alice");;
+    users.add_user("bob");;
+    let arr = *users.list_users;
+    println("users=" + arr.to_string).lift_io;;
+    logger.write_log("done");;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+
+    }.try(eprintln)
+);

@@ -1,92 +1,113 @@
+// ReaderT パターン
+// https://scrapbox.io/LugendrePublic/ReaderT_%E3%83%91%E3%82%BF%E3%83%BC%E3%83%B3(%E7%BF%BB%E8%A8%B3)
 // https://github.com/commercialhaskell/rio
+//
+// - アプリケーション全体を RIO モナドで表現する
+// - RIO の実体は ReaderT env IO
+// - 可変オブジェクトは Var にして env に入れる
+// - HasXXXX のような trait で コンポーネントを判別する
+//
+// Stateモナドとの比較
+// - スレッドセーフ
+// - 例外が発生しても状態が失われない。例外ハンドラで状態を取得できる。(本当?)
+//   (Fix の場合、IO ではなくIOFailにすべきかもしれない。throw を catch できるため)
 
 module Main;
 
 import AsyncTask;  // for Var
+import HashMap;
+
 import Minilib.Common.Common;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Iden;
 import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Minilib.Trait.Traversable;
 
-// RIO is a thread-safe version of State monad
-type RIO e a = ReaderT (Var e) IO a;
-
-get_env: RIO e e;
-get_env = (
-    let v: Var e = *ask;
-    v.get.lift_io
-);
-
-put_env: e -> RIO e ();
-put_env = |e| (
-    let v: Var e = *ask;
-    v.Var::set(e).lift_io
-);
-
-mod_env: (e -> e) -> RIO e ();
-mod_env = |f| (
-    let v: Var e = *ask;
-    v.Var::mod(f).lift_io
-);
+type RIO e a = ReaderT e IO a;
 
 type Logger = unbox struct {
     messages: Array String
 };
 
 trait e: HasLogger {
-    lens_logger: [f: Functor] (Logger -> f Logger) -> e -> f e;
+    get_logger: e -> Var Logger;    // 可変オブジェクトはVarにする
 }
 
-write_log: [e: HasLogger] String -> RIO e ();
-write_log = |msg| (
-    mod_env(
-        |e| flip(lens_logger, e).imod(mod_messages(push_back(msg)))
-    )
-);
+namespace Logger {
+    empty: Logger;
+    empty = Logger {
+        messages: []
+    };
+
+    write_log: [e: HasLogger] String -> RIO e ();
+    write_log = |msg| (
+        let v: Var Logger = (*ask).get_logger;
+        v.mod(mod_messages(push_back(msg))).lift_io
+    );
+}
 
 type Config = unbox struct {
-    value: I64
+    map: HashMap String String,
 };
 
 trait e: HasConfig {
-    lens_config: [f: Functor] (Config -> f Config) -> e -> f e;
+    get_config: e -> Config;
+}
+
+namespace Config {
+    empty: Config;
+    empty = Config {
+        map: HashMap::empty(10)
+    };
+
+    set: String -> String -> Config -> Config;
+    set = |k, v, c| c.mod_map(insert(k,v));
+
+    get: String -> Config -> String;
+    get = |k, c| c.@map.find(k).as_some_or("");
+
 }
 
 type Env = box struct {
-    logger: Logger,
+    logger: Var Logger,     // 可変オブジェクトは Var にする
     config: Config
 };
 
 trait e: HasEnv {
-    lens_env: [f: Functor] (Env -> f Env) -> e -> f e;
+    get_env: e -> Env;
 }
 
 impl Env: HasLogger {
-    lens_logger = Env::act_logger;
+    get_logger = Env::@logger;
 }
 
 impl Env: HasConfig {
-    lens_config = Env::act_config;
+    get_config = Env::@config;
 }
 
 impl Env: HasEnv {
-    lens_env = |f| f;
+    get_env = |e| e;
 }
 
-test1: RIO Env ();
+test1: [e: HasConfig, e: HasLogger] RIO e ();
 test1 = (
-    write_log("hello")
+    let config = (*ask).get_config;
+    config.@map.to_iter.foreach_m(|(key, value)|
+        write_log((key, value).format("{} = {}"))
+    )
 );
 
 main: IO ();
 main = (
+    let logger = *Var::make(Logger::empty);
+    let config = Config::empty.set("key1", "value1").set("key2", "value2");
     let env = Env {
-        logger: Logger { messages: [] },
-        config: Config { value: 42 },
+        logger: logger,
+        config: config
     };
-    let v = *Var::make(env);
-    test1.run_reader_t(v);;
-    let messages = (*v.get).@logger.@messages;
+    test1.run_reader_t(env);;
+    let messages = (*logger.get).@messages;
     println("messages="+messages.to_string)
 );
 

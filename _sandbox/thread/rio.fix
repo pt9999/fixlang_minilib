@@ -1,0 +1,80 @@
+// https://github.com/commercialhaskell/rio
+
+module Main;
+
+import AsyncTask;  // for Var
+import Minilib.Common.Common;
+import Minilib.Monad.Reader;
+import Minilib.Monad.State;
+import Minilib.Monad.Iden;
+import Minilib.Monad.IO;
+
+// RIO is a thread-safe version of State monad
+type RIO e a = ReaderT (Var e) IO a;
+
+impl ReaderT (Var e) IO: MonadStateIF {
+    type StateType (ReaderT (Var e) IO) = e;
+    get_state = ask.map(Var::get);
+    put_state = |e| ask.map(Var::set(e));
+    mod_state_ = |f| ask.map(Var::mod(e));
+}
+
+type Logger = unbox struct {
+    messages: Array String
+};
+
+trait e: HasLogger {
+    lens_logger: [f: Functor] (Logger -> f Logger) -> e -> f e;
+}
+
+write_log: [e: HasLogger, m: MonadState, StateType m = e] String -> m ();
+write_log = |msg| (
+    State::mod_state(
+        |e| flip(lens_logger, e).imod(mod_messages(push_back(msg)))
+    )
+);
+
+type Config = unbox struct {
+    value: I64
+};
+
+trait e: HasConfig {
+    lens_config: [f: Functor] (Config -> f Config) -> e -> f e;
+}
+
+type Env = box struct {
+    logger: Logger,
+    config: Config
+};
+
+trait e: HasEnv {
+    lens_env: [f: Functor] (Env -> f Env) -> e -> f e;
+}
+
+impl Env: HasLogger {
+    lens_logger = Env::act_logger;
+}
+
+impl Env: HasConfig {
+    lens_config = Env::act_config;
+}
+
+impl Env: HasEnv {
+    lens_env = |f| f;
+}
+
+test1: RIO Env ();
+test1 = (
+    write_log("hello")
+);
+
+main: IO ();
+main = (
+    let env = Env {
+        logger: Logger { messages: [] },
+        config: Config { value: 42 },
+    };
+    let v = *Var::make(env);
+    test1.run_reader_t
+);
+

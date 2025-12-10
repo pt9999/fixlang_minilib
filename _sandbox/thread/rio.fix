@@ -5,19 +5,29 @@ module Main;
 import AsyncTask;  // for Var
 import Minilib.Common.Common;
 import Minilib.Monad.Reader;
-import Minilib.Monad.State;
 import Minilib.Monad.Iden;
 import Minilib.Monad.IO;
 
 // RIO is a thread-safe version of State monad
 type RIO e a = ReaderT (Var e) IO a;
 
-impl ReaderT (Var e) IO: MonadStateIF {
-    type StateType (ReaderT (Var e) IO) = e;
-    get_state = ask.map(Var::get);
-    put_state = |e| ask.map(Var::set(e));
-    mod_state_ = |f| ask.map(Var::mod(e));
-}
+get_env: RIO e e;
+get_env = (
+    let v: Var e = *ask;
+    v.get.lift_io
+);
+
+put_env: e -> RIO e ();
+put_env = |e| (
+    let v: Var e = *ask;
+    v.Var::set(e).lift_io
+);
+
+mod_env: (e -> e) -> RIO e ();
+mod_env = |f| (
+    let v: Var e = *ask;
+    v.Var::mod(f).lift_io
+);
 
 type Logger = unbox struct {
     messages: Array String
@@ -27,9 +37,9 @@ trait e: HasLogger {
     lens_logger: [f: Functor] (Logger -> f Logger) -> e -> f e;
 }
 
-write_log: [e: HasLogger, m: MonadState, StateType m = e] String -> m ();
+write_log: [e: HasLogger] String -> RIO e ();
 write_log = |msg| (
-    State::mod_state(
+    mod_env(
         |e| flip(lens_logger, e).imod(mod_messages(push_back(msg)))
     )
 );
@@ -75,6 +85,8 @@ main = (
         config: Config { value: 42 },
     };
     let v = *Var::make(env);
-    test1.run_reader_t
+    test1.run_reader_t(v);;
+    let messages = (*v.get).@logger.@messages;
+    println("messages="+messages.to_string)
 );
 

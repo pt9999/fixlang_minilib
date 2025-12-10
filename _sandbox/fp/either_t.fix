@@ -1,0 +1,104 @@
+module Main;
+
+type [m: * -> *, n: * -> *] EitherT m n a = unbox union {
+    left: m a,
+    right: n a,
+};
+
+impl [m: Functor, n: Functor] EitherT m n: Functor {
+    map = |f, ea| (
+        match ea {
+            left(ma) => left(ma.map(f)),
+            right(na) => right(na.map(f)),
+        }
+    );
+}
+
+/*
+impl [m: Monad, n: Monad] EitherT m n: Monad {
+    // pure(a) becomes right
+    pure = |a| right(pure(a));
+
+    bind = |f, ea| (
+        match ea {
+            left(ma) => left(ma.bind(f)),       // type error: ma.bind(f), since f: a -> EitherT m n b, not a -> m b
+            right(na) => right(na.bind(f)),
+        }
+    );
+}
+*/
+
+//-------------------------------
+// Example
+//
+// Coproduct in "Data types à la carte"
+// https://www.cambridge.org/core/journals/journal-of-functional-programming/article/data-types-a-la-carte/14416CB20C4637164EA9F77097909409
+
+type [f: *->*] Expr f = box struct { data: f (Expr f) };
+namespace Expr {
+    make: [f:*->*] f (Expr f) -> Expr f;
+    make = |fa| Expr { data: fa };
+}
+
+
+type Val e = unbox struct { data: I64 };
+type IntExpr = Expr Val;
+namespace Val {
+    make: I64 -> Val e;
+    make = |i| Val { data: i };
+}
+impl Val: Functor {
+    map = |f, Val {data: i}| Val {data: i};
+}
+
+type Add2 e = unbox struct { data: (e, e) };
+type AddExpr = Expr Add2;
+namespace Add2 {
+    make: (e, e) -> Add2 e;
+    make = |(e1, e2)| Add2 { data: (e1, e2) };
+}
+impl Add2: Functor {
+    map = |f, Add2 {data: (e1, e2)}| Add2 {data: (f(e1), f(e2))};
+}
+
+addExample: Expr (EitherT Add2 Val);
+addExample = (
+    let e1 = Expr::make $ right $ Val::make $ 118;
+    let e2 = Expr::make $ right $ Val::make $ 1219;
+    Expr::make $ left $ Add2::make $ (e1, e2)
+);
+
+fold_expr: [f: Functor] (f a -> a) -> Expr f -> a;
+fold_expr = |g, Expr {data: fe}| (
+    let fa = fe.map(|e| e.fold_expr(g));
+    g(fa)
+);
+
+trait [f:*->*] f: Eval {
+    eval_algebra: f I64 -> I64;
+}
+
+impl Val: Eval {
+    eval_algebra = |Val {data: i}| i;
+}
+
+impl Add2: Eval {
+    eval_algebra = |Add2 {data: (x,y)}| x + y;
+}
+
+impl [f: Eval, g: Eval] EitherT f g: Eval {
+    eval_algebra = |either| match either {
+        left(fa) => fa.eval_algebra,
+        right(ga) => ga.eval_algebra
+    };
+}
+
+eval_expr: [f: Eval, f: Functor] Expr f -> I64;
+eval_expr = |expr| expr.fold_expr(eval_algebra);
+
+main: IO ();
+main = (
+    let i = addExample.eval_expr;
+    println(i.to_string);;
+    pure()
+);

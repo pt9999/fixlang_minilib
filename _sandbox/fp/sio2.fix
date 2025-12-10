@@ -1,0 +1,257 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+
+// ReaderT パターンを参考にした StateT パターン
+// DI のように実装を差し替えられるようにする。
+// やりたいこと
+// - DIのように実装をコンポーネント単位で差し替えられる。
+// - コンポーネントはインターフェイス(API)と実装が分かれている。
+// - 1つのAPIに複数の実装が存在できる。
+// - main()でアプリケーションを構成するコンポーネントを選択できる。
+// - なるべく複雑な制約式を書かずにすむこと。
+// - できれば `app.users.add_user(...)` や `app.logger.write_log(...)` のように書きたい。
+// - 上記で `app.users` や `app.logger`の実装は `app` の構成によって変更できる。
+type SIO e a = StateT e IOFail a;
+
+trait e: HasAppApi {
+    app: SIO e (AppApi e);
+}
+
+type AppApi e = unbox struct {
+    users: SIO e (UsersApi e),
+    logger: SIO e (LoggerApi e),
+};
+
+namespace UsersApi {
+    users: SIO e (AppApi e) -> SIO e (UsersApi e);
+    users = bind(@users);
+
+    logger: SIO e (AppApi e) -> SIO e (LoggerApi e);
+    logger = bind(@logger);
+}
+
+type UsersApi e = unbox struct {
+    list_users: SIO e (Array String),
+    add_user: String -> SIO e (),
+};
+
+namespace UsersApi {
+    list_users: SIO e (UsersApi e) -> SIO e (Array String);
+    list_users = |users| (
+        let users = *users;
+        users.@list_users
+    );
+
+    add_user: String -> SIO e (UsersApi e) -> SIO e ();
+    add_user = |name, users| (
+        let users = *users;
+        (users.@add_user)(name)
+    );
+}
+
+type LoggerApi e = unbox struct {
+    write_log: String -> SIO e (),
+};
+
+namespace LoggerApi {
+    write_log: String -> SIO e (LoggerApi e) -> SIO e ();
+    write_log = |str, logger| (
+        let logger = *logger;
+        (logger.@write_log)(str)
+    );
+}
+
+
+//--------------------------------------------------
+// Users
+//--------------------------------------------------
+
+type Users = unbox struct {
+    users: Array User,
+};
+
+trait e: HasUsers {
+    on_users: [f: Functor] (Users -> f Users) -> (e -> f e);
+}
+
+impl Users: HasUsers {
+    on_users = |f| f;
+}
+
+namespace Users {
+    empty: Users = Users { users: [] };
+
+    api: [e: HasUsers] SIO e (UsersApi e);
+    api = pure $ UsersApi {
+        list_users: _list_users,
+        add_user: _add_user,
+    };
+
+    _add_user: [e: HasUsers] String -> SIO e ();
+    _add_user = |name| lens_state_t(on_users) $ do {
+        mod_state_(mod_users(push_back(User::make(name))))
+    };
+
+    _list_users: [e: HasUsers] SIO e (Array String);
+    _list_users = lens_state_t(on_users) $ do {
+        let users = *get_state;
+        pure $ users.@users.map(@name)
+    };
+}
+
+type User = unbox struct {
+    name: String,
+    last_login: I64,
+};
+
+namespace User {
+    make: String -> User;
+    make = |name| User { name: name, last_login: -1 };
+}
+
+//--------------------------------------------------
+// Logger
+//--------------------------------------------------
+
+type Logger = unbox struct {
+    messages: Array String,
+};
+
+trait e: HasLogger {
+    on_logger: [f: Functor] (Logger -> f Logger) -> (e -> f e);
+}
+
+impl Logger: HasLogger {
+    on_logger = |f| f;
+}
+
+namespace Logger {
+    api: [e: HasLogger] SIO e (LoggerApi e);
+    api = pure $ LoggerApi {
+        write_log: Logger::_write_log,
+    };
+
+    empty: Logger = Logger { messages: [] };
+
+    _write_log: [e: HasLogger] String -> SIO e ();
+    _write_log = |str| lens_state_t(on_logger) $ do {
+        mod_state_(mod_messages(push_back(str)))
+    };
+}
+
+//--------------------------------------------------
+// Logger2
+//--------------------------------------------------
+
+type Logger2 = unbox struct {};
+
+trait e: HasLogger2 {
+    on_logger2: [f: Functor] (Logger -> f Logger) -> (e -> f e);
+}
+
+impl Logger2: HasLogger2 {
+    on_logger2 = |f| f;
+}
+
+namespace Logger2 {
+    api: [e: HasLogger2] SIO e (LoggerApi e);
+    api = pure $ LoggerApi {
+        write_log: Logger2::_write_log2,
+    };
+
+    empty: Logger2 = Logger2 {};
+
+    _write_log2: [e: HasLogger2] String -> SIO e ();
+    _write_log2 = |str| eprintln(str).lift_io;
+}
+
+//--------------------------------------------------
+// App
+//--------------------------------------------------
+
+type App = unbox struct {
+    users: Users,
+    logger: Logger,
+};
+
+namespace App {
+    empty: App = App {
+        users: Users::empty,
+        logger: Logger::empty,
+    };
+}
+impl App: HasAppApi {
+    app = pure $ AppApi {
+        users: Users::api,
+        logger: Logger::api,
+    };
+}
+impl App: HasUsers {
+    on_users = act_users;
+}
+impl App: HasLogger {
+    on_logger = act_logger;
+}
+
+
+//--------------------------------------------------
+// App2
+//--------------------------------------------------
+
+type App2 = unbox struct {
+    users: Users,
+    logger2: Logger2,
+};
+
+namespace App2 {
+    empty: App2 = App2 {
+        users: Users::empty,
+        logger2: Logger2::empty,
+    };
+}
+impl App2: HasAppApi {
+    app = pure $ AppApi {
+        users: Users::api,
+        logger: Logger2::api,
+    };
+}
+impl App2: HasUsers {
+    on_users = act_users;
+}
+impl App2: HasLogger2 {
+    on_logger2 = act_logger2;
+}
+
+//--------------------------------------------------
+// Usage
+//--------------------------------------------------
+
+
+test_app: [e: HasAppApi] SIO e ();
+test_app = (
+    app.logger.write_log("add users");;
+    app.users.add_user("alice");;
+    app.users.add_user("bob");;
+    let arr = *app.users.list_users;
+    println("users=" + arr.to_string).lift_io;;
+    app.logger.write_log("done");;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+        let args = *IO::get_args.lift;
+        if args.get_size == 1 {
+            let app = App::empty;
+            let (app, _) = *test_app.run_state_t(app);
+            println("messages=" + app.@logger.@messages.to_string).lift;;
+            pure()
+        } else {
+            test_app.eval_state_t(App2::empty)
+        }
+    }.try(eprintln)
+);

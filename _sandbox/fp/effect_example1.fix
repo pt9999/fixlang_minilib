@@ -3,7 +3,7 @@
 module Main;
 
 import Minilib.Monad.Iden;
-//import Minilib.Monad.Free;
+import Minilib.Monad.Free;
 import Minilib.Functor.EitherT;
 
 type [f: *->*] Wrap f a = unbox struct {
@@ -93,7 +93,7 @@ type EffOutput a = unbox union {
 
 impl EffOutput: Functor {
     map = |h, fa| match fa {
-        eff_output((s, next)) => eff_output((s, next >> h)),
+        eff_output((s, a)) => eff_output((s, h(a))),
     };
 }
 
@@ -117,9 +117,8 @@ type EffI = EitherT EffInput (Wrap Iden);
 type EffIO = EitherT EffOutput (Wrap EffI);
 type EffEIO = EitherT EffError (Wrap EffIO);
 
-
-main: IO ();
-main = (
+test_eff: IO ();
+test_eff = (
     let eff: EffOutput I64 = to_output("abc", 42);
     let eff: EffIO I64 = to_output("abc", 42);
     let eff: EffEIO I64 = to_output("abc", 42);
@@ -128,5 +127,41 @@ main = (
     println("eff.get_error=" + eff.get_error.to_string);;
     let eff: EffEIO I64 = to_error("err");
     println("eff.get_error=" + eff.get_error.to_string);;
+    pure()
+);
+
+input_m: [f: ToInput, f: Functor] Free f String;
+input_m = (
+    let fa: f String = to_input(|str| str);
+    fa.lift_f
+);
+
+output_m: [f: ToOutput, f: Functor] String -> Free f ();
+output_m = |str| (
+    let fa: f () = to_output(str, ());
+    fa.lift_f
+);
+
+error_m: [f: ToError, f: Functor] String -> Free f ();
+error_m = |str| (
+    let fa: f () = to_error(str);
+    fa.lift_f
+);
+
+test_free_eff: IO ();
+test_free_eff = (
+    let fm: Free EffEIO () = do {
+        let str = *input_m;
+        output_m("received: " + str);;
+        error_m("err");;
+        pure()
+    };
+    pure()
+);
+
+main: IO ();
+main = (
+    test_eff;;
+    test_free_eff;;
     pure()
 );

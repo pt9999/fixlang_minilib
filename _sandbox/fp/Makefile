@@ -17,7 +17,11 @@ test-const:
 	fix run -f const.fix -f const_test.fix
 
 test-either-t:
-	fix run -f either_t.fix -f either_t_example.fix
+	fix run -f either_t.fix -f either_t_test.fix -f eq1.fix
+	fix run -f either_t.fix -f either_t_example.fix -f eq1.fix
+
+test-eq1:
+	fix run -f eq1.fix -f eq1_test.fix
 
 test-free:
 	fix run -f free.fix -f free_example.fix

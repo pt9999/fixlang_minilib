@@ -10,7 +10,8 @@ build:
 test: test-fix test-document
 
 test-fix:
-	fix test
+	fix test -O basic
+	fix test -O max
 
 test-document:
 	fix docs -o docs
@@ -36,7 +37,7 @@ update-deps:
 # Publish a subproject.
 # - Clean
 # - Update deps
-# - Run test
+# - Run test (-O basic, -O max)
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
@@ -44,7 +45,8 @@ publish:
 	/usr/bin/test "$$(git rev-parse --abbrev-ref HEAD)" == "main"		# Check if current branch is main
 	fix clean
 	fix deps update
-	fix test
+	fix test -O basic
+	fix test -O max
 	if ! git diff --quiet HEAD -- fixdeps.lock; then \
 		git add fixdeps.lock; \
 		git commit -m 'update deps' -- fixdeps.lock; \

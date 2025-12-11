@@ -1,6 +1,8 @@
 all:
 
-test: test-applicative test-array-t test-compose test-const test-free test-free-t test-iterator-t test-pipe test-pipe-t test-traversable-a test-yield test-misc
+test: test-applicative test-array-t test-compose test-const test-either-t \
+		test-free test-free-t test-iterator-t test-pipe test-pipe-t \
+		test-traversable-a test-yield test-misc
 
 test-applicative:
 	fix run -f applicative.fix -f applicative_test.fix
@@ -13,6 +15,9 @@ test-compose:
 
 test-const:
 	fix run -f const.fix -f const_test.fix
+
+test-either-t:
+	fix run -f either_t.fix -f either_t_example.fix
 
 test-free:
 	fix run -f free.fix -f free_example.fix

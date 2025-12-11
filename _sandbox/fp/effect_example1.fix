@@ -60,7 +60,7 @@ impl [f:*->*, g: ToError] EitherT f (Wrap g): ToError {
 //------------------------------------------------
 
 type EffInput a = unbox union {
-    eff_input: String -> a,
+    eff_input: Option String -> a,
 };
 
 impl EffInput: Functor {
@@ -70,7 +70,7 @@ impl EffInput: Functor {
 }
 
 trait [f: * -> * ] f: ToInput {
-    to_input: (String -> a) -> f a;
+    to_input: (Option String -> a) -> f a;
 }
 
 impl EffInput: ToInput {
@@ -99,18 +99,28 @@ impl EffOutput: Functor {
 
 trait [f: * -> * ] f: ToOutput {
     to_output: String -> a -> f a;
+    get_output: f a -> Option (String, a);
 }
 
 impl EffOutput: ToOutput {
     to_output = |s, a| eff_output $ (s, a);
+    get_output = |fa| some $ fa.as_eff_output;
 }
 
 impl [g:*->*] EitherT EffOutput g: ToOutput {
     to_output = |s, a| left $ to_output(s, a);
+    get_output = |fa| match fa {
+        left(l) => l.get_output,
+        right(r) => none()
+    };
 }
 
 impl [f:*->*, g: ToOutput] EitherT f (Wrap g): ToOutput {
     to_output = |s, a| right $ wrap $ to_output(s, a);
+    get_output = |fa| match fa {
+        left(l) => none(),
+        right(r) => r.unwrap.get_output,
+    };
 }
 
 type EffI = EitherT EffInput (Wrap Iden);
@@ -130,9 +140,9 @@ test_eff = (
     pure()
 );
 
-input_m: [f: ToInput, f: Functor] Free f String;
+input_m: [f: ToInput, f: Functor] Free f (Option String);
 input_m = (
-    let fa: f String = to_input(|str| str);
+    let fa: f (Option String) = to_input(|str| str);
     fa.lift_f
 );
 
@@ -148,13 +158,36 @@ error_m = |str| (
     fa.lift_f
 );
 
+interpret: DynIterator String -> Free EffEIO a -> IOFail a;
+interpret = |inputs, fma| (
+    match fma {
+        f_pure(a) => pure(a),
+        f_functor(fa) => (
+            let opt = fa.get_error;
+            if opt.is_some {
+                throw $ opt.as_some
+            };
+            let opt = fa.get_output;
+            if opt.is_some {
+                let (str, fma) = opt.as_some;
+                println(str).lift;;
+                fma.interpret(inputs)
+            };
+            undefined("not impl")
+        )
+    }
+);
+
 test_free_eff: IO ();
 test_free_eff = (
     let fm: Free EffEIO () = do {
-        let str = *input_m;
-        output_m("received: " + str);;
-        error_m("err");;
-        pure()
+        loop_m(
+            (), |_|
+            let opt = *input_m;
+            if opt.is_none { error_m("end of input");; break_m() };
+            output_m("received: " + opt.as_some);;
+            continue_m $ ()
+        )
     };
     pure()
 );

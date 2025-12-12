@@ -1,0 +1,60 @@
+module Main;
+
+import AsyncTask;       // for Var
+
+type RetainedPtrIO = unbox struct {
+    dtor: Destructor (Var Ptr),   // retained ptr of Boxed object
+};
+
+namespace RetainedPtrIO {
+    make: a -> IO RetainedPtrIO;
+    make = |a| (
+        let box_a: Box a = Box::make(a);
+        let ptr = box_a.boxed_to_retained_ptr; // retain ptr
+        let var_ptr = *Var::make(ptr);
+        pure $ RetainedPtrIO {
+            dtor: Destructor::make(
+                var_ptr,
+                |var_ptr|
+                var_ptr.lock(|ptr|
+                    if ptr == nullptr { pure() };
+                    //eval debug_eprintln("RetainedPtrIO: destructor is called: ptr=" + ptr.to_string);
+                    let box_a: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                    var_ptr.Var::set(nullptr)
+                );;
+                pure $ var_ptr
+            )
+        }
+    );
+
+    get: RetainedPtrIO -> IO a;
+    get = |rp| (
+        rp.@dtor.borrow_io(
+            |var_ptr|
+            var_ptr.lock(|ptr|
+                if ptr == nullptr { undefined("RetainedPtrIO::get: ptr == nullptr") };
+                let box_a: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                let ptr = box_a.boxed_to_retained_ptr; // retain ptr
+                var_ptr.Var::set(ptr);;
+                pure $ box_a.@value
+            )
+        )
+    );
+    
+}
+
+main: IO ();
+main = (
+    range(0,3).fold_m(
+        (), |i, _|
+        let a: I64 = 42;
+        let rp = *RetainedPtrIO::make(a);
+        let b: I64 = *rp.get;
+        println("b=" + b.to_string);;
+        let c: I64 = *rp.get;
+        println("c=" + c.to_string);;
+        let d: I64 = *rp.get;
+        println("d=" + d.to_string);;
+        pure()
+    )
+);

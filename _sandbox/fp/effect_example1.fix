@@ -1,0 +1,226 @@
+// EitherT を使ってEffectファンクタを組み合わせる実験
+// TODO: Freeモナドを使ってEffectを使えるようにする
+module Main;
+
+import Minilib.Monad.Iden;
+import Minilib.Monad.Free;
+import Minilib.Functor.EitherT;
+
+type [f: *->*] Wrap f a = unbox struct {
+    data: f a,
+};
+
+namespace Wrap {
+    wrap: [f: *->*] f a -> Wrap f a = |fa| Wrap { data: fa };
+    unwrap: [f: *->*] Wrap f a -> f a = @data;
+}
+
+impl [f: Functor] Wrap f: Functor {
+    map = |h, wa| Wrap { data: wa.@data.map(h) };
+}
+
+//------------------------------------------------
+
+type EffError a = unbox union {
+    eff_error: String,
+};
+
+impl EffError: Functor {
+    map = |h, fa| match fa {
+        eff_error(e) => eff_error(e),
+    };
+}
+
+trait [f: * -> * ] f: ToError {
+    to_error: String -> f a;
+    get_error: f a -> Option String;
+}
+
+impl EffError: ToError {
+    to_error = |e| eff_error(e);
+    get_error = |fa| some $ fa.as_eff_error;
+}
+
+impl [g:*->*] EitherT EffError g: ToError {
+    to_error = |e| left $ to_error(e);
+    get_error = |fa| match fa {
+        left(l) => l.get_error,
+        right(r) => none()
+    };
+}
+
+impl [f:*->*, g: ToError] EitherT f (Wrap g): ToError {
+    to_error = |e| right $ wrap $ to_error(e);
+    get_error = |fa| match fa {
+        left(l) => none(),
+        right(r) => r.unwrap.get_error
+    };
+}
+
+//------------------------------------------------
+
+type EffInput a = unbox union {
+    eff_input: Option String -> a,
+};
+
+impl EffInput: Functor {
+    map = |h, fa| match fa {
+        eff_input(next) => eff_input(next >> h),
+    };
+}
+
+trait [f: * -> * ] f: ToInput {
+    to_input: (Option String -> a) -> f a;
+    get_input: f a -> Option (Option String -> a);
+}
+
+impl EffInput: ToInput {
+    to_input = |sa| eff_input $ sa;
+    get_input = |fa| some $ fa.as_eff_input;
+}
+
+impl [g:*->*] EitherT EffInput g: ToInput {
+    to_input = |sa| left $ to_input(sa);
+    get_input = |fa| match fa {
+        left(l) => l.get_input,
+        right(r) => none(),
+    };
+}
+
+impl [f:*->*, g: ToInput] EitherT f (Wrap g): ToInput {
+    to_input = |sa| right $ wrap $ to_input(sa);
+    get_input = |fa| match fa {
+        left(l) => none(),
+        right(r) => r.unwrap.get_input,
+    };
+}
+
+//------------------------------------------------
+
+type EffOutput a = unbox union {
+    eff_output: (String, a),
+};
+
+impl EffOutput: Functor {
+    map = |h, fa| match fa {
+        eff_output((s, a)) => eff_output((s, h(a))),
+    };
+}
+
+trait [f: * -> * ] f: ToOutput {
+    to_output: String -> a -> f a;
+    get_output: f a -> Option (String, a);
+}
+
+impl EffOutput: ToOutput {
+    to_output = |s, a| eff_output $ (s, a);
+    get_output = |fa| some $ fa.as_eff_output;
+}
+
+impl [g:*->*] EitherT EffOutput g: ToOutput {
+    to_output = |s, a| left $ to_output(s, a);
+    get_output = |fa| match fa {
+        left(l) => l.get_output,
+        right(r) => none()
+    };
+}
+
+impl [f:*->*, g: ToOutput] EitherT f (Wrap g): ToOutput {
+    to_output = |s, a| right $ wrap $ to_output(s, a);
+    get_output = |fa| match fa {
+        left(l) => none(),
+        right(r) => r.unwrap.get_output,
+    };
+}
+
+type EffI = EitherT EffInput (Wrap Iden);
+type EffIO = EitherT EffOutput (Wrap EffI);
+type EffEIO = EitherT EffError (Wrap EffIO);
+
+test_eff: IO ();
+test_eff = (
+    println("=== test_eff ===");;
+    let eff: EffOutput I64 = to_output("abc", 42);
+    let eff: EffIO I64 = to_output("abc", 42);
+    let eff: EffEIO I64 = to_output("abc", 42);
+    println("eff.get_error=" + eff.get_error.to_string);;
+    let eff: EffEIO I64 = to_input(|s| 42);
+    println("eff.get_error=" + eff.get_error.to_string);;
+    let eff: EffEIO I64 = to_error("err");
+    println("eff.get_error=" + eff.get_error.to_string);;
+    pure()
+);
+
+input_m: [f: ToInput, f: Functor] Free f (Option String);
+input_m = (
+    let fa: f (Option String) = to_input(|str| str);
+    fa.lift_f
+);
+
+output_m: [f: ToOutput, f: Functor] String -> Free f ();
+output_m = |str| (
+    let fa: f () = to_output(str, ());
+    fa.lift_f
+);
+
+error_m: [f: ToError, f: Functor] String -> Free f ();
+error_m = |str| (
+    let fa: f () = to_error(str);
+    fa.lift_f
+);
+
+interpret: DynIterator String -> Free EffEIO a -> IOFail a;
+interpret = |inputs, fma| (
+    match fma {
+        f_pure(a) => pure(a),
+        f_functor(fa) => (
+            // TODO: effect handlers を渡せるようにする
+            let opt = fa.get_error;
+            if opt.is_some {
+                throw $ opt.as_some
+            };
+            let opt = fa.get_output;
+            if opt.is_some {
+                let (str, fma) = opt.as_some;
+                println(str).lift;;
+                fma.interpret(inputs)
+            };
+            let opt = fa.get_input;
+            if opt.is_some {
+                let f = opt.as_some;
+                let (inputs, input) = match inputs.advance {
+                    none() => (inputs, none()),
+                    some((inputs, str)) => (inputs, some(str))
+                };
+                let fma = f(input);
+                fma.interpret(inputs)
+            };
+            undefined("unknown functor")
+        )
+    }
+);
+
+test_free_eff: IO ();
+test_free_eff = (
+    println("=== test_free_eff ===");;
+    let fm: Free EffEIO () = do {
+        loop_m(
+            (), |_|
+            let opt = *input_m;
+            if opt.is_none { error_m("end of input");; break_m() };
+            output_m("received: " + opt.as_some);;
+            continue_m $ ()
+        )
+    };
+    let inputs = [ "Hello", "world", "foo bar baz"].to_iter.to_dyn;
+    do {
+        fm.interpret(inputs)
+    }.try(|errmsg| eprintln("caught error: " + errmsg))
+);
+
+main: IO ();
+main = (
+    test_eff;;
+    test_free_eff;;
+    pure()
+);

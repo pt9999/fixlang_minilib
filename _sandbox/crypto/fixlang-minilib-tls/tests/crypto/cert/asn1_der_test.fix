@@ -1,0 +1,155 @@
+module Main;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+import Minilib.Testing.UnitTest;
+
+run_decoder: Array U8 -> StateT DecodeDerBuffer (Result ErrMsg) a -> IOFail (Result ErrMsg a);
+run_decoder = |arr, decoder| (
+    let buf = DecodeDerBuffer::make(arr);
+    let res = decoder.eval_state_t(buf);
+    pure $ res
+);
+
+test_decode_identifier: TestCase;
+test_decode_identifier = (
+    make_table_test("test_decode_identifier",
+        [
+            ([0x01_U8], ok $ Identifier::make(tc_universal, false, tag_boolean)),
+            ([0x42_U8], ok $ Identifier::make(tc_application, false, tag_integer)),
+            ([0x62_U8], ok $ Identifier::make(tc_application, true, tag_integer)),
+            ([0x84_U8], ok $ Identifier::make(tc_context_specific, false, tag_octet_string)),
+            ([0xE9_U8], ok $ Identifier::make(tc_private, true, tag_real)),
+            ([0x1F_U8, 0x21_U8], ok $ Identifier::make(tc_universal, false, tag_date_time)),
+        ],
+        |(arr, expected)|
+        let actual = *decode_identifier.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_length: TestCase;
+test_decode_length = (
+    make_table_test("test_decode_length",
+        [
+            ([0x00_U8], ok $ 0),
+            ([0x01_U8], ok $ 1),
+            ([0x7F_U8], ok $ 127),
+            ([0x80_U8], err $ "der does not allow indefinite length"),
+            ([0xFF_U8], err $ "der does not allow reserved length"),
+            ([0x81_U8, 0xAB_U8], ok $ 0xAB),
+            ([0x82_U8, 0xAB_U8, 0xCD_U8], ok $ 0xABCD),
+        ],
+        |(arr, expected)|
+        let actual = *decode_length.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_contents: TestCase;
+test_decode_contents = (
+    make_table_test("test_decode_contents",
+        [
+            ([0x01_U8, 0x02_U8, 0x03_U8], 2, ok $ [0x01_U8, 0x02_U8]),
+            ([0x01_U8, 0x02_U8, 0x03_U8], 0, ok $ []),
+            ([0x01_U8], 2, err $ Asn1Der::__Err_EndOfStream),
+        ],
+        |(arr, length, expected)|
+        let actual = *decode_contents(length).run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_obj_I64: TestCase;
+test_decode_obj_I64 = (
+    make_table_test("test_decode_obj_I64",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], ok $ 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], ok $ 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], ok $ 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], ok $ 0x0123456789ABCDEF),
+            ([0x02_U8, 0x09_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8, 0x01_U8], err $ "OutOfRange"),
+        ],
+        |(arr, expected)|
+        let actual: Result ErrMsg I64 = *decode_obj.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_obj_bigint: TestCase;
+test_decode_obj_bigint = (
+    make_table_test("test_decode_obj_bigint",
+        [
+            ([0x02_U8, 0x01_U8, 0x34_U8], ok $ BigInt::from_I64 $ 0x34),
+            ([0x02_U8, 0x02_U8, 0x34_U8, 0x56_U8], ok $ BigInt::from_I64 $ 0x3456),
+            ([0x02_U8, 0x02_U8, 0xAB_U8, 0xCD_U8], ok $ BigInt::from_I64 $ 0xABCD - 0x10000),
+            ([0x02_U8, 0x08_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8], ok $ BigInt::from_I64 $ 0x0123456789ABCDEF),
+            ([0x02_U8, 0x09_U8, 0x01_U8, 0x23_U8, 0x45_U8, 0x67_U8,
+                                0x89_U8, 0xAB_U8, 0xCD_U8, 0xEF_U8, 0x01_U8],
+                                let a = BigInt::from_I64 $ 0x0123456789ABCDEF;
+                                let b = BigInt::from_I64 $ 0x01;
+                                ok $ a.shift_left(8_U64) + b
+                                ),
+        ],
+        |(arr, expected)|
+        let actual: Result ErrMsg BigInt = *decode_obj.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+// TODO: add tests for String, ObjectIdentifier
+
+test_decode_obj_bit_string: TestCase;
+test_decode_obj_bit_string = (
+    make_table_test("test_decode_obj_bit_string",
+        [
+            ([0x03_U8, 0x00_U8], err $ "invalid bitstring"),
+            ([0x03_U8, 0x01_U8, 0x07_U8], ok $ BitString { number_of_unused_bits: 7_U8, data: [] }),
+            ([0x03_U8, 0x01_U8, 0x08_U8], err $ "invalid bitstring"),
+            ([0x03_U8, 0x02_U8, 0x02_U8, 0x34_U8], ok $ BitString { number_of_unused_bits: 2_U8, data: [0x34_U8] }),
+            ([0x03_U8, 0x03_U8, 0x01_U8, 0x34_U8, 0x56_U8], ok $ BitString { number_of_unused_bits: 1_U8, data: [0x34_U8, 0x56_U8] }),
+        ],
+        |(arr, expected)|
+        let actual: Result ErrMsg BitString = *decode_obj.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_decode_obj_octet_string: TestCase;
+test_decode_obj_octet_string = (
+    make_table_test("test_decode_obj_octet_string",
+        [
+            ([0x04_U8, 0x00_U8], ok $ OctetString { data: [] }),
+            ([0x04_U8, 0x01_U8, 0x34_U8], ok $ OctetString { data: [0x34_U8] }),
+            ([0x04_U8, 0x02_U8, 0x34_U8, 0x56_U8], ok $ OctetString { data: [0x34_U8, 0x56_U8] }),
+        ],
+        |(arr, expected)|
+        let actual: Result ErrMsg OctetString = *decode_obj.run_decoder(arr);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_decode_identifier,
+        test_decode_length,
+        test_decode_contents,
+        test_decode_obj_I64,
+        test_decode_obj_bigint,
+        test_decode_obj_bit_string,
+        test_decode_obj_octet_string,
+    ]
+    .run_test_driver
+);
+

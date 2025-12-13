@@ -1,0 +1,175 @@
+module Main;
+
+import AsyncTask;
+import Random;
+import HashMap;
+
+import Minilib.Crypto.Cipher.Ec.ECDSA;
+import Minilib.Math.BigInt;
+import Minilib.Monad.Random;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_to_n_bytes: TestCase;
+test_to_n_bytes = (
+    make_table_test("test_to_n_bytes",
+        [
+            (BigInt::from_I64(4275878552), 4, [0xFE,0xDC,0xBA,0x98]),
+            (BigInt::from_I64(4275878552), 6, [0x0,0x0,0xFE,0xDC,0xBA,0x98]),
+            (BigInt::from_I64(4275878552), 10, [0x0,0x0,0x0,0x0,0x0,0x0,0xFE,0xDC,0xBA,0x98]),
+            (BigInt::from_I64(4275878552), 2, [0xBA,0x98]),
+            (BigInt::from_I64(1), 10, [0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x1]),
+            (BigInt::from_I64(4275878552).shift_left(48_U64), 12, [0x0,0x0,0xFE,0xDC,0xBA,0x98,0x00,0x00,0x00,0x00,0x00,0x00]),
+            (BigInt::from_I64(4275878552).shift_left(48_U64), 9, [0xDC,0xBA,0x98,0x00,0x00,0x00,0x00,0x00,0x00]),
+        ],
+        |(a,n,expect)|
+        let expect = expect.map(to_U8);
+        let actual = a.to_n_bytes(n);
+        assert_equal("eq", expect, actual)
+    )
+);
+
+
+test_generate_keypair: TestCase;
+test_generate_keypair = (
+    make_test("test_generate_keypair") $ |_|
+    //let log = println >> lift;
+    let log = |s| pure();
+    let ec = secp256r1;
+    log("ec="+ec.to_string);;
+    let random = Random::init_by_seed(123_U64);
+    let key_pair = *generate_keypair(ec).eval_state_t(random);
+    log("key_pair=" + key_pair.to_string);;
+
+    log("validating public key q");;
+    key_pair.@q.validate_pubkey.from_result;;
+
+    log("convert q to bytes (uncompressed)");;
+    let q_bytes = key_pair.@q.to_bytes_uncompressed;
+    log("q_bytes=" + q_bytes.to_string_hex);;
+    // `Rng::rng_bytes` implementation for `Random` is changed in minilib-random_0.3.5
+    //eval *assert_equal("q_bytes",
+    //                    "04de7addffeffffc5fbcb398dc3413b177ee1e55a5838ca8c96f8b6a1006c8ff712d7e12b608e414139a9782a94a2853c9b4bf1f0f83c9b9228d66aeede6190c65",
+    //                    q_bytes.to_string_hex);
+    eval *assert_equal("q_bytes",
+                        "0466b599808d7bbd705d9ac63d316bad09a65d389a11828f0b92a16790d0061369b273b5ecd78b65565ffb4844038f50e0cbd95da31a2809c9711567e3c42a2070",
+                        q_bytes.to_string_hex);
+
+    log("convert bytes to q");;
+    let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+    log("q=" + q.to_string);;
+    assert_equal("q", key_pair.@q, q);;
+
+    log("convert q to bytes (compressed)");;
+    let q_bytes = key_pair.@q.to_bytes_compressed;
+    log("q_bytes=" + q_bytes.to_string_hex);;
+//    eval *assert_equal("compressed q_bytes",
+//                        "03de7addffeffffc5fbcb398dc3413b177ee1e55a5838ca8c96f8b6a1006c8ff71",
+//                        q_bytes.to_string_hex);
+    eval *assert_equal("compressed q_bytes",
+                        "0266b599808d7bbd705d9ac63d316bad09a65d389a11828f0b92a16790d0061369",
+                        q_bytes.to_string_hex);
+
+    log("convert bytes to q");;
+    let q: ECPoint = *from_bytes_ec(ec, q_bytes).from_result;
+    log("q=" + q.to_string);;
+    assert_equal("compressed q", key_pair.@q, q);;
+    pure()
+);
+
+test_sign: TestCase;
+test_sign = (
+    make_test("test_sign") $ |_|
+    let random = Random::init_by_seed(123_U64);
+    do {
+        //let log = println >> lift >> lift_t;
+        let log = |s| pure();
+        let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
+        let ec = scheme.@ec;
+
+        let key_pair = *generate_keypair(ec);
+        log("key_pair=" + key_pair.to_string);;
+
+        let message: Array U8 = "Hello world".get_bytes;
+
+        // Signing
+        log("signing");;
+        let signature = *scheme.sign(key_pair, message);
+        log(signature.to_string);;
+        log("signature=" + signature.to_string);;
+
+        // Verifying
+        log("verifying");;
+        scheme.verify(key_pair.@q, signature, message).from_result.lift_t;;
+        log("ok");;
+        pure()
+    }.eval_state_t(random)
+);
+
+// These test vectors were obtained using the steps below:
+// 1. Visit the NIST website:
+//    [CAVP Testing: Digital Signatures](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/digital-signatures)
+//
+// 2. Download the test vector from "Test Vectors" section on the above page:
+//    [FIPS 186-4 ECDSA](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/dss/186-4ecdsatestvectors.zip)
+//
+// 3. Unzip the downloaded zip file.
+//
+// 4. Open `SigGen.txt` and find `[P-256,SHA-256]` on line 620.
+
+test_cavp_1: TestCase;
+test_cavp_1 = (
+    make_test("test_cavp_1") $ |_| (
+        let testvec = "
+Msg = 5905238877c77421f73e43ee3da6f2d9e2ccad5fc942dcec0cbd25482935faaf416983fe165b1a045ee2bcd2e6dca3bdf46c4310a7461f9a37960ca672d3feb5473e253605fb1ddfd28065b53cb5858a8ad28175bf9bd386a5e471ea7a65c17cc934a9d791e91491eb3754d03799790fe2d308d16146d5c9b0d0debd97d79ce8
+d = 519b423d715f8b581f4fa8ee59f4771a5b44c8130b4e3eacca54a56dda72b464
+Qx = 1ccbe91c075fc7f4f033bfa248db8fccd3565de94bbfb12f3c59ff46c271bf83
+Qy = ce4014c68811f9a21a1fdb2c0e6113e06db7ca93b7404e78dc7ccd5ca89a4ca9
+k = 94a1bbb14b906a61a280f245f9e93c7f3b4a6247824f5d33b9670787642a68de
+R = f3ac8061b514795b8843e3d6629527ed2afd6b1f6a555a7acabb5e6f79c8c2ac
+S = 8bf77819ca05a6b2786c76262bf7371cef97b218e96f175a3ccdda2acc058903
+";
+        let hmap = testvec.split("\n").map(split_first("=")).filter(|(k,v)| v != "")
+        .fold(HashMap::empty(10), |(k, v)| insert(k.strip_spaces, v.strip_spaces));
+        let message: Array U8 = *hmap.find("Msg").as_some.FromStringHex::from_string_hex.from_result;
+        let from_string_hex = ECInt::from_string_hex;
+        let d: ECInt = *hmap.find("d").as_some.from_string_hex.from_result;
+        let qx: ECInt = *hmap.find("Qx").as_some.from_string_hex.from_result;
+        let qy: ECInt = *hmap.find("Qy").as_some.from_string_hex.from_result;
+        let k: ECInt = *hmap.find("k").as_some.from_string_hex.from_result;
+        let r: ECInt = *hmap.find("R").as_some.from_string_hex.from_result;
+        let s: ECInt = *hmap.find("S").as_some.from_string_hex.from_result;
+        //println([d, qx, qy, k, r, s].map(to_string).to_string).lift
+
+        let scheme = ECDSAScheme::ecdsa_secp256r1_sha256;
+        let ec = scheme.@ec;
+        let q = ECPoint::make(ec, ECField::make(qx, ec.@ps), ECField::make(qy, ec.@ps));
+        let key_pair = ECKeyPair { ec: ec, d: d, q: q };
+        let sigature = ECDSASignature::make(r, s);
+
+        // Signing
+        let res = scheme._sign_with_k(key_pair, message, k);
+        //println(res.to_string).lift;;
+        assert_equal("signing", ok $ sigature, res);;
+
+        // Verifying
+        let res = scheme.verify(q, sigature, message);
+        assert_equal("verifying", ok $ (), res);;
+
+        pure()
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_to_n_bytes,
+        test_generate_keypair,
+        test_sign,
+        test_cavp_1,
+    ]
+    .run_test_driver
+);

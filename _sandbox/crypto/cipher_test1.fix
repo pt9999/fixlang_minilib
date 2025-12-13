@@ -1,0 +1,85 @@
+module Main;
+
+
+import Minilib.Crypto.AES;
+import Minilib.Text.Hex;
+
+import Sandbox.Cipher;
+
+test_pkcs7_padding: IO ();
+test_pkcs7_padding = (
+    println("=== test_pkcs7_padding ===");;
+    let padding_scheme = Pkcs7Padding::default;
+    let block_size = 8;
+    let strings = [
+        "", "a", "ab", "abcdefg", "abcdefgh", "abcdefghi"
+    ];
+    strings.to_iter.fold_m(
+        (), |_, str|
+        let data1 = str.get_bytes.pop_back;
+        let data2 = padding_scheme.add_padding(data1, block_size);
+        let data3 = padding_scheme.remove_padding(data2);
+        println("data1=" + data1.to_string_hex + "\n" +
+            "data2=" + data2.to_string_hex + "\n" +
+            "data3=" + data3.to_string_hex + "\n")
+    )
+);
+
+byte_array_from_string_hex: String -> Array U8;
+byte_array_from_string_hex = |str| (
+    str.split(" ").map(from_string_hex >> as_ok).to_array
+);
+
+_test_cipher: [bc: BlockCipher, ps: PaddingScheme] ps -> bc -> IO ();
+_test_cipher = |padding_scheme, cipher| (
+    let strings = [
+        "Hello world hello hello",
+        "foo bar baz hoge hoge"
+    ];
+    strings.to_iter.fold_m(
+        (), |_, str|
+        let plaintext = str.get_bytes.pop_back;
+        let (ciphertext, _) = cipher.encrypt(plaintext, padding_scheme);
+        let (plaintext2, _) = cipher.decrypt(ciphertext, padding_scheme);
+        let str2 = plaintext2.push_back(0_U8)._unsafe_from_c_str;
+        println("str='"+str+"'");;
+        println("ciphertext="+ciphertext.to_string_hex);;
+        println("str2='"+str2+"'");;
+        pure()
+    )
+);
+
+aes_cipher: AESCipher;
+aes_cipher = (
+    let key = "2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c";
+    let key = key.byte_array_from_string_hex;
+    let aes = AES::make(key);
+    let cipher = AESCipher::make(aes);
+    cipher
+);
+
+test_aes_cipher: IO ();
+test_aes_cipher = (
+    println("=== test_aes_cipher ===");;
+    let padding_scheme = Pkcs7Padding::default;
+    _test_cipher(padding_scheme, aes_cipher)
+);
+
+test_aes_cbc: IO ();
+test_aes_cbc = (
+    println("=== test_aes_cbc ===");;
+    let iv = "00 01 02 03 cc dd ee ff 44 55 66 77 bb aa 99 88";
+    let iv = iv.byte_array_from_string_hex;
+    _test_cipher(Pkcs7Padding::default, CBC::make(aes_cipher, iv))
+);
+
+
+main: IO ();
+main = (
+    test_pkcs7_padding;;
+    test_aes_cipher;;
+    test_aes_cbc;;
+    pure()
+);
+
+

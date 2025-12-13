@@ -1,0 +1,67 @@
+// Default implementation of the Elliptic Curve cryptography API (`EcApi`).
+module Minilib.Crypto.Cipher.Ec.EcApiDefault;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cipher.Ec.EcApi;
+import Minilib.Crypto.Cipher.Ec.ECDSA;
+import Minilib.Crypto.Cipher.Ec.ECDHE;
+import Minilib.Math.BigInt;
+import Minilib.Monad.FreeRandom;
+import Minilib.Monad.State;
+
+make_ec_api: Result ErrMsg EcApi;
+make_ec_api = (
+    pure $ EcApi {
+        make_ecdhe: _make_ecdhe,
+        make_ecdsa: _make_ecdsa,
+    }
+);
+
+_make_ecdhe: EcCurveName -> Result ErrMsg (FreeRandom EcdheApi);
+_make_ecdhe = |curve_name| (
+    let ec = *ECParam::find_curve(curve_name);
+    let free /*: FreeRandom (EcdheApi m) */ = do {
+        let ecdhe = *ECDHE::make(ec);
+        pure $ EcdheApi {
+            curve_name: curve_name,
+            key_exchange: ecdhe.get_key_exchange,
+            accept_peer_key_exchange: |peer_key_exchange| ecdhe.accept_peer_key_exchange(peer_key_exchange),
+        }
+    };
+    pure $ free
+);
+
+_make_ecdsa: EcCurveName -> EcHashName -> Result ErrMsg EcdsaApi;
+_make_ecdsa = |curve_name, hash_name| (
+    let ec = *ECParam::find_curve(curve_name);
+    let hash = *ECHashParam::find_hash(hash_name);
+    let ecdsa_scheme = ECDSAScheme::make(ec, hash);
+
+    pure $ EcdsaApi {
+        curve_name: curve_name,
+        hash_name: hash_name,
+        verify: _ecdsa_verify(ecdsa_scheme),
+    }
+);
+
+_ecdsa_verify: ECDSAScheme -> EcPublicKey -> EcSignature -> EcSigMessage -> Result ErrMsg ();
+_ecdsa_verify = |ecdsa_scheme, public_key, signature, message| (
+    let ec = ecdsa_scheme.@ec;
+    let ecpoint = *ECPoint::from_bytes_ec(ec, public_key);
+    let signature = *_decode_ecdsa_signature(signature);
+    ecdsa_scheme.verify(ecpoint, signature, message)
+);
+
+_decode_ecdsa_signature: EcSignature -> Result ErrMsg ECDSASignature;
+_decode_ecdsa_signature = |signature| (
+    let sm = do {
+        // ECDSA-Sig-Value, see RFC5480 Appendix A or RFC3279 2.2.3
+        decode_sequence $ do {
+            let r: BigInt = *decode_obj;
+            let s: BigInt = *decode_obj;
+            pure $ ECDSASignature::make(r, s)
+        }
+    };
+    sm.eval_der_decoder(signature)
+);

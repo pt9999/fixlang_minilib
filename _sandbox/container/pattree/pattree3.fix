@@ -1,0 +1,421 @@
+// Simple map using Patricia Tree.
+// The type of key is U64, and the type of value is any type.
+//
+// This module was inspired by Haskell's `Data.IntMap` package.
+// https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
+//
+// In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
+//
+// Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
+// https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
+//
+// TODO: Check following pages
+// https://github.com/backtracking/ptmap
+// https://www.janmidtgaard.dk/papers/Midtgaard%3ATFP17.pdf
+module Minilib.Collection.PatTree3;
+
+import Minilib.Monad.Yield;
+
+// The key type of Patricia Trees.
+type Key = U64;
+
+// The prefix type. (used internally)
+type Prefix = U64;
+
+// The mask type. (used internally)
+type Mask = U64;
+
+// The type of tree nodes.
+type PNode a = unbox union {
+    // An empty node.
+    empty: (),
+    // A leaf node. (key, data)
+    leaf: (Key, a),
+    // A branch node. (prefix, mask of the branching bit, left, right)
+    branch: (Prefix, Mask, PNodeIndex, PNodeIndex),
+};
+
+// The type of index of the node array.
+type PNodeIndex = I64;
+
+namespace PNodeIndex {
+    // A special index which represents an empty node.
+    empty: PNodeIndex = -1;
+}
+
+// The type of Patricia Trees.
+type PTree a = unbox struct {
+    _root: PNodeIndex,
+    _size: I64,
+    _combine: Combine a,
+    _nodes: Array (PNode a),
+    _freelist: Array PNodeIndex,
+};
+
+namespace PTree {
+    // An empty Patricia Tree.
+    empty: PTree a;
+    empty = PTree {
+        _root: PNodeIndex::empty,
+        _size: 0,
+        _combine: overwrite,
+        _nodes: [],
+        _freelist: [],
+    };
+
+    _make_node: PNode a -> PTree a -> (PTree a, PNodeIndex);
+    _make_node = |nodedata, tree| (
+        match tree.@_freelist.get_last {
+            some(node) => (
+                let tree = tree.mod__freelist(pop_back).mod__nodes(set(node, nodedata));
+                (tree, node)
+            ),
+            none() => (
+                let node = tree.@_nodes.get_size;
+                let tree = tree.mod__nodes(push_back(nodedata));
+                (tree, node)
+            )
+        }
+    );
+
+    _free_node: PNodeIndex -> PTree a -> PTree a;
+    _free_node = |node, tree| (
+        tree.mod__freelist(push_back(node)).mod__nodes(set(node, empty()))
+    );
+
+    _make_branch: Prefix -> Mask -> PNodeIndex -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _make_branch = |prefix, mask, left, right, tree| (
+        tree._make_node(branch $ (prefix, mask, left, right))
+    );
+
+    _free_branch: PNodeIndex -> PTree a -> PTree a;
+    _free_branch = _free_node;
+
+    _make_leaf: Key -> a -> PTree a -> (PTree a, PNodeIndex);
+    _make_leaf = |key, value, tree| (
+        let tree = tree.mod__size(add(1));  // size += 1 when leaf is added
+        tree._make_node(leaf $ (key, value))
+    );
+
+    _free_leaf: PNodeIndex -> PTree a -> PTree a;
+    _free_leaf = |node, tree| (
+        let tree = tree.mod__size(add(-1));  // size -= 1 when leaf is removed
+        tree._free_node(node)
+    );
+
+    _get_node: PNodeIndex -> PTree a -> PNode a;
+    _get_node = |node, tree| (
+        if node == PNodeIndex::empty { empty() };
+        tree.@_nodes.@(node)
+    );
+
+    _set_node: PNodeIndex -> PNode a -> PTree a -> PTree a;
+    _set_node = |node, data, tree| (
+        tree.mod__nodes(set(node, data))
+    );
+
+    _mod_node: PNodeIndex -> (PNode a -> PNode a) -> PTree a -> PTree a;
+    _mod_node = |node, f, tree| (
+        tree.mod__nodes(mod(node, f))
+    );
+
+    // Checks whether the Patricia Tree is empty.
+    is_empty: PTree a -> Bool;
+    is_empty = |tree| tree.@_size == 0;
+
+    // Gets size (number of key-value pairs) of a Patricia Tree.
+    get_size: PTree a -> I64;
+    get_size = @_size;
+
+    // Finds the value which is associated with the key.
+    //
+    // # Parameters
+    //
+    // * `key` - The key to find.
+    // * `tree` - A Patricia Tree.
+    find: Key -> PTree a -> Option a;
+    find = |key, tree| (
+        let root = tree.@_root;
+        tree._lookup(key, root)
+    );
+
+    _lookup: Key -> PNodeIndex -> PTree a -> Option a;
+    _lookup = |key, node, tree| (
+        match tree._get_node(node) {
+            empty() => none(),
+            leaf((k, x)) => if k == key { some(x) } else { none() },
+            branch((prefix, m, left, right)) => (
+                if !key._match_prefix(prefix, m) { none() };
+                if key <= prefix { // key._zero_bit(m)
+                    tree._lookup(key, left)
+                } else {
+                    tree._lookup(key, right)
+                }
+            )
+        }
+    );
+
+    _zero_bit: Mask -> Key -> Bool;
+    _zero_bit = |mask, key| (
+        key.bit_and(mask) == 0_U64
+    );
+
+    _mask: Mask -> Key -> Mask;
+    _mask = |m, key| (
+        // big-endian mask
+        key.bit_or(m - 1_U64).bit_and(bit_not(m))
+    );
+
+    _match_prefix: Prefix -> Mask -> Key -> Bool;
+    _match_prefix = |prefix, m, key| (
+        key._mask(m) == prefix
+    );
+
+    _join: Prefix -> Mask -> PNodeIndex -> Prefix -> Mask -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _join = |p0, m0, t0, p1, m1, t1, tree| (
+        let m = _branching_bit(p0, m0, p1, m1);
+        if p0._zero_bit(m) {
+            tree._make_branch(p0._mask(m), m, t0, t1)
+        } else {
+            tree._make_branch(p0._mask(m), m, t1, t0)
+        }
+    );
+
+    _branching_bit: Prefix -> Mask -> Prefix -> Mask -> Mask;
+    _branching_bit = |p0, m0, p1, m1| (
+        _highest_bit(p0.bit_xor(p1), max(1_U64, 2_U64 * max(m0, m1)))
+    );
+
+    _lowest_bit: Prefix -> Mask;
+    _lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
+
+    // Returns a number which has only highest bit of `x` is set.
+    // When `x` is zero, this function returns zero.
+    //
+    // Example:
+    // ```
+    // _highb(0x7abc_U64) == 0x4000_U64
+    // _highb(0_U64) == 0_U64
+    // ```
+    _highb: Prefix -> Mask;
+    _highb = |x| (
+        let m = x._lowest_bit;
+        if x == m { m };
+        _highb(x - m)
+    );
+
+    // Same as `_highb`, but a bit fast.
+    _highbs: Prefix -> Mask;
+    _highbs = |x| (
+        let s = 0_U64;
+        let hi = x.shift_right(32_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 32_U64) } else { (x, s) };
+        let hi = x.shift_right(16_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 16_U64) } else { (x, s) };
+        let hi = x.shift_right(8_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 8_U64) } else { (x, s) };
+        let hi = x.shift_right(4_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 4_U64) } else { (x, s) };
+        let hi = x.shift_right(2_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 2_U64) } else { (x, s) };
+        let hi = x.shift_right(1_U64);
+        let (x, s) = if hi != 0_U64 { (hi, s + 1_U64) } else { (x, s) };
+        x.shift_left(s)
+    );
+
+    _highest_bit: Prefix -> Mask -> Mask;
+    _highest_bit = |x, m| (
+        // zero all bits below m
+        let xx = x.bit_and((m - 1_U64).bit_not);
+        //eval debug_eprintln("(x,m)=" + x.to_string_hex + "," + m.to_string_hex + " xx=" + xx.to_string_hex);
+        //let b = _highb(xx);
+        let b = _highbs(xx);
+        //eval debug_eprintln("_highb(" + xx.to_string_hex + ")=" + b.to_string_hex);
+        b
+    );
+
+    // Inserts a key-value pair into a Patricia Tree.
+    //
+    // # Parameters
+    //
+    // * `new_key` - The key to insert.
+    // * `new_value` - The value to insert.
+    // * `tree` - A Patricia Tree.
+    insert: Key -> a -> PTree a -> PTree a;
+    insert = |new_key, new_value, tree| (
+        let root = tree.@_root;
+        let (tree, root) = tree._insert(new_key, new_value, root);
+        tree.set__root(root)
+    );
+
+    _insert: Key -> a -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _insert = |new_key, new_value, old_node, tree| (
+        match tree._get_node(old_node) {
+            empty() => (
+                let (tree, new_node) = tree._make_leaf(new_key, new_value);
+                (tree, new_node)
+            ),
+            leaf((old_key, old_value)) => (
+                if old_key == new_key {
+                    let combine = tree.@_combine;
+                    let tree = tree._mod_node(old_node,
+                        mod_leaf(
+                            |(key, old_value)|
+                            let value = combine(old_value, new_value);
+                            (key, value)
+                        )
+                    );
+                    (tree, old_node)
+                } else {
+                    let (tree, new_node) = tree._make_leaf(new_key, new_value);
+                    tree._join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
+                }
+            ),
+            branch((prefix, m, left, right)) => (
+                if ! new_key._match_prefix(prefix, m) {
+                    let (tree, new_node) = tree._make_leaf(new_key, new_value);
+                    tree._join(new_key, 0_U64, new_node, prefix, m, old_node)
+                };
+                if new_key <= prefix { // new_key._zero_bit(m)
+                    let (tree, left2) = tree._insert(new_key, new_value, left);
+                    let tree = if left != left2 { tree._set_node(old_node, branch $ (prefix, m, left2, right)) } else { tree };
+                    (tree, old_node)
+                } else {
+                    let (tree, right2) = tree._insert(new_key, new_value, right);
+                    let tree = if right != right2 { tree._set_node(old_node, branch $ (prefix, m, left, right2)) } else { tree };
+                    (tree, old_node)
+                }
+            ),
+        }
+    );
+
+    // Erases a key-value pair from a Patricia Tree.
+    // If there is no key-value pair which matches the specified key, this function does nothing.
+    //
+    // # Parameters
+    //
+    // * `key` - The key to erase.
+    // * `tree` - A Patricia Tree.
+    erase: Key ->  PTree a -> PTree a;
+    erase = |key, tree| (
+        let root = tree.@_root;
+        let (tree, root) = tree._erase(key, root);
+        tree.set__root(root)
+    );
+
+    _erase: Key -> PNodeIndex -> PTree a -> (PTree a, PNodeIndex);
+    _erase = |new_key, node, tree| (
+        match tree._get_node(node) {
+            empty() => (tree, PNodeIndex::empty),
+            leaf((old_key, value)) => (
+                if old_key != new_key {
+                    (tree, node)
+                };
+                let tree = tree._free_leaf(node);
+                (tree, PNodeIndex::empty)
+            ),
+            branch((prefix, m, left, right)) => (
+                if ! new_key._match_prefix(prefix, m) {
+                    (tree, node)
+                };
+                if new_key <= prefix { // new_key._zero_bit(m)
+                    let (tree, left2) = tree._erase(new_key, left);
+                    if left2 == PNodeIndex::empty {
+                        let tree = tree._free_branch(node);
+                        (tree, right)
+                    };
+                    let tree = if left != left2 { tree._set_node(node, branch $ (prefix, m, left2, right)) } else { tree };
+                    (tree, node)
+                } else {
+                    let (tree, right2) = tree._erase(new_key, right);
+                    if right2 == PNodeIndex::empty {
+                        let tree = tree._free_branch(node);
+                        (tree, left)
+                    };
+                    let tree = if right != right2 { tree._set_node(node, branch $ (prefix, m, left, right2)) } else { tree };
+                    (tree, node)
+                }
+            ),
+        }
+    );
+
+    // Converts a Patricia Tree into an array of key-value pairs.
+    // The key-value pairs are sorted in ascending order of keys.
+    //
+    // # Parameters
+    //
+    // * `tree` - A Patricia Tree.
+    to_array: PTree a -> Array (Key, a);
+    to_array = |tree| (
+        tree._to_array(tree.@_root, [])
+    );
+
+    _to_array: PNodeIndex -> Array (Key, a) -> PTree a -> Array (Key, a);
+    _to_array = |node, arr, tree| (
+        match tree._get_node(node) {
+            leaf((key, value)) => arr.push_back((key, value)),
+            branch((prefix, m, left, right)) => (
+                let arr = tree._to_array(left, arr);
+                let arr = tree._to_array(right, arr);
+                arr
+            ),
+            _ => arr
+        }
+    );
+
+    to_iter: PTree a -> Yield (Key, a) ();
+    to_iter = |tree| (
+        tree._to_iter(tree.@_root)
+    );
+
+    _to_iter: PNodeIndex -> PTree a -> Yield (Key, a) ();
+    _to_iter = |node, tree| (
+        match tree._get_node(node) {
+            leaf((key, value)) => yield $ (key, value),
+            branch((prefix, m, left, right)) => (
+                tree._to_iter(left);;
+                tree._to_iter(right)
+            ),
+            _ => pure()
+        }
+    );
+
+    // Shows the hierarchy of the tree. (for debugging)
+    _show_tree: [a: ToString] PTree a -> String;
+    _show_tree = |tree| (
+        tree._show_tree_node(0, tree.@_root)
+    );
+
+    _show_tree_node: [a: ToString] I64 -> PNodeIndex -> PTree a -> String;
+    _show_tree_node = |indent, node, tree| (
+        let indent_str: String = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
+        match tree._get_node(node) {
+            empty() => indent_str + "empty()",
+            leaf((key, value)) => indent_str + "leaf(key=" + key.to_string + ", value=" + value.to_string + ")",
+            branch((prefix,mask,left,right)) => (
+                indent_str + "branch(prefix=" + prefix.to_string + ", mask=" + mask.to_string + ")\n" +
+                    tree._show_tree_node(indent + 1, left) + "\n" +
+                    tree._show_tree_node(indent + 1, right)
+            )
+        }
+    );
+
+} // namespace PTree
+
+impl [a: ToString] PTree a: ToString {
+    to_string = |tree| (
+        "PTree{ " + tree.to_array.to_string + " }"
+    );
+}
+
+// The type of combining functions that resolve collisions.
+// `combine(old_value, new_value)` should return a value combined from `old_value` and `new_value`.
+type Combine a = a -> a -> a;
+
+namespace Combine {
+    // A combining function that replaces the old value into the new value.
+    overwrite: Combine a = |old_value, new_value| new_value;
+    // A combining function that appends the new value after the old value.
+    append: [a: Add] Combine a = add;
+}
+

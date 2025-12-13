@@ -1,0 +1,372 @@
+// Record Protection for TLS 1.3
+//
+// RFC8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.Protection;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Crypto.Tls.CipherSuite;
+import Minilib.Crypto.Tls.RecordProtocol;
+import Minilib.Crypto.Tls.Aead;
+import Minilib.Crypto.Tls.Hkdf;
+import Minilib.Crypto.Tls.Secret;
+import Minilib.Crypto.HMAC;
+import Minilib.Encoding.Binary;
+import Minilib.Trait.Traversable;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+
+// A structure that holds various secret values.
+// cf. RFC8446 "7.1. Key Schedule"
+type Secrets = unbox struct {
+    psk: Array U8,                  // Pre-Shared Key (PSK)
+    early_secret: Array U8,         // used for 0-RTT Application
+    handshake_secret: Array U8,     // used for handshake traffic
+    master_secret: Array U8,        // used for application traffic
+    //exporter_master_secret: Array U8,
+    resumption_master_secret: Array U8,
+};
+
+impl Secrets: ToString {
+    to_string = |secrets| (
+        "Secrets {" +
+        "\n psk=" + secrets.@psk.to_string_hex +
+        "\n early_secret=" + secrets.@early_secret.to_string_hex +
+        "\n handshake_secret=" + secrets.@handshake_secret.to_string_hex +
+        "\n master_secret=" + secrets.@master_secret.to_string_hex +
+        "\n resumption_master_secret=" + secrets.@resumption_master_secret.to_string_hex +
+        "\n}"
+    );
+}
+
+namespace Secrets {
+    empty: Secrets;
+    empty = Secrets {
+        psk: [],
+        early_secret: [],
+        handshake_secret: [],
+        master_secret: [],
+        resumption_master_secret: [],
+    };
+
+    calc_early_secret: HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_early_secret = |hkdf, secrets| (
+        let psk = hkdf.zero_secret;
+        let early_secret = *hkdf.calc_early_secret(psk);
+        pure $ secrets.set_psk(psk).set_early_secret(early_secret)
+    );
+
+    calc_handshake_secret: Array U8 -> HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_handshake_secret = |dhe, hkdf, secrets| (
+        let handshake_secret = *hkdf.calc_handshake_secret(secrets.@early_secret, dhe);
+        pure $ secrets.set_handshake_secret(handshake_secret)
+    );
+
+    calc_master_secret: HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_master_secret = |hkdf, secrets| (
+        let master_secret = *hkdf.calc_master_secret(secrets.@handshake_secret);
+        pure $ secrets.set_master_secret(master_secret)
+    );
+
+    calc_resumption_master_secret: Array U8 -> HKDF -> Secrets -> Result ErrMsg Secrets;
+    calc_resumption_master_secret = |handshake_context, hkdf, secrets| (
+        let resumption_master_secret = *hkdf.calc_resumption_master_secret(secrets.@master_secret, handshake_context);
+        //eval log_debug("resumption_master_secret=" + resumption_master_secret.to_string_hex);
+        pure $ secrets.set_resumption_master_secret(resumption_master_secret)
+    );
+}
+
+// The traffic key for reading and writing records.
+type TrafficKey = unbox struct {
+    traffic_secret: Array U8,
+    write_key: Array U8,
+    write_iv: Array U8,
+    sequence_number: U64,
+};
+
+impl TrafficKey: ToString {
+    to_string = |p| (
+        "TrafficKey {" +
+        " traffic_secret=" + p.@traffic_secret.to_string_hex +
+        " write_key=" + p.@write_key.to_string_hex +
+        " write_iv=" + p.@write_iv.to_string_hex +
+        " sequence_number=" + p.@sequence_number.to_string_hex +
+        "}"
+    );
+}
+
+namespace TrafficKey {
+    empty: TrafficKey;
+    empty = TrafficKey {
+        traffic_secret: [],
+        write_key: [],
+        write_iv: [],
+        sequence_number: 0_U64,
+    };
+
+    // Calculates the traffic keying material for reading and writing records, and reset the sequence number.
+    // cf. RFC8446 "7.3. Traffic Key Calculation"
+    update_keys: Array U8 -> AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
+    update_keys = |secret, aead, hkdf, traffic_key| (
+        let (key, iv) = *hkdf.calc_traffic_keys(secret, aead.@key_len, aead.@iv_len);
+        pure $ traffic_key
+            .set_traffic_secret(secret)
+            .set_write_key(key)
+            .set_write_iv(iv)
+            .set_sequence_number(0_U64)
+    );
+
+    // Increments the sequence number for reading and writing records.
+    // cf. RFC8446 "5.3. Per-Record Nonce"
+    increment_sequence_number: TrafficKey -> TrafficKey;
+    increment_sequence_number = mod_sequence_number(add(1_U64));
+
+    // Calculates the next generation of traffic keys.
+    // cf. RFC8446 "7.2. Updating Traffic Secrets"
+    increment_generation: AEAD -> HKDF -> TrafficKey -> Result ErrMsg TrafficKey;
+    increment_generation = |aead, hkdf, traffic_key| (
+        let traffic_secret = traffic_key.@traffic_secret;
+        let traffic_secret = *hkdf.expand_label(traffic_secret,
+                             "traffic upd", [], hkdf.hash_length);
+        let traffic_key = traffic_key.set_traffic_secret(traffic_secret);
+        let traffic_key = *traffic_key.update_keys(traffic_secret, aead, hkdf);
+        pure $ traffic_key
+    );
+
+    // Calculates the per-record nonce for the AEAD construction.
+    // cf. RFC8446 "5.3. Per-Record Nonce"
+    get_per_record_nonce: TrafficKey -> Array U8;
+    get_per_record_nonce = |traffic_key| (
+        let iv = traffic_key.@write_iv;
+        let seqnum = traffic_key.@sequence_number;
+        let seqnum = Array::fill(iv.get_size, 0_U8).set_u64_be(iv.get_size - 8, seqnum);
+        let nonce = Array::from_map(iv.get_size, |i| iv.@(i).bit_xor(seqnum.@(i)));
+        nonce
+    );
+
+    encrypt: Array U8 -> Array U8 -> AEAD -> TrafficKey -> Result ErrMsg (Array U8);
+    encrypt = |plaintext, additional_data, aead, traffic_key| (
+        let write_key = traffic_key.@write_key;
+        let nonce = traffic_key.get_per_record_nonce;
+        aead.aead_encrypt(write_key, nonce, additional_data, plaintext)
+    );
+
+    decrypt: Array U8 -> Array U8 -> AEAD -> TrafficKey -> Result ErrMsg (Array U8);
+    decrypt = |aead_encrypted, additional_data, aead, traffic_key| (
+        let write_key = traffic_key.@write_key;
+        let nonce = traffic_key.get_per_record_nonce;
+        aead.aead_decrypt(write_key, nonce, additional_data, aead_encrypted)
+    );
+}
+
+type TrafficKeyType = unbox union {
+    server_tk: (),
+    client_tk: (),
+};
+
+// A structure that handles Record Payload Protection.
+type Protection = unbox struct {
+    hkdf: HKDF,
+    aead: AEAD,
+    handshake_context: Array U8,
+    secrets: Secrets,
+    server_tk: TrafficKey,
+    client_tk: TrafficKey,
+};
+
+impl Protection: ToString {
+    to_string = |p| (
+        "Protection {" +
+        " secrets=" + p.@secrets.to_string +
+        " server_tk=" + p.@server_tk.to_string +
+        " client_tk=" + p.@client_tk.to_string +
+        "}"
+    );
+}
+
+namespace Protection {
+    // Creates a Protection structure for the specified CipherSuite.
+    make: CipherSuite -> Result ErrMsg Protection;
+    make = |cipher_suite| (
+        let hkdf = *HKDF::from_cipher_suite(cipher_suite);
+        let aead = *AEAD::from_cipher_suite(cipher_suite);
+        let secrets = Secrets::empty;
+        let secrets = *secrets.calc_early_secret(hkdf);
+
+        pure $ Protection {
+            hkdf: hkdf,
+            aead: aead,
+            handshake_context: [],
+            secrets: secrets,
+            server_tk: TrafficKey::empty,
+            client_tk: TrafficKey::empty,
+        }
+    );
+
+    // Gets the traffic key of the specified type.
+    get_traffic_key: TrafficKeyType -> Protection -> TrafficKey;
+    get_traffic_key = |typ| (
+        if typ.is_server_tk { @server_tk };
+        if typ.is_client_tk { @client_tk };
+        undefined("get_traffic_key: invalid traffic key type")
+    );
+
+    // Modifies the traffic key of the specified type.
+    mod_traffic_key: TrafficKeyType -> (TrafficKey -> TrafficKey) -> Protection -> Protection;
+    mod_traffic_key = |typ| (
+        if typ.is_server_tk { mod_server_tk };
+        if typ.is_client_tk { mod_client_tk };
+        undefined("mod_traffic_key: invalid traffic key type")
+    );
+
+    // Appends handshake bytes to the handshake context.
+    add_handshake_context: Array U8 -> Protection -> Protection;
+    add_handshake_context = |handshake_bytes| (
+        mod_handshake_context(append(handshake_bytes))
+    );
+
+    // Initializes the handshake traffic using the Diffie-Hellman Ephemeral (dhe) shared secret.
+    // This function must be called after the ServerHello message is appended to the handshake context,
+    // and the shared secret is calculated.
+    init_handshake: Array U8 -> Protection -> Result ErrMsg Protection;
+    init_handshake = |dhe, protection| (
+        let Protection {
+            hkdf: hkdf,
+            aead: aead,
+            handshake_context: handshake_context,
+            secrets: secrets,
+            server_tk: server_tk,
+            client_tk: client_tk
+        } = protection;
+        let secrets = *secrets.calc_handshake_secret(dhe, hkdf);
+        let secrets = *secrets.calc_master_secret(hkdf);
+        let server_handshake_traffic_secret = *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context);
+        let server_tk = *server_tk.update_keys(server_handshake_traffic_secret, aead, hkdf);
+        let client_handshake_traffic_secret = *hkdf.calc_client_handshake_traffic_secret(secrets.@handshake_secret, handshake_context);
+        let client_tk = *client_tk.update_keys(client_handshake_traffic_secret, aead, hkdf);
+        pure $ protection.set_secrets(secrets).set_server_tk(server_tk).set_client_tk(client_tk)
+    );
+
+    // Initializes the application traffic.
+    // This function must be called after the server Finished message is appended to the handshake context.
+    init_appdata: Protection -> Result ErrMsg Protection;
+    init_appdata = |protection| (
+        let Protection {
+            hkdf: hkdf,
+            aead: aead,
+            handshake_context: handshake_context,   // ClientHello...server Finished
+            secrets: secrets,
+            server_tk: server_tk,
+            client_tk: client_tk
+        } = protection;
+
+        let server_application_traffic_secret_0 = *hkdf.calc_server_application_traffic_secret_0(secrets.@master_secret, handshake_context);
+        let server_tk = *server_tk.update_keys(server_application_traffic_secret_0, aead, hkdf);
+        let client_application_traffic_secret_0 = *hkdf.calc_client_application_traffic_secret_0(secrets.@master_secret, handshake_context);
+        let client_tk = *client_tk.update_keys(client_application_traffic_secret_0, aead, hkdf);
+        pure $ protection.set_server_tk(server_tk).set_client_tk(client_tk)
+    );
+
+    // Initializes the application traffic part two.
+    // This function must be called after the client Finished message is appended to the handshake context.
+    init_after_client_finished: Protection -> Result ErrMsg Protection;
+    init_after_client_finished = |protection| (
+        let Protection {
+            hkdf: hkdf,
+            handshake_context: handshake_context,   // ClientHello...client Finished
+            secrets: secrets
+        } = protection;
+        let secrets = *secrets.calc_resumption_master_secret(handshake_context, hkdf);
+        pure $ protection.set_secrets(secrets)
+    );
+
+    // Handles a KeyUpdate message.
+    // cf. RFC8446 "4.6.3. Key and Initialization Vector Update", "7.2. Updating Traffic Secrets"
+    handle_key_update: TrafficKeyType -> Protection -> Result ErrMsg Protection;
+    handle_key_update = |traffic_key_type, protection| (
+        let Protection {
+            hkdf: hkdf,
+            aead: aead
+        } = protection;
+        let traffic_key = protection.get_traffic_key(traffic_key_type);
+        let traffic_key = *traffic_key.increment_generation(aead, hkdf);
+        let protection = protection.mod_traffic_key(traffic_key_type, |_| traffic_key);
+        pure $ protection
+    );
+
+    // Decrypts `TLSCiphertext` into `TLSInnerPlaintext` using the traffic key, then
+    // increments the sequence number.
+    // cf. RFC8446 "5.2. Record Payload Protection", "5.3. Per-Record Nonce"
+    decrypt_record: TLSCiphertext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSInnerPlaintext, Protection);
+    decrypt_record = |ciphertext, traffic_key_type, protection| (
+        if !ciphertext.@opaque_type.is_application_data {
+            err $ "decrypt_server: unexpected content type"
+        };
+        let additional_data = ciphertext.get_additional_data;
+        let aead = protection.@aead;
+        let traffic_key = protection.get_traffic_key(traffic_key_type);
+        let inner_plaintext_bytes = *traffic_key.decrypt(ciphertext.@encrypted_record, additional_data, aead);
+        let protection = protection.mod_traffic_key(traffic_key_type, increment_sequence_number);
+        eval log_debug("inner_plaintext_bytes=" + inner_plaintext_bytes.to_string_hex_limit(100));
+        let inner_plaintext: TLSInnerPlaintext = *unmarshal_from_bytes(inner_plaintext_bytes);
+        pure $ (inner_plaintext, protection)
+    );
+
+    // Encrypts `TLSInnerPlaintext` into `TLSCiphertext` using the traffic key, then
+    // increments the sequence number.
+    // cf. RFC8446 "5.2. Record Payload Protection", "5.3. Per-Record Nonce"
+    encrypt_record: TLSInnerPlaintext -> TrafficKeyType -> Protection -> Result ErrMsg (TLSCiphertext, Protection);
+    encrypt_record = |inner_plaintext, traffic_key_type, protection| (
+        let inner_plaintext_bytes = marshal_to_bytes(inner_plaintext);
+        let aead = protection.@aead;
+        let ciphertext = TLSCiphertext::empty;
+        let length = inner_plaintext_bytes.get_size + aead.@tag_len;
+        let additional_data = ciphertext.get_additional_data_with_length(length);
+        let traffic_key = protection.get_traffic_key(traffic_key_type);
+        let encrypted_record = *protection.@client_tk.encrypt(inner_plaintext_bytes, additional_data, aead);
+        let ciphertext = ciphertext.set_encrypted_record(encrypted_record);
+        let protection = protection.mod_traffic_key(traffic_key_type, increment_sequence_number);
+        pure $ (ciphertext, protection)
+    );
+
+    // Calculates the content covered by the digital signature for the CertificateVerify message.
+    // cf. RFC8446 "4.4.3. Certificate Verify"
+    calc_certificate_verify_content: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
+    calc_certificate_verify_content = |traffic_key_type, protection| (
+        let Protection {
+            hkdf: hkdf,
+            handshake_context: handshake_context,   // ClientHello...Certificate
+            secrets: secrets
+        } = protection;
+        let context_string = if traffic_key_type.is_server_tk { "TLS 1.3, server CertificateVerify" } else { "TLS 1.3, client CertificateVerify" };
+        let concatenation = (
+            Array::fill(64, 0x20_U8)
+            .append(context_string.get_bytes.pop_back)
+            .append([0x00_U8])
+            .append(hkdf.transcript_hash(handshake_context))
+        );
+        eval log_debug("calc_certificate_verify_content: " + concatenation.to_string_hex);
+        pure $ concatenation
+    );
+
+    // Calculates the verify data for the Finished message.
+    // cf. RFC8446 "4.4.4. Finished"
+    calc_finished_verify_data: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
+    calc_finished_verify_data = |traffic_key_type, protection| (
+        let Protection {
+            hkdf: hkdf,
+            handshake_context: handshake_context,   // ClientHello...server Finished
+            secrets: secrets
+        } = protection;
+        let traffic_key = protection.get_traffic_key(traffic_key_type);
+        let base_key = traffic_key.@traffic_secret;
+        let finished_key = *hkdf.expand_label(base_key, "finished", [], hkdf.hash_length);
+        eval log_debug("finished_key=" + finished_key.to_string_hex);
+        let verify_data = hkdf.@hmac.digest(finished_key, hkdf.transcript_hash(handshake_context));
+        pure $ verify_data
+    );
+}

@@ -1,0 +1,171 @@
+module Main;
+
+import Minilib.Common.Common;
+
+type TypeInfo a = unbox struct {};
+
+typeinfo: TypeInfo a = TypeInfo{};
+
+trait a: GetTypeName {
+    get_typename: TypeInfo a -> String;
+}
+
+impl I8: GetTypeName { get_typename = |_| "I8"; }
+impl I16: GetTypeName { get_typename = |_| "I16"; }
+impl I32: GetTypeName { get_typename = |_| "I32"; }
+impl I64: GetTypeName { get_typename = |_| "I64"; }
+impl U8: GetTypeName { get_typename = |_| "U8"; }
+impl U16: GetTypeName { get_typename = |_| "U16"; }
+impl U32: GetTypeName { get_typename = |_| "U32"; }
+impl U64: GetTypeName { get_typename = |_| "U64"; }
+impl F32: GetTypeName { get_typename = |_| "F32"; }
+impl F64: GetTypeName { get_typename = |_| "F64"; }
+impl Ptr: GetTypeName { get_typename = |_| "Ptr"; }
+
+impl String: GetTypeName { get_typename = |_| "String"; }
+
+impl [a: GetTypeName] Array a: GetTypeName {
+    get_typename = |_| "(Array " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName] Option a: GetTypeName {
+    get_typename = |_| "(Option " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [e: GetTypeName, a: GetTypeName] Result e a: GetTypeName {
+    get_typename = |_| "(Result " + (typeinfo: TypeInfo e).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName] IO a: GetTypeName {
+    get_typename = |_| "(IO " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName] IOFail a: GetTypeName {
+    get_typename = |_| "(IOFail " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName, b: GetTypeName] Arrow a b: GetTypeName {
+    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + " -> " + (typeinfo: TypeInfo b).get_typename + ")";
+}
+
+impl (): GetTypeName { 
+    get_typename = |_| "()"; 
+}
+impl [a: GetTypeName] (a, ): GetTypeName { 
+    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + ",)"; 
+}
+
+impl [a: GetTypeName, b: GetTypeName] (a, b): GetTypeName { 
+    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + "," + (typeinfo: TypeInfo b).get_typename +")"; 
+}
+
+impl [a: GetTypeName, b: GetTypeName, c: GetTypeName] (a, b, c): GetTypeName { 
+    get_typename = |_| "("
+    + (typeinfo: TypeInfo a).get_typename
+    + "," + (typeinfo: TypeInfo b).get_typename 
+    + "," + (typeinfo: TypeInfo c).get_typename 
+    + ")"; 
+}
+
+
+test1: [a: GetTypeName] a -> a;
+test1 = |a| (
+    eval debug_eprintln("test1: " + (typeinfo: TypeInfo a).get_typename);
+    a
+);
+
+test_typename: IO ();
+test_typename = (
+    println("=== test_typename ===");;
+    (typeinfo: TypeInfo I64).get_typename.println;;
+    (typeinfo: TypeInfo (I64 -> Array String)).get_typename.println;;
+    (typeinfo: TypeInfo (Result ErrMsg ())).get_typename.println;;
+    42.test1.to_string.println;;
+    pure()
+);
+
+type TypedPtr = unbox struct {
+    typename: String,
+    dtor: Destructor Ptr,   // retained ptr of `Box a`
+};
+
+namespace TypedPtr {
+    to_typed_ptr: [a: GetTypeName] a -> TypedPtr;
+    to_typed_ptr = |a| (
+        TypedPtr {
+            typename: (typeinfo: TypeInfo a).get_typename,
+            dtor: Destructor::make(
+                Box::make(a).boxed_to_retained_ptr,             // retain ptr
+                |ptr|
+                if ptr == nullptr { pure $ nullptr };
+                eprintln("TypedPtr: destructor is called: ptr=" + ptr.to_string);;
+                let ba: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                pure $ nullptr
+            )
+        }
+    );
+
+    get: [a: GetTypeName] TypedPtr -> (TypedPtr, a);
+    get = |typed_ptr| (
+        let typename = (typeinfo: TypeInfo a).get_typename;
+        if typename != typed_ptr.@typename {
+            undefined("from_typed_ptr: type mismatch: typed_ptr:" + typed_ptr.@typename + " target:" + typename)
+        };
+        typed_ptr.act_dtor(
+            |dtor| dtor.mutate_unique(
+                |ptr| eprintln("mutate_unique ctor");; pure $ ptr,   // should call boxed_to_retained_ptr?
+                |ptr| eprintln("mutate_unique action");; let ba: Box a = ptr.boxed_from_retained_ptr; pure $ ba.@value
+            ).swap
+        ).swap
+    );
+}
+
+type Obj = box struct {
+    data: Destructor I64,
+};
+
+impl Obj: GetTypeName { 
+    get_typename = |_| "Obj"; 
+}
+
+impl Obj: ToString {
+    to_string = |obj| obj.@data.borrow(to_string);
+}
+
+namespace Obj {
+    make: I64 -> Obj;
+    make = |i| Obj { 
+        data: Destructor::make(i, 
+            |i| eprintln("destructor is called: i=" + i.to_string);; 
+            pure $ 0
+        )
+    };
+}
+
+make_typed_ptrs: () -> (TypedPtr, TypedPtr, TypedPtr);
+make_typed_ptrs = |_| (
+    let pa = "abc".to_typed_ptr;
+    let pb = Obj::make(123).to_typed_ptr;
+    let pc = Obj::make(234).to_typed_ptr;
+    (pa, pb, pc)
+);
+
+test_typed_ptr: IO ();
+test_typed_ptr = (
+    println("=== test_typed_ptr ===");;
+    let (pa, pb, pc) = make_typed_ptrs();
+    range(0,2).fold_m(
+        (pa, pb, pc), |_, (pa, pb, pc)|
+        let (pa, a: String) = pa.get;
+        let (pb, b: Obj) = pb.get;
+        let (pc, c: Obj) = pc.get;   // retain されたまま
+        eprintln("a="+ a.to_string + " b=" + b.to_string);;
+        pure $ (pa, pb, pc)
+    ).forget
+);
+
+main: IO () = (
+    test_typename;;
+    test_typed_ptr;;
+    pure()
+);

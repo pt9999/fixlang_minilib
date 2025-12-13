@@ -1,0 +1,189 @@
+// Wavefront obj file format
+//
+// You can see obj file with a 3D viewer such as
+// [Online3DViewer](https://github.com/kovacsv/Online3DViewer).
+module Main;
+
+import Math;
+
+import Minilib.Trait.Traversable;
+
+// 3D vector
+type Vec3 = Array F64;
+
+// Vertex of polygons or polylines.
+type Vertex = Vec3;
+
+namespace Vertex {
+    // `vertex.scale([sx, sy, sz])` scales each coordinate of a vertex.
+    scale: Vec3 -> Vertex -> Vertex;
+    scale = |s, v| (
+        s.to_iter.zip(v.to_iter).map(|(a,b)| a * b).to_array
+    );
+
+    // `vertex.translate([tx, ty, tz])` translates each coordinate of a vertex.
+    translate: Vec3 -> Vertex -> Vertex;
+    translate = |t, v| (
+        t.to_iter.zip(v.to_iter).map(|(a,b)| a + b).to_array
+    );
+}
+
+// Face of a polygon.
+// It is an array of vertex index (0-based).
+type Face = Array I64;
+
+// Polyline.
+// It is an array of vertex index (0-based).
+type Line = Array I64;
+
+// 3D Object that can be exported to a Wavefront obj file.
+type Object = unbox struct {
+    vertices: Array Vertex,
+    faces: Array Face,
+    lines: Array Line
+};
+
+namespace Object {
+    // An empty object.
+    empty: Object;
+    empty = (
+        Object { vertices: [], faces: [], lines: [] }
+    );
+
+    // `obj.write_file(file_path)` writes a Wavefront obj file.
+    write_file: Path -> Object -> IOFail ();
+    write_file = |file_path, obj| (
+        eprintln("writing file: " + file_path.to_string).lift;;
+        with_file(file_path, "w", |fh|
+            eval *obj.@vertices.foreach_m(|v|
+                write_string(fh, "v " + v.to_iter.map(to_string).join(" ") + "\n")
+            );
+            eval *obj.@faces.foreach_m(|f|
+                write_string(fh, "f " + f.to_iter.map(add(1)).map(to_string).join(" ") + "\n")
+            );
+            eval *obj.@lines.foreach_m(|l|
+                write_string(fh, "l " + l.to_iter.map(add(1)).map(to_string).join(" ") + "\n")
+            );
+            pure()
+        )
+    );
+
+    // Scales all vertices of an object.
+    scale: Vec3 -> Object -> Object;
+    scale = |s, obj| (
+        obj.mod_vertices(map(scale(s)))
+    );
+
+    // Translates all vertices of an object.
+    translate: Vec3 -> Object -> Object;
+    translate = |t, obj| (
+        obj.mod_vertices(map(translate(t)))
+    );
+
+    // `obj1.append(obj2) appends `obj2` after `obj1`.
+    append: Object -> Object -> Object;
+    append = |obj2, obj1| (
+        let nv = obj1.@vertices.get_size;
+        obj1.mod_vertices(append(obj2.@vertices))
+        .mod_faces(append(obj2.@faces.map(map(add(nv)))))
+        .mod_lines(append(obj2.@lines.map(map(add(nv)))))
+    );
+}
+
+// A cube of [-1,-1,-1]..[1,1,1].
+cube: Object;
+cube = (
+    let vertices = Iterator::range(0, 8).map(|i|
+        let x = (i % 2) * 2 - 1;
+        let y = ((i / 2) % 2) * 2 - 1;
+        let z = ((i / 4) % 2) * 2 - 1;
+        [x, y, z].map(to_F64)
+    ).to_array;
+    let faces = [
+        [0, 1, 3, 2],
+        [1, 5, 7, 3],
+        [5, 4, 6, 7],
+        [4, 0, 2, 6],
+        [0, 4, 5, 1],
+        [2, 3, 7, 6]
+    ];
+    Object::empty.set_vertices(vertices).set_faces(faces)
+);
+
+frame: Object;
+frame = (
+    let w = 0.05;
+    let bars = [
+        cube.scale([1.0, w, w]),
+        cube.scale([w, 1.0, w]),
+        cube.scale([w, w, 1.0])
+    ];
+    let iter = do {
+        let axis = *Iterator::range(0, 3);
+        let off1 = *Iterator::range(0, 2).map(|i| (i * 2 - 1).to_F64);
+        let off2 = *Iterator::range(0, 2).map(|i| (i * 2 - 1).to_F64);
+        let bar = bars.@(axis);
+        let trans = [0.0, 0.0, 0.0];
+        let trans = trans.set((axis+1)%3, off1);
+        let trans = trans.set((axis+2)%3, off2);
+        pure $ bar.translate(trans)
+    };
+    iter.fold(Object::empty, Object::append)
+);
+
+frame2: Object;
+frame2 = (
+    let w = 0.05;
+    let bars = [
+        cube.scale([1.0, w, w]),
+        cube.scale([w, 1.0, w]),
+        cube.scale([w, w, 1.0])
+    ];
+    let iter = do {
+        let dir = *Iterator::range(0, 2);
+        let axis = *Iterator::range(0, 3);
+        let ibar = *Iterator::range(0, 3);
+        if axis == ibar { Iterator::empty };
+        let bar = bars.@(ibar);
+        let trans = [0.0, 0.0, 0.0];
+        let trans = trans.set(axis, dir.to_F64 - 0.5);
+        pure $ bar.translate(trans)
+    };
+    iter.fold(Object::empty, Object::append)
+);
+
+grid1: Object;
+grid1 = (
+    let centers = Iterator::range(0, 27).map(|i|
+        [ i, i / 3, i / 9 ].map(|i| i % 3 - 1).map(to_F64)
+    );
+    /*
+    let centers = centers.map(|p|
+        let r = p.map(|x| x*x).to_iter.fold(0.0, add).sqrt;
+        if r == 0.0 { p };
+        p.map(|x| x / r)
+    );
+    */
+    let cubes = centers.map(|center|
+        let sz = 0.1;
+        cube.scale([ sz, sz, sz ]).translate(center)
+    );
+    let grid = cubes.fold(Object::empty, Object::append);
+    let path = [
+        1, 3, 9, 23, 22, 19, 10, 26, 4, 12, 5, 15, 14, 2, 6, 18, 16, 17, 11, 20, 13, 8, 24, 7, 21, 25, 1
+    ];
+    let lines = Object::empty
+        .set_vertices(centers.to_array)
+        .set_lines([path]);
+    grid.append(lines)
+);
+
+
+main: IO ();
+main = (
+    let obj = grid1;
+    do {
+        obj.write_file("tmp.obj")
+    }
+    .try(eprintln)
+);

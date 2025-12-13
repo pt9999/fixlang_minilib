@@ -1,0 +1,43 @@
+module Minilib.Crypto.Tls.TLSSocket;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Monad.BytesIO;
+import Minilib.Net.Tcp;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type TLSSocket = unbox struct {
+    socket: Socket,
+    debug: Bool,
+};
+
+make: Socket -> TLSSocket;
+make = |socket| TLSSocket {
+    socket: socket,
+    debug: false
+};
+
+_debug_lazy: Lazy String -> TLSSocket -> ();
+_debug_lazy = |message, sock| (
+    if !sock.@debug { () };
+    log_debug(message())
+);
+
+impl TLSSocket: BytesIO {
+    // type IOType Socket = IOFail;
+    send = |bytes, sock| (
+        let sent_size = *sock.@socket.Socket::send(bytes);
+        eval sock._debug_lazy(|_| "sent:" + sent_size.to_string + " bytes: " +
+                        bytes.get_sub(0, sent_size).to_string_hex_limit(100));
+        pure $ sent_size
+    );
+    recv = |length, sock| (
+        eval sock._debug_lazy(|_| "receiving " + length.to_string + " bytes");
+        let bytes = *sock.@socket.Socket::recv(length);
+        eval sock._debug_lazy(|_| "received " + bytes.get_size.to_string + " bytes: " +
+                        bytes.to_string_hex_limit(100));
+        pure $ bytes
+    );
+}

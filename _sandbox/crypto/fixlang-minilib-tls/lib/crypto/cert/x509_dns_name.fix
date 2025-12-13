@@ -1,0 +1,121 @@
+module Minilib.Crypto.Cert.X509DnsName;
+
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
+
+
+// Compares two domain name component.
+// Differences of uppercase or lowercase are ignored.
+// If the pattern contains wildcard character ('*'), it matches zero or more characters.
+// For details, see RFC 2818 "3.1. Server Identity".
+match_domain_name_component: String -> String -> Bool;
+match_domain_name_component = |pattern, target| (
+    // ignore uppercase/lowercase
+    let pattern = pattern.to_lower;
+    let target = target.to_lower;
+
+    let pattern = pattern.get_bytes.pop_back;
+    let target = target.get_bytes.pop_back;
+
+    // compress consective wildcard characters
+    let pattern = pattern.to_iter.fold(
+        Array::empty(pattern.get_size), |c, output|
+        if c == '*' && output.get_last == some('*') { output };
+        output.push_back(c)
+    );
+
+    // match characters
+    let np = pattern.get_size;
+    let nt = target.get_size;
+    let inner = fix $ |inner, ip, it| (
+        if ip >= np && it >= nt { true };
+        if ip >= np { false };
+        let p = pattern.@(ip);
+        if p == '*' {   // wildcard
+            // zero char match
+            let ret = inner(ip + 1, it);
+            if ret { true };
+            // one char match
+            let ret = inner(ip + 1, it + 1);
+            if ret { true };
+            // two or more chars match
+            inner(ip, it + 1)
+        };
+        if it >= nt { false };
+        let t = target.@(it);
+        if p != t { false };
+        inner(ip + 1, it + 1)
+    );
+    inner(0, 0)
+);
+
+// Compares two DNS names.
+// Differences of uppercase or lowercase are ignored.
+// A wildcard character('*') matches any single domain name component or component fragment.
+// For details, see RFC 2818 "3.1. Server Identity".
+match_dns_name: String -> String -> Bool;
+match_dns_name = |pattern, target| (
+    let pattern = pattern.split(".").map(to_lower).to_array;
+    let target = target.split(".").map(to_lower).to_array;
+    if pattern.get_size != target.get_size {
+        false
+    };
+    Iterator::range(0, pattern.get_size)
+    .filter(|i| !match_domain_name_component(pattern.@(i), target.@(i)))
+    .is_empty
+);
+
+
+verify_certificate_identity: [m: MonadError] Certificate -> String -> m ();
+verify_certificate_identity = |cert, target_server_name| (
+    eval log_debug("verify_certificate_identity: target_server_name=" + target_server_name);
+
+    // RFC2818 3.1.  Server Identity
+    let subjectAltName: Option SubjectAltName = do {
+        let extn = *cert.find_extension(match_name("id-ce-subjectAltName"));
+        let bytes = extn.@extn_value.to_bytes;
+        let res = decode_der_from_bytes(bytes);
+        if res.is_err { none () };
+        some $ res.as_ok
+    };
+    eval log_debug("subjectAltName=" + subjectAltName.to_string);
+
+    let dns_names: Array String = (
+        if subjectAltName.is_none { [] };
+        subjectAltName.as_some.@data
+            .to_iter
+            .filter(is_dNSName)
+            .map(as_dNSName)
+            .map(to_string) // IA5String -> String
+            .to_array
+    );
+
+    eval log_debug("dns_names=" + dns_names.to_string);
+    let dns_names = *(
+        if dns_names.get_size > 0 {
+            pure $ dns_names
+        };
+
+        let common_name: Option String = cert.get_subject.find_common_name;
+        if common_name.is_some {
+            eval log_debug("Using the common name as a DNS name: common_name=" + common_name.to_string);
+            pure $ [ common_name.as_some ]
+        };
+        error $ "Neither the DNS name nor the common name are not found"
+    );
+
+    let accepted_dns_names = (
+        dns_names.to_iter
+        .filter(|dns_name| match_dns_name(dns_name, target_server_name))
+        .to_array
+    );
+
+    if accepted_dns_names.get_size == 0 {
+        error $ "DNS names did not match"
+    };
+    pure()
+);

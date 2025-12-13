@@ -1,0 +1,113 @@
+module Main;
+
+import AsyncTask;       // for Var
+
+_unsafe_debug_eprintln: String -> ();
+_unsafe_debug_eprintln = debug_eprintln;
+
+type RetainedPtrIO = unbox struct {
+    dtor: Destructor (Var Ptr),   // retained ptr of Boxed object
+};
+
+namespace RetainedPtrIO {
+    make: a -> IO RetainedPtrIO;
+    make = |a| (
+        let box_a: Box a = Box::make(a);
+        let ptr = box_a.boxed_to_retained_ptr; // retain ptr
+        let var_ptr = *Var::make(ptr);
+        pure $ RetainedPtrIO {
+            dtor: Destructor::make(
+                var_ptr,
+                |var_ptr|
+                var_ptr.lock(|ptr|
+                    if ptr == nullptr { pure() };
+                    eval _unsafe_debug_eprintln("RetainedPtrIO: destructor is called: ptr=" + ptr.to_string);
+                    let box_a: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                    eval box_a;                                        // ensure box_a is evaluated
+                    var_ptr.Var::set(nullptr)
+                );;
+                pure $ var_ptr
+            )
+        }
+    );
+
+    get: RetainedPtrIO -> IO a;
+    get = |rp| (
+        rp.@dtor.borrow_io(
+            |var_ptr|
+            var_ptr.lock(|ptr|
+                if ptr == nullptr { undefined("RetainedPtrIO::get: ptr == nullptr") };
+                let box_a: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                let ptr = box_a.boxed_to_retained_ptr; // retain ptr
+                var_ptr.Var::set(ptr);;
+                pure $ box_a.@value
+            )
+        )
+    );
+    
+}
+
+test1: IO ();
+test1 = (
+    println("=== test1 ===");;
+    range(0,3).fold_m(
+        (), |i, _|
+        let a: I64 = 42;
+        let rp = *RetainedPtrIO::make(a);
+        let b: I64 = *rp.get;
+        println("b=" + b.to_string);;
+        let c: I64 = *rp.get;
+        println("c=" + c.to_string);;
+        let d: I64 = *rp.get;
+        println("d=" + d.to_string);;
+        pure()
+    )
+);
+
+type Value a = unbox struct {
+    dtor: Destructor (Option a),
+};
+
+namespace Value {
+    make: a -> Value a;
+    make = |a| Value {
+        dtor: Destructor::make(
+            some $ a,
+            |opt|
+            eval _unsafe_debug_eprintln("Value: destructor is called");
+            if opt.is_none { pure $ none() };
+            pure $ none()
+        )
+    };
+
+    get: Value a -> Option a;
+    get = |val| val.@dtor.borrow(|opt| opt);
+}
+
+test2: IO ();
+test2 = (
+    println("=== test2 ===");;
+    let a = Value::make(42);
+    //println("a.get=" + a.get.to_string);;     // if comment out this line, the destructor of `a` is not called. why?
+                                                // ... maybe `a` is never created, since it is never used
+    //eval a;                                   // ... if you evaluates `a`, the destructor of `a` is called
+    range(0,3).fold_m(
+        (), |i, _|
+        let a: Value I64 = Value::make $ (i+1) * 10;
+        let rp = *RetainedPtrIO::make(a);
+        let b: Value I64 = *rp.get;
+        println("b=" + b.get.to_string);;
+        let c: Value I64 = *rp.get;
+        println("c=" + c.get.to_string);;
+        let d: Value I64 = *rp.get;
+        println("d=" + d.get.to_string);;
+        pure()
+    )
+);
+
+main: IO ();
+main = (
+    test1;;
+    test2;;
+    pure()
+);

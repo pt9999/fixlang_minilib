@@ -1,0 +1,69 @@
+module Treap3Test;
+
+import Minilib.Collection.Treap3;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let n = 30;
+    let shuffled = Array::from_map(n, |i| (i * 1234567) % n);
+    println("shuffled=" + shuffled.to_string).lift;;
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = shuffled.to_iter.fold(t, insert);
+    let sorted = t.to_array;
+    println("sorted=" + sorted.to_string).lift;;
+    //println(t._debug_to_string).lift;;
+    pure()
+);
+
+test_perf: TestCase;
+test_perf = (
+    make_test("test_perf") $ |_|
+    let n = 1000000;
+    //let n = 100000;
+    println("test_perf (n=" + n.to_string + ")").lift;;
+    let array = Iterator::range(0, n).to_array;
+    let shuffled = array.reorder(shuffle(5432));
+    let (tree, from_iter_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.Treap::from_iter
+    }).lift;
+    println(" from_iter: " + from_iter_time.to_string + " seconds").lift;;
+    assert_equal("size", n, tree.get_size);;
+    /*
+    let (ans1, ans1_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_iter.to_array
+    }).lift;
+    println(" to_iter.to_array: " + ans1_time.to_string + " seconds").lift;;
+    assert_equal("eq", ans1, array);;
+    */
+    let (ans2, ans2_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_array
+    }).lift;
+    println(" to_array: " + ans2_time.to_string + " seconds").lift;;
+    assert_equal("eq", ans2, array);;
+    let (tree, remove_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.fold(
+            tree, |x| remove(x)
+        )
+    }).lift;
+    println(" remove: " + remove_time.to_string + " seconds").lift;;
+    assert_equal("size", 0, tree.get_size);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_simple,
+        test_perf,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

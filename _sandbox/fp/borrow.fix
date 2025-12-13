@@ -1,0 +1,139 @@
+//module Minilib.Monad.Borrow;
+module Main;
+
+import Minilib.Monad.Iden;
+import Minilib.Monad.State;
+
+/*
+### `borrow_boxed : [a : Std::Boxed] (Std::Ptr -> b) -> a -> b`
+### `borrow_boxed_io : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO b`
+
+### `borrow : (a -> b) -> Std::FFI::Destructor a -> b`
+### `borrow_io : (a -> Std::IO b) -> Std::FFI::Destructor a -> Std::IO b`
+
+### `borrow_c_str : (Std::Ptr -> a) -> Std::String -> a`
+### `borrow_c_str_io : (Std::Ptr -> Std::IO a) -> Std::String -> Std::IO a`
+*/
+
+/*
+### `mutate_boxed : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> (a, b)`
+### `mutate_boxed_io : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO (a, b)`
+### `mutate_boxed_ios : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO::IOState -> (Std::IO::IOState, (a, b))`
+
+### `mutate_unique : (a -> Std::IO a) -> (a -> Std::IO b) -> Std::FFI::Destructor a -> (Std::FFI::Destructor a, b)`
+### `mutate_unique_io : (a -> Std::IO a) -> (a -> Std::IO b) -> Std::FFI::Destructor a -> Std::IO (Std::FFI::Destructor a, b)`
+*/
+
+trait [m: * -> *] m: MonadBorrowIF {
+    borrow_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m b;
+    borrow_m: (a -> m b) -> Destructor a -> m b;
+    borrow_c_str_m: (Ptr -> m b) -> String -> m b;
+}
+
+impl Iden: MonadBorrowIF {
+    borrow_boxed_m = |f| borrow_boxed(f >> Iden::get) >> Iden::make;
+    borrow_m = |f| borrow(f >> Iden::get) >> Iden::make;
+    borrow_c_str_m = |f| borrow_c_str(f >> Iden::get) >> Iden::make;
+}
+
+impl IO: MonadBorrowIF {
+    borrow_boxed_m = borrow_boxed_io;
+    borrow_m = borrow_io;
+    borrow_c_str_m = borrow_c_str_io;
+}
+
+impl IOFail: MonadBorrowIF {
+    borrow_boxed_m = |f| borrow_boxed_io(f >> to_result) >> from_io_result;
+    borrow_m = |f| borrow_io(f >> to_result) >> from_io_result;
+    borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
+}
+
+/*
+//TODO
+impl [m: MonadBorrowIF] StateT s m: MonadBorrowIF {
+
+}
+*/
+
+trait [m: * -> *] m: MonadMutateIF {
+    mutate_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m (a, b);
+    // dtor.mutate_unique_m(ctor, action) applies action to dtor if dtor is unique. If dtor is shared, it creates a new Destructor value using ctor and applies action to the new value.
+    // `ctor` should return an IO monad.
+    mutate_unique_m: (a -> IO a) -> (a -> m b) -> Destructor a -> m (Destructor a, b);
+}
+
+impl Iden: MonadMutateIF {
+    mutate_boxed_m = |f| mutate_boxed(f >> Iden::get >> pure) >> Iden::make;
+    mutate_unique_m = |ctor, action| mutate_unique(ctor, action >> Iden::get >> pure) >> Iden::make;
+}
+
+impl IO: MonadMutateIF {
+    mutate_boxed_m = mutate_boxed_io;
+    mutate_unique_m = mutate_unique_io;
+}
+
+impl IOFail: MonadMutateIF {
+    mutate_boxed_m = |f, boxed| (
+        let (boxed, res) = *boxed.mutate_boxed_io(f >> to_result).lift;
+        match res {
+            ok(b) => pure((boxed, b)),
+            err(e) => throw(e)
+        }
+    );
+    //mutate_boxed_m = |f| mutate_boxed_io(f >> to_result) >> map(|(a, res)| res.map(|b| (a, b))) >> from_io_result;
+    mutate_unique_m = |ctor, action| mutate_unique_io(ctor, action >> to_result) >> from_io_result;
+}
+
+/*
+//TODO
+impl [m: MonadMutateIF] StateT s m: MonadMutateIF {
+
+}
+*/
+
+test1: IO ();
+test1 = (
+    let bufsize = 100;
+    let arr: Array U8 = Array::fill(bufsize, 0_U8);
+    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
+        FFI_CALL_IO[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
+    );
+    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    println("gethostname()=" + str + " ret=" + ret.to_string)
+);
+
+test2: IO ();
+test2 = do {
+    let bufsize = 100;
+    let arr: Array U8 = Array::fill(bufsize, 0_U8);
+    let format = "%d";
+    let num = 123;
+    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
+        format.borrow_c_str_m(|p_format|
+            FFI_CALL_IO[CInt sprintf(Ptr, Ptr, CInt), p_arr, p_format, num.to_CInt].lift
+        )
+    );
+    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    println("sprintf(\"%d\", 123)=" + str + " ret=" + ret.to_string).lift
+}.try(eprintln);
+
+test3: IO ();
+test3 = (
+    let bufsize = 100;
+    let arr: Array U8 = Array::fill(bufsize, 0_U8);
+    let (arr, ret) = arr.mutate_boxed_m(|p_arr|
+        // NOTE: gethostname() might have side effects, but I want to demonstrate `mutate_boxed_m` for Iden monad
+        Iden::make $ FFI_CALL[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
+    ).get;
+    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    println("gethostname()=" + str + " ret=" + ret.to_string)
+);
+
+main: IO ();
+main = (
+    test1;;
+    test2;;
+    test3;;
+    pure()
+);
+

@@ -1,0 +1,318 @@
+
+module Minilib.Net.HttpClient.ResponseParser;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.Encoding.Binary;
+import Minilib.Net.Request;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+// TODO: rewrite using Free monad or Coroutine monad
+
+type HttpClientResponse = unbox struct {
+    http_version: String,       // eg. "HTTP/1.1"
+    status: I64,                // HTTP status (eg. 404)
+    reason: String,             // reason phrase (eg. "Not Found")
+    headers: Headers,           // response headers
+    body: Array U8,
+};
+
+namespace HttpClientResponse {
+    empty: HttpClientResponse;
+    empty = HttpClientResponse {
+        http_version: "",
+        status: 0,
+        reason: "",
+        headers: Headers::empty,
+        body: [],
+    };
+
+    print_document_info: HttpClientResponse -> IO ();
+    print_document_info = |obj| (
+        println(obj.@http_version + " " + obj.@status.to_string + " " + obj.@reason);;
+        obj.@headers.to_iter.foreach_m(|(name, value)|
+            println(name + ": " + value)
+        )
+    );
+}
+
+impl HttpClientResponse: ToString {
+    to_string = |obj| (
+        "HttpClientResponse {" +
+        " http_version=" + obj.@http_version.to_string +
+        " status=" + obj.@status.to_string +
+        " reason=" + obj.@reason.to_string +
+        " headers=" + obj.@headers.to_string +
+        " body=(" + obj.@body.get_size.to_string + " bytes)" +
+        " }"
+    );
+}
+
+type ResponseParserState = unbox union {
+    parsing_status_line: (),
+    parsing_headers: (),
+    before_body: (),
+    parsing_body: (I64, I64),
+    parsing_chunk_size: (),
+    parsing_chunk_data: (I64, I64),
+    parsing_chunk_end_crlf: (),
+    parsing_trailer_section: (),
+    completed: (),
+};
+
+impl ResponseParserState: ToString {
+    to_string = |state| (
+        if state.is_parsing_status_line { "parsing_status_line" };
+        if state.is_parsing_headers { "parsing_headers" };
+        if state.is_before_body { "before_body" };
+        if state.is_parsing_body { "parsing_body"  + state.as_parsing_body.to_string };
+        if state.is_parsing_chunk_size { "parsing_chunk_size" };
+        if state.is_parsing_chunk_data { "parsing_chunk_data" + state.as_parsing_chunk_data.to_string };
+        if state.is_parsing_chunk_end_crlf { "parsing_chunk_end_crlf" };
+        if state.is_parsing_trailer_section { "parsing_trailer_section" };
+        if state.is_completed { "completed" };
+        ""
+    );
+}
+
+type ResponseParser = unbox struct {
+    state: ResponseParserState,
+    array: Array U8,
+    position: I64,
+    response: HttpClientResponse,
+};
+
+impl ResponseParser: ToString {
+    to_string = |obj| (
+        "ResponseParser {" +
+        " state=" + obj.@state.to_string +
+        " array=(" + obj.@array.get_size.to_string + " bytes)" +
+        " position=" + obj.@position.to_string +
+        " response=" + obj.@response.to_string +
+        " }"
+    );
+}
+
+namespace ResponseParser {
+    empty: ResponseParser;
+    empty = ResponseParser {
+        state: parsing_status_line(),
+        array: [],
+        position: 0,
+        response: HttpClientResponse::empty,
+    };
+
+    add_data: Array U8 -> ResponseParser -> Result ErrMsg ResponseParser;
+    add_data = |data, parser| (
+        let parser = parser.mod_array(append(data));
+        parser._process_parse
+    );
+
+    end_data: ResponseParser -> Result ErrMsg ResponseParser;
+    end_data = |parser| (
+        let state = parser.@state;
+        if state.is_completed {
+            pure $ parser
+        };
+        if !state.is_parsing_body {
+            err $ "unexpected EOF: not parsing body"
+        };
+        let (start, end) = state.as_parsing_body;
+        let array_size = parser.@array.get_size;
+        if array_size < end && end != I64::maximum {
+            err $ (array_size, end).format("unexpected EOF: array_size={} end={}")
+        };
+        let end = min(end, array_size);
+        let body = parser.@array.get_sub(start, end);
+        eval log_debug((array_size, end).format("end_data: completed: array_size={} end={}"));
+        pure $ parser
+            .mod_response(set_body(body))
+            .set_position(end)
+            .set_state(completed())
+    );
+
+    _process_parse: ResponseParser -> Result ErrMsg ResponseParser;
+    _process_parse = |parser| (
+        let state = parser.@state;
+        if state.is_parsing_status_line { parser._parse_status_line };
+        if state.is_parsing_headers { parser._parse_headers };
+        if state.is_before_body { parser._before_body };
+        if state.is_parsing_body {parser._parse_body(state.as_parsing_body) };
+        if state.is_parsing_chunk_size { parser._parse_chunk_size };
+        if state.is_parsing_chunk_data { parser._parse_chunk_data(state.as_parsing_chunk_data) };
+        if state.is_parsing_chunk_end_crlf { parser._parse_chunk_end_crlf };
+        if state.is_completed { pure $ parser };
+        err $ "invalid state"
+    );
+
+    _parse_status_line: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_status_line = |parser| (
+        let opt = parser._read_line;
+        if opt.is_none {
+            pure $ parser   // wait for data
+        };
+        let (line, parser) = opt.as_some;
+        let (http_version, rest) = line.split_first(" ");
+        let (status, reason) = rest.split_first(" ");
+        if http_version == "" || status == "" {
+             err $ "Invalid status line: `" + line + "`"
+        };
+        let status: I64 = *status.from_string;
+        let parser = parser.mod_response(|response| response
+            .set_http_version(http_version)
+            .set_status(status)
+            .set_reason(reason)
+        );
+        let parser = parser.set_state(parsing_headers());
+        parser._parse_headers   // run next state
+    );
+
+    _parse_headers: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_headers = |parser| (
+        let opt = parser._read_line;
+        if opt.is_none {
+            pure $ parser   // wait for data
+        };
+        let (line, parser) = opt.as_some;
+        if line == "" {
+            let parser = parser.set_state(before_body());
+            parser._before_body     // run next state
+        };
+        let parser = *parser._parse_header(line);
+        parser._parse_headers   // continue
+    );
+
+    _parse_header: String -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_header = |line, parser| (
+        let (field_name, field_value) = line.split_first(":");
+        let field_value = field_value.strip_spaces;
+        let parser = parser.mod_response(mod_headers(append(field_name, field_value)));
+        pure $ parser
+    );
+
+    _before_body: ResponseParser -> Result ErrMsg ResponseParser;
+    _before_body = |parser| (
+        let transfer_encoding = parser.@response.@headers.find("Transfer-Encoding");
+        if transfer_encoding == some("chunked") {
+            eval log_debug("Transfer-Encoding: chunked");
+            let parser = parser.set_state(parsing_chunk_size());
+            parser._parse_chunk_size     // run next state
+        };
+
+        let content_length = *(
+            let opt = parser.@response.@headers.find("Content-Length");
+            if opt.is_none { ok $ none() };
+            let content_length: I64 = *from_string(opt.as_some);
+            ok $ some $ content_length
+        );
+        eval log_debug("content_length=" + content_length.to_string);
+        let start = parser.@position;
+        let end = if content_length.is_none { I64::maximum }
+        else { start + content_length.as_some };
+
+        let parser = parser.set_state(parsing_body((start, end)));
+        parser._parse_body((start, end))    // run next state
+    );
+
+    _parse_body: (I64, I64) -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_body = |(start, end), parser| (
+        eval log_debug("_parse_body: " + (start, end).to_string);
+        if end > parser.@array.get_size {
+            pure $ parser   // wait for data
+        };
+        let body = parser.@array.get_sub(start, end);
+        let parser = parser.mod_response(set_body(body)).set_position(end)
+                        .set_state(completed());
+        eval log_debug("_parse_body completed");
+        pure $ parser       // mark completed and return
+    );
+
+    _parse_chunk_size: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_chunk_size = |parser| (
+        eval log_debug("_parse_chunk_size");
+        let opt = parser._read_line;
+        if opt.is_none {
+            pure $ parser   // wait for data
+        };
+        let (line, parser) = opt.as_some;
+        let (chunk_size_hex, chunk_ext) = line.split_first(";");
+        let chunk_size: U64 = *from_string_hex(chunk_size_hex);
+        eval log_debug((chunk_size, line).format("_parse_chunk_size: chunk_size={} line='{}'"));
+        if chunk_size == 0_U64 {    // last_chunk
+            let parser = parser.set_state(parsing_trailer_section());
+            parser._parse_trailer_section   // run next state
+        };
+        let start = parser.@position;
+        let end = start + chunk_size.to_I64;
+        if end < start { err $ "invalid chunk size: " + chunk_size_hex };
+        let parser = parser.set_state(parsing_chunk_data $ (start, end));
+        parser._parse_chunk_data((start, end))     // run next state
+    );
+
+    _parse_chunk_data: (I64, I64) -> ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_chunk_data = |(start, end), parser| (
+        if end > parser.@array.get_size {
+            pure $ parser   // wait for data
+        };
+        eval log_debug("chunk_data: " + (start, end).to_string);
+        let chunk_data = parser.@array.get_sub(start, end);
+        let parser = parser
+                .mod_response(mod_body(append(chunk_data)))
+                .set_position(end)
+                .set_state(parsing_chunk_end_crlf());
+        parser._parse_chunk_end_crlf
+    );
+
+    // consume last CRLF
+    _parse_chunk_end_crlf: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_chunk_end_crlf = |parser| (
+        let opt = parser._read_line;
+        if opt.is_none {
+            pure $ parser   // wait for data
+        };
+        let (line, parser) = opt.as_some;
+        if line != "" {
+            err $ "found unnessesary bytes at the end of chunk data: " + line
+        };
+        let parser = parser
+                .set_state(parsing_chunk_size());
+        parser._parse_chunk_size    // run next state
+    );
+
+    _parse_trailer_section: ResponseParser -> Result ErrMsg ResponseParser;
+    _parse_trailer_section = |parser| (
+        let opt = parser._read_line;
+        if opt.is_none {
+            pure $ parser   // wait for data
+        };
+        let (line, parser) = opt.as_some;
+        eval log_debug("trailer_section: " + line);
+        if line == "" {
+            pure $ parser
+                    .set_state(completed())     // mark completed and return
+        };
+        let parser = *parser._parse_header(line);
+        parser._parse_trailer_section       // continue
+    );
+
+    _read_line: ResponseParser -> Option (String, ResponseParser);
+    _read_line = |parser| (
+        let array = parser.@array;
+        let array_size = array.get_size;
+        let start = parser.@position;
+        let end = loop(
+            start, |i|
+            if i >= array_size { break $ array_size };
+            if array.@(i) == '\n' { break $ (i + 1) };
+            continue $ i + 1
+        );
+        if start >= end { none() };
+        let line = array.get_sub(start, end)._unsafe_to_string;
+        let line = line.strip_last_newlines;
+        let parser = parser.set_position(end);
+        some $ (line, parser)
+    );
+}
+

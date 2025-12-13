@@ -1,0 +1,141 @@
+module Minilib.Terminal.Terminal;
+
+import Minilib.Common.IOEx;
+import Minilib.Monad.IO;
+import Minilib.IO.Errno;
+
+type Terminal = unbox struct {
+    input: IOHandle,
+    output: IOHandle,
+};
+
+namespace Terminal {
+    make: [m: MonadIOFail] IOHandle -> IOHandle -> m Terminal;
+    make = |input, output| (
+        pure $ Terminal {
+            input: input,
+            output: output
+        }
+    );
+
+    // Inputs a character from the keyboard.
+    // If EOF is reached, `none()` is returned.
+    input_keyboard: [m: MonadIOFail] Terminal -> m (Option U8);
+    input_keyboard = |term| (
+        pure();; // make it lazy
+        let ch = *read_n_bytes(term.@input, 1).lift_iofail;
+        if ch.get_size == 0 {
+            pure $ none()
+        };
+        let ch = ch.@(0);
+        pure $ some(ch)
+    );
+
+    // Flushes the output.
+    flush: [m: MonadIOFail] Terminal -> m ();
+    flush = |term| (
+        fflush(term.@output).lift_iofail
+    );
+
+    output: [m: MonadIOFail] String -> Terminal -> m ();
+    output = |str, term| (
+        write_string(term.@output, str).lift_iofail;;
+        term.flush
+    );
+
+    cursor: [m: MonadIOFail] I64 -> I64 -> Terminal -> m ();
+    cursor = |x, y, term| (
+        term.output(ControlSequence::cs_cursor(x, y))
+    );
+
+    clear: [m: MonadIOFail] Terminal -> m ();
+    clear = |term| (
+        term.output(ControlSequence::cs_clear)
+    );
+
+    // Makes the standard input to noncanonical mode (a.k.a raw-mode).
+    // That is, input is available immediately, no input processing is performed,
+    // and line editing is disabled.
+    with_raw_mode: [m: MonadIOFail] Terminal -> m () -> m ();
+    with_raw_mode = |term, iof| (
+        let raw_mode = *RawMode::make(term.@input);
+        iof;;
+        eval raw_mode;
+        pure()
+    );
+}
+
+namespace ControlSequence {
+    // Control Sequence Introducer
+    _CSI: String;
+    _CSI = "\u001b[";
+
+    // `ControlSequence::cs_clear` is an ANSI escape sequence to clear the screen.
+    cs_clear: String;
+    cs_clear = _CSI + "2J";    // Erase in display
+
+    // `ControlSequence::cs_cursor(x,y)` gets an ANSI escape sequence to set the cursor position.
+    cs_cursor: I64 -> I64 -> String;
+    cs_cursor = |x, y| (
+        _CSI + (y+1).to_string + ";" + (x+1).to_string + "H"
+    );
+}
+
+namespace Keys {
+    // Returns a character that corresponds to a control key.
+    // For example, `ctrl('C') == 3_U8`.
+    ctrl: U8 -> U8;
+    ctrl = |c| (
+        if 'A' <= c && c <= 'Z' { c - 'A' + 1_U8 };
+        if 'a' <= c && c <= 'z' { c - 'a' + 1_U8 };
+        0_U8
+    );
+
+    // A character that represents Escape key.
+    esc: U8;
+    esc = 0x1b_U8;
+}
+
+// A structure to make the standard input to noncanonical mode (a.k.a raw-mode).
+type RawMode = unbox struct {
+    dtor: Destructor ()
+};
+
+namespace RawMode {
+    make: [m: MonadIOFail] IOHandle -> m RawMode;
+    make = |input| (
+        pure();; // make it lazy
+        let file_ptr = *input.get_file_ptr.lift;
+        let fileno: I32 = *(
+            FFI_CALL_IO[I32 fileno(Ptr), file_ptr]
+        ).lift;
+        eval debug_eprintln("fileno="+fileno.to_string);
+        let old_termios = Array::fill(120, 0_U8);
+        let res = *old_termios.borrow_boxed(|p_old_termios|
+            FFI_CALL_IO[CInt tcgetattr(CInt, Ptr), 0.to_CInt, p_old_termios]
+        ).lift;
+        if res.to_I64 != 0 {
+            throw $ "tcgetattr failed: " + *get_last_error.lift
+        };
+        let termios = Array::fill(120, 0_U8);
+        let res = *termios.borrow_boxed(|p_termios|
+            FFI_CALL_IO[() cfmakeraw(Ptr), p_termios];;
+            FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_termios]
+        ).lift;
+        if res.to_I64 != 0 {
+            throw $ "tcsetattr failed: " + *get_last_error.lift
+        };
+
+        let dtor = Destructor::make((), |_|
+            // eval debug_eprintln ("destructor is called");
+            let res = *old_termios.borrow_boxed(|p_old_termios|
+                FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_old_termios]
+            );
+            if res.to_I64 != 0 {
+                undefined("tcsetattr failed: res="+res.to_string)
+            };
+            pure()
+        );
+        pure $ RawMode { dtor: dtor }
+    ).lift_iofail;
+}

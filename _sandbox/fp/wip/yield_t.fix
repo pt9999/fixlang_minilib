@@ -1,0 +1,149 @@
+module Minilib.Monad.Yield;
+
+import Minilib.Monad.Trans;
+
+trait MonadYield = Functor + Monad + MonadYieldIF;
+
+trait [m: * -> *] m: MonadYieldIF {
+    type InputType m;
+    type OutputType m;
+    yield: OutputType m -> m (InputType m);
+}
+
+/*
+type Yield i o a = unbox union {
+    y_pure: a,
+    y_yield: (o, i -> Yield i o a),
+};
+
+impl Yield i o: Monad {
+    pure = y_pure;
+    bind = |f, ma| (
+        match ma {
+            y_pure(a) => f(a),
+            y_yield((e, next)) => y_yield((e, next >> bind(f))),
+        }
+    );
+}
+*/
+
+type YieldDataT i o m a = unbox union {
+    y_pure: a,
+    y_yield: (o, i -> YieldT i o m a),
+};
+
+type [m: * -> *] YieldT i o m a = unbox struct {
+    data: m (YieldDataT i o m a)
+};
+
+/*
+namespace YieldT {
+    make: [m: * -> *] m (YieldDataT i o m a) -> YieldT i o m a;
+    make = |mya| YieldT { data: mya };
+
+    run_yield_t: YieldT i o m a -> m (YieldDataT i o m a);
+    run_yield_t = @data;
+}
+*/
+
+impl [m: Monad] YieldT i o m: Monad {
+    pure = |a| YieldT { 
+        data: pure $ y_pure(a)
+    };
+    bind = |f, yta| YieldT {
+        data: yta.@data.bind(|ya|
+            match ya {
+                y_pure(a) => f(a).bind(@data),
+                y_yield((o, g)) => pure $ y_yield((o, g >> bind(f))),
+            }
+        )
+    };
+}
+
+impl [m: Functor] YieldT i o m: Functor {
+    map = |f, yta| YieldT { 
+        data: yta.@data.map(|ya|
+            match ya {
+                y_pure(a) => y_pure(f(a)),
+                y_yield((o, g)) => pure $ y_yield((o, g >> map(f)))
+            }           
+        )
+    };
+}
+
+impl Yield i o: MonadYieldIF {
+    type InputType (Yield i o) = i;
+    type OutputType (Yield i o) = o;
+    //yield: OutputType m -> m (InputType m);
+    yield = |o| pure $ y_yield $ (o, pure);
+}
+
+
+/*
+type [m: * -> *] YieldT i o m a = unbox union {
+    y_pure: m a,
+    y_yield: m (o, i -> YieldT i o m a),
+};
+
+impl [m: Monad] YieldT i o m: Monad {
+    pure = |a| y_pure(pure(a));
+    bind = |f, yta| match yta {
+        y_pure(ma) => (
+            // f: a -> YieldT i o m b
+            let mb = ma.bind(f >> pure);  // m (YieldT i o m b)
+
+        ),
+        y_yield(mt) => mt.map(|g| g >> bind(f)),
+    };
+}
+*/
+
+/*
+map_yield: (d -> e) -> Yield d a -> Yield i o a;
+map_yield = |f, ma| (
+    match ma {
+        y_pure(a) => y_pure(a),
+        y_yield((d, next)) => y_yield((f(d), next >> map_yield(f))),
+    }
+);
+*/
+
+to_iter: Yield i o a -> DynIterator e;
+to_iter = |ma| (
+    match ma {
+        y_pure(a) => DynIterator { next: |_| none() },     // `a` is discarded
+        y_yield((e, next)) => DynIterator { next: |_| some $ (next().to_iter, e) },
+    }
+);
+
+take_array: I64 -> Yield i o a -> (Array e, Yield i o a);
+take_array = |n, ma| (
+    loop(
+        ([], ma), |(arr,ma)|
+        if arr.get_size >= n { break $ (arr, ma) };
+        match ma {
+            y_pure(a) => break $ (arr, y_pure(a)),
+            y_yield((e, next)) => continue $ (arr.push_back(e), next()),
+        }
+    )
+);
+
+/*
+//------------------------------------
+type [m: * -> *] Wrap m a = unbox struct {
+    data: m a
+};
+
+namespace Wrap {
+    wrap: [m: *-> *] m a -> Wrap m a;
+    wrap = |ma| Wrap { data: ma };
+
+    get: Wrap m a -> m a;
+    get = @data;
+}
+
+impl [m: MonadYieldIF] Wrap m: MonadYieldIF {
+    yield = |a| wrap $ yield(a);
+}
+*/
+

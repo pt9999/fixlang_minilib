@@ -1,0 +1,181 @@
+// Key Share Extension for TLS 1.3
+//
+// RFC8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.KeyShare;
+
+
+import Minilib.Crypto.Tls.Types;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+
+// 4.2.8. Key Share
+
+type KeyShareEntry = unbox struct {
+    group: NamedGroup,
+    key_exchange: Array U8
+};
+
+namespace KeyShareEntry {
+    make: NamedGroup -> Array U8 -> KeyShareEntry;
+    make = |group, key_exchange| KeyShareEntry {
+        group: group,
+        key_exchange: key_exchange
+    };
+}
+
+impl KeyShareEntry: Eq {
+    eq = |a, b| (
+        a.@group == b.@group &&
+        a.@key_exchange == b.@key_exchange
+    );
+}
+
+impl KeyShareEntry: ToString {
+    to_string = |obj| (
+        "group=" + obj.@group.to_string_hex + " key_exch="+ obj.@key_exchange.to_string_hex
+    );
+}
+
+impl KeyShareEntry: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@group);
+        buf.marshal_var_size(obj.@key_exchange, to_U16)
+    );
+}
+
+impl KeyShareEntry: Unmarshal {
+    unmarshal = |buf| (
+        let (group: NamedGroup, buf) = *buf.unmarshal;
+        let (key_exchange: Array U8, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let obj = KeyShareEntry { group: group, key_exchange: key_exchange };
+        pure $ (obj, buf)
+    );
+}
+
+type KeyShareClientHello = unbox struct {
+    client_shares: Array KeyShareEntry
+};
+
+namespace KeyShareClientHello {
+    make: Array KeyShareEntry -> KeyShareClientHello;
+    make = |client_shares| KeyShareClientHello {
+        client_shares: client_shares
+    };
+}
+
+impl KeyShareClientHello: ToString {
+    to_string = |obj| (
+        "KeyShareClientHello:" + obj.@client_shares.to_string
+    );
+}
+
+impl KeyShareClientHello: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal_var_size(obj.@client_shares, to_U16)
+    );
+}
+
+impl KeyShareClientHello: Unmarshal {
+    unmarshal = |buf| (
+        let (client_shares, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let obj = KeyShareClientHello::make(client_shares);
+        pure $ (obj, buf)
+    );
+}
+
+type KeyShareHelloRetryRequest = unbox struct {
+    selected_group: NamedGroup
+};
+
+namespace KeyShareHelloRetryRequest {
+    make: NamedGroup -> KeyShareHelloRetryRequest;
+    make = |selected_group| KeyShareHelloRetryRequest { selected_group: selected_group };
+}
+
+impl KeyShareHelloRetryRequest: ToString {
+    to_string = |obj| (
+        "KeyShareHelloRetryRequest:" + obj.@selected_group.to_string_hex
+    );
+}
+
+impl KeyShareHelloRetryRequest: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.@selected_group)
+    );
+}
+
+impl KeyShareHelloRetryRequest: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal.map_res_0(KeyShareHelloRetryRequest::make)
+    );
+}
+
+type KeyShareServerHello = unbox struct {
+    server_share: KeyShareEntry
+};
+
+namespace KeyShareServerHello {
+    make: KeyShareEntry -> KeyShareServerHello;
+    make = |server_share| KeyShareServerHello { server_share: server_share };
+}
+
+impl KeyShareServerHello: ToString {
+    to_string = |obj| (
+        "KeyShareServerHello:" + obj.@server_share.to_string
+    );
+}
+
+impl KeyShareServerHello: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.@server_share)
+    );
+}
+
+impl KeyShareServerHello: Unmarshal {
+    unmarshal = |buf| (
+        buf.unmarshal.map_res_0(KeyShareServerHello::make)
+    );
+}
+
+
+type KeyShare = unbox union {
+    ks_client_hello: KeyShareClientHello,
+    ks_hello_retry_request: KeyShareHelloRetryRequest,
+    ks_server_hello: KeyShareServerHello,
+};
+
+impl KeyShare: ToString {
+    to_string = |obj| (
+        if obj.is_ks_client_hello { obj.as_ks_client_hello.to_string };
+        if obj.is_ks_hello_retry_request { obj.as_ks_hello_retry_request.to_string };
+        if obj.is_ks_server_hello { obj.as_ks_server_hello.to_string };
+        undefined("invalid keyshare")
+    );
+}
+
+impl KeyShare: Marshal {
+    marshal = |obj, buf| (
+        if obj.is_ks_client_hello { buf.marshal(obj.as_ks_client_hello) };
+        if obj.is_ks_hello_retry_request { buf.marshal(obj.as_ks_hello_retry_request) };
+        if obj.is_ks_server_hello { buf.marshal(obj.as_ks_server_hello) };
+        undefined("invalid keyshare")
+    );
+}
+
+impl KeyShare: Unmarshal {
+    unmarshal = |buf| (
+        // very hacky
+        if buf.get_size == 2 {
+            // KeyShareHelloRetryRequest
+            buf.unmarshal.map_res_0(ks_hello_retry_request)
+        };
+        let (u16: U16, buf2) = *buf.unmarshal;
+        if (0x0017_U16 <= u16 && u16 < 0x001e_U16) || (0x0100_U16 <= u16 && u16 < 0x0104_U16) {
+            // maybe KeyShareServerHello
+            buf.unmarshal.map_res_0(ks_server_hello)
+        };
+        // maybe KeyShareClientHello
+        buf.unmarshal.map_res_0(ks_client_hello)
+    );
+}

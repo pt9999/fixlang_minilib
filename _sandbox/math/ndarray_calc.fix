@@ -1,0 +1,691 @@
+
+//
+//  以下のように実行する。
+//  $ fix run -d readline -f ndarray_calc.fix ndarray.fix ../lib/simple_parser.fix ../lib/string_ex.fix ../lib/monad/state_monad.fix
+//
+//  あらかじめ libreadline-dev をインストールしておく必要がある。
+//  $ sudo apt install libreadline-dev
+//
+
+module Main;
+
+import Character;
+import HashMap;
+
+import Minilib.Common.Assert;
+import Minilib.Text.StringEx;
+import Minilib.Text.SimpleParser;
+import Sandbox.NdArray;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+import Minilib.Trait.Traversable;
+
+_EOF: String;
+_EOF = "EOF";
+
+readline: String -> IOFail String;
+readline = |prompt| (
+    let ptr = *prompt.borrow_c_str_io(|p_prompt|
+        FFI_CALL_IO[Ptr readline(Ptr), p_prompt]
+    ).lift;
+    if ptr == nullptr {
+        throw $ _EOF
+    };
+    let str = String::unsafe_from_c_str_ptr(ptr);
+    if str.get_size > 0 {
+        FFI_CALL_IO[() add_history(Ptr), ptr].lift
+    } else {
+        pure()
+    };;
+    FFI_CALL_IO[() free(Ptr), ptr].lift;;
+    pure $ str
+);
+
+is_all: (a -> Bool) -> Array a -> Bool;
+is_all = |f, array| (
+    array.to_iter.fold(
+        true, |x, b|
+        b && f(x)
+    )
+);
+
+type Expr = box union {
+    ex_none: (),
+    ex_ident: String,
+    ex_float: F64,
+    ex_funcall: (String, Array Expr),
+    ex_array: Array Expr,
+    ex_subsc: (Expr, Array Expr),
+    ex_range: (Option Expr, Option Expr),
+    ex_assign: (Expr, Expr),
+    ex_unary: (String, Expr),
+    ex_infix: (Expr, String, Expr)
+};
+
+impl Expr: ToString {
+    to_string = |ex| (
+        if ex.is_ex_ident { ex.as_ex_ident };
+        if ex.is_ex_float { ex.as_ex_float.to_string };
+        if ex.is_ex_funcall {
+            let (name, args) = ex.as_ex_funcall;
+            name + "(" + args.to_iter.map(to_string).join(",") + ")"
+        };
+        if ex.is_ex_array {
+            "[" + ex.as_ex_array.to_iter.map(to_string).join(",") + "]"
+        };
+        if ex.is_ex_subsc {
+            let (a, b) = ex.as_ex_subsc;
+            a.to_string + "[" + b.to_iter.map(to_string).join(",") + "]"
+        };
+        if ex.is_ex_range {
+            let (a, b) = ex.as_ex_range;
+            a.map_or("", to_string) + ":" + b.map_or("", to_string)
+        };
+        if ex.is_ex_assign {
+            let (a, b) = ex.as_ex_assign;
+            a.to_string + "=" + b.to_string
+        };
+        if ex.is_ex_unary {
+            let (op, b) = ex.as_ex_unary;
+            "(" + op + a.to_string + ")"
+        };
+        if ex.is_ex_infix {
+            let (a, op, b) = ex.as_ex_infix;
+            "(" + a.to_string + " " + op + " " + b.to_string + ")"
+        };
+        ""
+    );
+}
+
+// num_lit
+// ident
+// "(" expr ")"
+// expr "(" (expr ("," expr)*)? ")"
+// "[" (expr ("," expr)*)? "]"
+// expr ("[" (expr ("," expr)*)? "]")+
+// "-" expr
+// expr ( "*" | "/" ) expr
+// expr ( "+" | "-" ) expr
+// expr ":" expr
+// expr "=" expr
+//
+
+namespace Expr {
+
+    parse_expr: String -> Result ErrMsg Expr;
+    parse_expr = |line| (
+        let parser = do {
+            let ex = *_parse_expr;
+            _skip_whitespaces;;
+            match_end_of_stream;;
+            pure $ ex
+        };
+        parser.run_parser_str(line).map(@0)
+    );
+
+    _parse_expr: Parser Expr;
+    _parse_expr = do {
+        _skip_whitespaces;;
+        let expr = *(
+            _parse_assign
+        );
+        pure $ expr
+    };
+
+    _parse_assign: Parser Expr;
+    _parse_assign = do {
+        let lhs = *_parse_range;
+        _skip_whitespaces;;
+        let equal = *match_char('=').if_exists;
+        if equal.is_none {
+            pure $ lhs
+        };
+        let rhs = *_parse_range;
+        pure $ ex_assign $ (lhs, rhs)
+    };
+
+    _parse_range: Parser Expr;
+    _parse_range = do {
+        let colon = *match_char(':').if_exists;
+        if colon.is_some {
+            let rhs = *_parse_add_sub.if_exists;
+            pure $ ex_range $ (none(), rhs)
+        };
+        let lhs = *_parse_add_sub;
+        _skip_whitespaces;;
+        let colon = *match_char(':').if_exists;
+        if colon.is_none {
+            pure $ lhs
+        };
+        let rhs = *_parse_add_sub.if_exists;
+        pure $ ex_range $ (some(lhs), rhs)
+    };
+
+    _parse_add_sub: Parser Expr;
+    _parse_add_sub = do {
+        let lhs = *_parse_mult_div;
+        loop_m(
+            lhs, |lhs|
+            _skip_whitespaces;;
+            let add = *match_char_if_exists('+');
+            let sub = *match_char_if_exists('-');
+            if add.is_none && sub.is_none {
+                break_m $ lhs
+            };
+            let rhs = *_parse_mult_div;
+            let op = if add.is_some { "+" } else { "-" };
+            continue_m $ ex_infix $ (lhs, op, rhs)
+        )
+    };
+
+    _parse_mult_div: Parser Expr;
+    _parse_mult_div = do {
+        let lhs = *_parse_neg;
+        loop_m(
+            lhs, |lhs|
+            _skip_whitespaces;;
+            let mul = *match_char_if_exists('*');
+            let div = *match_char_if_exists('/');
+            if mul.is_none && div.is_none {
+                break_m $ lhs
+            };
+            let rhs = *_parse_neg;
+            let op = if mul.is_some { "*" } else { "/" };
+            continue_m $ ex_infix $ (lhs, op, rhs)
+        )
+    };
+
+    _parse_neg: Parser Expr;
+    _parse_neg = do {
+        _skip_whitespaces;;
+        let neg = *match_char_if_exists('-');
+        let expr = *_parse_term;
+        let expr = if neg.is_some { ex_unary $ ("-", expr) } else { expr };
+        pure $ expr
+    };
+
+    _parse_term: Parser Expr;
+    _parse_term = do {
+        _parse_funcall
+        .or_else(_parse_array)
+        .or_else(_parse_subsc)
+        .or_else(_parse_paren)
+        .or_else(_parse_number_lit)
+    };
+
+    _parse_expr_list: Parser (Array Expr);
+    _parse_expr_list = do {
+        let a = *_parse_expr.if_exists;
+        if a.is_none {
+            pure $ []
+        };
+        let a = a.as_some;
+        let rest = *repeat(do {
+            _skip_whitespaces;;
+            match_char(',');;
+            _parse_expr
+        });
+        pure $ [a].append(rest)
+    };
+
+    _parse_funcall: Parser Expr;
+    _parse_funcall = do {
+        _skip_whitespaces;;
+        let name = *_parse_ident;
+        let name = name.as_ex_ident;
+        _skip_whitespaces;;
+        match_char('(');;
+        let args = *_parse_expr_list;
+        _skip_whitespaces;;
+        match_char(')').or_error("')' is missing");;
+        pure $ ex_funcall $ (name, args)
+    };
+
+    _parse_array: Parser Expr;
+    _parse_array = do {
+        _skip_whitespaces;;
+        match_char('[');;
+        let array = *_parse_expr_list;
+        _skip_whitespaces;;
+        match_char(']').or_error("']' is missing");;
+        pure $ ex_array(array)
+    };
+
+    _parse_subsc: Parser Expr;
+    _parse_subsc = do {
+        let ident = *_parse_ident;
+        loop_m(
+            ident, |expr|
+            _skip_whitespaces;;
+            let lbracket = *match_char('[').if_exists;
+            if lbracket.is_none {
+                break_m $ expr
+            };
+            let indices = *_parse_expr_list;
+            _skip_whitespaces;;
+            match_char(']').or_error("']' is missing");;
+            continue_m $ ex_subsc $ (expr, indices)
+        )
+    };
+
+    _parse_paren: Parser Expr;
+    _parse_paren = do {
+        match_char('(');;
+        let expr = *_parse_expr;
+        match_char(')');;
+        pure $ expr
+    };
+
+    _parse_ident: Parser Expr;
+    _parse_ident = do {
+        let c = *match_char_class(|c| is_alpha(c) || c == '_');
+        let rest = *repeat(match_char_class(is_alnum));
+        let str = [c].append(rest)._unsafe_to_string;
+        pure $ ex_ident(str)
+    };
+
+    _parse_number_lit: Parser Expr;
+    _parse_number_lit = (
+        let match_decimal_point = match_str(".");
+        let match_digit = match_any_char.filter(|c| '0' <= c && c <= '9');
+        let match_digit1_9 = match_any_char.filter(|c| '1' <= c && c <= '9');
+        let match_e = match_any_char.filter(|c| c == 'e' || c == 'E');
+        let match_minus = match_str("-");
+        let match_plus = match_str("+");
+        let match_zero = match_str("0");
+        let match_int = match_zero.or_else(
+            do {
+                match_digit1_9;;
+                repeat(match_digit);;
+                pure $ ()
+            }
+        );
+        let match_exp = do {
+            match_e;;
+            match_minus.or_else(match_plus).or_else(unit);;
+            one_or_more(match_digit);;
+            pure $ ()
+        };
+        let match_frac = do {
+            match_decimal_point;;
+            repeat(match_digit);;
+            pure $ ()
+        };
+        let match_number = do {
+            match_minus.or_else(unit);;
+            match_int;;
+            match_frac.or_else(unit);;
+            match_exp.or_else(unit);;
+            pure $ ()
+        };
+
+        do {
+            let stream_begin = *get_stream;
+            match_number;;
+            let stream_end = *get_stream;
+            let byte_count = stream_end.@position - stream_begin.@position;
+            assert_lazy(|_| "number byte count is negative", byte_count >= 0) $ |_|
+            let number_str = stream_begin.read_string(byte_count);
+            let res: Result ErrMsg F64 = from_string(number_str);
+            if res.is_err {
+                error_parser(res.as_err)
+            };
+            pure $ ex_float $ res.as_ok
+        }
+    );
+
+    _skip_whitespaces: Parser ();
+    _skip_whitespaces = do {
+        match_str_class_whitespace.map(|_|())
+    };
+}
+
+type Value = box union {
+    v_none: (),
+    v_err: String,
+    v_float: F64,
+    v_range: (Option I64, Option I64),
+    v_func: (String, Func),
+    v_array: Array Value,
+    v_ndarray: NdArray F64
+};
+
+err_type: Value;
+err_type = v_err $ "TYPE";
+
+impl Value: ToString {
+    to_string = |v| (
+        if v.is_v_none { "" };
+        if v.is_v_err { "ERR:" + v.as_v_err };
+        if v.is_v_float { v.as_v_float.to_string };
+        if v.is_v_range {
+            let (lhs, rhs) = v.as_v_range;
+            lhs.map_or("", to_string) + ":" + rhs.map_or("", to_string)
+        };
+        if v.is_v_func {
+            let (name, _) = v.as_v_func;
+            "#{function " + name + "}"
+        };
+        if v.is_v_array {
+            "[" + v.as_v_array.to_iter.map(to_string).join(",") + "]"
+        };
+        if v.is_v_ndarray {
+            "#" + v.as_v_ndarray.to_string
+        };
+        ""
+    );
+}
+
+type EvalEffect = AppStateIOF;
+
+// Expr evaluator
+namespace Evaluator
+{
+    evaluate: Expr -> EvalEffect Value;
+    evaluate = |expr| (
+        if expr.is_ex_ident {
+            _eval_ident $ expr.as_ex_ident
+        };
+        if expr.is_ex_assign {
+            _eval_assign $ expr.as_ex_assign
+        };
+        if expr.is_ex_range {
+            _eval_range $ expr.as_ex_range
+        };
+        if expr.is_ex_funcall {
+            _eval_funcall $ expr.as_ex_funcall
+        };
+        if expr.is_ex_array {
+            _eval_array $ expr.as_ex_array
+        };
+        if expr.is_ex_subsc {
+            _eval_subsc $ expr.as_ex_subsc
+        };
+        if expr.is_ex_infix {
+            _eval_infix $ expr.as_ex_infix
+        };
+        if expr.is_ex_unary {
+            _eval_unary $ expr.as_ex_unary
+        };
+        if expr.is_ex_none {
+            pure $ v_none $ expr.as_ex_none
+        };
+        if expr.is_ex_float {
+            pure $ v_float $ expr.as_ex_float
+        };
+        undefined("unknown expr")
+    );
+
+    _evaluate_array: Array Expr -> EvalEffect (Array Value);
+    _evaluate_array = map_m(evaluate);
+
+    _eval_ident: String -> EvalEffect Value;
+    _eval_ident = |name| (
+        let app_state: AppState = *get_state;
+        let opt = app_state.@env.find(name);
+        if opt.is_none {
+            error $ "not found: " + name
+        };
+        pure $ opt.as_some
+    );
+
+    _eval_assign: (Expr, Expr) -> EvalEffect Value;
+    _eval_assign = |(lhs, rhs)| (
+        if lhs.is_ex_ident {
+            let lhs = lhs.as_ex_ident;
+            let rhs = *evaluate(rhs);
+            let app_state = *get_state;
+            let app_state = app_state.mod_env(insert(lhs, rhs));
+            put_state(app_state);;
+            pure $ v_none()
+        };
+        error $ "assign type mismatch"
+    );
+
+    _eval_funcall: (String, Array Expr) -> EvalEffect Value;
+    _eval_funcall = |(name, args)| (
+        let f = *_eval_ident(name);
+        args.to_iter.fold_m(
+            f, |arg, f|
+            if !f.is_v_func {
+                error $ "invalid func type: " + f.to_string
+            };
+            let (f_name, f) = f.as_v_func;
+            let arg = *evaluate(arg);
+            let value = *f(arg);
+            pure $ value
+        )
+    );
+
+    _eval_infix: (Expr, String, Expr) -> EvalEffect Value;
+    _eval_infix = |(lhs, op, rhs)| (
+        let lhs = *evaluate(lhs);
+        let rhs = *evaluate(rhs);
+        if lhs.is_v_float && rhs.is_v_float {
+            _eval_infix_op((lhs.as_v_float, op, rhs.as_v_float), v_float)
+        };
+        if lhs.is_v_ndarray && rhs.is_v_ndarray {
+            _eval_infix_op((lhs.as_v_ndarray, op, rhs.as_v_ndarray), v_ndarray)
+        };
+        if lhs.is_v_ndarray && rhs.is_v_float {
+            _eval_infix_op((lhs.as_v_ndarray, op, scalar(rhs.as_v_float)), v_ndarray)
+        };
+        if lhs.is_v_float && rhs.is_v_ndarray {
+            _eval_infix_op((scalar(lhs.as_v_float), op, rhs.as_v_ndarray), v_ndarray)
+        };
+        error $ "_eval_infix: type mismatch"
+    );
+
+    _eval_infix_op: [a: Add, a: Sub, a: Mul, a: Div] (a, String, a) -> (a -> Value) -> EvalEffect Value;
+    _eval_infix_op = |(lhs, op, rhs), to_value| (
+        if op == "+" { pure $ to_value $ lhs + rhs };
+        if op == "-" { pure $ to_value $ lhs - rhs };
+        if op == "*" { pure $ to_value $ lhs * rhs };
+        if op == "/" { pure $ to_value $ lhs / rhs };
+        error $ "invalid op: " + op
+    );
+
+    _eval_unary: (String, Expr) -> EvalEffect Value;
+    _eval_unary = |(op, expr)| (
+        let value = *evaluate(expr);
+
+        if value.is_v_float {
+            _eval_unary_op((op, value.as_v_float), v_float)
+        };
+        if value.is_v_ndarray {
+            _eval_unary_op((op, value.as_v_ndarray), v_ndarray)
+        };
+        error $ "_eval_unary: type mismatch"
+    );
+
+    _eval_unary_op: [a: Neg] (String, a) -> (a -> Value) -> EvalEffect Value;
+    _eval_unary_op = |(op, val), to_value| (
+        if op == "-" { pure $ to_value $ -val };
+        error $ "invalid op: " + op
+    );
+
+    _eval_array: Array Expr -> EvalEffect Value;
+    _eval_array = |array_expr| (
+        let array_value = *_evaluate_array(array_expr);
+        if array_value.is_all(is_v_float) {
+            //eval debug_eprintln("all v_float");
+            let ndarray = NdArray::from_array(array_value.map(as_v_float));
+            pure $ v_ndarray(ndarray)
+        };
+        //eval debug_eprintln("not all v_float");
+        pure $ v_array (array_value)
+    );
+
+    _eval_subsc: (Expr, Array Expr) -> EvalEffect Value;
+    _eval_subsc = |(lhs, rhs)| (
+        let lhs = *evaluate(lhs);
+        let rhs = *_evaluate_array(rhs);
+        if lhs.is_v_array {
+            let array = lhs.as_v_array;
+            let idx = rhs;
+            if idx.get_size != 1 {
+                error $ "invalid subsc (idx size)"
+            };
+            let idx = idx.@(0);
+            if !idx.is_v_float {
+                error $ "invalid subsc (idx type)"
+            };
+            let i = idx.as_v_float.to_I64;
+            if !(0 <= i && i <= array.get_size) {
+                error $ "invalid subsc (idx out of range)"
+            };
+            pure $ array.@(i)
+        };
+        if lhs.is_v_ndarray {
+            let ndarray = lhs.as_v_ndarray;
+            let idx = rhs;
+            if idx.get_size != ndarray.get_dim {
+                error $ "invalid subsc (idx size)"
+            };
+            let tuple2_array = *idx.map_m(|i|
+                if i.is_v_float {
+                    let i = i.as_v_float.to_I64;
+                    pure $ (i, i + 1)
+                };
+                if i.is_v_range {
+                    let (begin, end) = i.as_v_range;
+                    let begin = begin.as_some_or(0);
+                    let end = end.as_some_or(I64::maximum);
+                    pure $ (begin, end)
+                };
+                error $ "invalid subsc (idx type): " + i.to_string
+            );
+            let val = ndarray.get_sub(tuple2_array);
+            pure $ v_ndarray $ val
+        };
+        error $ "invalid subsc: lhs="+lhs.to_string + " rhs="+rhs.to_string
+    );
+
+    _eval_range: (Option Expr, Option Expr) -> EvalEffect Value;
+    _eval_range = |(lhs, rhs)| (
+        let inner: Option Expr -> EvalEffect (Option I64) = |expr| (
+            if expr.is_none {
+                pure $ none ()
+            };
+            let v = *evaluate(expr.as_some);
+            if !v.is_v_float {
+                error $ "invalid range type: " + v.to_string
+            };
+            pure $ some(v.as_v_float.to_I64)
+        );
+        let lhs = *inner(lhs);
+        let rhs = *inner(rhs);
+        pure $ v_range $ (lhs, rhs)
+    );
+}
+
+
+type Func = Value -> EvalEffect Value;
+
+namespace Builtin {
+
+    // initialize builtin functions
+    init_builtin_funcs: AppState -> AppState;
+    init_builtin_funcs = |app_state| (
+        app_state
+        .add_builtin_func("ndarray", Builtin::ndarray)
+        .add_builtin_func("stack", Builtin::stack)
+    );
+
+    add_builtin_func: String -> Func -> AppState -> AppState;
+    add_builtin_func = |name, f, app_state| (
+        let func = v_func $ (name, f);
+        app_state.mod_env(insert(name, func))
+    );
+
+    ndarray: Value -> EvalEffect Value;
+    ndarray = |arg| (
+        if arg.is_v_ndarray {
+            pure $ arg
+        };
+        if arg.is_v_array {
+            let array = arg.as_v_array;
+            if !array.is_all(is_v_float) {
+                error $ "not all v_float"
+            };
+            let ndarray = NdArray::from_array(array.map(as_v_float));
+            pure $ v_ndarray(ndarray)
+        };
+        error $ "invalid arg: arg=" + arg.to_string
+    );
+
+    stack: Value -> EvalEffect Value;
+    stack = |arg| (
+        if !arg.is_v_array {
+            error $ "invalid arg type"
+        };
+        let array = arg.as_v_array;
+        if array.get_size == 0 {
+            error $ "invalid arg count"
+        };
+        if !array.is_all(is_v_ndarray) {
+            error $ "type mismatch"
+        };
+        let children = array.map(as_v_ndarray);
+        let first_child = children.@(0);
+        if !children.is_all(|child| child.@shape == first_child.@shape) {
+            error $ "shape mismatch"
+        };
+        let parent = NdArray::stack(0, children);
+        pure $ v_ndarray $ parent
+    );
+}
+
+// Type of application state
+type AppState = struct {
+    env: HashMap String Value
+};
+
+// Type of State monad with IOFail for application state
+type AppStateIOF = StateT AppState IOFail;
+
+namespace AppState {
+    // An empty application state
+    empty: AppState;
+    empty = AppState {
+        env: HashMap::empty(100)
+    };
+
+    process_line: String -> AppState -> IO AppState;
+    process_line = |line, app_state| (
+        do {
+            //println("process_line: " + line).lift_io;;
+            let expr = *parse_expr(line).from_result_t;
+            let value = *evaluate(expr);
+            println("--> " + value.to_string).lift_io;;
+            pure()
+        }
+        .exec_state_t(app_state)
+        .try(|err|
+            eprintln("ERROR: " + err).lift_io;;
+            pure $ app_state
+        )
+    );
+
+    main_loop: () -> IOFail ();
+    main_loop = |_| (
+        let app_state = AppState::empty;
+        let app_state = app_state.init_builtin_funcs;
+        loop_m(
+            app_state, |app_state|
+            let line = *readline("$ ");
+            let app_state = *app_state.process_line(line).lift;
+            continue_m $ app_state
+        )
+    );
+}
+
+
+main: IO ();
+main = (
+    do {
+        main_loop()
+    }.try(eprintln)
+);
+

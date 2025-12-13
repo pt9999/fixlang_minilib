@@ -1,0 +1,100 @@
+// Privacy-Enhanced Mail (PEM) encoding
+//
+// RFC 7468 - Textual Encodings of PKIX, PKCS, and CMS Structures
+// https://tex2e.github.io/rfc-translater/html/rfc7468.html
+//
+// Below is a sample of PEM encoded data.
+// ```
+// -----BEGIN {label}-----
+// {base64 encoded data}
+// -----END {label}-----
+// ```
+//
+module Minilib.Crypto.Cert.Pem;
+
+
+import Minilib.Encoding.Base64;
+import Minilib.Text.StringEx;
+
+// A type that represents an entry between encapsulation boundaries
+// (`-----BEGIN {label}-----` .. `-----END {label}-----`) of PEM encoding.
+type PemEntry = unbox struct {
+    label: String,
+    bytes: Array U8
+};
+
+namespace PemEntry {
+    make: String -> Array U8 -> PemEntry;
+    make = |label, bytes| PemEntry {
+        label: label,
+        bytes: bytes
+    };
+}
+
+// A type that parses a text content in PEM encoding.
+type PemParser = unbox struct {
+    entries: Array PemEntry,
+    current_label: Option String,
+    current_block: Array String
+};
+
+namespace PemParser {
+    // Parses a text content in PEM encodings, and extracts entries.
+    parse_pem_entries: String -> Result ErrMsg (Array PemEntry);
+    parse_pem_entries = |contents| (
+        let parser =  PemParser {
+            entries: [],
+            current_label: none(),
+            current_block: []
+        };
+        let parser = *contents.split("\n").fold_m(
+            parser, _process_line
+        );
+        if parser.@current_label.is_some {
+            err $ "end label missing"
+        };
+        pure $ parser.@entries
+    );
+
+    _process_line: String -> PemParser -> Result ErrMsg PemParser;
+    _process_line = |line, parser| (
+        let line = line.strip_last_newlines;
+
+        let begin_label = line._match_label("-----BEGIN ", "-----");
+        if begin_label.is_some { parser._handle_begin_label(begin_label) };
+
+        let end_label = line._match_label("-----END ", "-----");
+        if end_label.is_some { parser._handle_end_label(end_label) };
+
+        if parser.@current_label.is_none { pure $ parser };
+        pure $ parser.mod_current_block(push_back(line))
+    );
+
+    _match_label: String -> String -> String -> Option String;
+    _match_label = |left, right, line| (
+        if line.starts_with(left) && line.ends_with(right) {
+            some $ line.get_sub(left.get_size, line.get_size - right.get_size)
+        };
+        none()
+    );
+
+    _handle_begin_label: Option String -> PemParser -> Result ErrMsg PemParser;
+    _handle_begin_label = |begin_label, parser| (
+        if parser.@current_label.is_some { err $ "begin label is nested" };
+        let parser = parser.set_current_label(begin_label);
+        pure $ parser
+    );
+
+    _handle_end_label: Option String -> PemParser -> Result ErrMsg PemParser;
+    _handle_end_label = |end_label, parser| (
+        if parser.@current_label.is_none { err $ "begin label is missing" };
+        if parser.@current_label != end_label { err $ "end label mismatch" };
+        let base64 = parser.@current_block.to_iter.join("\n");
+        let bytes = base64_decode(base64);
+        let entry = PemEntry::make(parser.@current_label.as_some, bytes);
+        let parser = parser.mod_entries(push_back(entry));
+        let parser = parser.set_current_block([]);
+        let parser = parser.set_current_label(none());
+        pure $ parser.set_current_label(none())
+    );
+}

@@ -1,0 +1,108 @@
+module Minilib.Monad.ArrayT;
+
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
+
+// A monadic array, ie. a monad transformer of an array.
+type [m: * -> *] ArrayT m a = box struct {
+    data: m (Array a)
+};
+
+namespace ArrayT {
+    // Creates an monadic array from a monad of an array.
+    make: [m: * -> *] m (Array a) -> ArrayT m a;
+    make = |data| ArrayT { data: data };
+
+    // Creates an empty monadic array.
+    empty: [m: Monad] ArrayT m a;
+    empty = make $ pure $ [];
+
+    // Creates an monadic array from an array.
+    from_array: [m: Monad] Array a -> ArrayT m a;
+    from_array = |arr| make $ pure $ arr;
+
+    // Synonym of `from_array`.
+    lift_array: [m: Monad] Array a -> ArrayT m a;
+    lift_array = from_array;
+
+    // Converts an monadic array to a monad of an array.
+    to_array_m: [m: * -> *] ArrayT m a -> m (Array a);
+    to_array_m = @data;
+
+    // Synonym of `to_array_m`.
+    run_array_t: [m: * -> *] ArrayT m a -> m (Array a);
+    run_array_t = to_array_m;
+
+    // Converts an monadic array of monads to an monadic array.
+    run_sequence: [m: Monad] ArrayT m (m a) -> ArrayT m a;
+    run_sequence = |ma| (
+        let ma = ma.@data;                    // m (Array (m a))
+        let ma = ma.bind(sequence >> pure);   // m (m (Array a))
+        let ma = ma.flatten;                  // m (Array a)
+        make $ ma                             // ArrayT m a
+    );
+}
+
+impl [m: Functor] ArrayT m: Functor {
+    // Maps every element of a monadic array by a function.
+    map = |f, xs| (
+        make $ xs.@data.map(map(f))
+    );
+}
+
+impl [m: Monad] ArrayT m: Monad {
+    // Creates a monadic array of a single element.
+    pure = |x| make $ pure $ [x];
+    // Binds a function to a monadic array with comprehension of elements.
+    // Similar to `bind` function for `Array`.
+    bind = |f, xs| (
+        make $ do {
+            let arr = *xs.@data;            // Array a
+            let arr = arr.map(f >> @data);  // Array (m (Array b))
+            let arr = *arr.sequence;        // Array (Array b)
+            pure $ arr.flatten              // m (Array b)
+        }
+    );
+}
+
+impl ArrayT: MonadTrans {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from the monad.
+    lift_t = |ma| (
+        make $ ma.bind(pure >> pure)
+    );
+}
+
+impl [m: MonadError] ArrayT m: MonadErrorIF {
+    // Creates a monadic array which causes an error.
+    error = lift_t << error;
+
+    // Catches an error of a monadic array.
+    catch = |handler, xs| (
+        ArrayT::make $ xs.@data.catch(handler >> @data)
+    );
+}
+
+impl [m: MonadIO] ArrayT m: MonadIOIF {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from an `IO a`.
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] ArrayT m: MonadIOFailIF {
+    // Creates a monadic array of a single element,
+    // whose value is lifted from an `IOFail a`.
+    lift_iofail = lift_t << lift_iofail;
+}
+
+impl [m: Monad, m: Traversable] ArrayT m: Traversable {
+    sequence /*: [n: Monad] ArrayT m (n a) -> n (ArrayT m a) */ = |ma| (
+        let ma = ma.@data;                    // m (Array (n a))
+        let ma = ma.bind(sequence >> pure);   // m (n (Array a))
+        let ma = ma.sequence;                 // n (m (Array a))
+        let ma = ma.bind(ArrayT::make >> pure);       // n (ArrayT m a)
+        ma
+    );
+}

@@ -1,0 +1,126 @@
+module Minilib.Net.Curl;
+
+import AsyncTask;
+import Minilib.Common.Assert;
+import Minilib.Text.StringEx;
+
+type Curl = box struct {
+    dtor: Destructor Ptr
+};
+
+make: IOFail Curl;
+make = (
+    pure();;
+    eval debug_eprintln("curl_glue_init");
+    let glue = *FFI_CALL_IO[Ptr curl_glue_init()].lift;
+    let curl = Curl {
+        dtor: Destructor::make(glue, |glue|
+            eval debug_eprintln("curl_glue_cleanup");
+            if glue == nullptr { pure $ nullptr };
+            FFI_CALL_IO[() curl_glue_cleanup(Ptr), glue];;
+            pure $ nullptr
+        )
+    };
+    pure $ curl
+);
+
+_check_error: IO CInt -> Ptr -> IOFail ();
+_check_error = |io_code, glue| (
+    let code = *io_code.lift;
+    if code != 0.to_CInt {
+        let errmsg = *FFI_CALL_IO[Ptr curl_glue_get_error_message(Ptr), glue].lift;
+        throw $ "curl: " + String::unsafe_from_c_str_ptr(errmsg)
+    };
+    pure()
+);
+
+_borrow_glue_iofail: (Ptr -> IOFail a) -> Curl -> IOFail a;
+_borrow_glue_iofail = |f, curl| (
+    curl.@dtor.borrow_io(|glue| f(glue).to_result).from_io_result
+);
+
+set_url: String -> Curl -> IOFail ();
+set_url = |url, curl| (
+    pure();;
+    curl._borrow_glue_iofail(|glue|
+        url.borrow_c_str(|p_url|
+            glue._check_error(FFI_CALL_IO[CInt curl_glue_set_url(Ptr, Ptr), glue, p_url])
+        )
+    )
+);
+
+perform: Curl -> IOFail ();
+perform = |curl| (
+    pure();;
+    curl._borrow_glue_iofail(|glue|
+        glue._check_error(FFI_CALL_IO[CInt curl_glue_perform(Ptr), glue])
+    )
+);
+
+set_boxed_value: I64 -> Box a -> Curl -> IOFail ();
+set_boxed_value = |index, boxed, curl| (
+    pure();;
+    curl._borrow_glue_iofail(|glue|
+        let retained_ptr = FFI::boxed_to_retained_ptr(boxed);
+        let retain = FFI::get_funptr_retain(|_| boxed);
+        let release = FFI::get_funptr_release(|_| boxed);
+        FFI_CALL_IO[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release].lift
+    )
+);
+
+get_boxed_value: I64 -> Curl -> IOFail (Box a);
+get_boxed_value = |index, curl| (
+    pure();;
+    curl._borrow_glue_iofail(|glue|
+        _get_boxed_value(index, glue).lift
+    )
+);
+
+_get_boxed_value: I64 -> Ptr -> IO (Box a);
+_get_boxed_value = |index, glue| (
+    let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
+    pure $ FFI::boxed_from_retained_ptr(retained_ptr)
+);
+
+// NOTE: This function is called from libcurl as a callback, so we can't use an IO monad as its return value.
+//       So we have to use `unsafe_perform`.
+_callback_write_function: Ptr -> CSizeT -> CSizeT -> Ptr -> CSizeT;
+_callback_write_function = |ptr, size, nmemb, userdata| (
+    do {
+        let glue = userdata;
+        //eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
+        assert(|_| "invalid size", size == 1.to_CSizeT).lift;;
+        assert(|_| "invalid nmemb", nmemb >= 0.to_CSizeT).lift;;
+
+        let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
+        bytes.borrow_boxed_io(|p_bytes|
+            FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
+        ).lift;;
+
+        let boxed: Box (Destructor WriteFunc) = *glue._get_boxed_value(0).lift;
+        boxed.@value.borrow_io(|write_func|
+            write_func(bytes).map(to_CSizeT).to_result
+        ).from_io_result
+    }
+    .try(|errmes| eprintln(errmes);; pure $ 0.to_CSizeT)
+    .unsafe_perform
+);
+FFI_EXPORT[_callback_write_function, _callback_write_function];
+
+type WriteFunc = Array U8 -> IOFail I64;
+
+set_write_callback: WriteFunc -> Curl -> IOFail ();
+set_write_callback = |func, curl| (
+    pure();;
+    let boxed: Box (Destructor WriteFunc) = Box {
+        value: Destructor::make(func, |func|
+            eval debug_eprintln("write_func destructor is called");
+            pure $ func
+        )
+    };
+    let boxed = mark_threaded(boxed);
+    curl.set_boxed_value(0, boxed);;
+    curl._borrow_glue_iofail(|glue|
+        glue._check_error(FFI_CALL_IO[CInt curl_glue_set_write_callback(Ptr), glue])
+    )
+);

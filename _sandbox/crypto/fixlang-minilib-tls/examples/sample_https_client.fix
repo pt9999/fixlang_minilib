@@ -1,0 +1,55 @@
+module Main;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.App.Clap;
+import Minilib.Net.URL;
+import Minilib.Net.HttpClient;
+import Minilib.Net.HttpClient.ResponseParser;
+import Minilib.Crypto.Tls.TLSSession;
+//import Minilib.Crypto.Tls.TLSSessionMock;
+import Minilib.Text.StringEx;
+
+main: IO ();
+main = (
+    do {
+        let command = (
+            Command::new("sample_https_client")
+            .version("0.2")
+            .about("Fetches contents from remote HTTP/HTTPS server.")
+            .arg(Arg::new("URL").takes_value.default_value("https://localhost")
+                .help("The URL to fetch."))
+            .arg(Arg::new("verbose").short('v').help("Increment verbose level").set_action(ArgAction::increment()))
+            .arg(Arg::new("show_document_info_only").short('I').long("head").help("Show document info only"))
+            .arg(Arg::new("save_certificates").short('S').help("Save certificates to temporary files"))
+            .arg(Arg::new("skip_cert_verify").short('k').help("Skip verification of certificates"))
+        );
+        let matches = *command.get_matches;
+
+        let verbose = matches.get_one("verbose").as_some_or("0");
+        let verbose: I64 = *from_string(verbose).from_result;
+        eval *LogOptions::set_threshold(
+            if verbose >= 3 { lvl_debug3 };
+            if verbose >= 2 { lvl_debug2 };
+            if verbose >= 1 { lvl_debug };
+            lvl_info
+        ).lift;
+
+        let client = HttpClient::empty;
+        let client = client.set_save_certificates(matches.get_one("save_certificates") == some("true"));
+        let client = client.mod_ts_init_param(set_skip_cert_verify(matches.get_one("skip_cert_verify") == some("true")));
+
+        let url = matches.get_one("URL").as_some;
+        let url = *URL::parse(url).from_result;
+        let request = *HttpClientRequest::make(url);
+
+        let response = *client.fetch(request);
+
+        if matches.get_one("show_document_info_only") == some("true") {
+            response.print_document_info.lift
+        };
+        println(response.@body._unsafe_to_string).lift
+    }.try (
+        |err| eprintln(err)
+    )
+);

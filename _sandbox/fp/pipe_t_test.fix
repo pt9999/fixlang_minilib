@@ -1,0 +1,212 @@
+module Main;
+
+import Minilib.Monad.PipeT;
+import Minilib.Monad.IteratorT;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Iden;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+/*
+import Minilib.Trait.Traversable;
+*/
+import Minilib.Testing.UnitTest;
+
+repeat: [m: Monad] m () -> m ();
+repeat = |ma| (
+    ma;;
+    repeat(ma)
+);
+
+test_from_iter_to_iter_t: TestCase;
+test_from_iter_to_iter_t = (
+    make_test("test_from_iter_to_iter_t") $ |_|
+    let pipe: PipeT Void I64 IOFail () = PipeT::from_iter $ Iterator::range(0, 3);
+    let arr: Array I64 = *pipe.to_iter_t.to_array_m;
+    assert_equal("eq", [0, 1, 2], arr)
+);
+
+test_compose: TestCase;
+test_compose = (
+    make_test("test_compose") $ |_|
+    let p_i64_inf: PipeT Void I64 IOFail () = PipeT::from_iter $ Iterator::count_up(0);
+    let p_i64_3: PipeT Void I64 IOFail () = PipeT::from_iter $ Iterator::range(0, 3);
+    let p_i64_0: PipeT Void I64 IOFail () = PipeT::from_iter $ Iterator::empty;
+    let p_i64_to_string: PipeT I64 String IOFail () = repeat $ do { write((*read).to_string) };
+    let p_const_string: PipeT I64 String IOFail () = repeat $ do { write("a") };
+    let p_read_only: PipeT I64 String IOFail () = repeat $ do { let a = *read; pure() };
+    assert_equal("p_i64_inf, p_i64_to_string", ["0", "1", "2", "3", "4"], *PipeT::compose(p_i64_inf, p_i64_to_string).to_iter_t.take(5).to_array_m);;
+    assert_equal("p_i64_3, p_i64_to_string", ["0", "1", "2"], *PipeT::compose(p_i64_3, p_i64_to_string).to_array_m);;
+    assert_equal("p_i64_0, p_i64_to_string", [], *PipeT::compose(p_i64_0, p_i64_to_string).to_array_m);;
+    assert_equal("p_i64_inf, p_const_string", ["a", "a", "a"], *PipeT::compose(p_i64_inf, p_const_string).to_iter_t.take(3).to_array_m);;
+    assert_equal("p_i64_3, p_read_only", [], *PipeT::compose(p_i64_3, p_read_only).to_iter_t.to_array_m);;
+    pure()
+);
+
+test_functor_map: TestCase;
+test_functor_map = (
+    make_test("test_functor_map") $ |_|
+    let pab: PipeT Void I64 IOFail () = do {
+        write(123)
+    };
+    let pbc: PipeT I64 String IOFail () = do {
+        write(*pure("a").Functor::map(|s| s + "b"));;
+        write(*read.map(to_string));;
+        write(*pure("iofail").lift_t.map(|s| s + "!"));;
+        write(*write("write").map(to_string));;
+        pure()
+    };
+    let arr = *pab.composeF(pbc).to_array_m;
+    let expected = ["ab", "123", "iofail!", "write", "()"];
+    assert_equal("eq", expected, arr)
+);
+
+test_monad_pure_bind: TestCase;
+test_monad_pure_bind = (
+    make_test("test_monad_pure_bind") $ |_|
+    let pab: PipeT Void String IOFail () = do {
+        write(*pure("ab"));;
+        let a = *do {
+            write("123");;
+            write("456");;
+            pure $ 789
+        };
+        write(a.to_string)
+    };
+    let arr = *pab.to_array_m;
+    let expected = ["ab", "123", "456", "789"];
+    assert_equal("eq", expected, arr)
+);
+
+test_monad_trans_lift_t_iofail: TestCase;
+test_monad_trans_lift_t_iofail = (
+    make_test("test_monad_trans_lift_t_iofail") $ |_|
+    let pipe: PipeT Void I64 IOFail () = do {
+        write(1);;
+        write(2);;
+        println("from test_monad_trans_lift_t_iofail").lift.lift_t;;
+        write(3)
+    };
+    let arr: Array I64 = *pipe.to_iter_t.to_array_m;
+    assert_equal("eq", [1, 2, 3], arr)
+);
+
+test_monad_trans_lift_t_option: TestCase;
+test_monad_trans_lift_t_option = (
+    make_test("test_monad_trans_lift_t_option") $ |_|
+    let pipe: PipeT Void I64 Option () = do {
+        write(1);;
+        write(2);;
+        (none(): Option ()).lift_t;;
+        write(3)
+    };
+    let arr: Option (Array I64) = pipe.to_iter_t.to_array_m;
+    assert_equal("eq", none(), arr)
+);
+
+test_monad_trans_lift_t_state: TestCase;
+test_monad_trans_lift_t_state = (
+    make_test("test_monad_trans_lift_t_state") $ |_|
+    let pab: PipeT Void I64 (State String) () = do {
+        write(1);;
+        State::mod_state(|s| s + "pab,").lift_t;;
+        write(2)
+    };
+    let pbc: PipeT I64 String (State String) () = do {
+        let a = *read;  // pab is pulled here
+        write(a.to_string);;
+        State::mod_state(|s| s + "pbc,").lift_t;;
+        let a = *read;  // pab is pulled here
+        write(a.to_string)
+    };
+    let (s, arr) = pab.composeF(pbc).to_array_m.run_state("");
+    assert_equal("arr", ["1", "2"], arr);;
+    assert_equal("s", "pbc,pab,", s)
+);
+
+test_monad_error_error: TestCase;
+test_monad_error_error = (
+    make_test("test_monad_error_error") $ |_|
+    let pab: PipeT Void String IOFail () = do {
+        write("a");;
+        error("error");;
+        write("b")
+    };
+    let res = *pab.to_array_m.from_result;
+    assert_equal("eq", err $ "error", res)
+);
+
+test_monad_error_catch: TestCase;
+test_monad_error_catch = (
+    make_test("test_monad_error_catch") $ |_|
+    let countup: PipeT Void I64 IOFail () = PipeT::from_iter $ Iterator::count_up(1);
+    let pipe1: PipeT I64 String IOFail () = do {
+        write(*read.map(to_string));;
+        pure().lift_t;;
+        (error("error") : PipeT I64 String IOFail ());;
+        write(*read.map(to_string))
+    };
+    let pipe2 = pipe1.catch(|errmsg|
+        write("catch:" + errmsg);;
+        write(*read.map(to_string))
+    );
+    let res = *countup.composeF(pipe2).to_array_m.to_result.lift;
+    assert_equal("eq", ok $ ["1", "catch:error", "2"], res);;
+    let pipe2 = pipe1.catch(|errmsg|
+        write("catch:" + errmsg);;
+        (error("error2") : PipeT I64 String IOFail ());;
+        write("x")
+    );
+    let res = *countup.composeF(pipe2).to_array_m.to_result.lift;
+    assert_equal("eq", err $ "error2", res);;
+    let pipe3 = pipe2.catch(|errmsg|
+        write("catch:" + errmsg);;
+        write(*read.map(to_string))
+    );
+    let res = *countup.composeF(pipe3).to_array_m.to_result.lift;
+    assert_equal("eq", ok $ ["1", "catch:error", "catch:error2", "2"], res);;
+    pure()
+);
+
+test_monad_io_lift_io: TestCase;
+test_monad_io_lift_io = (
+    make_test("test_monad_io_lift_io") $ |_|
+    let pab: PipeT Void I64 IOFail () = do {
+        write(1);;
+        println("from test_monad_io_lift_io").lift_io;;
+        write(2)
+    };
+    let pbc: PipeT I64 String IOFail () = repeat $ do { write((*read).to_string) };
+    assert_equal("arr", ["1", "2"], *pab.composeF(pbc).to_array_m)
+);
+
+test_monad_iofail_lift_iofail: TestCase;
+test_monad_iofail_lift_iofail = (
+    make_test("test_monad_iofail_lift_iofail") $ |_|
+    let pab: PipeT Void I64 IOFail () = do {
+        write(1);;
+        println("from test_monad_iofail_lift_iofail").lift.lift_iofail;;
+        write(2)
+    };
+    let pbc: PipeT I64 String IOFail () = repeat $ do { write((*read).to_string) };
+    assert_equal("arr", ["1", "2"], *pab.composeF(pbc).to_array_m)
+);
+
+// TODO: add tests
+
+main: IO ();
+main = (
+    [
+        test_from_iter_to_iter_t,
+        test_compose,
+        test_functor_map,
+        test_monad_pure_bind,
+        test_monad_trans_lift_t_iofail,
+        test_monad_trans_lift_t_option,
+        test_monad_trans_lift_t_state,
+        test_monad_error_catch,
+        test_monad_io_lift_io,
+        test_monad_iofail_lift_iofail,
+    ]
+    .run_test_driver
+);

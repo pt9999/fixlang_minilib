@@ -1,0 +1,215 @@
+module Main;
+
+import Minilib.Monad.ArrayT;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Trait.Traversable;
+import Minilib.Testing.UnitTest;
+
+test_empty: TestCase;
+test_empty = (
+    make_test("test_empty") $ |_|
+    let xs: ArrayT Option I64 = ArrayT::empty;
+    assert_equal("eq", some $ [], xs.run_array_t)
+);
+
+test_functor_map: TestCase;
+test_functor_map = (
+    make_test("test_functor_map") $ |_|
+    let xs: ArrayT IOFail I64 = ArrayT::from_array([1, 2, 3]);
+    let xs: ArrayT IOFail String = xs.map(to_string);
+    let arr = *xs.to_array_m;
+    assert_equal("arr", ["1", "2", "3"], arr)
+);
+
+test_monad_pure: TestCase;
+test_monad_pure = (
+    make_test("test_monad_pure") $ |_|
+    let xs: ArrayT IOFail I64 = pure(1);
+    let arr = *xs.to_array_m;
+    assert_equal("arr", [1], arr)
+);
+
+test_monad_bind: TestCase;
+test_monad_bind = (
+    make_test("test_monad_bind") $ |_|
+    let xs: ArrayT IOFail (I64, I64) = do {
+        let x = *ArrayT::from_array([1,2]);
+        let y = *ArrayT::from_array([3,4]);
+        pure $ (x, y)
+    };
+    let arr = *xs.to_array_m;
+    assert_equal("arr", [(1,3),(1,4),(2,3),(2,4)], arr)
+);
+
+test_monad_trans_lift_t: TestCase;
+test_monad_trans_lift_t = (
+    make_test("test_monad_trans_lift_t") $ |_|
+    let xs: ArrayT (Result ErrMsg) (I64, I64) = do {
+        let x = *ArrayT::from_array([1,2]);
+        let y = *ok(3).lift_t;
+        pure $ (x, y)
+    };
+    assert_equal("arr", ok([(1,3),(2,3)]), xs.to_array_m);;
+    let xs: ArrayT (Result ErrMsg) (I64, I64) = do {
+        let x = *ArrayT::from_array([1,2]);
+        let y = *err("error").lift_t;
+        pure $ (x, y)
+    };
+    assert_equal("arr", err("error"), xs.to_array_m);;
+    pure()
+);
+
+test_monad_error_error: TestCase;
+test_monad_error_error = (
+    make_test("test_monad_error_error") $ |_|
+    let xs1: ArrayT (Result ErrMsg) I64 = error("error");
+    assert_equal("xs1.to_array_m", err("error"), xs1.to_array_m);;
+//    let xs2: ArrayT (Result ErrMsg) I64 = xs1.push_front(42);
+//    assert_equal("xs2.to_array_m", err("error"), xs2.to_array_m);;
+    pure()
+);
+
+test_monad_error_catch: TestCase;
+test_monad_error_catch = (
+    make_test("test_monad_error_catch") $ |_|
+    let xs1: ArrayT (Result ErrMsg) I64 = do {
+        let x = *ArrayT::from_array([1,2,3]);
+        if x == 3 { error("error") };
+        pure(x)
+    };
+    assert_equal("xs1.to_array_m", err("error"), xs1.to_array_m);;
+    let xs2: ArrayT (Result ErrMsg) I64 = xs1.catch(|errmsg|
+        let x = *ArrayT::from_array([4,5,6]);
+        if x == 6 { error("error2") };
+        pure(x)
+    );
+    assert_equal("xs2.to_array_m", err("error2"), xs2.to_array_m);;
+    let xs3: ArrayT (Result ErrMsg) I64 = xs2.catch(|errmsg|
+        let x = *ArrayT::from_array([7,8,9]);
+        pure(x)
+    );
+    assert_equal("xs3.to_array_m", ok([7,8,9]), xs3.to_array_m);;
+    pure()
+);
+
+// TODO: implement `with_tempfile` to Minilib.IO.FileSystem
+temp_filepath: Path;
+temp_filepath = ".fixlang/tmp.array_t_test.tmp";
+
+test_monad_io_lift_io: TestCase;
+test_monad_io_lift_io = (
+    make_test("test_monad_io_lift_io") $ |_|
+    with_file(temp_filepath, "w", |handle|
+        let xs1: ArrayT IOFail (I64,I64) = do {
+            let x = *ArrayT::from_array([1,2]);
+            let res = *write_string(handle, "x="+ x.to_string + ",").to_result.lift_io;
+            assert_true("write_string", res.is_ok).lift_iofail;;
+            let y = *ArrayT::from_array([3,4]);
+            let res = *write_string(handle, "y="+y.to_string + ",").to_result.lift_io;
+            assert_true("write_string", res.is_ok).lift_iofail;;
+            pure $ (x, y)
+        };
+        assert_equal("arr", [(1,3),(1,4),(2,3),(2,4)], *xs1.to_array_m)
+    );;
+    let contents = *read_file_string(temp_filepath);
+    assert_equal("contents", "x=1,y=3,y=4,x=2,y=3,y=4,", contents)
+);
+
+test_monad_iofail_lift_iofail: TestCase;
+test_monad_iofail_lift_iofail = (
+    make_test("test_monad_iofail_lift_iofail") $ |_|
+    with_file(temp_filepath, "w", |handle|
+        let xs1: ArrayT IOFail I64 = do {
+            let x = *ArrayT::from_array([1,2,3,4,5]);
+            write_string(handle, "x="+x.to_string + ",").lift_iofail;;
+            if x == 3 { throw("error").lift_iofail };
+            pure(x)
+        };
+        let xs2: ArrayT IOFail String = xs1.map(to_string).catch(|errmsg|
+            write_string(handle, "catch="+errmsg).lift_iofail;;
+            pure(errmsg)
+        );
+        let res = *xs2.to_array_m.to_result.lift;
+        assert_equal("arr", ok $ ["error"], res)
+    );;
+    let contents = *read_file_string(temp_filepath);
+    assert_equal("contents", "x=1,x=2,x=3,catch=error", contents)
+);
+
+test_monad_state: TestCase;
+test_monad_state = (
+    make_test("test_monad_state") $ |_|
+    let xs: ArrayT (StateT (Array String) IOFail) () = do {
+        let n = 10;
+        let i = *Iterator::range(0, n).to_array.lift_array;
+        let j = *Iterator::range(i, n).to_array.lift_array;
+        let k = *Iterator::range(j, n).to_array.lift_array;
+        State::mod_state(push_back((i,j,k).to_string)).lift_t
+    };
+    let result = *xs.to_array_m.exec_state_t([]);
+    //println("result.size="+result.get_size.to_string).lift;;
+    //println("result="+result.to_string).lift;;
+    assert_true("result", result.find_by(eq("(1, 2, 3)")).is_some)
+);
+
+test_traversable_sequence: TestCase;
+test_traversable_sequence = (
+    make_test("test_traversable_sequence") $ |_|
+    let xs: ArrayT Option (IOFail I64) = do {
+        let i = *Iterator::range(0, 3).to_array.lift_array;
+        pure $ pure $ i
+    };
+    let xs: IOFail (ArrayT Option I64) = xs.sequence;
+    let xs: ArrayT Option I64 = *xs;
+    let xs: Option (Array I64) = xs.run_array_t;
+    assert_equal("xs", some $ [0, 1, 2], xs)
+);
+
+test_run_sequence: TestCase;
+test_run_sequence = (
+    make_test("test_run_sequence") $ |_|
+    let xs: ArrayT Option (Option I64) = do {
+        let i = *Iterator::range(0, 3).to_array.lift_array;
+        pure $ some $ i
+    };
+    let xs: ArrayT Option I64 = xs.run_sequence;
+    let xs: Option (Array I64) = xs.run_array_t;
+    assert_equal("xs", some $ [0, 1, 2], xs)
+);
+
+
+// TODO: add tests
+
+main: IO ();
+main = (
+    [
+        test_empty,
+        /*
+        test_is_empty,
+        test_get_first,
+        test_push_front,
+        test_push_m_front,
+        test_from_m_iter,
+        test_from_iter,
+        test_from_array,
+        test_to_array_m,
+        test_append,
+        test_fold_m,
+        */
+        test_functor_map,
+        test_monad_pure,
+        test_monad_bind,
+        test_monad_trans_lift_t,
+        test_monad_error_error,
+        test_monad_error_catch,
+        test_monad_io_lift_io,
+        test_monad_iofail_lift_iofail,
+        test_monad_state,
+        test_traversable_sequence,
+        test_run_sequence,
+    ]
+    .run_test_driver
+);

@@ -1,0 +1,208 @@
+/*
+
+Patricia Tree
+
+This module was inspired by Haskell's `Data.IntMap` package.
+https://hackage-content.haskell.org/package/containers-0.8/docs/Data-IntMap.html
+
+In particular, I used the following papers mentioned in the `Data.IntMap` package's documentation:
+
+Chris Okasaki and Andy Gill, "Fast Mergeable Integer Maps", Workshop on ML, September 1998, pages 77-86,
+https://web.archive.org/web/20150417234429/https://ittc.ku.edu/~andygill/papers/IntMap98.pdf
+
+*/
+module Minilib.Collection.PatTree;
+
+import Minilib.Text.Hex;
+
+type Key = U64;
+type Prefix = U64;
+type Mask = U64;
+
+// A type of combining function that resolves collisions.
+// `combine(old_value, new_value)` returns a combined value.
+type Combine a = a -> a -> a;
+
+overwrite: Combine a = |old_value, new_value| new_value;
+
+type PNode a = box union {
+    empty: (),
+    // key, data
+    leaf: (Key, a),
+    // (prefix, branching bit (power of two), left, right)
+    branch: (Prefix, Mask, PNode a, PNode a),
+};
+
+impl [a: ToString] PNode a: ToString {
+    to_string = |node| node._node_to_string(0);
+}
+
+_node_to_string: [a: ToString] I64 -> PNode a -> String;
+_node_to_string = |indent, node| (
+    let indent_str: String = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
+    match node {
+        empty() => indent_str + "()",
+        leaf((key,value)) => indent_str + "leaf(key=" + key.to_string + ", value=" + value.to_string + ")",
+        branch((prefix,mask,left,right)) => 
+            indent_str + "branch(prefix=" + prefix.to_string + ", mask=" + mask.to_string + ")\n" +
+                left._node_to_string(indent + 1) + "\n" + right._node_to_string(indent + 1),
+    }
+);
+
+_empty: PNode a;
+_empty = empty();
+
+find: Key -> PNode a -> Option a = lookup;
+
+lookup: Key -> PNode a -> Option a;
+lookup = |key, node| (
+    match node {
+        empty() => none(),
+        leaf((k,x)) => if k == key { some(x) } else { none() },
+        branch((prefix, m, t0, t1)) => (
+            if !key._match_prefix(prefix, m) { none() };
+            if key <= prefix { // key._zero_bit(m)
+                lookup(key, t0) 
+            } else { 
+                lookup(key, t1) 
+            }
+        )
+    }
+);
+
+_zero_bit: Mask -> Key -> Bool;
+_zero_bit = |mask, key| (
+    key.bit_and(mask) == 0_U64
+);
+
+_mask: Mask -> Key -> Mask;
+_mask = |m, key| (
+    // little-endian mask
+    //key.bit_and(m - 1_U64)
+    // big-endian mask
+    key.bit_or(m - 1_U64).bit_and(bit_not(m))
+);
+
+_match_prefix: Prefix -> Mask -> Key -> Bool;
+_match_prefix = |prefix, m, key| (
+    key._mask(m) == prefix
+);
+
+make_branch: Prefix -> Mask -> PNode a -> PNode a -> PNode a;
+make_branch = |prefix, m, t0, t1| (
+    if t0.is_empty  { t1 };
+    if t1.is_empty { t0 };
+    branch $ (prefix, m, t0, t1)
+);
+
+_join: Prefix -> Mask -> PNode a -> Prefix -> Mask -> PNode a -> PNode a;
+_join = |p0, m0, t0, p1, m1, t1| (
+    let m = _branching_bit(p0, m0, p1, m1);
+    if p0._zero_bit(m) { 
+        branch $ (p0._mask(m), m, t0, t1) 
+    } else { 
+        branch $ (p0._mask(m), m, t1, t0) 
+    }
+);
+
+_branching_bit: Prefix -> Mask -> Prefix -> Mask -> Mask;
+//_branching_bit = |p0, p1| p0.bit_xor(p1)._lowest_bit;
+_branching_bit = |p0, m0, p1, m1| (
+    _highest_bit(p0.bit_xor(p1), max(1_U64, 2_U64 * max(m0, m1)))
+);
+
+_lowest_bit: Prefix -> Mask;
+_lowest_bit = |x| x.bit_and(x.bit_not + 1_U64);
+
+_highb: Prefix -> Mask;
+_highb = |x| (
+    let m = x._lowest_bit;
+    if x == m { m };
+    _highb(x - m)
+);
+
+_highest_bit: Prefix -> Mask -> Mask;
+_highest_bit = |x, m| (
+    // zero all bits below m
+    let xx = x.bit_and((m - 1_U64).bit_not);
+    //eval debug_eprintln("(x,m)=" + x.to_string_hex + "," + m.to_string_hex + " xx=" + xx.to_string_hex);
+    let b = _highb(xx);
+    //eval debug_eprintln("_highb(" + xx.to_string_hex + ")=" + b.to_string_hex);
+    b
+);
+
+insert: Combine a -> Key -> a -> PNode a -> PNode a;
+insert = |combine, new_key, new_value, old_node| (
+    match old_node {
+        empty() => (
+            leaf $ (new_key, new_value)
+        ),
+        leaf((old_key, old_value)) => (
+            if old_key == new_key { 
+                leaf $ (new_key, combine(old_value, new_value)) 
+            } else { 
+                let new_node = leaf $ (new_key, new_value);
+                _join(new_key, 0_U64, new_node, old_key, 0_U64, old_node)
+            }
+        ),
+        branch((prefix, m, left, right)) => (
+            if new_key._match_prefix(prefix, m) {
+                if new_key <= prefix { // new_key._zero_bit(m)
+                    let left = left.insert(combine, new_key, new_value);
+                    //old_node.mod_branch(set_2(left))
+                    branch $ (prefix, m, left, right) 
+                } else { 
+                    let right = right.insert(combine, new_key, new_value);
+                    //old_node.mod_branch(set_3(right))
+                    branch $ (prefix, m, left, right)
+                }
+            } else { 
+                let new_node = leaf $ (new_key, new_value);
+                _join(new_key, 0_U64, new_node, prefix, m, old_node)
+            }
+        ),
+    }
+);
+
+merge: Combine a -> PNode a -> PNode a -> PNode a;
+merge = |combine, new_node, old_node| (
+    let mrg: PNode a -> PNode a -> PNode a = fix $ |mrg, new_node, old_node| (
+        if new_node.is_empty { old_node };
+        if old_node.is_empty { new_node };
+        if new_node.is_leaf { 
+            let (new_key, new_value) = new_node.as_leaf;
+            old_node.insert(combine, new_key, new_value)
+        };
+        if old_node.is_leaf { 
+            let (old_key, old_value) = old_node.as_leaf;
+            new_node.insert(|x,y| combine(y,x), old_key, old_value)
+        };
+        let (new_prefix, new_mask, new_left, new_right) = new_node.as_branch;
+        let (old_prefix, old_mask, old_left, old_right) = old_node.as_branch;
+        if new_mask == old_mask && new_prefix == old_prefix {
+            // same prefix
+            let left = mrg(new_left, old_left);
+            let right = mrg(new_right, old_right);
+            branch((new_prefix, new_mask, left, right))
+        };
+        if new_mask < old_mask && old_prefix._match_prefix(new_prefix, new_mask) {
+            // old_prefix contains new_prefix
+            if old_prefix <= new_prefix { //old_prefix._zero_bit(new_mask)
+                branch((new_prefix, new_mask, mrg(new_left, old_node), new_right)) 
+            } else { 
+                branch((new_prefix, new_mask, new_left, mrg(new_right, old_node))) 
+            }
+        };
+        if (old_mask < new_mask && new_prefix._match_prefix(old_prefix, old_mask)) {
+            // new_prefix contains old_prefix
+            if new_prefix <= old_prefix { //new_prefix._zero_bit(old_mask)
+                branch((old_prefix, old_mask, mrg(new_node, old_left), old_right)) 
+            } else { 
+                branch((old_prefix, old_mask, old_left, mrg(new_node, old_right))) 
+            }
+        };
+        // the prefixes disagree.
+        _join(new_prefix, new_mask, new_node, old_prefix, old_mask, old_node)
+    );
+    mrg(new_node, old_node)
+);

@@ -1,0 +1,136 @@
+module Minilib.Logging.Log;
+
+type MonadLog = Monad + MonadLogIF;
+
+trait [m: * -> *] m: MonadLogIF {
+	add_log_entry: LogEntry -> m ();
+}
+
+trait [m: * -> *] a: GetLogHandlers {
+	get_log_handlers: a -> m (Array (LogHandler m));
+}
+
+type [m: * -> *] LogHandler m = unbox struct {
+    data: LogEntry -> m ()
+};
+
+namespace DebugLogHandler {
+    make: [m: Monad] m (LogHandler m);
+    make = pure $ LogHandler {
+        data: |entry| (
+            eval debug_eprintln(entry.@message);
+            pure()
+        )
+    };
+}
+
+namespace FileLogHandler {
+    make: [m: MonadIOFail] IO::Path -> m (LogHandler m);
+    make = |filepath| (
+        with_file(path, "w",
+            |handle| pure $ LogHandler {
+                data: |entry| (
+                    write_string(handle, entry.@message)
+                )
+            }
+        ).lift_iofail
+    );
+}
+
+impl [m: Monad, s: GetLogHandlers] StateT s m: MonadLogIF {
+    add_log_entry = |entry| (
+        let state = *get_state;
+        let handlers = *state.get_log_handlers;
+        handlers.foreach_m(|handler|
+            handler(entry)
+        )
+    );
+}
+
+impl Identity: MonadLogIF {
+    add_log_entry = (
+        let handler = *DebugLogHandler::make;
+        handler
+    );
+}
+
+/*
+type [m: * -> *] LoggingT m a = unbox struct {
+    data: m a
+};
+
+namespace LogT {
+    run_logging: [m: Monad] Array (LogHandler m) -> LoggingT m a -> m a;
+
+}
+*/
+
+type LogEntry = unbox struct {
+	logger_name: String,
+	level: LogLevel,
+	message: String,
+};
+
+type LogLevel = I64;
+
+namespace LogLevel {
+    lvl_critical: LogLevel;
+    lvl_critical = 100;
+
+    lvl_error: LogLevel;
+    lvl_error = 90;
+
+    lvl_warn: LogLevel;
+    lvl_warn = 50;
+
+    lvl_info: LogLevel;
+    lvl_info = 20;
+
+    lvl_debug: LogLevel;
+    lvl_debug = 0;
+
+    lvl_debug2: LogLevel;
+    lvl_debug2 = -10;
+
+    lvl_debug3: LogLevel;
+    lvl_debug3 = -20;
+
+    lvl_all: LogLevel;
+    lvl_all = I64::minimum;
+}
+
+type Logger = {
+	name: String,
+	level: LogLevel
+};
+
+namespace Logger {
+    make: String -> Logger;
+    make = |name| Logger {
+        name: String,
+        level: LogLevel::lvl_all
+    };
+
+	log: [m: MonadLog] LogLevel -> String -> Logger -> m ();
+	log = |level, message, logger| (
+        if level < logger.@level { pure () };
+        let entry = LogEntry {
+            logger_name: logger.@name,
+	        level: level,
+	        message: message,
+        };
+        add_log_entry(entry)
+    );
+
+	debug: [m: MonadLog] String -> Logger -> m ();
+	debug = |message, logger| logger.log(LogLevel::lvl_debug, message);
+
+}
+
+
+module Minilib.Crypto.Cert.X509Time;
+
+_logger: Logger;
+_logger = Logger::make("Minilib.Crypto.Cert.X509Time");
+
+

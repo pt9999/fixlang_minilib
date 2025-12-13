@@ -1,0 +1,136 @@
+module Main;
+
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
+
+type App = unbox struct {
+    users: Array String,
+    pages: Array String
+};
+
+type StateApp = StateT App;
+
+namespace App {
+    empty: App;
+    empty = App {
+        users: Array::empty(0),
+        pages: Array::empty(0)
+    };
+
+    get_app: [m: Monad] StateApp m App;
+    get_app = get_state;
+
+    mod_app: [m: Monad] StateApp m ();
+    mod_app = mod_state;
+
+    add_user: [m: Monad] String -> StateApp m ();
+    add_user = |user| (
+        mod_state(mod_users(push_back(user)))
+    );
+
+    add_page: [m: Monad] String -> StateApp m ();
+    add_page = |page| (
+        mod_state(mod_pages(push_back(page)))
+    );
+
+    get_users: [m: Monad] StateApp m (Array String);
+    get_users = get_state.map(@users);
+
+    get_pages: [m: Monad] StateApp m (Array String);
+    get_pages = get_state.map(@pages);
+
+    print_users: [m: MonadIO] StateApp m ();
+    print_users = do {
+        let users = *get_users;
+        println("---users---").lift_io;;
+        users.to_iter.foreach_m(println).lift_io
+    };
+
+    print_pages: [m: MonadIO] StateApp m ();
+    print_pages = do {
+        let pages = *get_pages;
+        println("---pages---").lift_io;;
+        pages.to_iter.foreach_m(println).lift_io
+    };
+
+    register_users: [m: Monad] StateApp m ();
+    register_users = do {
+        add_user("taro");;
+        add_user("jiro");;
+        add_user("saburo");;
+        pure()
+    };
+
+    create_user_pages: [m: Monad] StateApp m ();
+    create_user_pages = do {
+        let users = *get_users;
+        users.to_iter.foreach_m(|user|
+            add_page(user + "'s page")
+        )
+    };
+
+    save_file: [m: MonadIOFail, m: MonadError] String -> StateApp m ();
+    save_file = |path| (
+        let users = *get_users;
+        let pages = *get_pages;
+        if path == "" { error $ "Empty path" };
+        if path == "*invalid_file_path*" { error $ "Invalid file path (This error is expected, not a true error)" };
+        write_file_string(path,
+            users.to_iter.join(",") + "\n" +
+            pages.to_iter.join(",")
+        ).lift_iofail
+    );
+}
+
+test_state: IO ();
+test_state = (
+    println("=== test_state ===");;
+    let m = do {
+        register_users;;
+        get_users
+    };
+    let users = *m.eval_state_t(App::empty);
+    println(users.to_iter.join(","))
+);
+
+stateio_func: [m: MonadIO] StateApp m ();
+stateio_func = (
+    print_users;;
+    print_pages;;
+    register_users;;
+    create_user_pages;;
+    print_users;;
+    print_pages;;
+    pure ()
+);
+
+test_stateio: IO ();
+test_stateio = (
+    println("=== test_stateio ===");;
+    stateio_func.eval_state_t(App::empty)
+);
+
+stateiof_func: [m: MonadIOFail, m: MonadError] StateApp m ();
+stateiof_func = (
+    stateio_func;;
+    //save_file("tmp.state_monad_test2.txt");;
+    save_file("*invalid_file_path*");;
+    println("completed.").lift_io;;
+    pure()
+);
+
+test_stateiof: IO ();
+test_stateiof = do {
+    println("=== test_stateiof ===").lift;;
+    stateiof_func.eval_state_t(App::empty)
+}.try(|err| println("ERROR: " + err));
+
+main: IO ();
+main = (
+    test_state;;
+    test_stateio;;
+    test_stateiof;;
+    pure()
+);

@@ -1,0 +1,155 @@
+module Treap2Test;
+
+import Minilib.Collection.Treap2;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let n = 30;
+    let shuffled = Array::from_map(n, |i| (i * 1234567) % n);
+    println("shuffled=" + shuffled.to_string).lift;;
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = shuffled.to_iter.fold(t, insert);
+    let sorted = t.to_array;
+    println("sorted=" + sorted.to_string).lift;;
+    //println(t._debug_to_string).lift;;
+    pure()
+);
+
+test_find_range: TestCase;
+test_find_range = (
+    make_test("test_find_range") $ |_|
+    let n = 30;
+    let arr = range(0, n).to_array;
+    let arr = arr.reorder(shuffle(1122));
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = arr.to_iter.fold(t, insert);
+    let expected = [11,12,13,14,15,16,17];
+    let actual = t.find_range(|x| x < 11, |x| x <= 17).to_array;
+    assert_equal("eq", expected, actual);;
+    let expected = [27,28,29];
+    let actual = t.find_range(|x| x < 27, |x| x <= 35).to_array;
+    assert_equal("eq", expected, actual);;
+    pure()
+);
+
+test_find_range_descending: TestCase;
+test_find_range_descending = (
+    make_test("test_find_range_descending") $ |_|
+    let n = 30;
+    let arr = range(0, n).to_array;
+    let arr = arr.reorder(shuffle(1123));
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = arr.to_iter.fold(t, insert);
+    let expected = [27,26,25,24,23,22,21];
+    let actual = t.find_range_descending(|x| x < 21, |x| x <= 27).to_array;
+    assert_equal("eq", expected, actual);;
+    let expected = [29,28,27];
+    let actual = t.find_range_descending(|x| x < 27, |x| x <= 35).to_array;
+    assert_equal("eq", expected, actual);;
+    pure()
+);
+
+test_to_iter: TestCase;
+test_to_iter = (
+    make_test("test_to_iter") $ |_|
+    let n = 30;
+    let sorted = range(0, n).to_array;
+    let arr = sorted.reorder(shuffle(3344));
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = arr.to_iter.fold(t, insert);
+    let expected = sorted;
+    let actual = t.to_iter.to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_to_iter_descending: TestCase;
+test_to_iter_descending = (
+    make_test("test_to_iter_descending") $ |_|
+    let n = 30;
+    let sorted = range(0, n).to_array;
+    let arr = sorted.reorder(shuffle(2345));
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = arr.to_iter.fold(t, insert);
+    let expected = sorted.reverse;
+    let actual = t.to_iter_descending.to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_contains: TestCase;
+test_contains = (
+    make_test("test_contains") $ |_|
+    let n = 30;
+    let sorted = range(0, n).to_array;
+    let arr = sorted.reorder(shuffle(3345));
+    let t: Treap (KeyLessThan I64) I64 = Treap::empty;
+    let t = arr.to_iter.fold(t, insert);
+    [
+        (-1, false),
+        (0, true),
+        (15, true),
+        (29, true),
+        (30, false),
+    ].to_iter.fold_m(
+        (), |(k, expected), _|
+        let actual = t.contains(k);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_perf: TestCase;
+test_perf = (
+    make_test("test_perf") $ |_|
+    let n = 1000000;
+    //let n = 100000;
+    println("test_perf (n=" + n.to_string + ")").lift;;
+    let array = Iterator::range(0, n).to_array;
+    let shuffled = array.reorder(shuffle(5432));
+    let (tree, from_iter_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.Treap::from_iter
+    }).lift;
+    println(" from_iter: " + from_iter_time.to_string + " seconds").lift;;
+    assert_equal("size", n, tree.get_size);;
+    /*
+    let (ans1, ans1_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_iter.to_array
+    }).lift;
+    println(" to_iter.to_array: " + ans1_time.to_string + " seconds").lift;;
+    assert_equal("eq", ans1, array);;
+    */
+    let (ans2, ans2_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_array
+    }).lift;
+    println(" to_array: " + ans2_time.to_string + " seconds").lift;;
+    assert_equal("eq", ans2, array);;
+    let (tree, remove_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.fold(
+            tree, |x| remove(x)
+        )
+    }).lift;
+    println(" remove: " + remove_time.to_string + " seconds").lift;;
+    assert_equal("size", 0, tree.get_size);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_simple,
+        test_find_range,
+        test_find_range_descending,
+        test_to_iter,
+        test_to_iter_descending,
+        test_contains,
+        test_perf,
+        TestCase::empty
+    ]
+    .run_test_driver
+);

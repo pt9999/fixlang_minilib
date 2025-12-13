@@ -6,7 +6,6 @@ fix_func = |f| |x| f(fix_func(f), x);
 //fix_func2: ((a -> b) -> a -> b) -> a -> b;
 //fix_func2 = |f| (|x| f(x(x)))(|x| f(x(x)));
 
-
 fib_inner : (I64 -> I64) -> I64 -> I64;
 fib_inner = |loop| |n| (
     if n == 0 {
@@ -18,10 +17,56 @@ fib_inner = |loop| |n| (
     }
 );
 
-main : IO ();
-main = (
+main1 : IO ();
+main1 = (
     let fib = fix_func(fib_inner);
     let ans = fib(30);
 
     print $ ans.to_string
+);
+
+//------------------------------------
+
+fix_m_func: [m: Monad] (m a -> m a) -> m a;
+fix_m_func = |f| (
+    let g // : (() -> m a) -> () -> m a
+      = |h, _| f(h());
+    fix(g, ())
+);
+
+test1 : IO I64 -> IO I64;
+test1 = |ma| (
+    let n = *ma;
+    println(n.to_string);;
+    pure $ n + 1
+);
+
+main2: IO ();
+main2 = (
+    let io = fix_m_func(test1);
+    // infinite loop, stack overflow
+    let n = *io;
+    pure()
+);
+
+//------------------------------------
+
+fib_m_inner : (I64 -> IO I64) -> I64 -> IO I64;
+fib_m_inner = |loop| |n| (
+    if n == 0 {
+        pure $ 0
+    } else if n == 1 {
+        pure $ 1
+    } else {
+        println("n="+ n.to_string);;
+        pure $ *loop(n-1) + *loop(n-2)
+    }
+);
+
+main : IO ();
+main = (
+    let fib_m = fix_func(fib_m_inner);
+    let ans = *fib_m(5);
+
+    println $ ans.to_string
 );

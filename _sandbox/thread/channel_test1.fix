@@ -1,0 +1,75 @@
+module Main;
+
+import AsyncTask;
+import Random;
+
+//import Minilib.Collection.Deque;
+import Minilib.Common.TimeEx;
+import Minilib.Common.IOEx;
+import Minilib.Thread.Channel;
+import Minilib.Thread.Future;
+import Minilib.Thread.TaskPool;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+
+
+//---------------------------------------------------
+
+parallel_map_m: TaskPool -> (a -> IO b) -> Array a -> IOFail (Array b);
+parallel_map_m = |pool, f, arr| (
+    let futures = *arr.map_m(
+        |a| Future::make(pool, pure(a).bind(f))
+    );
+    futures.map_m(
+        |future| future.get
+    )
+);
+
+_usleep: I64 -> IO ();
+_usleep = |usec| usleep(usec.to_U32).try(eprintln);
+
+sleep_random: Var Random -> IO ();
+sleep_random = |rand_var| (
+    let u64 = *rand_var.lock(|rand|
+        let (rand, u64) = rand.generate_U64;
+        rand_var.Var::set(rand);;
+        pure $ u64
+    );
+    _usleep((u64 % 5000000_U64).to_I64);;
+    pure()
+);
+
+test1: IO ();
+test1 = (
+    do {
+        eprintln("start").lift;;
+        let rand_var: Var Random = *Var::make(Random::init_by_seed(123_U64)).lift;
+        let pool = *TaskPool::make(3).lift;
+        let arr: Array I64 = Iterator::range(0, 30).to_array;
+        let f = |i| (
+            pure();;
+            let thr = *FFI_CALL_IO[U32 pthread_self()];
+            eprintln(thr.to_string + ": " + i.to_string + ": start");;
+            sleep_random(rand_var);;
+            eprintln(thr.to_string + ": " + i.to_string + ": end");;
+            pure()
+        );
+        let futures = *arr.map_m(
+            |a| Future::make(pool, f(a))
+        );
+        //arr.parallel_map_m(pool, f);;
+        let pool = *pool.shutdown.lift;
+        futures.map_m(
+            |future| future.get
+        );;
+        eprintln("end").lift;;
+        pure()
+    }.try(eprintln)
+);
+
+main: IO ();
+main = (
+    set_unbuffered_mode(IO::stdout);;
+    set_unbuffered_mode(IO::stderr);;
+    test1
+);

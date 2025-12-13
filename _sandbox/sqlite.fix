@@ -1,20 +1,17 @@
-// 実行方法: fix run -d sqlite3 -f sqlite3.fix
-// ビルド方法: fix build -d sqlite3 -f sqlite3.fix
-// 実行時にSIGSEGVが起きる問題があったが、ランタイムライブラリのリンク時に-Wl,--no-as-needed を付けたら動くようになった。
-// またビルド時はライブラリを最後にリンクしたら動くようになった。
+// 実行方法: fix run -d sqlite3 -f sqlite.fix
+// ビルド方法: fix build -d sqlite3 -f sqlite.fix
 
 module Main;
 
-import Debug;
 
 _sqlite3_open: String -> IOFail Ptr;
 _sqlite3_open = |filepath| (
     let pdb : Array Ptr = Array::fill(1, nullptr);
-    let res = pdb.borrow_ptr(|p_pdb|
+    let (pdb, res) = *pdb.mutate_boxed_io(|p_pdb|
         filepath.borrow_c_str(|p_filepath|
-            CALL_C[I32 sqlite3_open(Ptr, Ptr), p_filepath, p_pdb]
+            FFI_CALL_IO[I32 sqlite3_open(Ptr, Ptr), p_filepath, p_pdb]
         )
-    );
+    ).lift;
     if res != 0_I32 {
         throw $ "sqlite3_open failed: res = " + res.to_string
     };
@@ -24,7 +21,7 @@ _sqlite3_open = |filepath| (
 
 _sqlite3_close: Ptr -> IOFail ();
 _sqlite3_close = |db| (
-    let res = CALL_C[I32 sqlite3_close(Ptr), db];
+    let res = *FFI_CALL_IO[I32 sqlite3_close(Ptr), db].lift;
     if res != 0_I32 {
         throw $ "sqlite3_close failed: res = " + res.to_string
     };
@@ -36,25 +33,26 @@ _sqlite3_prepare_v2 = |db, sql| (
     let nbyte = sql.get_size.to_I32;
     let pstmt: Array Ptr = Array::fill(1, nullptr);
     let ztail: Array Ptr = Array::fill(1, nullptr);
-    let res = (
-        ztail.borrow_ptr(|pztail|
-            pstmt.borrow_ptr(|ppstmt|
+    let (ztail, (pstmt, res)) = *(
+        ztail.mutate_boxed_io(|pztail|
+            pstmt.mutate_boxed_io(|ppstmt|
                 sql.borrow_c_str(|zsql|
-                    CALL_C[I32 sqlite3_prepare_v2(Ptr, Ptr, I32, Ptr, Ptr), db, zsql, nbyte, ppstmt, pztail]
+                    FFI_CALL_IO[I32 sqlite3_prepare_v2(Ptr, Ptr, I32, Ptr, Ptr), db, zsql, nbyte, ppstmt, pztail]
                 )
             )
         )
-    );
+    ).lift;
+    // TODO: check ztail
     if res != 0_I32 {
         throw $ "sqlite3_prepare_v2 failed: res = " + res.to_string + " sql=" + sql
     };
     let stmt = pstmt.@(0);
     pure $ stmt
-); 
+);
 
 _sqlite3_finalize: Ptr -> IOFail ();
 _sqlite3_finalize = |stmt| (
-    let res = CALL_C[I32 sqlite3_finalize(Ptr), stmt];
+    let res = *FFI_CALL_IO[I32 sqlite3_finalize(Ptr), stmt].lift;
     if res != 0_I32 {
         throw $ "sqlite3_finalize failed: res = " + res.to_string
     };
@@ -63,7 +61,7 @@ _sqlite3_finalize = |stmt| (
 
 _sqlite3_step: Ptr -> IOFail ();
 _sqlite3_step = |stmt| (
-    let res = CALL_C[I32 sqlite3_step(Ptr), stmt];
+    let res = *FFI_CALL_IO[I32 sqlite3_step(Ptr), stmt].lift;
     if res != 0_I32 && res != /* SQLITE_ROW: */ 100_I32 && res != /* SQLITE_DONE: */ 101_I32 {
         throw $ "sqlite3_step failed: res = " + res.to_string
     };
@@ -83,24 +81,40 @@ _SQLITE_NULL = 5_I32;
 
 _sqlite3_column_type: I64 -> Ptr -> IOFail I32;
 _sqlite3_column_type = |icol, stmt| (
-    let res = CALL_C[I32 sqlite3_column_type(Ptr, I32), stmt, icol.to_I32];
-    pure $ res
+    FFI_CALL_IO[I32 sqlite3_column_type(Ptr, I32), stmt, icol.to_I32].lift
 );
 
 _sqlite3_column_int: I64 -> Ptr -> IOFail I32;
 _sqlite3_column_int = |icol, stmt| (
-    let res = CALL_C[I32 sqlite3_column_int(Ptr, I32), stmt, icol.to_I32];
-    pure $ res
+    FFI_CALL_IO[I32 sqlite3_column_int(Ptr, I32), stmt, icol.to_I32].lift
 );
 
 _sqlite3_column_text: I64 -> Ptr -> IOFail String;
 _sqlite3_column_text = |icol, stmt| (
     //eval debug_eprintln("get text: icol="+icol.to_string);
-    let ptr = CALL_C[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32];
+    let ptr = *FFI_CALL_IO[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32].lift;
     //eval debug_eprintln("get text done: icol="+icol.to_string);
-    let str = _unsafe_from_c_str_ptr(ptr);
+    let str = unsafe_from_c_str_ptr(ptr);
     pure $ str
 );
+
+namespace BorrowUtil {
+    lift_borrow: ((ptr -> IO (Result ErrMsg b)) -> a -> IO (Result ErrMsg c)) -> ((ptr -> IOFail b) -> a -> IOFail c);
+    lift_borrow = |borrow| (
+        |f, a| a.borrow(f >> to_result).from_io_result
+    );
+
+    borrow_iofail: (ptr -> IOFail b) -> Destructor ptr -> IOFail b;
+    borrow_iofail = lift_borrow(borrow_io);
+    /*
+    borrow_iofail = |f, dtor| (
+        //dtor.borrow_io(f >> to_result).from_io_result
+        let ff: a -> IO (Result ErrMsg b) = f >> to_result;
+        let iof: IO (Result ErrMsg b) = dtor.borrow_io(ff);
+        iof.from_io_result
+    );
+    */
+}
 
 type Sqlite = unbox struct {
     dtor: Destructor Ptr
@@ -111,11 +125,12 @@ namespace Sqlite {
     open = |filepath| (
         let db = *_sqlite3_open(filepath);
         let dtor = Destructor::make(db, |db|
-            //eval debug_eprintln ("closing db");
-            _sqlite3_close(db).to_result.map(|_|())._unsafe_perform
+            eval debug_eprintln ("closing db");
+            _sqlite3_close(db).try(eprintln);;
+            pure $ nullptr
         );
         pure $ Sqlite { dtor:dtor }
-    ); 
+    );
 }
 
 type Statement = unbox struct {
@@ -127,11 +142,12 @@ namespace Statement {
     prepare: String -> Sqlite -> IOFail Statement;
     prepare = |sql, db| (
         eval debug_eprintln ("prepare: "+ sql);
-        db.@dtor.borrow(|pdb| 
+        db.@dtor.borrow(|pdb|
             let stmt = *_sqlite3_prepare_v2(pdb, sql);
             let dtor = Destructor::make(stmt, |stmt|
-                //eval debug_eprintln ("finalizing statement");
-                _sqlite3_finalize(stmt).to_result.map(|_|())._unsafe_perform
+                eval debug_eprintln ("finalizing statement");
+                _sqlite3_finalize(stmt).try(eprintln);;
+                pure $ nullptr
             );
             pure $ Statement { db:db, dtor:dtor }
         )
@@ -139,31 +155,28 @@ namespace Statement {
 
     step: Statement -> IOFail ();
     step = |stmt| (
-        stmt.@dtor.borrow(|stmt|
-            let _ = *_sqlite3_step(stmt);
-            pure $ ()
+        stmt.@dtor.borrow_iofail(|stmt|
+            _sqlite3_step(stmt)
         )
     );
 
     column_type: I64 -> Statement -> IOFail I32;
     column_type = |icol, stmt| (
-        stmt.@dtor.borrow(|stmt|
-            let val = *_sqlite3_column_type(icol, stmt);
-            pure $ val
+        stmt.@dtor.borrow_iofail(|stmt|
+            _sqlite3_column_type(icol, stmt)
         )
     );
 
     column_int: I64 -> Statement -> IOFail I32;
     column_int = |icol, stmt| (
-        stmt.@dtor.borrow(|stmt|
-            let val = *_sqlite3_column_int(icol, stmt);
-            pure $ val
+        stmt.@dtor.borrow_iofail(|stmt|
+            _sqlite3_column_int(icol, stmt)
         )
     );
 
     column_text: I64 -> Statement -> IOFail String;
     column_text = |icol, stmt| (
-        stmt.@dtor.borrow(|stmt|
+        stmt.@dtor.borrow_iofail(|stmt|
             let val = *_sqlite3_column_text(icol, stmt);
             pure $ val
         )
@@ -187,7 +200,7 @@ namespace Statement {
             (Array::empty(100), 0), |(array, i)|
             /*
             let typ = *_sqlite3_column_type(i, stmt);
-            //let _ = *println("typ=" + typ.to_string).lift;
+            //println("typ=" + typ.to_string).lift;;
             if typ <= 0_I32 || typ == _SQLITE_NULL {
                 break_m $ array
             };
@@ -210,9 +223,9 @@ namespace Statement {
 
 step_and_show: Statement -> IOFail ();
 step_and_show = |stmt| (
-    let _ = *stmt.step;
+    stmt.step;;
     let row = *stmt.row;
-    let _ = *println("> " + row.to_iter.join(",")).lift;
+    println("> " + row.to_iter.join(",")).lift;;
     pure $ ()
 );
 
@@ -222,13 +235,13 @@ main = (
         //let ptr = *_sqlite3_open("a.db");
         let db = *Sqlite::open("a.db");
         let stmt = *db.prepare("DROP TABLE IF EXISTS t1;");
-        let _ = *stmt.step_and_show;
+        stmt.step_and_show;;
         let stmt = *db.prepare("CREATE TABLE t1 (a int, b text);");
-        let _ = *stmt.step_and_show;
+        stmt.step_and_show;;
         let stmt = *db.prepare("INSERT INTO t1 VALUES (123, 'hello');");
-        let _ = *stmt.step_and_show;
+        stmt.step_and_show;;
         let stmt = *db.prepare("SELECT * FROM t1;");
-        let _ = *stmt.step_and_show;
+        stmt.step_and_show;;
         pure()
     }
     .try(|err| eprintln(err))

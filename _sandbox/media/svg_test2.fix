@@ -1,0 +1,115 @@
+module Main;
+
+import Math;
+
+import Minilib.Common.Assert;
+import Minilib.Media.Svg;
+import Minilib.Encoding.Xml;
+//import Minilib.Text.StringEx;
+
+//----------------------------------------------------------------------------
+// Test routine
+//----------------------------------------------------------------------------
+
+segs_data: String;
+segs_data = "
+-18 -4 -9 -5 -18 -4 -9 -14
+0 14 -7 9 0 14 -7 12
+-7 10 -3 10 -7 1 -3 10
+-11 9 -13 -6 -11 0 -13 -6
+0 14 -7 12 0 14 -7 17
+0 14 -7 18 0 14 -7 17
+-12 -3 0 -3 -13 -3 0 -3
+-2 0 -15 6 -2 2 -15 6
+-5 13 -16 7 -6 13 -16 7
+-16 10 -1 -2 -16 8 -1 -2
+";
+
+type Point = Array I64;
+type Segment = (Point, Point);
+type Segments = Array Segment;
+
+read_segments: String -> Segments;
+read_segments = |text| (
+    let lines = text.split("\n");
+    lines.map(strip_spaces).filter(|line| !line.is_empty).fold(
+        [], |line, segs|
+        let nums: Array I64 = line.split(" ").map(from_string).map(as_ok).to_array;
+        assert_lazy(|_| "nums.size=" + nums.get_size.to_string, nums.get_size == 8) $ |_|
+        let p = nums.get_sub(0, 4);
+        let q = nums.get_sub(4, 8);
+        segs.push_back((p, q))
+    )
+);
+
+point_xy: Point -> (F64, F64);
+point_xy = |p| (
+    Iterator::range(0, p.get_size).fold(
+        (0.0, 0.0), |i, (x, y)|
+        let th = atan(1.0) * i.to_F64;
+        (x + cos(th) * p.@(i).to_F64, y + sin(th) * p.@(i).to_F64)
+    )
+);
+
+segment_path: Segment -> XmlElement;
+segment_path = |(p, q)| (
+    let p = p.point_xy;
+    let q = q.point_xy;
+     path(
+        newpath
+        .moveto(p.@0, p.@1)
+        .lineto(q.@0, q.@1)
+    ).stroke("black")
+);
+
+point_circle: F64 -> Point -> XmlElement;
+point_circle = |r, p| (
+    let p = p.point_xy;
+    circle(p.@0, p.@1, r)
+    .Svg::fill("black")
+);
+
+figure1: XmlElement;
+figure1 = (
+    let segs = read_segments(segs_data);
+    let fill = Svg::fill;
+    let gr = group
+        .stroke("transparent").stroke_width(0.1)
+        .fill("transparent");
+    let bbox = (0.0, 0.0, 0.0, 0.0);
+    let update_bbox = |p, bbox| (
+        let p: (F64, F64) = p.point_xy;
+        (
+            min(bbox.Tuple4::@0, p.Tuple2::@0),
+            min(bbox.Tuple4::@1, p.Tuple2::@1),
+            max(bbox.Tuple4::@2, p.Tuple2::@0),
+            max(bbox.Tuple4::@3, p.Tuple2::@1)
+        )
+    );
+    let r = 0.3;
+    let (gr, bbox) = segs.to_iter.fold(
+        (gr, bbox), |seg, (gr, bbox)|
+        let (p, q) = seg;
+        let gr = gr.add(seg.segment_path);
+        let gr = gr.add(p.point_circle(r));
+        let gr = gr.add(q.point_circle(r));
+        let bbox = bbox.update_bbox(p);
+        let bbox = bbox.update_bbox(q);
+        (gr, bbox)
+    );
+    let margin = 2.0;
+    let bbox = (bbox.@0 - margin, bbox.@1 - margin, bbox.@2 + margin, bbox.@3 + margin);
+    Svg::svg(600, 600).view_box(bbox.@0, bbox.@1, bbox.@2 - bbox.@0, bbox.@3 - bbox.@1).add(gr)
+);
+
+main: IO ();
+main = (
+    do {
+        let svg = figure1;
+        let filepath = "tmp.svg";
+        svg.write_file(filepath);;
+        eprintln("Wrote " + filepath).lift;;
+        pure()
+    }
+    .try(eprintln)
+);

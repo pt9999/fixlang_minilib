@@ -1,0 +1,116 @@
+module Main;
+
+
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+namespace RingBuffer {
+    type RingBuffer a = unbox struct {
+        array: Array a,             // array of elements
+        initial_value: a,           // initial value of `a`
+        write_pos: I64,             // write position
+        read_pos: I64               // read position
+    };
+
+    // Creates an empty ring buffer with specified capacity.
+    // The internal array is initialized with `zero`.
+    make: [a: Zero] I64 ->  RingBuffer a;
+    make = |capacity| (
+        make_with_empty(capacity, zero)
+    );
+
+    // Creates an empty ring buffer with specified capacity.
+    // The internal array is initialized with specified initial value.
+    // The initial value is used when the element of buffer does not contain a value.
+    make_with_empty: I64 -> a -> RingBuffer a;
+    make_with_empty = |capacity, initial_value| (
+        eval assert(|_| "invalid capacity", capacity >= 0);
+        RingBuffer {
+            array: Array::fill(capacity + 1, initial_value),
+            initial_value: initial_value,
+            write_pos: 0,
+            read_pos: 0
+        }
+    );
+
+    // Returns the capacity of a ring buffer.
+    get_capacity: RingBuffer a -> I64;
+    get_capacity = |ring_buf| (
+        ring_buf.@array.get_size - 1
+    );
+
+    // Returns the number of values hold in a ring buffer.
+    get_size: RingBuffer a -> I64;
+    get_size = |ring_buf| (
+        let n = ring_buf.@array.get_size;
+        (ring_buf.@write_pos + n - ring_buf.@read_pos) % n
+    );       
+     
+    // Checks whether a ring buffer is empty.
+    is_empty: RingBuffer a -> Bool;
+    is_empty = |ring_buf| (
+        ring_buf.@write_pos == ring_buf.@read_pos
+    );
+
+    // Checks whether a ring buffer is full.
+    is_full: RingBuffer a -> Bool;
+    is_full = |ring_buf| (
+        ring_buf.get_size == ring_buf.get_capacity
+    );
+
+    // Pushes a value into a ring buffer.
+    // If the ring buffer is full, an error is returned.
+    push: a -> RingBuffer a -> Result ErrMsg (RingBuffer a);
+    push = |value, ring_buf| (
+        if ring_buf.is_full {
+            err $ "ring buffer is full"
+        };
+        let write_pos = ring_buf.@write_pos;
+        let ring_buf = ring_buf.mod_array(set(write_pos, value));
+        let ring_buf = ring_buf.set_write_pos(
+            if write_pos < ring_buf.@array.get_size - 1 { write_pos + 1 } else { 0 }
+        );
+        ok $ ring_buf
+    );
+
+    // Pops a value from a ring buffer.
+    // If the ring buffer is empty, an error is returned.
+    pop: RingBuffer a -> Result ErrMsg (a, RingBuffer a);
+    pop = |ring_buf| (
+        if ring_buf.is_empty { err $ "ring buffer is empty" };
+        let read_pos = ring_buf.@read_pos;
+        let value = ring_buf.@array.@(read_pos);
+        // set initial value so that `value` is released
+        let ring_buf = ring_buf.mod_array(set(read_pos, ring_buf.@initial_value));
+        let ring_buf = ring_buf.set_read_pos(
+            if read_pos < ring_buf.@array.get_size - 1 { read_pos + 1 } else { 0 }
+        );
+        ok $ (value, ring_buf)
+    );
+}
+
+main: IO ();
+main = (
+    do {
+        let capacity = 10;
+        let ring_buf = RingBuffer::make(capacity);
+        let iter = Iterator::range(0, capacity);
+        let ring_buf = *iter.fold_m(
+            ring_buf, push
+        ).from_result;
+        assert_true("is_full", ring_buf.is_full);;
+        assert_true("push on full", ring_buf.push(0).is_err);;
+        let ring_buf = *iter.fold_m(
+            ring_buf, |value, ring_buf|
+            let (popped_value, ring_buf) = *ring_buf.pop.from_result;
+            assert_equal("pop", value, popped_value);;
+            pure $ ring_buf
+        );
+        assert_true("is_empty", ring_buf.is_empty);;
+        assert_true("pop on empty", ring_buf.pop.is_err);;
+        assert_equal("array is cleared", Array::fill(capacity + 1, 0), ring_buf.@array);;
+        println("OK").lift;;
+        pure()
+    }.try(eprintln)
+);
+

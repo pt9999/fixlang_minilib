@@ -1,0 +1,252 @@
+module Minilib.Terminal.Ncurses;
+
+import Minilib.Monad.IO;
+
+type Ncurses = unbox struct {
+    dtor: Destructor ()
+};
+
+namespace Ncurses {
+    run: (Window -> IOFail ()) -> IOFail ();
+    run = |runner| (
+        FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
+        let ncurses = Ncurses {
+            dtor: Destructor::make((), |_|
+                FFI_CALL_IO[() minilib_ncurses_finialize()];;
+                println("finalize done");;
+                pure()
+            )
+        };
+        let win = *ncurses.get_standard_window;
+        runner(win);;
+        eval ncurses;
+        pure()
+    );
+
+    get_standard_window: [m: MonadIOFail] Ncurses -> m Window;
+    get_standard_window = |ncurses| lift_iofail $ do {
+        let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_standard_window()].lift;
+        pure $ Window {
+            dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
+        }
+    };
+}
+
+type Window = unbox struct {
+    dtor: Destructor Ptr
+};
+
+namespace Window {
+    make_sub_window: [m: MonadIOFail] I64 -> I64 -> I64 -> I64 -> Window -> m Window;
+    make_sub_window = |x, y, w, h, parent| lift_iofail $ do {
+        let p_win = *parent.@dtor.borrow_io(|p_parent|
+            FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt]
+        ).lift;
+        if p_win == nullptr {
+            throw $ "subwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
+        };
+        let err = *FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt].lift;
+        if err != 0.to_CInt {
+            throw $ "keypad failed!"
+        };
+        let win = Window {
+            dtor: Destructor::make(p_win, |p_win|
+                FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
+                pure $ nullptr
+            )
+        };
+        pure $ win
+    };
+
+    get_window_size: [m: MonadIOFail] Window -> m (I64, I64);
+    get_window_size = |win| lift_iofail $ do {
+        let ret = *win.@dtor.borrow_io(|p_win|
+            FFI_CALL_IO[CInt minilib_ncurses_get_window_size(Ptr), p_win]
+        ).lift;
+        let w = ret.to_I64.shift_right(16).bit_and(0xffff);
+        let h = ret.to_I64.bit_and(0xffff);
+        pure $ (w, h)
+    };
+
+    _check_cint_err: String -> Window -> (Ptr -> IO CInt) -> IOFail ();
+    _check_cint_err = |name, win, ffi_call_io| (
+        let err = *win.@dtor.borrow_io(|p_win| ffi_call_io(p_win)).lift;
+        if err != 0.to_CInt { throw $ name + " failed!" };
+        pure()
+    );
+
+    clear: [m: MonadIOFail] Window -> m ();
+    clear = |win| lift_iofail $ do {
+        win._check_cint_err("clear") $ |p_win|
+        FFI_CALL_IO[CInt erase(Ptr), p_win]
+    };
+
+    draw_border: [m: MonadIOFail] Window -> m ();
+    draw_border = |win| lift_iofail $ do {
+        win._check_cint_err("draw_border") $ |p_win|
+        FFI_CALL_IO[CInt minilib_ncurses_draw_border(Ptr), p_win]
+    };
+
+    set_attr: [m: MonadIOFail] ChType -> Window -> m ();
+    set_attr = |chtype, win| lift_iofail $ do {
+        win._check_cint_err("set_attr") $ |p_win|
+        FFI_CALL_IO[CInt wattrset(Ptr, U32), p_win, chtype]
+    };
+
+    set_color_pair: [m: MonadIOFail] ColorPair -> Attr -> Window -> m ();
+    set_color_pair = |color_pair, attr, win| lift_iofail $ do {
+        win._check_cint_err("set_color_pair") $ |p_win|
+        FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.to_U16, nullptr]
+    };
+
+    move_to: [m: MonadIOFail] I64 -> I64 -> Window -> m ();
+    move_to = |x, y, win| lift_iofail $ do {
+        win._check_cint_err("move_to") $ |p_win|
+        FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.to_CInt, x.to_CInt]
+    };
+
+    add_str: [m: MonadIOFail] String -> Window -> m ();
+    add_str = |str, win| lift_iofail $ do {
+        win._check_cint_err("add_str") $ |p_win|
+        str.borrow_c_str_io(|p_str|
+            FFI_CALL_IO[CInt waddstr(Ptr, Ptr), p_win, p_str]
+        )
+    };
+
+    move_add_str: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
+    move_add_str = |x, y, str, win| lift_iofail $ do {
+        win._check_cint_err("move_add_str") $ |p_win|
+        str.borrow_c_str_io(|p_str|
+            FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_str]
+        )
+    };
+
+    refresh: [m: MonadIOFail] Window -> m ();
+    refresh = |win| lift_iofail $ do {
+        win._check_cint_err("refresh") $ |p_win|
+        FFI_CALL_IO[CInt wrefresh(Ptr), p_win]
+    };
+
+    getch: [m: MonadIOFail] Window -> m I64;
+    getch = |win| lift_iofail $ do {
+        win.@dtor.borrow_io(|p_win|
+            FFI_CALL_IO[CInt wgetch(Ptr), p_win]
+        ).map(to_I64).lift
+    };
+
+    get_key: [m: MonadIOFail] Window -> m String;
+    get_key = |win| lift_iofail $ do {
+        let ch = *win.getch;
+        pure $ *keyname(ch)
+    };
+}
+
+type Color = I16;
+
+namespace Color {
+    black: Color;
+    black = 0_I16;
+
+    red: Color;
+    red = 1_I16;
+
+    green: Color;
+    green = 2_I16;
+
+    yellow: Color;
+    yellow = 3_I16;
+
+    blue: Color;
+    blue = 4_I16;
+
+    magenta: Color;
+    magenta = 5_I16;
+
+    cyan: Color;
+    cyan = 6_I16;
+
+    white: Color;
+    white = 7_I16;
+}
+
+type ColorPair = I64;
+
+namespace ColorPair {
+    init_color_pair: [m: MonadIOFail] ColorPair -> Color -> Color -> m ();
+    init_color_pair = |color_pair, fore_color, back_color| lift_iofail $ do {
+        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
+        if err != 0.to_CInt { throw $ "init_color_pair failed!" };
+        pure()
+    };
+
+    color_pair: ColorPair -> ChType;
+    color_pair = |i| (i.bit_and(255)).to_U32.shift_left(8_U32);
+
+    cp_red: ColorPair;
+    cp_red = 1;
+
+    cp_green: ColorPair;
+    cp_green = 2;
+
+    cp_yellow: ColorPair;
+    cp_yellow = 3;
+
+    cp_blue: ColorPair;
+    cp_blue = 4;
+
+    cp_magenta: ColorPair;
+    cp_magenta = 5;
+
+    cp_cyan: ColorPair;
+    cp_cyan = 6;
+
+    cp_white: ColorPair;
+    cp_white = 7;
+}
+
+type ChType = U32;
+
+_ncurses_bits: ChType -> ChType -> ChType;
+_ncurses_bits = |shift, mask| mask.shift_left(shift + 8_U32);
+
+type Attr = ChType;
+
+make_attr: ColorPair -> Attr -> ChType;
+make_attr = |pair, attr| (
+    color_pair(pair).bit_or(attr)
+);
+
+namespace Attr {
+
+    normal: Attr;
+    normal = 0_U32;
+
+    underline: Attr;
+    underline = 1_U32._ncurses_bits(9_U32);
+
+    reverse: Attr;
+    reverse = 1_U32._ncurses_bits(10_U32);
+
+    blink: Attr;
+    blink = 1_U32._ncurses_bits(11_U32);
+
+    dim: Attr;
+    dim = 1_U32._ncurses_bits(12_U32);
+
+    bold: Attr;
+    bold = 1_U32._ncurses_bits(13_U32);
+}
+
+type Key = I64;
+type KeyName = String;
+
+namespace Key {
+    keyname: [m: MonadIOFail] Key -> m KeyName;
+    keyname = |key| lift_iofail $ do {
+        let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.to_CInt].lift;
+        if ptr == nullptr {
+            throw $ "keyname failed!"
+        };
+        pure $ String::unsafe_from_c_str_ptr(ptr)
+    };
+}

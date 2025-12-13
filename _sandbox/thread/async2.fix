@@ -1,0 +1,183 @@
+module Main;
+
+import AsyncTask;
+import Random;
+
+import Minilib.Common.TimeEx;
+
+// Task a のラッパー
+type TaskM a = unbox struct {
+    data: Task a
+};
+
+namespace TaskM {
+    make: Lazy a -> TaskM a;
+    make = |f| TaskM { data: AsyncTask::make(f) };
+
+    get: TaskM a -> a;
+    get = |t| t.@data.get;
+}
+
+impl TaskM: Functor {
+    map = |f, fa| TaskM::make(
+        |_|
+        let a = fa.get;
+        f(a)
+    );
+}
+
+impl TaskM: Monad {
+    pure = |a| TaskM::make(
+        |_| a);
+    bind = |f, ma| TaskM::make(
+        |_|
+        let a = ma.get;
+        f(a).get
+    );
+}
+
+// IO (IOTask a) のラッパー
+type IOTaskM a = unbox struct {
+    data: IO (IOTask a)
+};
+
+namespace IOTaskM {
+    make: IO a -> IOTaskM a;
+    make = |io| IOTaskM {
+        data: AsyncIOTask::make(io)
+    };
+
+    // この結果を perform した時点でタスクが作成される
+    // 何度もperformするとその都度タスクが作成される
+    get: IOTaskM a -> IO a;
+    get = |taskm| (
+        let task = *taskm.@data;        // この結果を perform した時点でタスクが作成される
+        task.get
+    );
+}
+
+impl IOTaskM: Functor {
+    map = |f, fa| IOTaskM::make(
+        do {
+            let a = *fa.get;
+            pure $ f(a)
+        }
+    );
+}
+
+impl IOTaskM: Monad {
+    pure = |a| IOTaskM::make(
+        pure $ a
+    );
+    bind = |f, ma| IOTaskM::make(
+        do {
+            let a = *ma.get;    // これをperformした時点で1つ目のタスクが作成され、実行される
+            f(a).get            // これをperformした時点で2つ目のタスクが作成され、実行される
+        }
+    );
+}
+
+myTask: () -> TaskM I64;
+myTask = |_| (
+    let a = *pure(42);
+    let b = *pure(a*2);
+    pure $ b
+);
+
+myIOTaskM: () -> IOTaskM I64;
+myIOTaskM = |_| (
+    let a = *pure(42);
+    IOTaskM::make(println("a="+a.to_string));;
+    let b = *pure(a*2);
+    pure $ b
+);
+
+_usleep: I64 -> IO ();
+_usleep = |usec| usleep(usec.to_U32).try(eprintln);
+
+test1: IO ();
+test1 = (
+    let x = myTask().map(|x| x + 2).get;
+    println("x="+x.to_string);;
+    let y = *myIOTaskM().map(|y| y + 2).get;
+    println("y="+y.to_string);;
+    pure()
+);
+
+test2: IO ();
+test2 = (
+    let complete = *Var::make(false);
+    let loop = fix $ |loop, i| (
+        println(i.to_string);;
+        _usleep(500000);;
+        if i >= 10 {
+            complete.set(true)
+        };
+        let task = *AsyncIOTask::make(loop(i + 1));
+        pure()
+    );
+    let task = *AsyncIOTask::make(loop(0));
+    complete.wait_and_lock(|b|b, |b|pure())
+);
+
+test3: IO ();
+test3 = (
+    let rand_var = *Var::make(Random::init_by_seed(1234_U64));
+    let next_u64 = rand_var.lock(|rand|
+            let (rand, u64) = rand.generate_U64;
+            rand_var.Var::set(rand);;
+            pure $ u64
+    );
+    let thread_count_var = *Var::make(0);
+    let loop = fix $ |loop, i| (
+        println(i.to_string);;
+        let usec = *next_u64 % 500000_U64;
+        _usleep(usec.to_I64);;
+        let nchild = (*next_u64 % 3_U64).to_I64;
+        Iterator::range(0, nchild).to_dyn.fold_m(
+            (), |_, _|
+            let task = *AsyncIOTask::make(loop(i + 1));
+            thread_count_var.mod(|n| n + 1)
+        );;
+        thread_count_var.mod(|n| n - 1)
+    );
+    let task = *AsyncIOTask::make(loop(0));
+    thread_count_var.mod(|n| n + 1);;
+    thread_count_var.wait_and_lock(|n|n == 0, |n|pure())
+);
+
+type Node = box struct {
+    val: Array U8,
+    next: Var (Option Node)
+};
+
+test4: IO ();
+test4 = (
+    let loop = fix $ |loop, i| (
+        if (false) { pure() };
+        println(i.to_string);;
+        _usleep(1);;
+        if i >= 100 { pure() };
+        let next = *Var::make(none());
+        let node = Node {
+            val: Array::fill(10000000, 0_U8),
+            next: next      // loop reference
+        };
+        next.Var::set(some(node));; // memory leak
+        loop(i+1)
+    );
+    loop(0)
+);
+
+main: IO ();
+main = (
+    println("test1");;
+    test1;;
+    println("test2");;
+    test2;;
+    println("test3");;
+    test3;;
+    println("test4");;
+    test4;;
+    pure()
+);

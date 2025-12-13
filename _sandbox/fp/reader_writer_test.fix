@@ -1,0 +1,156 @@
+module Main;
+
+import HashMap;
+
+import Minilib.Trait.Semigroup;
+import Minilib.Trait.Monoid;
+import Minilib.Trait.Comonad;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Writer;
+import Minilib.Trait.Traversable;
+import Minilib.Monad.IO;
+import Minilib.Comonad.Env;
+import Minilib.Comonad.Traced;
+import Minilib.Text.StringEx;
+
+// Same as `println`, but lifted to any monad which implements `MonadIO`.
+_println: [m: MonadIO] String -> m ();
+_println = println >> lift_io;
+
+type Config = HashMap String String;
+
+namespace ReaderTest {
+
+    get_key: [m: Monad] String -> ReaderT Config m String;
+    get_key = |key| (
+        let config = *Reader::read;
+        pure $ config.find(key).as_some_or("")
+    );
+
+    print_key: [m: MonadIO] String -> ReaderT Config m String;
+    print_key = |key| (
+        let value = *get_key(key);
+        _println(key + ": " + value);;
+        pure $ value
+    );
+
+    test_reader: IO ();
+    test_reader = (
+        _println("test_reader");;
+        let config = HashMap::empty(0)
+        .insert("key1", "abc")
+        .insert("key2", "def");
+        let reader = do {
+            let v1 = *print_key("key1");
+            let v2 = *print_key("key2");
+            _println("sum = " + (v1 + v2))
+        };
+        reader.run_reader_t(config)
+    );
+}
+
+namespace WriterTest {
+    type [m: * -> *] LogWriter m = WriterT (Array String) m;
+
+    write_log: [m: MonadIO] String -> LogWriter m ();
+    write_log = |message| (
+        _println("log=" + message);;
+        Writer::write([message])
+    );
+
+    write_logs: [m: MonadIO] LogWriter m I64;
+    write_logs = (
+        let sum = *Iterator::range(0, 10).fold_m(
+            0, |sum, i|
+            write_log(i.to_string);;
+            pure $ sum + i
+        );
+        _println("done");;
+        pure $ sum
+    );
+
+    test_writer: [m: MonadIO] m ();
+    test_writer = (
+        _println("test_writer");;
+        let (logs, sum) = *write_logs.run_writer_t;
+        _println("logs=" + logs.to_iter.join(","));;
+        _println("sum="+sum.to_string)
+    );
+}
+
+
+//----------------------------
+
+namespace EnvTest {
+    // `IO` is not a comonad, so we cannot use `EnvT Config IO a` here.
+    type ConfigEnv a = Env Config a;
+
+    get_foo: ConfigEnv () -> IO String;
+    get_foo = |wc| (
+        _println("get_foo");;
+        pure $ wc.get_env.find("foo").as_some
+    );
+
+    get_bar: ConfigEnv () -> IO String;
+    get_bar = |wc| (
+        _println("get_bar");;
+        pure $ wc.get_env.find("bar").as_some
+    );
+
+    get_foo_bar:  ConfigEnv () -> IO (Array String);
+    get_foo_bar = |wc| (
+        let foo = *wc.extend(get_foo).extract;
+        let bar = *wc.extend(get_bar).extract;
+        pure $ [foo, bar]
+    );
+
+    run_foo_bar: ConfigEnv () -> IO ();
+    run_foo_bar = |wc| (
+        let value = *wc.extend(get_foo_bar).extract;
+        _println(value.to_string)
+    );
+
+    test_env: IO ();
+    test_env = (
+        _println("test_env");;
+        let config = HashMap::empty(0)
+        .insert("foo", "aaa")
+        .insert("bar", "bbb");
+        let e = env(config, ());
+        e.run_foo_bar
+    );
+
+}
+
+namespace TracedTest {
+    type Tracer a = Traced (Array I64) a;
+
+    trace_size: Tracer I64;
+    trace_size = traced(|arr| arr.get_size);
+
+    trace_sum: Tracer I64;
+    trace_sum = traced(|arr| arr.to_iter.fold(0, add));
+
+    trace_size_sum: Tracer (I64, I64);
+    trace_size_sum = trace_size.extend(|wa|
+        trace_sum.extend(|wb|
+            (wa.extract, wb.extract)
+        ).extract
+    );
+
+    test_traced: IO ();
+    test_traced = (
+        let v = trace_size_sum.run_traced([1,2,3]);
+        _println("v="+v.to_string)   // expected: [3, 6], actual: [3, 0]
+    );
+}
+
+main: IO ();
+main = (
+    test_reader;;
+    test_writer;;
+    test_env;;
+    test_traced;;
+    pure()
+);
+

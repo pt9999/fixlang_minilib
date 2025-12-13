@@ -1,52 +1,18 @@
 module Main;
 
+import Minilib.Monad.State;
 import Minilib.Text.StringEx;
-
-//-------------------------------------------------------
-// State Monad
-//-------------------------------------------------------
-
-type State s a = unbox struct { _data: s -> (a, s) };
-
-namespace State {
-    make_state_monad: (s -> (a, s)) -> State s a;
-    make_state_monad = |f| State { _data: f };
-
-    run_state: s -> State s a -> (a, s);
-    run_state = |s, ma| (ma.@_data) (s);
-
-    get_state: State s s;
-    get_state = make_state_monad $ |s| (s, s);
-
-    put_state: s -> State s ();
-    put_state = |s| make_state_monad $ |_| ((), s);
-}
-
-impl State s: Monad {
-    pure = |a| make_state_monad $ |s| (a, s);
-    bind = |f, ma| make_state_monad $ |s|
-        let (a, ss) = ma.run_state(s);
-        let mb = f(a);
-        mb.run_state(ss) 
-    ;
-}
-//---------------------------------
-// StringWriter
-//---------------------------------
 
 type StringWriter = State String ();
 
 namespace StringWriter {
     write: [a: ToString] a -> StringWriter;
     write = |a| (
-        put_state(*get_state + a.to_string)
+        mod_state(|state| state + a.to_string)
     );
 
     collect_string: StringWriter -> String;
-    collect_string = |w| (
-        let (_, str) = w.run_state("");
-        str
-    );
+    collect_string = |w| w.exec_state("");
 }
 
 namespace Tuple2 {
@@ -68,9 +34,9 @@ namespace Tuple4 {
 test_string_writer: IO ();
 test_string_writer = (
     let text = collect_string $ do {
-        let _ = *write("hello ");
-        let _ = *write("world");
-        let _ = *write(((" ", 1).concat_str, " ", 2.2, "\n").concat_str);
+        write("hello ");;
+        write("world");;
+        write(((" ", 1).concat_str, " ", 2.2, "\n").concat_str);;
         pure()
     };
     println (text)

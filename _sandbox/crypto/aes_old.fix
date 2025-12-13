@@ -1,0 +1,363 @@
+// *** Old Version ***
+//
+// Advanced Encryption Standard (AES)
+//
+// Implemented from specification of FIPS 197:
+// https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
+// https://doi.org/10.6028/NIST.FIPS.197-upd1
+//
+module Sandbox.AESOld;
+
+import Minilib.Common.Assert;
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+
+type AES = unbox struct {
+    key_length: I64,    // 128, 192, 256
+    key: Array U8,      // key (128 bits / 192 bits / 256 bits)
+    w: Array U32,       // expanded key
+    s: Array U8         // state 4x4 bytes
+};
+
+namespace AES {
+    // `AES::make(key)` creates an AES cipher.
+    // `key` must be a byte array of 128 bits (= 16 bytes), 192 bits (= 24 bytes), or
+    // 256 bits (= 32 bytes).
+    make: Array U8 -> AES;
+    make = |key| (
+        let aes = AES::_empty(key.get_size * 8);
+        let w = aes._key_expansion(key);
+        aes.set_key(key).set_w(w)
+    );
+
+    _empty: I64 -> AES;
+    _empty = |key_length| (
+        assert_eq_lazy(|_| "unsupported key length", 
+            key_length == 128 || key_length == 192 || key_length == 256) $ |_|
+        AES {
+            key_length: key_length,
+            key: Array::fill(0, 0_U8),
+            w: Array::fill(0, 0_U32),
+            s: Array::fill(16, 0_U8)
+        }
+    );
+
+    // `aes.encrypt_block(plaintext)` encrypts a block of plaintext to a block of ciphertext.
+    // `plaintext` must be a byte array of 128 bits (= 16 bytes).
+    encrypt_block: Array U8 -> AES -> Array U8;
+    encrypt_block = |plaintext, aes| (
+        aes._cipher(plaintext, aes.@w)
+    );
+
+    // `aes.decrypt_block(ciphertext)` decrypts a block of ciphertext to a block of plaintext.
+    // `ciphertext` must be a byte array of 128 bits (= 16 bytes).
+    decrypt_block: Array U8 -> AES -> Array U8;
+    decrypt_block = |ciphertext, aes| (
+        aes._inv_cipher(ciphertext, aes.@w)
+    );
+    
+    // 5. Algorithm Specifcations
+    _get_number_of_rounds: AES -> I64;
+    _get_number_of_rounds = |aes| (
+        if aes.@key_length == 128 { 10 };
+        if aes.@key_length == 192 { 12 };
+        if aes.@key_length == 256 { 14 };
+        assert_lazy(|_| "unsupported key length", false) $ |_|
+        0
+    );
+
+    // 5.1 CIPHER()
+    _cipher: Array U8 -> Array U32 -> AES -> Array U8;
+    _cipher = |input, w, aes| (
+        let nr = aes._get_number_of_rounds;
+        assert_lazy(|_| "invalid input size", input.get_size == 16) $ |_|
+        let aes = aes.set_s(input);
+        let aes = aes._add_round_key(w, 0);
+        let aes = loop(
+            (aes, 1), |(aes, round)|
+            if round >= nr { break $ aes };
+            let aes = aes._sub_bytes;
+            let aes = aes._shift_rows;
+            let aes = aes._mix_columns;
+            let aes = aes._add_round_key(w, round);
+            continue $ (aes, round + 1)
+        );
+        let aes = aes._sub_bytes;
+        let aes = aes._shift_rows;
+        let aes = aes._add_round_key(w, nr);
+        aes.@s
+    );
+
+    // 5.3 INVCIPHER()
+    _inv_cipher: Array U8 -> Array U32 -> AES -> Array U8;
+    _inv_cipher = |input, w, aes| (
+        let nr = aes._get_number_of_rounds;
+        assert_lazy(|_| "invalid input size", input.get_size == 16) $ |_|
+        let aes = aes.set_s(input);
+        let aes = aes._add_round_key(w, nr);
+        let aes = loop(
+            (aes, nr - 1), |(aes, round)|
+            if round < 1 { break $ aes };
+            let aes = aes._inv_shift_rows;
+            let aes = aes._inv_sub_bytes;
+            let aes = aes._add_round_key(w, round);
+            let aes = aes._inv_mix_columns;
+            continue $ (aes, round - 1)
+        );
+        let aes = aes._inv_shift_rows;
+        let aes = aes._inv_sub_bytes;
+        let aes = aes._add_round_key(w, 0);
+        aes.@s
+    );
+
+    // 5.1.1 SUBBYTES() 
+    _sub_bytes: AES -> AES;
+    _sub_bytes = |aes| (
+        aes.mod_s(map(|b| _sbox_table.@(b.to_I64)))
+    );
+
+    _sbox_table: Array U8;
+    _sbox_table = (
+        Array::from_map(256, I64::to_U8 >> _sbox)
+    );
+
+    // 5.3.2 INVSUBBYTES()
+    _inv_sub_bytes: AES -> AES;
+    _inv_sub_bytes = |aes| (
+        aes.mod_s(map(|b| _inv_sbox_table.@(b.to_I64)))
+    );
+
+    _inv_sbox_table: Array U8;
+    _inv_sbox_table = (
+        Iterator::range(0, 256).fold(
+            Array::fill(256, 0_U8), |arr, i|
+            let x = i.to_U8;
+            let y = _sbox_table.@(i);
+            arr.set(y.to_I64, x)
+        )
+    );
+
+    // SBOX
+    _sbox: U8 -> U8;
+    _sbox = |b| (
+        let b = if b == 0_U8 { 0_U8 } else { b._inv_gf8 };
+        b.bit_xor(b._rotr(4_U8))
+         .bit_xor(b._rotr(5_U8))
+         .bit_xor(b._rotr(6_U8))
+         .bit_xor(b._rotr(7_U8))
+         .bit_xor(0x63_U8)  // c
+    );    
+
+    // rotate right
+    _rotr: U8 -> U8 -> U8;
+    _rotr = |n, x| (
+        x.shift_right(n).bit_or(x.shift_left(8_U8 - n))
+    );
+
+    // 5.1.2 SHIFTROWS()
+    _shift_rows: AES -> AES;
+    _shift_rows = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c = (c + r).bit_and(3);
+                let i = c.shift_left(2).bit_or(r);
+                s.@(i)
+            )
+        )
+    );
+
+    // 5.3.1 INVSHIFTROWS()
+    _inv_shift_rows: AES -> AES;
+    _inv_shift_rows = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c = (c - r).bit_and(3);
+                let i = c.shift_left(2).bit_or(r);
+                s.@(i)
+            )
+        )
+    );
+
+    // 5.1.3 MIXCOLUMNS()
+    _mix_columns: AES -> AES;
+    _mix_columns = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c4 = c.shift_left(2);
+                let s0c = s.@((r + 0).bit_and(3) + c4);
+                let s1c = s.@((r + 1).bit_and(3) + c4);
+                let s2c = s.@((r + 2).bit_and(3) + c4);
+                let s3c = s.@((r + 3).bit_and(3) + c4);
+                s0c._mul_gf8(0x02_U8)
+                ._add_gf8(s1c._mul_gf8(0x03_U8))
+                ._add_gf8(s2c)
+                ._add_gf8(s3c)
+            )
+        )
+    );
+
+    // 5.3.3 INVMIXCOLUMNS()
+    _inv_mix_columns: AES -> AES;
+    _inv_mix_columns = |aes| (
+        aes.mod_s(|s|
+            Array::from_map(16, |i|
+                let r = i.bit_and(3);
+                let c = i.shift_right(2).bit_and(3);
+                let c4 = c.shift_left(2);
+                let s0c = s.@((r + 0).bit_and(3) + c4);
+                let s1c = s.@((r + 1).bit_and(3) + c4);
+                let s2c = s.@((r + 2).bit_and(3) + c4);
+                let s3c = s.@((r + 3).bit_and(3) + c4);
+                s0c._mul_gf8(0x0e_U8)
+                ._add_gf8(s1c._mul_gf8(0x0b_U8))
+                ._add_gf8(s2c._mul_gf8(0x0d_U8))
+                ._add_gf8(s3c._mul_gf8(0x09_U8))
+            )
+        )
+    );
+
+    // 5.1.4 ADDROUNDKEY()
+    _add_round_key: Array U32 -> I64 -> AES -> AES;
+    _add_round_key = |w, round, aes| (
+        aes.mod_s(|s|
+            loop(
+                (s, 0), |(s, c)|
+                if c >= 4 { break $ s };
+                let s0123c = s.get_u32_be(4 * c);
+                let s0123c = s0123c.bit_xor(w.@(4 * round + c));
+                let s = s.set_u32_be(4 * c, s0123c);
+                continue $ (s, c + 1)
+            )
+        )
+    );
+
+    // 5.2 KEYEXPANSION()
+    _key_expansion: Array U8 -> AES -> Array U32;
+    _key_expansion = |key, aes| (
+        assert_lazy(|_| "key length mismatch", key.get_size * 8 == aes.@key_length) $ |_|
+        let nk = aes.@key_length / (4 * 8);
+        let nb = 4;
+        let nr = aes._get_number_of_rounds;
+        let w = Array::fill(4 * (nr + 1), 0_U32);
+        let (w, i) = loop(
+            (w, 0), |(w, i)|
+            if i >= nk { break $ (w, i) };
+            let w = w.set(i, key.get_u32_be(4 * i));
+            continue $ (w, i + 1)
+        );
+        loop(
+            (w, i), |(w, i)|
+            if i >= 4 * nr + 4 { break $ w };
+            let temp = w.@(i - 1);
+            let temp = if i % nk == 0 {
+                _sub_word(_rot_word(temp)).bit_xor(_rcon(i / nk))
+            } else if nk > 6 && i % nk == 4 {
+                _sub_word(temp)
+            } else { temp };
+            let w = w.set(i, w.@(i - nk).bit_xor(temp));
+            continue $ (w, i + 1)
+        )
+    );
+
+    _sub_word: U32 -> U32;
+    _sub_word = |w| (
+        loop(
+            (0_U32, 0), |(out, i)|
+            if i >= 4 { break $ out };
+            let shift = (8 * i).to_U32;
+            let b = w.shift_right(shift).bit_and(0xFF_U32).to_U8;
+            let b = _sbox_table.@(b.to_I64);
+            let out = out.bit_or(b.to_U32.shift_left(shift));
+            continue $ (out, i + 1)
+        )
+    );
+
+    _rot_word: U32 -> U32;
+    _rot_word = |w| (
+        w.bit_and(0x00FFFFFF_U32).shift_left(8_U32).bit_or(
+            w.bit_and(0xFF000000_U32).shift_right(24_U32)
+        )
+    );
+
+    _rcon: I64 -> U32;
+    _rcon = |j| (
+        _rcon_table.@(j - 1).to_U32.shift_left(24_U32)
+    );
+
+    _rcon_table: Array U8;
+    _rcon_table = [
+        0x01, 0x02, 0x04, 0x08, 0x10,
+        0x20, 0x40, 0x80, 0x1b, 0x36
+    ].map(to_U8);
+
+}
+
+// Arithmetic in GF(2^8)
+// NOTE: It might be better to rename GF8 to GF256 or GF2_8, but shorter is better.
+namespace GF8 {
+    // 4.1 Addition in GF(2^8) 
+    _add_gf8: U8 -> U8 -> U8;
+    _add_gf8 = bit_xor;
+
+    // 4.2 Multiplication in GF(2^8) 
+    _mul_gf8: U8 -> U8 -> U8;
+    _mul_gf8 = |a, b| (
+        _mul_gf8_table.@(a.to_I64.shift_left(8).bit_or(b.to_I64))
+    );
+
+    _mul_gf8_table: Array U8;
+    _mul_gf8_table = (
+        Array::from_map(256 * 256, |i|
+            let a = i.shift_right(8).bit_and(255).to_U8;
+            let b = i.shift_right(0).bit_and(255).to_U8;
+            a._mul_gf8_slow(b)
+        )
+    );
+
+    _mul_gf8_slow: U8 -> U8 -> U8;
+    _mul_gf8_slow = |a, b| (
+        loop(
+            (b, 0_U8, 0_U8), |(b, c, i)|
+            if i >= 8_U8 { break $ c };
+            let c = if a.bit_and(1_U8.shift_left(i)) == 0_U8 { c }
+            else { c._add_gf8(b) };
+            let b = _xtimes(b);
+            continue $ (b, c, i + 1_U8) 
+        )
+    ); 
+
+    _xtimes: U8 -> U8;
+    _xtimes = |b| (
+        if b.bit_and(0x80_U8) == 0x00_U8 { b.shift_left(1_U8) }
+        else { b.shift_left(1_U8).bit_xor(0x1B_U8) }
+    );
+        
+    // 4.4 Multiplicative Inverses in GF(2^8) 
+    _inv_gf8: U8 -> U8;
+    _inv_gf8 = |b| (
+        b._pow_gf8(254_U8)
+    );
+
+    // `a._pow_gf8(n)` calculates `a ^ n`.
+    _pow_gf8: U8 -> U8 -> U8;
+    _pow_gf8 = |n, a| (
+        let op = _mul_gf8;
+        loop(
+            (1_U8, a, n), |(x, a, n)|
+            if n == 0_U8 {
+                break $ x
+            };
+            let x = if n.bit_and(1_U8) != 0_U8 {
+                op(x, a)
+            } else { x };
+            continue $ (x, op(a, a), n.shift_right(1_U8))
+        )
+    );
+
+}

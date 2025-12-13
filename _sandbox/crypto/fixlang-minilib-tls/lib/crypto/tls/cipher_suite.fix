@@ -1,0 +1,86 @@
+module Minilib.Crypto.Tls.CipherSuite;
+
+import Minilib.Encoding.Binary;
+import Minilib.Text.Hex;
+
+
+type HashType = unbox union {
+    invalid: (),
+    sha256: (),
+    sha384: (),
+};
+
+// B.4. Cipher Suites
+
+type CipherSuite = unbox union {
+    _TLS_AES_128_GCM_SHA256: (),
+    _TLS_AES_256_GCM_SHA384: (),
+    _TLS_CHACHA20_POLY1305_SHA256: (),
+    _TLS_AES_128_CCM_SHA256: (),
+    _TLS_AES_128_CCM_8_SHA256: (),
+};
+
+namespace CipherSuite {
+    supported_cipher_suites: Array CipherSuite;
+    supported_cipher_suites = [
+        // 9.1. Mandatory-to-Implement Cipher Suites
+        // MUST implement
+        _TLS_AES_128_GCM_SHA256(),
+        //  SHOULD implement
+        //_TLS_AES_256_GCM_SHA384(),
+        //_TLS_CHACHA20_POLY1305_SHA256(),
+    ];
+
+    to_hash_type: CipherSuite -> HashType;
+    to_hash_type = |obj| (
+        match obj {
+            _TLS_AES_128_GCM_SHA256() => HashType::sha256(),
+            _TLS_AES_256_GCM_SHA384() => HashType::sha384(),
+            _TLS_CHACHA20_POLY1305_SHA256() => HashType::sha256(),
+            _TLS_AES_128_CCM_SHA256() => HashType::sha256(),
+            _TLS_AES_128_CCM_8_SHA256() => HashType::sha256(),
+        }
+    );
+
+    to_U16: CipherSuite -> U16;
+    to_U16 = |obj| (
+        match obj {
+            _TLS_AES_128_GCM_SHA256() => 0x1301_U16,
+            _TLS_AES_256_GCM_SHA384() => 0x1302_U16,
+            _TLS_CHACHA20_POLY1305_SHA256() => 0x1303_U16,
+            _TLS_AES_128_CCM_SHA256() => 0x1304_U16,
+            _TLS_AES_128_CCM_8_SHA256() => 0x1305_U16,
+        }
+    );
+
+    from_U16: U16 -> Result ErrMsg CipherSuite;
+    from_U16 = |val| (
+            if val == 0x1301_U16 { ok $ _TLS_AES_128_GCM_SHA256() };
+            if val == 0x1302_U16 { ok $ _TLS_AES_256_GCM_SHA384() };
+            if val == 0x1303_U16 { ok $ _TLS_CHACHA20_POLY1305_SHA256() };
+            if val == 0x1304_U16 { ok $ _TLS_AES_128_CCM_SHA256() };
+            if val == 0x1305_U16 { ok $ _TLS_AES_128_CCM_8_SHA256() };
+            err $ "invalid cipher suite: " + val.to_string_hex
+    );
+}
+
+impl CipherSuite: ToString {
+    to_string = |obj| (
+        obj.to_U16.to_string_hex
+    );
+}
+
+impl CipherSuite: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.to_U16)
+    );
+}
+
+impl CipherSuite: Unmarshal {
+    unmarshal = |buf| (
+        let (val: U16, buf) = *buf.unmarshal;
+        let obj = *from_U16(val);
+        pure $ (obj, buf)
+    );
+}
+

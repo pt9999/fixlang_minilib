@@ -1,0 +1,243 @@
+// Montgomery modular multiplication
+//
+// Using Montgomery form, modular arithmetic becomes faster.
+// For details, see [Wikipedia: Montgomery modular multiplication](https://en.wikipedia.org/wiki/Montgomery_modular_multiplication).
+//
+// Montgomery form is `a * R mod N`, where `N` is the modulus for the target modular arithmetic, and `R` is an integer such that `R > N`.
+// `R` can be chosen such that the division by `R` is easy.
+// In practive, `R` is a power of two. For example, `R = 2^256` or `R = 2^384`.
+//
+module Minilib.Math.Montgomery;
+
+import Minilib.Common.Assert;
+import Minilib.Math.BigInt;
+import Minilib.Math.BigNat;
+import Minilib.Math.Euclid;
+import Minilib.Math.Types;
+
+// Montgomery scheme, which contains several parameters for Montgomery arithmetic.
+type MontScheme = unbox struct {
+    r_bits: U64,        // r = 2 ^ r_bits
+    r_digits: I64,      // r_digits = r_bits / _log2_base
+    n: BigInt,          // the modulus `n`
+    ndash: BigInt,      // the negative inverse of `n` mod `r`, such that `n * ndash = -1 mod r`.
+    r2_mod_n: BigInt,   // r2_mod_n = r^2 mod n
+    r3_mod_n: BigInt,   // r3_mod_n = r^3 mod n
+};
+
+namespace MontScheme {
+    // `MontScheme::make(r_bits, n)` creates a Montgomery scheme.
+    // `r_bits` is a base-2 logarithm of `r`. In other words, `r = 2 ^ r_bits`.
+    // `n` is the modules `n`, such that `r > n`, and `r` and `n` must be coprime.
+    make: U64 -> BigInt -> MontScheme;
+    make = |r_bits, n| (
+        assert_lazy(|_| "r_bits % _log2_base should be zero", r_bits % _log2_base == 0_U64) $ |_|
+        let r_digits = (r_bits / _log2_base).to_I64;
+        let r: BigInt = one.shift_left(r_bits);
+        assert_lazy(|_| "r > n should be hold", r > n) $ |_|
+        let (x, y, d) = extended_euclid(r, n);
+        assert_lazy(|_| "r and n are not coprime", d == one) $ |_|
+
+        // Calculate the negative inverse of `n` mod `r`.
+        // R * x + _N * y = 1
+        // _N * (-y) = -1 mod R
+        let ndash = (-y) % r;
+        let ndash = if ndash.is_negative { ndash + r } else { ndash };
+
+        // Calculate r^2 mod n, which is used in transforming integers to Montgomery form.
+        let r2: BigInt = one.shift_left(r_bits * 2_U64);
+        let r2_mod_n = r2 % n;
+
+        // Calculate r^3 mod n, which is used in calculating productive inverse.
+        let r3: BigInt = one.shift_left(r_bits * 3_U64);
+        let r3_mod_n = r3 % n;
+
+        MontScheme {
+            r_bits: r_bits,
+            r_digits: r_digits,
+            n: n,
+            ndash: ndash,
+            r2_mod_n: r2_mod_n,
+            r3_mod_n: r3_mod_n,
+        }
+    );
+
+    // Multiplies with `r`.
+    mul_R: MontScheme -> BigInt -> BigInt;
+    mul_R = |s, a| (
+        BigInt::make(a.@sign, Array::fill(s.@r_digits, 0_U32).append(a.@nat))
+    );
+
+    // Modulo with `r`.
+    mod_R: MontScheme -> BigInt -> BigInt;
+    mod_R = |s, a| (
+        BigInt::make(a.@sign, a.@nat.truncate(s.@r_digits))
+    );
+
+    // Divides with `r`.
+    div_R: MontScheme -> BigInt -> BigInt;
+    div_R = |s, a| (
+        BigInt::make(a.@sign, a.@nat.get_sub(s.@r_digits, a.@nat.get_size))
+    );
+
+    //REDC algorithm
+    reduce: MontScheme -> BigInt -> BigInt;
+    reduce = |s, aR| (
+        let MontScheme { n:n, ndash:ndash } = s;
+        //assert_lazy(|_| "aR out of range", zero <= aR && aR < one.mul_R(s) * n) $ |_|
+        let m: BigInt = (aR.mod_R(s) * ndash).mod_R(s);
+        let a: BigInt = (aR + m * n).div_R(s);
+        let a_n = a - n;
+        if !a_n.is_negative {
+            a_n
+        } else {
+            a
+        }
+    );
+}
+
+// Montgomery form
+type Mont = unbox struct {
+    aR: BigInt,           // a * r mod n
+    s: MontScheme         // the scheme
+};
+
+impl Mont: ToString {
+    to_string = |mont| (
+        "Mont { aR=" + mont.@aR.to_string + ", a=" + mont.to_BigInt.to_string + " }"
+    );
+}
+
+namespace Mont {
+    // `Mont::from_BigInt(a,s)` creates a Montgomery form from a big integer `a` and a Montgomery scheme `s`.
+    // `a` must be in the range of `0 <= a && a < n`.
+    from_BigInt: BigInt -> MontScheme -> Mont;
+    from_BigInt = |a, s| (
+        assert_lazy(|_| "a out of range: " + a.to_string, zero <= a && a < s.@n) $ |_|
+        let aR = (a * s.@r2_mod_n).reduce(s);
+        Mont { aR: aR, s: s }
+    );
+
+    // Converts a Montgomery form to an integer.
+    to_BigInt: Mont -> BigInt;
+    to_BigInt = |mont| (
+        let Mont { aR: aR, s: s } = mont;
+        aR.reduce(s)
+    );
+
+    // Calculates the productive inverse.
+    _inverse: Mont -> Mont;
+    _inverse = |mont| (
+        let Mont { aR: aR, s: s } = mont;
+        let MontScheme { n:n, r3_mod_n:r3_mod_n } = s;
+        let (aRinv, y, d) = extended_euclid(aR, n);
+        assert_lazy(|_| "aR and N are not coprime", d == one) $ |_|
+        // aR * aRinv = 1 mod n
+        let aRinv = if aRinv.is_negative { aRinv + n } else { aRinv };
+        let inv_aR = (aRinv * r3_mod_n).reduce(s);
+        Mont { aR: inv_aR, s: s }
+    );
+}
+
+impl Mont: Add {
+    add = |m1, m2| (
+        let s = m1.@s;
+        let aR = m1.@aR + m2.@aR;
+        let aR_n = aR - s.@n;
+        let aR = if ! aR_n.is_negative { aR_n } else { aR };
+        Mont { aR: aR, s: s }
+    );
+}
+
+impl Mont: Sub {
+    sub = |m1, m2| (
+        let s = m1.@s;
+        let aR = m1.@aR - m2.@aR;
+        let aR = if aR.is_negative { aR + s.@n } else { aR };
+        Mont { aR: aR, s: s }
+    );
+}
+
+impl Mont: Mul {
+    mul = |m1, m2| (
+        let s = m1.@s;
+        let aR = (m1.@aR * m2.@aR).reduce(s);
+        Mont { aR: aR, s: s }
+    );
+}
+
+impl Mont: Div {
+    div = |m1, m2| (
+        m1 * m2._inverse
+    );
+}
+
+// A type which is either a non-Montgomery form (a big integer) or a Montgomery form.
+type Montgomery = unbox union {
+    no_mont: BigInt,
+    mont: Mont
+};
+
+impl Montgomery: ToString {
+    to_string = |m| (
+        match m {
+            no_mont(a) => "no_mont(" + a.to_string + ")",
+            mont(m) => "mont(" + m.to_BigInt.to_string + ")",
+        }
+    );
+}
+
+namespace Montgomery {
+    // Converts `I64` to a non-Montgomery form.
+    from_I64: I64 -> Montgomery;
+    from_I64 = |i64| (
+        no_mont $ BigInt::from_I64(i64)
+    );
+
+    // Converts a big integer to a Montgomery form.
+    from_BigInt: BigInt -> MontScheme -> Montgomery;
+    from_BigInt = |a, s| (
+        mont $ Mont::from_BigInt(a, s)
+    );
+
+    // Converts a (non-)Montgomery form to a big integer.
+    to_BigInt: Montgomery -> BigInt;
+    to_BigInt = |m| (
+        match m {
+            no_mont(a) => a,
+            mont(m) => m.to_BigInt
+        }
+    );
+
+    // Maps two-argument operations for `BigInt` and `Mont` into a two-argument operation of `Montgomery`.
+    _map_op2: (BigInt -> BigInt -> BigInt) -> (Mont -> Mont -> Mont) -> (Montgomery -> Montgomery -> Montgomery);
+    _map_op2 = |int_op, mont_op| (
+        |a, b|
+        match a {
+            no_mont(a) => match b {
+                no_mont(b) => no_mont $ int_op(a, b),
+                mont(b) => mont $ mont_op(from_BigInt(a, b.@s), b)
+            },
+            mont(a) => match b {
+                no_mont(b) => mont $ mont_op(a, from_BigInt(b, a.@s)),
+                mont(b) => mont $ mont_op(a, b)
+            }
+        }
+    );
+}
+
+impl Montgomery: Add {
+    add = _map_op2(add, add);
+}
+
+impl Montgomery: Sub {
+    sub = _map_op2(sub, sub);
+}
+
+impl Montgomery: Mul {
+    mul = _map_op2(mul, mul);
+}
+
+impl Montgomery: Div {
+    div = _map_op2(div, div);
+}

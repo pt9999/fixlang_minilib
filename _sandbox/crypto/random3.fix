@@ -1,0 +1,68 @@
+// Random Number Generator Monad
+module Minilib.Monad.Random3;
+
+import AsyncTask;
+import Random;
+
+import Minilib.Crypto.SecureRandom;
+import Minilib.Common.RandomEx;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+
+trait MonadRandomU64 = Functor + Monad + MonadRandomU64IF;
+
+trait [m: * -> *] m: MonadRandomU64IF {
+    random_U64: m U64;
+}
+
+trait MonadRandomBytes = Functor + Monad + MonadRandomBytesIF;
+
+trait [m: * -> *] m: MonadRandomBytesIF {
+    random_bytes: I64 -> m (Array U8);
+}
+
+// `random_U8` generates a random integer of U8.
+random_U8: [m: MonadRandomU64IF] m U8;
+random_U8 = random_U64.map(to_U8);
+
+// `random_U16` generates a random integer of U8.
+random_U16: [m: MonadRandomU64IF] m U16;
+random_U16 = random_U64.map(to_U16);
+
+// `random_U32` generates a random integer of U32.
+random_U32: [m: MonadRandomU64IF] m U32;
+random_U32 = random_U64.map(to_U32);
+
+impl [m: Monad] StateT Random m: MonadRandomU64IF {
+    random_U64 = make_state_t_monad $ |random| (
+        pure $ random.generate_U64
+    );
+}
+
+impl [m: Monad] StateT Random m: MonadRandomBytesIF {
+    random_bytes = |size| make_state_t_monad $ |random| (
+        pure $ random.generate_array(size, generate_U8)
+    );
+}
+
+namespace SecureRandom {
+    generate_U64: SecureRandom -> IOFail (SecureRandom, U64);
+    generate_U64 = |size, secure_random| (
+        let (secure_random, bytes) = *secure_random.generate_bytes(8);
+        let u64: U64 = *from_bytes(bytes).from_result;
+        pure $ (secure_random, u64)
+    );    
+}
+
+impl [m: MonadIOFail] StateT SecureRandom m: MonadRandomU64IF {
+    random_U64 = make_state_t_monad $ |secure_random| (
+        secure_random.generate_bytes(size).lift_iofail
+    );
+}
+
+impl [m: MonadIOFail] StateT SecureRandom m: MonadRandomBytesIF {
+    random_bytes = |size| make_state_t_monad $ |secure_random| (
+        secure_random.generate_bytes(size).lift_iofail
+    );
+}

@@ -1,0 +1,135 @@
+//module Minilib.Data.Fragment;
+module Main;
+
+import Minilib.Trait.Semigroup;
+import Minilib.Trait.Monoid;
+import Minilib.Monad.Writer;
+
+type Fragment a = unbox union {
+    empty: (),
+    single: a,
+    array: Array a,
+};
+
+namespace Fragment {
+    to_array: Fragment a -> Array a;
+    to_array = |fa| match fa {
+        empty() => [],
+        single(x) => [x],
+        array(xs) => xs,
+    };
+}
+
+impl Fragment a: MEmpty {
+    mempty = empty();
+}
+
+impl Fragment a: Semigroup {
+    sappend = |f2, f1| (
+        match f1 {
+            empty() => f2,
+            single(x) => match f2 {
+                empty() => f1,
+                single(y) => array $ [x, y],
+                array(ys) => array $ [x].append(ys),
+            },
+            array(xs) => match f2 {
+                empty() => f1,
+                single(y) => array $ xs.push_back(y),
+                array(ys) => array $ xs.append(ys),
+            },
+        }
+    );
+}
+
+impl Fragment: Functor {
+    map = |f, fa| match fa {
+        empty() => empty(),
+        single(x) => single(f(x)),
+        array(xs) => array(xs.map(f)),
+    };
+}
+
+impl Fragment: Monad {
+    pure = |a| single(a);
+    bind = |f, fa| match fa {
+        empty() => empty(),
+        single(x) => f(x),
+        array(xs) => (
+            //xs.to_iter.map(f).mconcat
+            xs.to_iter.fold(
+                mempty, |x, fa2|
+                fa2.sappend(f(x))
+            )
+        ),
+    };
+}
+
+/*
+trait ma: Singleton {
+    type Element ma;
+    singleton: Element ma -> ma;
+}
+
+impl [m: Monad] m a: Singleton {
+    type Element (m a) = a;
+    singleton = pure;
+}
+*/
+
+//write_one: [f: Monad, fe: Monoid, fe = f e, m: Monad] e -> WriterT (f e) m ();
+write_one: [m: Monad] e -> WriterT (Fragment e) m ();
+write_one = |e| write(pure(e));
+
+//fragment_test1: [f: Monad, fe: Monoid, fe = f I64, m: Monad] I64 -> I64 -> WriterT (f I64) m I64;
+fragment_test1: [m: Monad] I64 -> I64 -> WriterT (Fragment I64) m I64;
+fragment_test1 = |n, sum| (
+    write_one(sum);;
+    if n <= 0 {
+        pure $ sum 
+    };
+    fragment_test1(n - 1, sum + n)
+);
+
+fragment_perf: I64 -> IO ();
+fragment_perf = |n| (
+    println("=== fragment_perf ===");;
+    let (_, time) = *consumed_time_while_io(do {
+        pure();;
+        let (fa, sum) = fragment_test1(n, 0).run_writer : (Fragment I64, I64);
+        println("sum=" + sum.to_string);;
+        println("arr.size=" + fa.to_array.get_size.to_string);;
+        pure $ ()
+    });
+    println("time=" + (time * 1000.0).to_string_precision(3_U8) + " msec")
+);
+
+array_test1: [m: Monad] I64 -> I64 -> WriterT (Array I64) m I64;
+array_test1 = |n, sum| (
+    write([sum]);;
+    if n <= 0 {
+        pure $ sum 
+    };
+    array_test1(n - 1, sum + n)
+);
+
+array_perf: I64 -> IO ();
+array_perf = |n| (
+    println("=== array_perf ===");;
+    let (_, time) = *consumed_time_while_io(do {
+        pure();;
+        let (fa, sum) = array_test1(n, 0).run_writer : (Array I64, I64);
+        println("sum=" + sum.to_string);;
+        println("arr.size=" + fa.get_size.to_string);;
+        pure $ ()
+    });
+    println("time=" + (time * 1000.0).to_string_precision(3_U8) + " msec")
+);
+
+main: IO ();
+main = (
+    //let n = 200000;
+    let n = 20000;
+    fragment_perf(n);;
+    array_perf(n)
+);

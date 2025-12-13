@@ -1,0 +1,166 @@
+module Main;
+
+
+import Minilib.Math.Types;
+import Minilib.Math.Ring;
+import Minilib.Math.Euclid;
+import Minilib.Math.Modular;
+import Minilib.Math.Polynomial;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+
+
+//---------------------------------------
+
+test_modular_power: IO ();
+test_modular_power = (
+    println("----------- test_modular_power -----------");;
+    let m = 17;
+    let a = 3;
+    let a = Modular::make(a, m);
+    let one = Modular::make(1, m);
+    let x = *Iterator::range(0, m).fold_m(
+        one, |i, x|
+        println((a, i, x, m).format("{}^{} = {} (mod {})"));;
+        pure $ x * a
+    );
+    pure()
+);
+
+test_polynomial_power: IO ();
+test_polynomial_power = (
+    println("----------- test_polynomial_power -----------");;
+    let a = Polynomial::make([1, 3]);
+    let one = Polynomial::make([1]);
+    let x = *Iterator::range(0, 5).fold_m(
+        one, |i, x|
+        println((a, i, x).format("({})^{} = {}"));;
+        pure $ x * a
+    );
+    pure()
+);
+
+test_extended_euclid: IO ();
+test_extended_euclid = (
+    println("----------- test_extended_euclid -----------");;
+    let table = [
+        (5, 7),
+        (20, 32),
+        (40, 30)
+    ];
+    table.foreach_m(
+        |(a, b)|
+        let (x, y, d) = extended_euclid(a, b);
+        println([a, x, b, y, d].format("{} * {} + {} * {} = {}"))
+    )
+);
+
+test_modular_div: IO ();
+test_modular_div = (
+    println("----------- test_modular_div -----------");;
+    let m = 31;
+    let table = [
+        (5, 7),
+        (20, 12),
+        (10, 3)
+    ];
+    table.foreach_m(
+        |(a, b)|
+        let a = modulo(a, m);
+        let b = modulo(b, m);
+        let c = a / b;
+        let cc = c * b;
+        let d = b / a;
+        let dd = d * a;
+        println(
+            [a, b, c, cc].format("a={}, b={}, a/b={}, a/b*b={}") +
+            [m].format(" (modulo {})\n") +
+            [a, b, d, dd].format("a={}, b={}, b/a={}, b/a*a={}") +
+            [m].format(" (modulo {})\n") +
+            [cc == a, dd == b].format("ok={} {}\n")
+        )
+    )
+);
+
+test_polynomial_modular: IO ();
+test_polynomial_modular = (
+    println("----------- test_polynomial_modular -----------");;
+    let p = 3;
+    let f = polynomial([ modulo(1, p), modulo(2, p), modulo(1, p), modulo(1, p) ]);
+    let m = f.get_degree;
+    let q = p.pow_by_U64(m.to_U64);     // q = p ^ m
+    let a = polynomial([ modulo(0, p), modulo(1, p) ]);
+    let a = modulo(a, f);
+    let one_ = modulo(one, f);
+    let x = *Iterator::range(1, q).fold_m(
+        a, |i, x|
+        let is_one = if x == one_ { " !!!" } else { "" };
+        println((a, i, x, f).format("{}^{} = {} (modulo {})") + is_one);;
+        pure $ x * a
+    );
+    pure()
+);
+
+test_primitive_polynomials: IO ();
+test_primitive_polynomials = (
+    println("----------- test_primitive_polynomials -----------");;
+    let p = 2;
+    let m = 8;
+    eval *println(
+        [m, p].format("Generating primitive polynomials of degree {} in GF({})")
+    );
+    generate_primitive_polynomials(p, m)
+    .foreach_m(|f|
+        let ff: Polynomial I64 = f.map(|c| c.nonneg.@value);
+        println((f, ff.subst(2)).format("{} (decimal={})"))
+    )
+);
+
+// `f.subst_poly(x)` substitutes the indeterminate of a polynomial with `x`.
+subst_poly: [a: Ring] Polynomial a -> Polynomial a -> Polynomial a;
+subst_poly = |x, f| (
+    f.subst0(x, mul_scalar)
+);
+
+test_primitive_polynomials2: IO ();
+test_primitive_polynomials2 = (
+    println("----------- test_primitive_polynomials2 -----------");;
+    let p = 2;
+    let m = 4;
+    let q = p.pow_by_U64(m.to_U64);
+    let mkpoly = |arr| (
+        polynomial(arr.map(|x| modulo(x, p)))
+    );
+    // F(2^4)の0を除く要素からなる乗法群は位数15の巡回群、生成元はφ(15)=8個
+    // そのうち4つはf(x)=0, 残りの 4つはg(x)=0
+    let f = mkpoly([1, 1, 0, 0, 1]); // x^4 + x + 1
+    let g = mkpoly([1, 0, 0, 1, 1]); // x^4 + x^3 + 1
+    let a = polynomial([ modulo(0, p), modulo(1, p) ]);
+    let a = modulo(a, f);
+    //let one_ = modulo(one, f);
+    //let zero_ = modulo(zero, f);
+    println((f,).format("f={}"));;
+    println((g,).format("g={}"));;
+    Iterator::range(1, q).fold_m(
+        a, |i, x|
+        let f_x = modulo(f.subst_poly(x.@value), f);
+        let g_x = modulo(g.subst_poly(x.@value), f);
+        println((a, i, x).format("{}^{} = {} (mod f)"));;
+        println((x, f_x).format("  f({}) = {} (mod f)"));;
+        println((x, g_x).format("  g({}) = {} (mod f)"));;
+        pure $ x * a
+    ).forget;;
+    pure()
+);
+
+main: IO ();
+main = (
+    test_modular_power;;
+    test_polynomial_power;;
+    test_extended_euclid;;
+    test_modular_div;;
+    test_polynomial_modular;;
+    test_primitive_polynomials;;
+    test_primitive_polynomials2;;
+    pure()
+);

@@ -1,0 +1,82 @@
+module Main;
+
+import Random;
+
+import Minilib.Testing.UnitTest;
+
+test_tuple2_get_set_mod_act: TestCase;
+test_tuple2_get_set_mod_act = (
+    make_test("test_tuple2_get_set_mod_act") $ |_|
+    let a = (1, 2);
+    assert_equal("eq", 1, a.@0);;
+    assert_equal("eq", (1, 3), a.set_1(3));;
+    assert_equal("eq", (2, 2), a.mod_0(add(1)));;   // Tuple2::mod0: (t0 -> t0) -> (t0, t1) -> (t0, t1)
+    assert_equal("eq", [(2, 2), (3, 2)], a.act_0(|x| [x+1, x+2]))
+);
+
+test_tuple2_map: TestCase;
+test_tuple2_map = (
+    make_test("test_tuple2_map") $ |_|
+    let a = (1, 2);
+    let a = a.map(add(3));
+    let a = a.map(to_string);
+    assert_equal("eq", (1, "5"), a)
+);
+
+test_tuple2_match: TestCase;
+test_tuple2_match = (
+    make_test("test_tuple2_match") $ |_|
+    let a = (1, 2);
+    match a {
+        (x, y) => do { assert_equal("eq", 1, x);; assert_equal("eq", 2, y) }
+    }
+    // match 構文では、pattern_case を書ける。
+    // pattern_case は、{ pattern_union | pattern_var | pattern_tuple | pattern_struct }
+    // pattern_tuple は、各成分が pattern_nounion なので、union は書けない。
+);
+
+test_tuple3_map: TestCase;
+test_tuple3_map = (
+    make_test("test_tuple3_map") $ |_|
+    let a = ("a", 1.1, 2);
+    let a = a.map(add(3));
+    let a = a.map(to_string);
+    assert_equal("eq", ("a", 1.1, "5"), a)
+);
+
+type Foo = unbox struct {
+    random: Random,
+    array: Array I64,
+};
+
+test_struct_act: TestCase;
+test_struct_act = (
+    make_test("test_struct_act") $ |_|
+    let foo = Foo {
+        random: Random::init_by_seed(123_U64),
+        array: [1, 2, 3],
+    };
+    let (r, foo) = foo.act_random(|random|
+        let (random, r) = random.generate_U64;
+        (r, random)
+    );
+    //println("r=" + r.to_string).lift;;
+    let (a, foo) = foo.act_array(|array|
+        (array.get_last.as_some, array.pop_back)
+    );
+    //println("a=" + a.to_string).lift;;
+    assert_equal("a", 3, a);;
+    assert_equal("eq", [1, 2], foo.@array)
+);
+
+main: IO ();
+main = (
+    [
+        test_tuple2_get_set_mod_act,
+        test_tuple2_map,
+        test_tuple2_match,
+        test_tuple3_map,
+        test_struct_act,
+    ]
+    .run_test_driver
+);

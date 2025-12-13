@@ -1,6 +1,5 @@
 module Main;
 
-import Debug;
 
 loop_loop: I64 -> I64;
 loop_loop = |n| (
@@ -39,14 +38,14 @@ loop_fold = |n| (
 
 bench: String -> I64 -> I64 -> (I64 -> I64) -> IO ();
 bench = |name, times, n, f| (
-    let (result, time) = consumed_time_while(|n|
-        loop(
-            (f(n), 0), |(sum, i)|
-            if i >= times - 1 { break $ sum };
-            eval f(n);
+    let (result, time) = *consumed_time_while_io(
+        pure();;
+        pure $ loop(
+            (0, 0), |(sum, i)|
+            if i >= times { break $ sum };
+            let sum = sum + f(n+i);     // changed for avoiding optimization
             continue $ (sum, i + 1)
-        )
-    , n);
+        ));
     println(name + ": result="+result.to_string+" time="+time.to_string)
 );
 
@@ -54,18 +53,19 @@ main: IO ();
 main = (
     let times = 100;
     let n = 1000000;
-    let _ = *bench("loop_loop", times, n, loop_loop);
-    let _ = *bench("loop_rec", times, n, loop_rec(0));
-    let _ = *bench("loop_rec2", times, n, |n| loop_rec2(n, 0));
-    let _ = *bench("loop_fix", times, n, loop_fix);
-    let _ = *bench("loop_fold", times, n, loop_fold);
+    bench("loop_loop ", times, n, loop_loop);;
+    bench("loop_rec  ", times, n, loop_rec(0));;
+    bench("loop_rec2 ", times, n, |n| loop_rec2(n, 0));;
+    bench("loop_fix  ", times, n, loop_fix);;
+    bench("loop_fold ", times, n, loop_fold);;
     pure()
 );
 
 /*
-    times = 100, n = 1000000
-    loop_loop: result=499999500000 time=0.464619
-    loop_rec: result=499999500000 time=0.000002
-    loop_fix: result=499999500000 time=3.820138
-    loop_fold: result=499999500000 time=3.706885
+    times = 100, n = 1000000, -O max
+    loop_loop : result=50004900161700 time=0.066070
+    loop_rec  : result=50004900161700 time=0.000002
+    loop_rec2 : result=50004900161700 time=0.000001
+    loop_fix  : result=50004900161700 time=3.661313
+    loop_fold : result=50004900161700 time=0.030633
 */

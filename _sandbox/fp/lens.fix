@@ -1,0 +1,331 @@
+// Simple lens.
+module Main;
+
+import Hash;
+import HashMap;
+
+import Minilib.Monad.State;
+import Minilib.Common.Common;
+import Minilib.Text.StringEx;
+
+// ToString extensions
+namespace HashMap {
+    // Converts `HashMap k v` to a string, for example `"{a:1,b:2}"` etc.
+    to_string_ex: [k: ToString, v: ToString] HashMap k v -> String;
+    to_string_ex = |h| (
+        "{" +
+        h.to_iter.map(|(k,v)| k.to_string + ":" + v.to_string).join(",")
+        + "}"
+    );
+}
+
+// Simple lens.
+// A lens is a pair of a getter and a modifier.
+type Lens a b = unbox struct {
+    getter: a -> b,
+    modifier: (b -> b) -> a -> a
+};
+
+namespace Lens {
+    // `Lens::make(getter, modifier)` makes a lens from a getter and a modifier.
+    make: (a -> b) -> ((b -> b) -> a -> a) -> Lens a b;
+    make = |getter, modifier| (
+        Lens { getter: getter, modifier: modifier }
+    );
+
+    // `Lens::lens` is symonym for `Len::make`.
+    lens: (a -> b) -> ((b -> b) -> a -> a) -> Lens a b;
+    lens = make;
+
+    // `lens.get(a)` calls `lens.@getter`.
+    get: a -> Lens a b -> b;
+    get = |a, lens| (lens.@getter)(a);
+    
+    // `lens.mod(f)` calls `lens.@modifier`.
+    mod: (b -> b) -> a -> Lens a b -> a;
+    mod = |f, a, lens| (lens.@modifier)(f, a);
+    
+    // Flipped version of `Lens::mod`.
+    modF: (b -> b) -> Lens a b -> (a -> a);
+    modF = |f, lens, a| lens.mod(f, a);
+
+    // `lens.set(b, a)` calls `lens.mod(|_| b, a)`.
+    set: b -> a -> Lens a b -> a;
+    set = |b, a, lens| lens.mod(|_| b, a);
+
+    // `lens1.compose(lens2)` composes two lenses.
+    compose: Lens b c -> Lens a b -> Lens a c;
+    compose = |lens2, lens1| (
+        Lens {
+            getter: lens1.@getter >> lens2.@getter,
+            modifier: lens1.@modifier << lens2.@modifier
+        }
+    );
+
+    // `lens1.zip(lens2)` zips two lenses.
+    zip: Lens a c -> Lens a b -> Lens a (b, c);
+    zip = |lens2, lens1| (
+        Lens {
+            getter: |a| (lens1.get(a), lens2.get(a)),
+            modifier: |f, a| (
+                let bc = (lens1.get(a), lens2.get(a));
+                let bc = f(bc);
+                lens2.set(bc.@1, lens1.set(bc.@0, a))
+            )
+        }
+    );
+
+    // `lens.transform_state(state)` transforms a state monad.
+    transform_state: State t a -> Lens s t -> State s a;
+    transform_state = |state, lens| (
+        make_state_monad $ |s|
+        let t = lens.get(s);
+        let (t, a) = state.run_state(t);
+        let s = lens.set(t, s);
+        (s, a)
+    );
+
+    // `Lens::of_key(k)` creates a lens from a hashmap to a value of the key.
+    of_key: [k: HashKey] k -> Lens (HashMap k v) (Option v);
+    of_key = |k| (
+        let getter = HashMap::find(k);
+        let modifier = |f, map| (
+            let v = map.HashMap::find(k);
+            let v = f(v);
+            if v.is_none { map.erase(k) } else { map.insert(k, v.as_some) }
+        );
+        lens(getter, modifier)
+    );
+}
+
+//-------------------
+// Simple test
+//-------------------
+
+type Foo = unbox struct {
+    bar: Bar
+};
+
+type Bar = unbox struct {
+    baz: Baz
+};
+
+type Baz = unbox struct {
+    n: I64
+};
+
+test1: IO ();
+test1 = (
+    let lens = Lens::make(Foo::@bar, Foo::mod_bar).apply $
+                Lens::make(Bar::@baz, Bar::mod_baz).compose >>
+                Lens::make(Baz::@n, Baz::mod_n).compose;
+
+    let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
+    let foo = lens.set(3, foo);
+    let foo = lens.mod(add(1), foo);
+    let a = lens.get(foo);
+    println(a.to_string)
+);
+
+test2: IO ();
+test2 = (
+    // 以下のように関数合成を使えばいいので、わざわざ Lens を使うまでもない
+    /*
+    let set = |n, foo| foo.mod_bar(mod_baz(set_n(n)));
+    let get = |foo| foo.@bar.@baz.@n;
+    let mod = |f, foo| foo.mod_bar(mod_baz(mod_n(f)));
+    */
+    let set = mod_bar << mod_baz << Baz::set_n;
+    let get = @bar >> @baz >> @n;
+    let mod = mod_bar << mod_baz << Baz::mod_n;
+
+    let foo = Foo { bar: Bar { baz: Baz { n: 0 } } };
+    let foo = foo.set(3);
+    let foo = foo.mod(add(1));
+    let a = foo.get;
+    println(a.to_string)
+);
+
+//-------------------
+// Mock application
+//-------------------
+
+namespace StateEx {
+    // Lift a State monad.
+    liftS: [f: Functor] State s a -> State (f s) (f a);
+    liftS = |state| (
+        make_state_monad $ |fs|
+        let fas = fs.map(|s| state.run_state(s));
+        (fas.map(@0), fas.map(@1))
+    );
+}
+
+type User = unbox struct {
+    name: String,
+    favo_books: Array String
+};
+
+namespace User {
+    make: String -> Array String -> User;
+    make = |name, favo_books| User {
+        name: name, favo_books: favo_books
+    };
+
+    add_favo: String -> User -> User;
+    //add_favo = |book_name| mod_favo_books(push_back(book_name));
+    add_favo = mod_favo_books << push_back;
+
+    state_add_favo: String -> State User ();
+    state_add_favo = |book_name| (
+        mod_state(add_favo(book_name))
+    );
+}
+
+impl User: ToString {
+    to_string = |u| (u.@name, u.@favo_books).format(
+        "User { name={}, favo_books={} }"
+    );
+}
+
+type Book = unbox struct {
+    name: String,
+    likes: I64
+};
+
+namespace Book {
+    make: String -> I64 -> Book;
+    make = |name, likes| Book {
+        name: name, likes: likes
+    };
+
+    add_likes: I64 -> Book -> Book;
+    add_likes = |n| mod_likes(add(n));
+
+    state_add_likes: I64 -> State Book ();
+    state_add_likes = |n| (
+        mod_state(add_likes(n))
+    );
+}
+
+impl Book: ToString {
+    to_string = |b| (b.@name, b.@likes).format(
+        "Book { name={}, likes={} }"
+    );
+}
+
+
+type App = unbox struct {
+    users: HashMap String User,
+    books: HashMap String Book
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        users: HashMap::empty(0),
+        books: HashMap::empty(0)
+    };
+
+    users: Lens App (HashMap String User);
+    users = Lens::make(@users, mod_users);
+
+    books: Lens App (HashMap String Book);
+    books = Lens::make(@books, mod_books);
+
+    user: String -> Lens App (Option User);
+    user = |name| users.compose(of_key(name));
+
+    book: String -> Lens App (Option Book);
+    book = |name| books.compose(of_key(name));
+
+    add_user: String -> App -> App;
+    add_user = |user_name, app| (
+        let user = User::make(user_name, []);
+        app.mod_users(insert(user.@name, user))
+    );
+
+    add_book: String -> App -> App;
+    add_book = |book_name, app| (
+        let book = Book::make(book_name, 0);
+        app.mod_books(insert(book.@name, book))
+    );
+
+    // Simple implementation
+    add_favo_book: String -> String -> App -> App;
+    add_favo_book = |user_name, book_name, app| (
+        let app = do {
+            let user = *app.@users.find(user_name);
+            let user = user.add_favo(book_name);
+            pure $ app.mod_users(insert(user.@name, user))
+        }.as_some_or(app);
+        let app = do {
+            let book = *app.@books.find(book_name);
+            let book = book.add_likes(1);
+            pure $ app.mod_books(insert(book.@name, book))
+        }.as_some_or(app);
+        app
+    );
+
+    // Using `Lens::modF()` and a function composition
+    add_favo_book2: String -> String -> App -> App;
+    add_favo_book2 = |user_name, book_name| (
+        user(user_name).modF(map(add_favo(book_name)))
+        >>
+        book(book_name).modF(map(add_likes(1)))
+    );
+
+    // Using `Lens::zip()`
+    add_favo_book3: String -> String -> App -> App;
+    add_favo_book3 = |user_name, book_name| (
+        user(user_name).zip(book(book_name))
+        .modF(|(user, book)|
+            let user = user.map(add_favo(book_name));
+            let book = book.map(add_likes(1));
+            (user, book)
+        )
+    );
+
+    // Using state monads
+    add_favo_book4: String -> String -> App -> App;
+    add_favo_book4 = |user_name, book_name, app| (
+        do {
+            user(user_name).transform_state(state_add_favo(book_name).liftS);;
+            book(book_name).transform_state(state_add_likes(1).liftS);;
+            pure()
+        }.exec_state(app)
+    );
+}
+
+impl App: ToString {
+    to_string = |app| (
+        (app.@users.to_string_ex, app.@books.to_string_ex).format(
+            "App {\n" +
+            "  users={},\n" +
+            "  books={}\n" +
+            "}"
+        )
+    );
+}
+
+test_app: IO ();
+test_app = (
+    let app = App::empty.apply $
+        add_user("taro") >>
+        add_user("jiro") >>
+        add_book("book1") >>
+        add_book("book2") >>
+        add_favo_book("taro", "book1") >>
+        add_favo_book2("jiro", "book1") >>
+        add_favo_book("taro", "book2") >>
+        add_favo_book4("jiro", "book2");
+    println(app.to_string)
+);
+
+main: IO ();
+main = (
+    test1;;
+    test2;;
+    test_app;;
+    pure()
+);
+

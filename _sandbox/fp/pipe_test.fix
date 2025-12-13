@@ -1,0 +1,68 @@
+module Main;
+
+import Minilib.Monad.Pipe;
+/*
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+*/
+import Minilib.Trait.Traversable;
+import Minilib.Testing.UnitTest;
+
+my_pipe1: Pipe Void I64 ();
+my_pipe1 = (
+    loop_m(
+        0, |i|
+        write(i);;
+        continue_m $ i + 1
+    )
+);
+
+my_pipe2: Pipe I64 (I64, I64) ();
+my_pipe2 = (
+    loop_m(
+        (), |_|
+        let a: I64 = *read;
+        let b: I64 = *read;
+        write((a,a));;
+        write((b,b));;
+        write((a,b)).when((a + b) % 7 != 0);;
+        continue_m $ ()
+    )
+);
+
+my_pipe3: Pipe (I64, I64) (Array (I64, I64)) ();
+my_pipe3 = (
+    loop_m(
+        (), |_|
+        let a: (I64, I64) = *read;
+        let b: (I64, I64) = *read;
+        if b.@0 % 10 < 3 {
+            write([a, b])
+        } else {
+            write([a, a]);;
+            write([b, b])
+        };;
+        continue_m $ ()
+    )
+);
+
+// Skips at most n elements from an iterator.
+skip : I64 -> DynIterator a -> DynIterator a;
+skip = |n, iter| (
+    if n <= 0 { iter };
+    match iter.advance {
+        none() => Iterator::empty.to_dyn,
+        some((next, a)) => next.skip(n-1)
+    }
+);
+
+main: IO ();
+main = (
+    let pipe: Pipe Void (Array (I64, I64)) () = my_pipe1.composeF(my_pipe2).composeF(my_pipe3);
+    println(pipe.to_string);;
+    let xs = pipe.to_iter.skip(1000000).take(20).to_array;
+    println(xs.to_string);;
+    pure()
+);

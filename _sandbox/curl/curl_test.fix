@@ -1,0 +1,32 @@
+module Main;
+
+import Minilib.Net.Curl;
+import Minilib.Text.StringEx;
+
+fetch_url: String -> Path -> IOFail ();
+fetch_url = |url, output_file| (
+    let curl = *Curl::make;
+    curl.set_url(url);;
+    with_file(output_file, "w", |output_handle|
+        eval *curl.set_write_callback(|bytes|
+            write_bytes(output_handle, bytes);;
+            println("... write_callback: wrote " + bytes.get_size.to_string + " bytes").lift;;
+            pure $ bytes.get_size
+        );
+        curl.perform;;
+        pure()
+    )
+);
+
+main : IO ();
+main = (
+    println("program start");;
+    do {
+        let url = "https://www.google.co.jp/";
+        let output_file = "./tmp.output.txt";
+        println("url = " + url).lift;;
+        println("output_file = " + output_file.to_string).lift;;
+        fetch_url(url, output_file)
+    }
+    .try (|err| eprintln (err))
+);

@@ -1,0 +1,328 @@
+// TODO: use Minilib.Terminal.Ncurses
+module Main;
+
+import Random;
+
+import Minilib.IO.Errno;
+
+help_message: String;
+help_message = (
+    "A simple math game. A lot of numbers will appear on the screen. \r\n" +
+    "Find a sequence of three numbers in the form `a + b = c mod 10` or `a = b + c mod 10`,\r\n" +
+    "move the cursor to the middle number and press the SPACE key.\r\n" +
+    "For example, if you find the sequence of numbers `541`, move the cursor over `4` and press the SPACE key.\r\n" +
+    "To move the cursor, press `H`, `J`, `K`, `L` keys (same as vi command).\r\n" +
+    "To quit the game, press `Q` key.\r\n" +
+    "Press any key to start the game.\r\n" +
+    "\r\n" +
+    "シンプルな算数ゲームです。画面にたくさんの数字が表示されます。\r\n" +
+    "3つの数字の並びで、`a + b = c mod 10` または `a = b + c mod 10`の形になっているものを探し、\r\n" +
+    "中央の数字にカーソルを移動してスペースキーを押して下さい。\r\n" +
+    "例えば、`541`という数字の並びを見つけた場合、`4`の上にカーソルを移動してスペースキーを押してください。\r\n" +
+    "カーソルの移動には `H`, `J`, `K`, `L` キーを押してください(viコマンドと同じです)。\r\n" +
+    "ゲームを終了する場合は `Q` キーを押してください。\r\n" +
+    "なにかキーを入力するとゲームが始まります。\r\n"
+);
+
+type Board = unbox struct {
+    width: I64,
+    height: I64,
+    px: I64,
+    py: I64,
+    score: I64,
+    data: Array U8,
+    random: Random
+};
+
+namespace Board {
+    make: I64 -> I64 -> IO Board;
+    make = |width, height| (
+        let time = *(IO::from_runner $ |ios| FFI_CALL_IOS[I32 time(Ptr), nullptr, ios]);
+        let random = Random::init_by_seed(time.to_U64);
+        let data = Array::fill(width * height, '0');
+        let board = Board {
+            width: width,
+            height: height,
+            px: width / 2,
+            py: height / 2,
+            score: 0,
+            data: data,
+            random: random
+        };
+        pure $ board._init_random
+    );
+
+    _init_random: Board -> Board;
+    _init_random = |board| (
+        loop(
+            (board, 0), |(board, i)|
+            if i >= board.@width * board.@height {
+                break $ board
+            };
+            let (random, x) = board.@random.generate_U64;
+            let board = board.set_random(random);
+            let c = '0' + (x % 10_U64).to_U8;
+            let board = board.mod_data(set(i, c));
+            continue $ (board, i + 1)
+        )
+    );
+
+    get_digit: I64 -> I64 -> Board -> I64;
+    get_digit = |x, y, board| (
+        let c = board.@data.@(y * board.@width + x);
+        if '0' <= c && c <= '9' {
+            (c - '0').to_I64
+        };
+        0
+    );
+
+    get_ch: I64 -> I64 -> Board -> U8;
+    get_ch = |x, y, board| (
+        board.@data.@(y * board.@width + x)
+    );
+
+    set_random_ch: I64 -> I64 -> Board -> Board;
+    set_random_ch = |x, y, board| (
+        let (random, u) = board.@random.generate_U64;
+        let board = board.set_random(random);
+        let c = '0' + (u % 10_U64).to_U8;
+        board.set_ch(x, y, c)
+    );
+
+    set_ch: I64 -> I64 -> U8 -> Board -> Board;
+    set_ch = |x, y, c, board| (
+        board.mod_data(set(y * board.@width + x, c))
+    );
+
+    sleep: F64 -> IO ();
+    sleep = |sec| (
+        pure();; // make it lazy
+        let usec = (sec * 1000000.0).to_U32;
+        (IO::from_runner $ |ios| FFI_CALL_IOS[() usleep(U32), usec, ios]);;
+        pure()
+    );
+
+    show: Board -> IO ();
+    show = |board| (
+        let line = Array::fill(board.@width, ' ');
+        print(Terminal::clear);;
+        Iterator::range(0, board.@height).fold_m(
+            (), |y, _|
+            print(Terminal::cursor(0, y));;
+            let line = Iterator::range(0, board.@width).fold(
+                line, |x, line|
+                line.set(x, board.@data.@(y * board.@width + x))
+            );
+            print(line.push_back(0_U8)._unsafe_from_c_str)
+        );;
+        println(Terminal::cursor(0, board.@height) + "Q:Quit HJKL:Move SPACE:Bomb");;
+        println(Terminal::cursor(0, board.@height + 1) + "Score: " + board.@score.to_string);;
+        print(Terminal::cursor(board.@px, board.@py));;
+        Terminal::flush
+    );
+
+    handle_key: U8 -> Board -> IO Board;
+    handle_key = |ch, board| (
+        if ch == 'h' {
+            board.move_player(-1,0)
+        };
+        if ch == 'j' {
+            board.move_player(0,1)
+        };
+        if ch == 'k' {
+            board.move_player(0,-1)
+        };
+        if ch == 'l' {
+            board.move_player(1,0)
+        };
+        if ch == ' ' {
+            board.bomb
+        };
+        pure $ board
+    );
+    move_player: I64 -> I64 -> Board -> IO Board;
+    move_player = |dx, dy, board| (
+        let px = board.@px + dx;
+        let py = board.@py + dy;
+        if !(0 <= px && px < board.@width && 0 <= py && py < board.@height) {
+            pure $ board
+        };
+        let board = board.set_px(px).set_py(py);
+        print(Terminal::cursor(px, py));;
+        Terminal::flush;;
+        //println("px="+px.to_string+" py="+py.to_string);;
+        pure $ board
+    );
+
+    bomb: Board -> IO Board;
+    bomb = |board| (
+        let px = board.@px;
+        let py = board.@py;
+        if !(1 <= px && px < board.@width -1) {
+            pure $ board
+        };
+        let c0 = board.get_digit(px - 1, py);
+        let c1 = board.get_digit(px, py);
+        let c2 = board.get_digit(px + 1, py);
+        if !(c0 == (c1 + c2) % 10 || (c0 + c1) % 10 == c2) {
+            pure $ board
+        };
+        let board = board.mod_score(|score| score + c0 + c1 + c2);
+        let board = *loop_m(
+            (board, py - 1), |(board, y)|
+            if y < 0 { break_m $ board };
+            let board = if y < py {
+                board.set_ch(px - 1, y + 1, board.get_ch(px - 1, y))
+                     .set_ch(px    , y + 1, board.get_ch(px    , y))
+                     .set_ch(px + 1, y + 1, board.get_ch(px + 1, y))
+            } else { board };
+            let board = board.set_ch(px - 1, y, ' ')
+                             .set_ch(px    , y, ' ')
+                             .set_ch(px + 1, y, ' ');
+            board.show;;
+            sleep(0.1);;
+            continue_m $ (board, y - 1)
+        );
+        /*
+        let board = board.set_random_ch(px - 1, 0)
+                         .set_random_ch(px,     0)
+                         .set_random_ch(px + 1, 0);
+        */
+        board.show;;
+        pure $ board
+    );
+}
+
+namespace Terminal {
+    // Control Sequence Introducer
+    _CSI: String;
+    _CSI = "\u001b[";
+
+    // `Terminal::clear` is an ANSI escape sequence to clear the screen.
+    clear: String;
+    clear = _CSI + "2J";    // Erase in display
+
+    // `Terminal::cursor(x,y)` gets an ANSI escape sequence to set the cursor position.
+    cursor: I64 -> I64 -> String;
+    cursor = |x, y| (
+        _CSI + (y+1).to_string + ";" + (x+1).to_string + "H"
+    );
+
+    // `Terminal::flush` is an IO monad of flushing the standard output.
+    flush: IO ();
+    flush = (
+        pure();; // make it lazy
+        let file_ptr = *stdout.get_file_ptr;
+        let res = *FFI_CALL_IO[I32 fflush(Ptr), file_ptr];
+        pure()
+    );
+
+    // `Terminal::input_keyboard` is an IOFail monad to input a character from the keyboard.
+    // If EOF is reached, `none()` is returned.
+    input_keyboard: IOFail (Option U8);
+    input_keyboard = do {
+        pure();; // make it lazy
+        let ch = *read_n_bytes(stdin, 1);
+        if ch.get_size == 0 {
+            pure $ none()
+        };
+        let ch = ch.@(0);
+        pure $ some(ch)
+    };
+
+    // Makes the standard input to noncanonical mode (a.k.a raw-mode).
+    // That is, input is available immediately, no input processing is performed,
+    // and line editing is disabled.
+    with_raw_mode: IO () -> IO ();
+    with_raw_mode = |io| (
+        let raw_mode = *RawMode::make;
+        io;;
+        let alive = *raw_mode.is_alive;
+        pure()
+    );
+}
+
+// A structure to make the standard input to noncanonical mode (a.k.a raw-mode).
+type RawMode = unbox struct {
+    dtor: Destructor Bool
+};
+
+namespace RawMode {
+    make:  IO RawMode;
+    make = (
+        pure();; // make it lazy
+        let stdin_file_ptr = *stdin.get_file_ptr;
+        let stdin_fileno: I32 = *FFI_CALL_IO[I32 fileno(Ptr), stdin_file_ptr];
+        eprintln("stdin_fileno="+stdin_fileno.to_string);;
+        let old_termios = Array::fill(120, 0_U8);
+        let res = *old_termios.borrow_boxed_io(|p_old_termios|
+            FFI_CALL_IO[I32 tcgetattr(I32, Ptr), 0_I32, p_old_termios]
+        );
+        if res != 0_I32 {
+            let errmes = *get_last_error;
+            undefined("tcgetattr failed: res="+res.to_string+" errmes="+errmes)
+        };
+        let termios = Array::fill(120, 0_U8);
+        let res = *termios.borrow_boxed_io(|p_termios|
+            FFI_CALL_IO[() cfmakeraw(Ptr), p_termios];;
+            FFI_CALL_IO[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_termios]
+        );
+        if res != 0_I32 {
+            let errmes = *get_last_error;
+            undefined("tcsetattr failed: res="+res.to_string+" errmes="+errmes)
+        };
+
+        let dtor = Destructor::make(true, |alive|
+            if !alive { pure $ false };
+            // eval debug_eprintln ("destructor is called");
+            let res = *old_termios.borrow_boxed_io(|p_old_termios|
+                FFI_CALL_IO[I32 tcsetattr(I32, I32, Ptr), 0_I32, 2_I32, p_old_termios]
+            );
+            if res != 0_I32 {
+                undefined("tcsetattr failed: res="+res.to_string)
+            };
+            eprintln("finalized RawMode");;
+            pure $ false
+        );
+        eprintln("initialized RawMode");;
+        pure $ RawMode { dtor: dtor }
+    );
+
+    is_alive: RawMode -> IO Bool;
+    is_alive = |rawmode| (
+        pure $ rawmode.@dtor.borrow(|alive| alive)
+    );
+}
+
+show_help: IO ();
+show_help = (
+    println(Terminal::clear + Terminal::cursor(0,0));;
+    println(help_message);;
+    Terminal::input_keyboard.to_result;;
+    println(Terminal::clear + Terminal::cursor(0,0));;
+    pure()
+);
+
+main: IO ();
+main = (
+    Terminal::with_raw_mode $ do {
+        show_help;;
+        let board = *Board::make(60,20);
+        board.show;;
+        loop_m(
+            board, |board|
+            let ch = *Terminal::input_keyboard;
+            if ch.is_none {
+                break_m $ ()
+            };
+            let ch = ch.as_some;
+            if ch == 'q' || ch == 'Q' {
+                break_m $ ()
+            };
+            let board = *board.handle_key(ch).lift;
+            continue_m $ board
+        ).try(eprintln);;
+        println(Terminal::clear + Terminal::cursor(0,0));;
+        pure()
+    }
+);

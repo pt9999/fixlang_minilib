@@ -1,0 +1,86 @@
+module Minilib.Functor.Compose;
+
+import Minilib.Common.Common;
+import Minilib.Trait.Traversable;
+import Minilib.Trait.Applicative;
+
+type [f: * -> *, g: * -> *] Compose f g a = unbox struct {
+    data: f (g a)
+};
+
+make: [f: * -> *, g: * -> *] f (g a) -> Compose f g a;
+make = |fga| Compose { data: fga };
+
+run_compose: [f: * -> *, g: * -> *] Compose f g a -> f (g a);
+run_compose = @data;
+
+impl [f: Functor, g: Functor] Compose f g: Functor {
+    map = |h, comp| Compose::make $ comp.run_compose.map(map(h));
+}
+
+impl [f: Applicative, g: Applicative] Compose f g: Applicative {
+    pure_a: a -> Compose f g a = |a| (
+        Compose::make $ pure_a $ pure_a $ a
+    );
+    app_a: Compose f g (a -> b) -> Compose f g a -> Compose f g b = |ch, ca| (
+        Compose::make $ (
+            let fgh: f (g (a -> b)) = ch.run_compose;
+            let fgk: f (g a -> g b) = fgh.map_a(
+                |gab: g (a -> b), ga: g a| ga.app_a(gab)
+            );
+            let fga: f (g a) = ca.run_compose;
+            fga.app_a(fgk)
+        )
+    );
+}
+
+/*
+    NOTE: `Compose f g` is generally not a monad.
+    Because `bind` must be implmented such as
+    `(a -> f (g b)) -> f (g a) -> f (g b)`, but simple mapping results in
+    `f (g (f (g b))`.
+    If f and g are transposable, ie. there is a function of type `g (f x) -> f (g x)`,
+    the above can be `f (f (g (g b)))`, so `bind` can be implemented using `flatten`.
+    If g is traversable, above condition holds.
+*/
+
+impl [f: Monad, g: Monad, g: Traversable] Compose f g: Monad {
+    pure: a -> Compose f g a = |a| (
+        Compose::make $ pure $ pure $ a
+    );
+    bind: (a -> Compose f g b) -> Compose f g a -> Compose f g b = |h, comp| (
+        Compose::make $ do {
+            let fga: f (g a) = comp.run_compose;
+            let ga: g a = *fga;
+            let gfgb: g (f (g b)) = ga.bind(|a|
+                let comp_b: Compose f g b = h(a);
+                let fgb: f (g b) = comp_b.run_compose;
+                pure $ fgb
+            );
+            let fggb: f (g (g b)) = gfgb.sequence;
+            let ggb: g (g b) = *fggb;
+            let gb: g b = ggb.bind(id);
+            pure $ gb
+        }
+/*
+        Compose::make $ do {
+            let h: a -> Compose f g b = h;
+            let fga: f (g a) = comp.run_compose;
+            let fgb: f (g (f (g b))) = fga.bind(|ga: g a|
+                 let gfgb = ga.bind(|a|
+                    let comp_b: Compose f g b = h(a);
+                    let fgb: f (g b) = comp_b.run_compose;
+                    pure $ fgb
+                ) : g (f (g b));
+                pure $ gfgb
+            );
+            let fgb: f (f (g (g b))) = fgb.bind(sequence >> pure);
+            let fgb: f (g (g b)) = fgb.bind(|x|x);
+            let fgb: f (g b) = fgb.bind(bind(|x|x) >> pure);
+            fgb
+        }
+*/
+    );
+}
+
+

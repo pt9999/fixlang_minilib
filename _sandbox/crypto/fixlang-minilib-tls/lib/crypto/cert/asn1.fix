@@ -1,0 +1,252 @@
+// Abstract Syntax Notation One (ASN.1).
+//
+// For ASN.1, see below:
+// https://en.wikipedia.org/wiki/ASN.1
+module Minilib.Crypto.Cert.Asn1;
+
+import Hash;
+import HashMap;
+import Time;
+
+import Minilib.Crypto.Cert.OID;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// A type that represents ASN.1 tag class.
+type TagClass = U8;
+
+namespace TagClass {
+    tc_universal: TagClass;
+    tc_universal = 0_U8;
+
+    tc_application: TagClass;
+    tc_application = 1_U8;
+
+    tc_context_specific: TagClass;
+    tc_context_specific = 2_U8;
+
+    tc_private: TagClass;
+    tc_private = 3_U8;
+}
+
+// A type that represents ASN.1 tag number.
+type Tag = U8;
+
+namespace Tag {
+    tag_boolean: Tag;
+    tag_boolean = 1_U8;
+
+    tag_integer: Tag;
+    tag_integer = 2_U8;
+
+    tag_bit_string: Tag;
+    tag_bit_string = 3_U8;
+
+    tag_octet_string: Tag;
+    tag_octet_string = 4_U8;
+
+    tag_null: Tag;
+    tag_null = 5_U8;
+
+    tag_object_identifier: Tag;
+    tag_object_identifier = 6_U8;
+
+    tag_object_descriptor: Tag;
+    tag_object_descriptor = 7_U8;
+
+    tag_external: Tag;
+    tag_external = 8_U8;
+
+    tag_real: Tag;
+    tag_real = 9_U8;
+
+    tag_enumerated: Tag;
+    tag_enumerated = 10_U8;
+
+    tag_embedded_pdv: Tag;
+    tag_embedded_pdv = 11_U8;
+
+    tag_utf8_string: Tag;
+    tag_utf8_string = 12_U8;
+
+    tag_relative_oid: Tag;
+    tag_relative_oid = 13_U8;
+
+    tag_time: Tag;
+    tag_time = 14_U8;
+
+    tag_sequence: Tag;
+    tag_sequence = 16_U8;
+
+    tag_set: Tag;
+    tag_set = 17_U8;
+
+    tag_numeric_string: Tag;
+    tag_numeric_string = 18_U8;
+
+    tag_printable_string: Tag;
+    tag_printable_string = 19_U8;
+
+    tag_t61_string: Tag;
+    tag_t61_string = 20_U8;
+
+    tag_videotex_string: Tag;
+    tag_videotex_string = 21_U8;
+
+    tag_ia5_string: Tag;
+    tag_ia5_string = 22_U8;
+
+    tag_utc_time: Tag;
+    tag_utc_time = 23_U8;
+
+    tag_generalized_time: Tag;
+    tag_generalized_time = 24_U8;
+
+    tag_graphic_string: Tag;
+    tag_graphic_string = 25_U8;
+
+    tag_visible_string: Tag;
+    tag_visible_string = 26_U8;
+
+    tag_general_string: Tag;
+    tag_general_string = 27_U8;
+
+    tag_universal_string: Tag;
+    tag_universal_string = 28_U8;
+
+    tag_character_string: Tag;
+    tag_character_string = 29_U8;
+
+    tag_bmp_string: Tag;
+    tag_bmp_string = 30_U8;
+
+    tag_date: Tag;
+    tag_date = 31_U8;
+
+    tag_time_of_day: Tag;
+    tag_time_of_day = 32_U8;
+
+    tag_date_time: Tag;
+    tag_date_time = 33_U8;
+
+    tag_duration: Tag;
+    tag_duration = 34_U8;
+
+    tag_oid_iri: Tag;
+    tag_oid_iri = 35_U8;
+
+    tag_relative_oid_iri: Tag;
+    tag_relative_oid_iri = 36_U8;
+}
+
+type Boolean = Std::Bool;
+
+type Integer = Std::I64;
+
+type BitString = unbox struct {
+    number_of_unused_bits: U8,  // the number (0..7) of unused bits in the final subsequent octet
+    data: Array U8,             // or `Array Bool`?
+};
+
+impl BitString: Eq {
+    eq = |a, b| a.@number_of_unused_bits == b.@number_of_unused_bits && a.@data == b.@data;
+}
+
+impl BitString: ToString {
+    to_string = |obj| (
+        "BitString {" +
+        " number_of_unused_bits=" + obj.@number_of_unused_bits.to_string +
+        " data=" + obj.@data.to_string_hex +
+        " }"
+    );
+}
+
+type OctetString = unbox struct {
+    data: Array U8,
+};
+
+impl OctetString: Eq {
+    eq = |a, b| a.@data == b.@data;
+}
+
+impl OctetString: ToBytes {
+    to_bytes = @data;
+}
+
+impl OctetString: ToString {
+    to_string = |obj| (
+        "OctetString {" +
+        " data=" + obj.@data.to_string_hex +
+        " }"
+    );
+}
+
+type PrintableString = String;
+
+type UTF8String = String;
+
+type IA5String = String;
+
+type VisibleString = String;
+
+type ObjectIdentifier = unbox struct {
+    data: String,
+};
+
+impl ObjectIdentifier: Eq {
+    eq = |a, b| a.@data == b.@data;
+}
+
+impl ObjectIdentifier: Hash {
+    hash = |a| a.@data.hash;
+}
+
+impl ObjectIdentifier: ToString {
+    to_string = |obj| (
+        obj.@data
+    );
+}
+
+namespace ObjectIdentifier {
+    to_string_with_name: ObjectIdentifier -> String;
+    to_string_with_name = |obj| (
+        let oid_str = obj.to_string;
+        let opt_name = OID::oid_to_name.find(oid_str);
+        oid_str + opt_name.map_or("", |name| "(" + name + ")")
+    );
+
+    get_name: ObjectIdentifier -> Option String;
+    get_name = |obj| (
+        let oid_str = obj.to_string;
+        OID::oid_to_name.find(oid_str)
+    );
+
+    to_string_ldap: ObjectIdentifier -> String;
+    to_string_ldap = |obj| (
+        let oid_str = obj.to_string;
+        let opt_ldap = OID::oid_to_ldap.find(oid_str);
+        if opt_ldap.is_none { obj.to_string_with_name };
+        opt_ldap.as_some
+    );
+
+    match_name: String -> ObjectIdentifier -> Bool;
+    match_name = |name, obj| (
+        let expected: Option String = OID::name_to_oid.find(name);
+        let actual: Option String = some $ obj.to_string;
+        expected == actual
+    );
+}
+
+/*
+namespace ObjectIdentifier {
+    make: Array I64 -> ObjectIdentifier;
+    make = |components| ObjectIdentifier {
+        components: components
+    };
+
+    append: Array I64 -> ObjectIdentifier -> ObjectIdentifier;
+    append = |tail, oid| ObjectIdentifier {
+        components: oid.@components.append(tail)
+    };
+}
+*/

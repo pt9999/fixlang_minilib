@@ -1,0 +1,59 @@
+module Minilib.Monad.FreeT;
+
+import Minilib.Monad.Iden;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+
+// Free Monad
+//
+// `FreeT f m a` is a union which has three variants.
+// 1. Pure value of `a`, which represents the final result
+// 2. Monad value of `FreeT f m a`, which represents an action with possible side effects
+// 3. Functor value of `FreeT f m a`, which represents a functional operation
+//
+// For details of free monad, see following pages:
+// https://www.haskellforall.com/2012/06/you-could-have-invented-free-monads.html
+// https://eed3si9n.com/herding-cats/ja/Free-monads.html
+type [f: *->*, m: *->*] FreeT f m a = box union {
+    f_pure: a,
+    f_monad: m (FreeT f m a),
+    f_functor: f (FreeT f m a),
+};
+
+type [f: *->*] Free f = FreeT f Iden;
+
+lift_f: [f: Functor, m: Monad] f a -> FreeT f m a;
+lift_f = |command| f_functor $ command.map(f_pure);
+
+impl [f: Functor, m: Monad] FreeT f m: Functor {
+    map = |g, ma| (
+        match ma {
+            f_pure(value) => f_pure(g(value)),
+            f_monad(ma) => f_monad(ma.bind(g >> pure)),
+            f_functor(fma) => f_functor(fma.map(map(g))),
+        }
+    );
+}
+
+impl [f: Functor, m: Monad] FreeT f m: Monad {
+    pure = f_pure;
+    bind = |g, ma| (
+        match ma {
+            f_pure(value) => g(value),
+            f_monad(ma) => f_monad(ma.bind(bind(g) >> pure)),
+            f_functor(fma) => f_functor(fma.map(bind(g))),
+        }
+    );
+}
+
+impl [f: Functor] FreeT f: MonadTrans {
+    lift_t = |ma| f_monad(ma.bind(pure >> pure));
+}
+
+impl [f: Functor, m: MonadIO] FreeT f m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [f: Functor, m: MonadIOFail] FreeT f m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
+}

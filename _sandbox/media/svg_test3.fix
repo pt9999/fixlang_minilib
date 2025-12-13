@@ -1,0 +1,159 @@
+// A fractal like a Cayley graph
+module Main;
+
+import Math;
+
+import Minilib.Common.Assert;
+import Minilib.Encoding.Xml;
+import Minilib.Monad.State;
+import Minilib.Media.Svg;
+import Minilib.Trait.Traversable;
+
+type Point = (F64, F64);
+type Segment = (Point, Point);
+type Segments = Array Segment;
+
+type BBox = (F64, F64, F64, F64);   // minx, miny, maxx, maxy
+
+namespace BBox {
+    empty: BBox;
+    empty = (0.0, 0.0, 0.0, 0.0);
+
+    add_point: Point -> BBox -> BBox;
+    add_point = |p, bbox| (
+        (
+            min(bbox.@0, p.@0),
+            min(bbox.@1, p.@1),
+            max(bbox.@2, p.@0),
+            max(bbox.@3, p.@1)
+        )
+    );
+
+    add_segment: Segment -> BBox -> BBox;
+    add_segment = |seg, bbox| (
+        bbox.add_point(seg.@0).add_point(seg.@1)
+    );
+
+    add_margin: F64 -> BBox -> BBox;
+    add_margin = |margin, bbox| (
+         (bbox.@0 - margin, bbox.@1 - margin, bbox.@2 + margin, bbox.@3 + margin)
+    );
+}
+
+type GraphParam = unbox struct {
+    max_level: I64,
+    num_directions: I64,
+    base_size: F64,
+    scale: F64,
+};
+
+namespace GraphParam {
+    default: GraphParam;
+    default = GraphParam {
+        max_level: 5,
+        num_directions: 4,
+        base_size: 20.0,
+        scale: 0.48,
+    };
+}
+
+type Graph = unbox struct {
+    param: GraphParam,
+    pathdata: Svg::PathData,
+    bbox: BBox,
+};
+
+namespace Graph {
+
+    make: GraphParam -> Graph;
+    make = |param| (
+        let graph = Graph {
+            param: param,
+            pathdata: Svg::PathData::newpath,
+            bbox: BBox::empty,
+        };
+
+        graph.exec_state $
+        Iterator::range(0, param.@num_directions).to_dyn.foreach_m(|dir|
+            let p = (0.0, 0.0);
+            let level = 0;
+            _make_descendants(p, level, dir)
+        )
+    );
+
+    type GraphState a = State Graph a;
+
+    _get_param: GraphState GraphParam;
+    _get_param = get_state.map(@param);
+
+    _add_segment: Segment -> GraphState ();
+    _add_segment = |(p, q)| (
+        State::mod_state(|graph|
+            graph.mod_pathdata(|pathdata|
+                pathdata.moveto(p.@0, p.@1).lineto(q.@0, q.@1)
+            )
+            .mod_bbox(add_segment((p, q)))
+        )
+    );
+
+    _make_descendants: Point -> I64 -> I64 -> GraphState ();
+    _make_descendants = |p, level, dir| (
+        let param = *_get_param;
+        if level >= param.@max_level { pure() };
+        let q = *_make_child(p, level, dir);
+        _add_segment((p, q));;
+        Iterator::range(0, param.@num_directions).to_dyn.foreach_m(|d|
+            let n = param.@num_directions;
+            if (d - dir + n) % n == n / 2 { pure() };
+            _make_descendants(q, level + 1, d)
+        )
+    );
+
+    _make_child: Point -> I64 -> I64 -> GraphState Point;
+    _make_child = |p, level, dir| (
+        let param = *_get_param;
+        let r = param.@base_size * param.@scale.pow(level.to_F64);
+        let th = 2.0 * Math::pi64 * dir.to_F64 / param.@num_directions.to_F64;
+        let q = (p.@0 + r * cos(th), p.@1 + r * sin(th));
+        pure $ q
+    );
+}
+
+segment_path: Segment -> XmlElement;
+segment_path = |(p, q)| (
+    path(
+        newpath
+        .moveto(p.@0, p.@1)
+        .lineto(q.@0, q.@1)
+    ).stroke("black")
+);
+
+point_circle: F64 -> Point -> XmlElement;
+point_circle = |r, p| (
+    circle(p.@0, p.@1, r)
+    .Svg::fill("black")
+);
+
+figure1: XmlElement;
+figure1 = (
+    let graph = Graph::make(GraphParam::default);
+    let group = Svg::group
+        .stroke("black")
+        .stroke_width(0.1)
+        .Svg::fill("transparent");
+    let group = group.add(Svg::path(graph.@pathdata));
+    let bbox = graph.@bbox.add_margin(2.0);
+    Svg::svg(600, 600).view_box(bbox.@0, bbox.@1, bbox.@2 - bbox.@0, bbox.@3 - bbox.@1).add(group)
+);
+
+main: IO ();
+main = (
+    do {
+        let svg = figure1;
+        let filepath = "tmp.svg";
+        svg.write_file(filepath);;
+        eprintln("Wrote " + filepath).lift;;
+        pure()
+    }
+    .try(eprintln)
+);

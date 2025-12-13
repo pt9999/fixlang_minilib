@@ -1,0 +1,96 @@
+module Minilib.Monad.Pipe;
+
+// Similar to `Pipe` monad in Haskell.
+// https://hackage.haskell.org/package/pipes-1.0/docs/Control-Pipe-Common.html
+
+type Pipe a b r = box union {
+    p_pure: r,
+    p_read: a -> Pipe a b r,
+    p_write: (b, () -> Pipe a b r),
+};
+
+// A data type which has no instances (uninhabited).
+type Void = box union {
+    _void: Void
+};
+
+namespace Pipe {
+    from_iter: [iter: Iterator, Item iter = a] iter -> Pipe Void a ();
+    from_iter = |iter| (
+        match iter.advance {
+            none() => p_pure $ (),
+            some((next, a)) => p_write $ (a, |_| from_iter(next))
+        }
+    );
+
+    to_iter: Pipe a b () -> DynIterator b;
+    to_iter = |pipe| (
+        match pipe {
+            p_pure() => Iterator::empty.to_dyn,
+            p_read(fa) => Iterator::empty.to_dyn,      // no more input
+            p_write((b, next)) => DynIterator { next: |_| some $ (next().to_iter, b) },
+        }
+    );
+
+    read: Pipe a b a;
+    read = p_read $ p_pure;
+
+    write: b -> Pipe a b ();
+    write = |b| p_write $ (b, |_| p_pure());
+
+    compose: Pipe a b () -> Pipe b c () -> Pipe a c ();
+    compose = |pab, pbc| (
+        match pbc {
+            p_pure() => p_pure(),
+            p_write((c, next)) => p_write((c, |_| compose(pab, next()))),
+            p_read(fb) => match pab {
+                p_pure() => p_pure(),   // no more input
+                p_write((b, next)) => (
+                    let pbc = fb(b);
+                    let pab = next();
+                    compose(pab, pbc)
+                ),
+                p_read(fa) => p_read(|a|
+                    let pab = fa(a);
+                    compose(pab, pbc)
+                ),
+            }
+        }
+    );
+
+    // Flipped version of `compose`.
+    composeF: Pipe b c () -> Pipe a b () -> Pipe a c ();
+    composeF = |pbc, pab| compose(pab, pbc);
+}
+
+impl [b: ToString, r: ToString] Pipe a b r: ToString {
+    to_string = |pipe| (
+        match pipe {
+            p_pure(r) => "p_pure(" + r.to_string + ")",
+            p_read(fa) => "p_read(...)",
+            p_write((b, next)) => "p_write((" + b.to_string + ", ...))",
+        }
+    );
+}
+
+impl Pipe a b: Functor {
+    map = |f, pipe| (
+        match pipe {
+            p_pure(r) => p_pure(f(r)),
+            p_read(fa) => p_read(fa >> map(f)),
+            p_write((b, next)) => p_write((b, next >> map(f))),
+        }
+    );
+}
+
+//impl Pipe a b: Monad {
+impl Pipe a c: Monad {
+    pure = p_pure;
+    bind = |f, pipe| (
+        match pipe {
+            p_pure(r) => f(r),
+            p_read(fa) => p_read(fa >> bind(f)),
+            p_write((b, next)) => p_write((b, next >> bind(f))),
+        }
+    );
+}

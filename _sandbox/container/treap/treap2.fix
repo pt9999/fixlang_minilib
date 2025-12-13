@@ -1,0 +1,284 @@
+module Minilib.Collection.Treap2;
+
+import Minilib.Common.Common;
+import Minilib.Text.StringEx;
+
+trait kc : KeyCompare {
+    type Key kc;
+    // Returns false iff the first key should appear after the second key.
+    compare : Key kc -> Key kc -> kc -> Bool;
+}
+
+type KeyLessThan k = unbox struct {};
+
+impl [k: LessThan] KeyLessThan k: KeyCompare {
+    type Key (KeyLessThan k) = k;
+    compare = |x, y, kc| x < y;
+}
+
+type KeyLessThanOrEq k = unbox struct {};
+
+impl [k: LessThanOrEq] KeyLessThanOrEq k: KeyCompare {
+    type Key (KeyLessThanOrEq k) = k;
+    compare = |x, y, kc| x <= y;
+}
+
+type KeyGreaterThan k = unbox struct {};
+
+impl [k: LessThan] KeyGreaterThan k: KeyCompare {
+    type Key (KeyGreaterThan k) = k;
+    compare = |x, y, kc| y < x;
+}
+
+// The priority type. (used internally)
+type Priority = U64;
+
+// The type of treap nodes.
+type TNode k = box struct {
+    prio: Priority, 
+    key: k, 
+    left: Option (TNode k),
+    right: Option (TNode k),
+};
+
+type TNodeOpt k = Option (TNode k);
+
+// The type of Treap.
+type Treap kc k = box struct {
+    root_opt: TNodeOpt k,
+    kc: kc,
+    size: I64,
+    seed: Priority,
+};
+
+namespace Treap {
+    empty: [k: LessThan] Treap (KeyLessThan k) k;
+    empty = (
+        Treap::make(KeyLessThan{})
+    );
+
+    make: [kc: KeyCompare, Key kc = k] kc -> Treap kc k;
+    make = |kc| Treap {
+        root_opt: none(),
+        kc: kc,
+        size: 0,
+        seed: 0x0123456789abcdef_U64,
+    };
+
+    _generate_random_priority: Treap kc k -> (Treap kc k, Priority);
+    _generate_random_priority = |treap| (
+        treap.act_seed(|x|
+            // generate random number using XORSHIFT
+            let x = x.bit_xor(x.shift_left(13_U64));
+            let x = x.bit_xor(x.shift_right(7_U64));
+            let x = x.bit_xor(x.shift_left(17_U64));
+            (x, x)
+        ).swap
+    );
+
+    get_size: Treap kc k -> I64;
+    get_size = @size;
+
+    insert: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
+    insert = |key, treap| (
+        let (treap, prio) = treap._generate_random_priority;
+        let kc = treap.@kc;
+        let (dsize, treap) = treap.act_root_opt(|root_opt| 
+            _insert(prio, key, kc, root_opt)
+            .map(some)
+        );
+        treap.mod_size(add(dsize))
+    );
+
+    _insert: [kc: KeyCompare, Key kc = k] Priority -> k -> kc -> TNodeOpt k -> (I64, TNode k);
+    _insert = |new_prio, new_key, kc, node_opt| (
+        if node_opt.is_none {
+            let new_node = TNode { prio:new_prio, key:new_key, left:none(), right:none() };
+            (1, new_node)
+        };
+        let node = node_opt.as_some;
+        if kc.compare(node.@key, new_key) { // node_key < new_key
+            let (dsize, up) = _insert(new_prio, new_key, kc, node.@right);
+            if node.@prio < up.@prio {
+                let up = up.mod_left(|left| some $ node.set_right(left));
+                (dsize, up)
+            } else {
+                let node = node.set_right(some $ up);
+                (dsize, node)
+            }
+        } else if kc.compare(new_key, node.@key) { // new_key < node_key
+            let (dsize, up) = _insert(new_prio, new_key, kc, node.@left);
+            if node.@prio < up.@prio {
+                let up = up.mod_right(|right| some $ node.set_left(right));
+                (dsize, up)
+            } else {
+                let node = node.set_left(some $ up);
+                (dsize, node)
+            }
+        } else {    // replace key
+            let node = node.set_key(new_key);
+            (0, node)
+        }
+    );
+
+    remove: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Treap kc k;
+    remove = |key, treap| (
+        let root_opt = treap.@root_opt;
+        let treap = treap.set_root_opt(none());
+        let kc = treap.@kc;
+        let (dsize, root_opt) = _remove(key, kc, root_opt);
+        treap.set_root_opt(root_opt).mod_size(add(dsize))
+    );
+
+    _remove: [kc: KeyCompare, Key kc = k] k -> kc -> TNodeOpt k -> (I64, TNodeOpt k);
+    _remove = |key, kc, node_opt| (
+        if node_opt.is_none { (0, none()) };
+        let node = node_opt.as_some;
+        if kc.compare(node.@key, key) { // node_key < key
+            node.act_right(|right| _remove(key, kc, right)).map(some)
+        } else if kc.compare(key, node.@key) { // key < node_key
+            node.act_left(|left| _remove(key, kc, left)).map(some)
+        } else {    // remove this node
+            let node_opt = _join(node.@left, node.@right);
+            (-1, node_opt)
+        }
+    );
+
+    _join: TNodeOpt k -> TNodeOpt k -> TNodeOpt k;
+    _join = |left_opt, right_opt| (
+        if left_opt.is_none { right_opt };
+        if right_opt.is_none { left_opt };
+        let left = left_opt.as_some;
+        let right = right_opt.as_some;
+        if left.@prio >= right.@prio {
+            some $ left.set_right(_join(left.@right, right_opt))
+        } else {
+            some $ right.set_left(_join(left_opt, right.@left))
+        }
+    );
+
+    to_array: Treap kc k -> Array k;
+    to_array = |treap| (
+        let inner = fix $ |inner, node_opt, arr| (
+            if node_opt.is_none { arr };
+            let node = node_opt.as_some;
+            let arr = inner(node.@left, arr);
+            let arr = arr.push_back(node.@key);
+            let arr = inner(node.@right, arr);
+            arr
+        );
+        inner(treap.@root_opt, [])
+    );
+
+    type TreapIterator k = unbox struct {
+        lt_begin: k -> Bool,
+        lt_end: k -> Bool,
+        descending: Bool,
+        stack: Array (Result k (TNodeOpt k)),  // ok: node, err: k
+    };
+
+    impl TreapIterator k : Iterator {
+        type Item (TreapIterator k) = k;
+        advance = |TreapIterator { lt_begin:lt_begin, lt_end:lt_end, descending:descending, stack:stack }| (
+            loop(
+                stack, |stack|
+                if stack.is_empty { break $ none() };
+                let res = stack.@(stack.get_size - 1);
+                let stack = stack.pop_back;
+                match res {
+                    err(elem) => (
+                        break $ some((TreapIterator { lt_begin:lt_begin, lt_end:lt_end, descending:descending, stack:stack }, elem))
+                    ),
+                    ok(node_opt) => (
+                        if node_opt.is_none { continue $ stack };
+                        let node = node_opt.as_some;
+                        let elem = node.@key;
+                        let stack = if elem.lt_begin {         // elem < begin
+                            stack.push_back(ok $ node.@right)
+                        } else if elem.lt_end {    // begin <= elem && elem < end
+                            if descending {
+                                stack.push_back(ok $ node.@left)
+                                .push_back(err $ elem)
+                                .push_back(ok $ node.@right)
+                            } else {
+                                stack.push_back(ok $ node.@right)
+                                .push_back(err $ elem)
+                                .push_back(ok $ node.@left)
+                            }
+                        } else {                    // end <= elem
+                            stack.push_back(ok $ node.@left)
+                        };
+                        continue $ stack
+                    ),
+                }
+            )
+        );
+    }
+
+    // `treap.find_range(lt_begin, lt_end)` finds all elements `elem`
+    // such that `!elem.lt_begin && elem.lt_end` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    find_range: (k -> Bool) -> (k -> Bool) -> Treap kc k -> TreapIterator k;
+    find_range = |lt_begin, lt_end, treap| (
+        TreapIterator {
+            lt_begin: lt_begin,
+            lt_end: lt_end,
+            descending: false,
+            stack: [ok $ treap.@root_opt]
+        }
+    );
+
+    // `treap.find_range_descending(lt_begin, lt_end)` finds all elements `elem`
+    // such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    find_range_descending: (k -> Bool) -> (k -> Bool) -> Treap kc k -> TreapIterator k;
+    find_range_descending = |lt_begin, lt_end, treap| (
+        TreapIterator {
+            lt_begin: lt_begin,
+            lt_end: lt_end,
+            descending: true,
+            stack: [ok $ treap.@root_opt]
+        }
+    );
+
+    to_iter: Treap kc k -> TreapIterator k;
+    to_iter = |treap| (
+        treap.find_range(|_| false, |_| true)
+    );
+
+    to_iter_descending: Treap kc k -> TreapIterator k;
+    to_iter_descending = |treap| (
+        treap.find_range_descending(|_| false, |_| true)
+    );
+
+    contains: [kc: KeyCompare, Key kc = k] k -> Treap kc k -> Bool;
+    contains = |key, treap| (
+        let kc = treap.@kc;
+        let iter = treap.find_range(|x| kc.compare(x, key), |x| !kc.compare(key, x));
+        ! iter.is_empty
+    );
+
+    _debug_to_string: [k: ToString] Treap kc k -> String;
+    _debug_to_string = |treap| (
+        let inner = fix $ |inner, indent, node_opt, str: String| (
+            if node_opt.is_none { str };
+            let node = node_opt.as_some;
+            let s_indent = Array::fill(indent, ' ')._unsafe_to_string;
+            let str: String = inner(indent + 2, node.@left, str);
+            let str: String = str + s_indent + (node.@prio, node.@key).format("prio={} key={}\n");
+            let str: String = inner(indent + 2, node.@right, str);
+            str
+        );
+        inner(0, treap.@root_opt, "")
+    );
+
+    from_iter: [k: LessThan, i: Iterator, Item i = k] i -> Treap (KeyLessThan k) k;
+    from_iter = |iter| (
+        iter.fold(
+            Treap::empty, insert
+        )
+    );
+}
+

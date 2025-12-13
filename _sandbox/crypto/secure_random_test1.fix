@@ -1,0 +1,98 @@
+module Main;
+
+import Minilib.Common.Assert;
+import Minilib.Crypto.SHA256;
+import Minilib.Crypto.SecureRandom;
+/*
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+*/
+import Minilib.Trait.Traversable;
+import Minilib.Text.Hex;
+
+type LessSecureRandom = unbox struct {
+    state: Array U8,
+    digest: Array U8
+};
+
+namespace LessSecureRandom {
+    _STATE_SIZE: I64;
+    _STATE_SIZE = 56;
+
+    init_with_state: Array U8 -> LessSecureRandom;
+    init_with_state = |state| (
+        assert_lazy(|_| "invalid state size", state.get_size == _STATE_SIZE) $ |_|
+        LessSecureRandom {
+            state: state,
+            digest: []
+        }
+    );
+
+    generate_bytes: I64 -> LessSecureRandom -> (Array U8, LessSecureRandom);
+    generate_bytes = |size, sr| (
+        assert_lazy(|_| "invalid size", size >= 0) $ |_|
+        if sr.@digest.get_size <= size {
+            sr._generate_digest.generate_bytes(size)
+        };
+        let bytes = sr.@digest.get_sub(0, size);
+        let sr = sr.mod_digest(get_sub(size, sr.@digest.get_size));
+        (bytes, sr)
+    );
+
+    _generate_digest: LessSecureRandom -> LessSecureRandom;
+    _generate_digest = |sr| (
+        let digest = SHA256::digest(sr.@state);
+        let sr = sr.mod_state(_increment_state(0));
+        let sr = sr.mod_digest(append(digest));
+        sr
+    );
+
+    _increment_state: I64 -> Array U8 -> Array U8;
+    _increment_state = |i, state| (
+        if i >= state.get_size { state };
+        if state.@(i) == 255_U8 {
+            state.mod(i, add(1_U8))._increment_state(i + 1)
+        } else {
+            state.mod(i, add(1_U8))
+        }
+    );
+}
+
+/*
+test_inc: IO ();
+test_inc = (
+    let state = [0_U8, 0_U8];
+    let state = *Iterator::range(0, 1000).fold_m(
+        state, |state, i|
+        let state = state._increment_state(1);
+        print(state.to_string_hex + " ");;
+        pure $ state
+    );
+    println("")
+);
+*/
+
+test1: IO ();
+test1 = do {
+    let sr = *SecureRandom::make;
+    let (sr, bytes) = *sr.generate_bytes(256);
+    println(bytes.to_string_hex).lift
+}.try(eprintln);
+
+/*
+test2: IO ();
+test2 = do {
+    let sr = *SecureRandom::make;
+    let print_line: StateT SecureRandom IOFail () = do {
+        let bytes = *make_state_t_monad(generate_bytes(40));
+        println(bytes.to_string_hex).lift_io
+    };
+    let print_lines = Iterator::range(0, 20).foreach_m(|i| print_line);
+    print_lines.eval_state_t(sr)
+}.try(eprintln);
+*/
+
+main: IO ();
+main = test1;
+

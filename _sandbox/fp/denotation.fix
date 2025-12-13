@@ -1,0 +1,149 @@
+// https://okmij.org/ftp/Computation/having-effect.html
+
+module Main;
+
+
+// 1. Unstable Denotations, Brittle Interpreters, Hard-to-apply Theory
+
+type Expr = box union {
+    eint: I64,
+    einc: (),
+    eapp: (Expr, Expr)
+};
+
+tinc: Expr;
+tinc = eapp $ (einc(), eapp $ (einc(), eint(2)));
+
+type Dom = unbox union {
+    derror: (),
+    dint: I64,
+    dbool: Bool,
+    dfun: Dom -> Dom,
+};
+
+eeval: Expr -> Dom;
+eeval = |ex| (
+    //eval debug_eprintln("eeval");
+    match ex {
+        eint(value) => dint(value),
+        einc(()) => dfun(|x| match x {
+            dint(value) => dint(value + 1),
+            _ => derror()
+        }),
+        eapp((e1, e2)) => (
+            match eeval(e1) {
+                dfun(f) => f(eeval(e2)),
+                _ => derror()
+            }
+        )
+    }
+);
+
+test_unstable: IO ();
+test_unstable = (
+    println("--- test_unstable ---");;
+    match eeval(tinc) {
+        dint(value) => println("tinc=" + value.to_string),
+        _ => println("tinc=other"),
+    }
+);
+
+//-------------------------------------
+// Extensible interpreters
+trait d: EBasic {
+    int: I64 -> d;
+    inc: d;
+    app: d -> d -> d;
+}
+
+trait d: ECond {
+    eq: d;
+    if_: d -> d -> d -> d;
+}
+
+//----------------------------------------------------------------
+// 3. Stable Denotations, Extensible Effects
+
+type Comp = unbox union {
+    done: DomC,
+    req: (ReqT, DomC -> Comp)
+};
+
+impl Comp: ToString {
+    to_string = |obj| (
+        match obj {
+            done(value) => "done(" + value.to_string + ")",
+            req((reqt, f)) => "req((" + reqt.to_string + ", ...))",
+        }
+    );
+}
+
+type DomC = unbox union {
+    dcint: I64,
+    dcbool: Bool,
+    dcfun: DomC -> Comp
+};
+
+impl DomC: ToString {
+    to_string = |obj| (
+        match obj {
+            dcint(value) => "dcint(" + value.to_string + ")",
+            dcbool(value) => "dcbool(" + value.to_string + ")",
+            dcfun(f) => "dcfun(...)",
+        }
+    );
+}
+
+type ReqT = unbox union {
+    reqerror: (),
+};
+
+impl ReqT: ToString {
+    to_string = |obj| (
+        match obj {
+            reqerror(err) => "reqerror()",
+        }
+    );
+}
+
+cerr: Comp;
+cerr = req $ (reqerror(), |_| cerr);
+
+impl Comp: EBasic {
+    int = done << dcint;
+    inc = done << dcfun $ |x| (
+        match x {
+            dcint(value) => int(value + 1),
+            _ => cerr
+        }
+    );
+    app = |e1, e2| (
+        match e1 {
+            req((r, k)) => req $ (r, |x| app(k(x), e2)),
+            done(d1) => match e2 {
+                req((r, k)) => req $ (r, |x| app(e1, k(x))),
+                done(d2) => match d1 {
+                    dcfun(f) => f(d2),
+                    _ => cerr
+                }
+            }
+        }
+    );
+}
+
+ttinc: [d: EBasic] d;
+ttinc = int(2).app(inc).app(inc);
+
+test_stable: IO ();
+test_stable = (
+    println("--- test_stable ---");;
+    println("ttinc=" + (ttinc: Comp).to_string)
+);
+
+main: IO ();
+main = (
+    test_unstable;;
+    test_stable;;
+    pure()
+);
+

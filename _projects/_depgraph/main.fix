@@ -1,0 +1,115 @@
+module Main;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Text.StringEx;
+import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
+
+import DepGraph;
+
+// Application
+type App = unbox struct {
+    projects: Array String,
+    graph: DepGraph,
+    proj_name: String,
+    section: String,
+};
+
+namespace App {
+    empty: App;
+    empty = App {
+        projects: [],
+        graph: DepGraph::empty,
+        proj_name: "",
+        section: "",
+    };
+
+    read_deps_from_base_dir: String -> App -> IOFail App;
+    read_deps_from_base_dir = |base_dir, app| (
+        let files = *list_dir(base_dir);
+        files.to_iter.fold_m(
+            app, |file, app|
+            if !file.starts_with("fixlang-minilib-") {
+                pure $ app
+            };
+            let proj_dir = Path::join_paths([base_dir, file]);
+            app.read_deps_from_project_dir(proj_dir)
+            .catch(|err|
+                eprintln("WARNING: " + err).lift;;
+                pure $ app
+            )
+        )
+    );
+
+    read_deps_from_project_dir: String -> App -> IOFail App;
+    read_deps_from_project_dir = |proj_dir, app| (
+        let proj_file = Path::join_paths([proj_dir, "fixproj.toml"]);
+        let contents = *read_file_string(proj_file);
+        let app = app.set_proj_name("").set_section("");
+        contents.split("\n").loop_iter_m(
+            app, |line, app|
+            let line = line.strip_spaces;
+            if line.starts_with("[") {
+                let app = app.set_section(line);
+                continue_m $ app
+            };
+            let (key, value) = line.split_first("=");
+            let key = key.strip_spaces;
+            let value = value.strip_spaces;
+            if key == "name" {
+                let value = value.strip_first_bytes(|c| c == 0x22_U8).strip_last_bytes(|c| c == 0x22_U8);
+                if app.@section == "[general]" {
+                    let proj_name = value;
+                    let app = app.mod_projects(push_back(proj_name));
+                    let app = app.set_proj_name(proj_name);
+                    continue_m $ app
+                };
+                if app.@section == "[[dependencies]]" {
+                    let app = app.mod_graph(add(app.@proj_name, value));
+                    continue_m $ app
+                };
+                continue_m $ app
+            };
+            continue_m $ app
+       )
+    );
+
+    cleanup_dependencies: App -> App;
+    cleanup_dependencies = |app| (
+        let app = app.mod_graph(transitive_reduction); // Remove redundant dependencies
+        app
+    );
+
+    write_dependency_graph: App -> IOFail ();
+    write_dependency_graph = |app| (
+        let output_file = "tmp.dot";
+        with_file(output_file, "w", |fh|
+            let write = |line| write_string(fh, line + "\n");
+            write("digraph \"deps\" {");;
+            write("rankdir=TB;");;
+            write("node [shape=box, style=filled];");;
+            app.@projects.to_iter.to_dyn.foreach_m(|proj_name|
+                write((proj_name, ).format("\"{}\" [fillcolor=\"#ccffff\"];"))
+            );;
+            app.@graph.to_iter.foreach_m(|(parent, child)|
+                write((parent, child).format("\"{}\" -> \"{}\" [];"))
+            );;
+            write("}");;
+            pure()
+        );;
+        println("Wrote " + output_file).lift
+    );
+}
+
+main: IO ();
+main = do {
+    let app = App::empty;
+    let app = *app.read_deps_from_base_dir("..");
+    let app = app.cleanup_dependencies;
+    app.write_dependency_graph;;
+    pure()
+}.try(eprintln);
+
+
+

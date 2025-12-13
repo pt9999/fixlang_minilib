@@ -1,0 +1,66 @@
+module Main;
+
+
+import Minilib.Common.DebugLog;
+import Minilib.App.Clap;
+import Minilib.Net.Tcp;
+import Minilib.Text.StringEx;
+import Minilib.Net.URL;
+import Minilib.Net.HttpClient.ResponseParser;
+
+http_fetch: URL -> IOFail ();
+http_fetch = |url| (
+    if url.@scheme != "http" {
+        throw $ "url does not start with 'http://': url=" + url.@url
+    };
+    let host_port = url.@host + ":" + url.@port;
+    let path = url.@path;
+    //println("host_port = " + host_port).lift;;
+    //println("path = " + path).lift;;
+    let socket = *connect_to_tcp_server(host_port);
+    let request = "GET " + path + " HTTP/1.0\n\n";
+    let request = request.get_bytes.pop_back;
+    let (start, end) = (0, request.get_size);
+    eval *loop_m(
+        start, |start|
+        if start >= end  { break_m $ () };
+        let len = *socket.send(request.get_sub(start, end));
+        continue_m $ start + len
+    );
+    let parser = *loop_m(
+        ResponseParser::empty, |parser|
+        let recv_bytes = *socket.recv(4096);
+        eval log_debug("received " + recv_bytes.get_size.to_string + " bytes");
+        if recv_bytes.get_size == 0 {
+            let parser = *parser.end_data.from_result;
+            break_m $ parser
+        };
+        let parser = *parser.add_data(recv_bytes).from_result;
+        if parser.@state.is_completed {
+            break_m $ parser
+        };
+        continue_m $ parser
+    );
+    print(parser.@response.@body._unsafe_to_string).lift;;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+        let command = (
+            Command::new("sample_client")
+            .version("0.1")
+            .about("Fetches contents from remote HTTP server.")
+            .arg(Arg::new("URL").takes_value.default_value("http://localhost")
+                .help("The URL to fetch. NOTE: URL should start with 'http://'."))
+        );
+        let matches = *command.get_matches;
+        let url = matches.get_one("URL").as_some;
+        //println("url = " + url).lift;;
+        let url = *URL::parse(url).from_result;
+        http_fetch(url)
+    }.try (
+        |err| eprintln(err)
+    )
+);

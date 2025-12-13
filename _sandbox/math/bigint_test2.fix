@@ -1,0 +1,223 @@
+module Main;
+
+import Random;
+
+import Minilib.Common.Assert;
+import Minilib.Math.BigNat;
+import Minilib.Math.BigInt;
+//import Minilib.Math.BigIntPrime;
+import Minilib.Math.Types;
+import Minilib.Monad.Random;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+import Minilib.Common.TimeEx;
+import Minilib.Text.Hex;
+
+
+namespace DivMod1 {
+    _divmod1: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod1 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
+        if b.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a, b.@(0));
+            (quo, [rem])
+        };
+        let (quo, rem, rem_sign) = loop(
+            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
+            let an = a.get_size;
+            let bn = b.get_size;
+            if an < bn {
+                break $ (quo, a, a_sign)
+            };
+            let (q, qoff) = if an == bn {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 1) - (bn - 1);
+                (q, qoff)
+            } else {
+                let b0 = b.@(bn - 1).to_U64;
+                let a0 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                let (q1, q0) = _divmod_base(a0 / b0);
+                let q = [q0.to_U32, q1.to_U32];
+                let qoff = (an - 2) - (bn - 1);
+                (q, qoff)
+            };
+            let ((rem, rem_off), rem_sign) = _signed_sub_with_offset((a,0), (_mul(b, q), qoff));
+            // rem_off == 0
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 {
+                _add_with_offset1(quo, (q, qoff))
+            } else {
+                let ((quo, qoffset), sign) = _signed_sub_with_offset((quo, 0), (q, qoff));
+                assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
+                quo
+            };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue $ (quo, rem, rem_sign)
+        );
+        if rem_sign > 0 || rem == BigNat::_zero {
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        }
+    );
+
+}
+
+namespace DivMod5 {
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod5: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod5 = BigNat::_divmod;
+}
+
+test_divmod5: IO ();
+test_divmod5 = (
+    println("=== test_divmod5 ===");;
+    let random = Random::init_by_seed(124_U64); // time.to_U64);
+    //let bits = 256;
+    let bits = 512;
+    loop_m(
+        0, |i|
+        if i >= 10 { break_m $ () };
+        let a = *generate_bigint(2*bits);
+        //let b = *generate_bigint(bits);
+        // _divmod1 was very slow when (b.bit_length % 32) is too small
+        let b = *generate_bigint(bits + 1);
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| _divmod1(a.@nat, b.@nat)).lift_io;
+        let (quo5, rem5) = *timeit("(quo5, rem5)", |_| _divmod5(a.@nat, b.@nat)).lift_io;
+        assert_equal("quo", quo1, quo5).lift_iofail;;
+        assert_equal("rem", rem1, rem5).lift_iofail;;
+        assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo5), rem5)).lift_iofail;;
+        assert_true("rem < b", _cmp((rem5,0), (b.@nat,0)) < 0).lift_iofail;;
+        continue_m $ (i + 1)
+    )
+    .eval_state_t(random)
+    .try(eprintln)
+);
+
+test_divmod_spec: (Array U32 -> Array U32 -> (Array U32, Array U32)) -> IO ();
+test_divmod_spec = |divmod| (
+    do {
+        let test: BigInt -> BigInt -> IOFail () = |a, b| (
+            eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
+            let (quo, rem) = divmod(a.@nat, b.@nat);
+            assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo), rem));;
+            assert_true("rem < b", _cmp((rem,0), (b.@nat,0)) < 0);;
+            eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
+            pure()
+        );
+        let bit_lengths = [1, 2, 16, 31, 32, 33, 48, 63, 64, 65, 95, 96, 97];
+        let base_nums = |seed:U64, n:I64| [
+                one.BigInt::shift_left(n.to_U64),
+                one.BigInt::shift_left(n.to_U64) + one,
+                one.BigInt::shift_left(n.to_U64) - one,
+                (
+                    let random = Random::init_by_seed(seed + (n * 1000).to_U64);
+                    let a = generate_bigint(n).eval_state(random);
+                    a
+                )
+        ];
+        let arr: Array (IOFail ()) = do {
+            let a: BigInt = *base_nums(123_U64, *bit_lengths);
+            let b: BigInt = *base_nums(234_U64, *bit_lengths);
+            pure $ test(a,b)
+        };
+        arr.sequence.forget
+        /*
+        let (a,b) = ([0, 2147483648], [4294967295, 1]);
+        let (a,b) = (BigInt::make(1, a.map(to_U32)), BigInt::make(1, b.map(to_U32)));
+        test(a,b)
+        */
+    }.try(eprintln)
+);
+
+test_divmod5_spec: IO ();
+test_divmod5_spec = (
+    println("=== test_divmod5_spec ===");;
+    do {
+        let test: BigInt -> BigInt -> IOFail () = |a, b| (
+            eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
+            let (quo, rem) = _divmod5(a.@nat, b.@nat);
+            assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo), rem));;
+            assert_true("rem < b", _cmp((rem,0), (b.@nat,0)) < 0);;
+            eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
+            pure()
+        );
+        let n = 64;
+        let arr: Array (IOFail ()) = do {
+            let a = *[-1, 0, 1];
+            let b = *[-1, 0, 1];
+            let a: BigInt = One::one.shift_left((2*n).to_U64) + BigInt::from_I64(a);
+            let b: BigInt = One::one.shift_left((n+1).to_U64) + BigInt::from_I64(b);
+            pure $ test(a,b)
+        };
+        arr.sequence.forget
+    }.try(eprintln)
+);
+
+prof_divmod5: IO ();
+prof_divmod5 = (
+    println("=== prof_divmod5 ===");;
+    pure();;
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 64;
+    let (random, a) = generate_bigint(2*bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
+    eval loop(
+        0, |i|
+        if i >= 10000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = _divmod5(a.@nat, b.@nat);
+        continue $ i + 1
+    );
+    pure()
+);
+
+test_approx_with_exp: IO ();
+test_approx_with_exp = (
+    println("=== test_approx_with_exp ===");;
+    pure();;
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let sm: StateT Random IOFail () = do {
+        let bit_length = *random_I64_range(128, 256);
+        let a = (*generate_bigint(bit_length)).@nat;
+        let m_bitlen = *random_I64_range(10, 64);
+        let (m, e) = a._approx_with_exp(m_bitlen);
+        println("(bit_length, a)=" + (bit_length, a).to_string).lift_io;;
+        println("(m_bitlen, m, e)=" + (m_bitlen, m, e).to_string).lift_io;;
+        let lower = BigNat::_from_u64(m)._shift_left(e.to_U64);
+        let upper = BigNat::_from_u64(m)._add(BigNat::_one)._shift_left(e.to_U64);
+        assert(|_| "lower check failed", _cmp((lower,0), (a,0)) <= 0).lift_io;;
+        assert(|_| "upper check failed", _cmp((a,0), (upper,0)) <= 0).lift_io;;
+        pure()
+    };
+
+    Iterator::range(0, 30).to_dyn.foreach_m(|i| sm).eval_state_t(random)
+    .try(eprintln)
+);
+
+main: IO ();
+main = (
+    test_approx_with_exp;;
+    test_divmod5;;
+    test_divmod5_spec;;
+    prof_divmod5;;
+    test_divmod_spec(_divmod5);;
+    pure()
+);
+

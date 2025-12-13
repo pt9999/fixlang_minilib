@@ -1,0 +1,993 @@
+// Red-Black Tree.
+// (This is an internal module of `TreeMap` and `TreeSet`.)
+//
+// Ported from Japanese translation of the book below:
+//
+// "Purely functional data structures" by Chris Okasaki, Cambridge University Press, 1998, ISBN 0-521-66350-4
+//
+// And for removal algorithm, ported from web site below.
+// http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+//
+// NOTE: `less_than()` function must meet following conditions.
+// - Irreflexivity: for all `x`, `less_than(x,x)` must be false.
+// - Asymmetry:     for all `x, y`, if `less_than(x,y)` is true, then `less_than(y,x)` must be false.
+// - Transitivity:  for all `x, y, z`, if `less_than(x,y)` is true and `less_than(y,z)` is true,
+//                  then `less_than(x,z)` must be true.
+//
+module Minilib.Collection.RBTree4;
+
+// 上記の和訳:
+//
+// 下記の日本語版の書籍の「3.3 赤黒木」のサンプルコードを移植した。
+//
+// 「純粋関数型データ構造」
+// Chris Okasaki 著
+// 稲葉一浩、遠藤侑介 訳
+// ISBN：978-4-04-893056-7
+//
+// また、削除アルゴリズムについては下記のサイトを参考にした。
+// http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+//
+// 注: `less_than()` 関数は以下の条件を満たしている必要があります。
+// - 非反射性: 任意の `x` について、`less_than(x,x)` は false でなければならない。
+// - 非対称性: 任意の `x, y` について、 もし `less_than(x,y)` が true であるなら、`less_than(y,x)` は false でなければならない。
+// - 推移性:   任意の `x, y, z` について、もし `less_than(x,y)` が true かつ `less_than(y,z)` が true であるなら、
+//             `less_than(x,z)` は true でなければならない。
+
+import Minilib.Common.Assert;
+
+// A trait of the element. Currently `ToString` is required.
+trait RBNodeElem = ToString;
+
+// Default less_than function using `LessThan` trait.
+_less_than: [a: LessThan, a: RBNodeElem] a -> a -> Bool;
+_less_than = |x, y| x < y;
+
+type RBColor = U8;
+
+namespace RBColor {
+    black: RBColor = 0_U8;
+    red: RBColor = 1_U8;
+}
+
+// A type of red-black tree node.
+type RBBranch a = unbox struct {
+    color: RBColor,
+    left: RBNodeIndex,
+    elem: Option a,
+    right: RBNodeIndex,
+};
+
+namespace RBBranch {
+    empty: RBBranch a;
+    empty = RBBranch {
+        color: red,
+        left: RBNodeIndex::empty,
+        elem: none(),
+        right: RBNodeIndex::empty,
+    };
+}
+
+// A type of an index of the node array.
+type RBNodeIndex = I64;
+
+namespace RBNodeIndex {
+    empty: RBNodeIndex = -1;
+
+    is_empty: RBNodeIndex -> Bool;
+    is_empty = |node| node == RBNodeIndex::empty;
+}
+
+// A type of red-black tree.
+type RBTree a = unbox struct {
+    less_than: a -> a -> Bool,
+    root: RBNodeIndex,
+    size: I64, 
+    free_list: Array RBNodeIndex,
+    _branches: Array (RBBranch a),
+};
+
+namespace RBTree {
+    // Debug flag. If set to true, a lot of debug messages will be printed and various validations will be done.
+    _Debug: Bool;
+    _Debug = false;
+
+    _EnableAssertUnique: Bool;
+    _EnableAssertUnique = false;
+
+    // Prints to stderr if the debug flag is set.
+    _debug_eprintln_lazy: (() -> String) -> ();
+    _debug_eprintln_lazy = (
+        if _Debug { |f| debug_eprintln(f()) } else { |f| () }
+    );
+
+    // Returns the level of this node (ie. the number of black nodes from this node to any leaf).
+    // This function does not validate, so an unbalanced node can be specified.
+    level_nonvalidate: [a: RBNodeElem] RBNodeIndex -> RBTree a -> I64;
+    level_nonvalidate = |node, tree| (
+        if node.is_empty { 1 };
+        let branch = tree.get_branch(node);
+        let this_count = if branch.@color == black { 1 } else { 0 };
+        let left_level = tree.level_nonvalidate(branch.@left);
+        let right_level = tree.level_nonvalidate(branch.@right);
+        max(left_level, right_level) + this_count
+    );
+
+    // Returns the level of this node (ie. the number of black nodes from this node to any leaf).
+    // Panicks when the left and right nodes have different black count.
+    level: [a: RBNodeElem] RBNodeIndex -> RBTree a -> I64;
+    level = |node, tree| (
+        if node.is_empty { 1 };
+        let this_count = if tree.is_black(node) { 1 } else { 0 };
+        let (left, right) = tree.get_left_right(node);
+        let left_level = tree.level(left);
+        let right_level = tree.level(right);
+        assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
+                + " left=" + left_level.to_string
+                + " right=" + right_level.to_string
+                + "\nleft="+tree._to_string(left)
+                + "\nright="+tree._to_string(right),
+            left_level == right_level
+        ) $ |_|
+        assert_lazy(|_| "Red duplicates", !(tree.is_red(node) && (tree.is_red(left) || tree.is_red(right)))) $ |_|
+        left_level + this_count
+    );
+
+    // Validates that:
+    // - the left and right nodes have same black count
+    // - children of a red node is not red
+    // - max of left node < elem
+    // - elem < min of right node
+    // Returns `(level, min, max)`.
+    // Panicks if validation failed.
+    validate: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (I64, Option a, Option a);
+    validate = |node, tree| (
+        if node.is_empty { (1, none(), none()) };
+        let this_count = if tree.is_black(node) { 1 } else { 0 };
+        let (left, elem, right) = tree.get_triplet(node);
+        let (left_level, left_min, left_max) = tree.validate(left);
+        let (right_level, right_min, right_max) = tree.validate(right);
+        assert_lazy(|_| "The number of black nodes below the left and right nodes is different:"
+                + " left=" + left_level.to_string
+                + " right=" + right_level.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string,
+            left_level == right_level
+        ) $ |_|
+        assert_lazy(|_| "Red duplicates", !(tree.is_red(node) && (tree.is_red(left) || tree.is_red(right)))) $ |_|
+        let lt = tree.@less_than;
+        assert_lazy(|_| "not left_max < elem"
+                + "\nleft_max="+left_max.as_some.to_string + " elem="+elem.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string,
+            left_max.is_none || lt(left_max.as_some, elem)) $ |_|
+        assert_lazy(|_| "not elem < right_min"
+                + "\nright_min="+right_min.as_some.to_string + " elem="+elem.to_string
+                + "\nleft="+left.to_string
+                + "\nright="+right.to_string,
+            right_min.is_none || lt(elem, right_min.as_some)) $ |_|
+
+        let level = left_level + this_count;
+        let min = if left_min.is_some { left_min } else { some(elem) };
+        let max = if right_max.is_some { right_max } else { some(elem) };
+        (level, min, max)
+    );
+
+    make: [a: RBNodeElem, a: LessThan] () -> RBTree a;
+    make = |_| make_lt(|x,y| x < y);
+
+    make_lt: (a -> a -> Bool) -> RBTree a;
+    make_lt = |less_than| RBTree {
+        less_than: less_than,
+        root: RBNodeIndex::empty,
+        size: 0,
+        free_list: [],
+        _branches: [],
+    };
+
+    _assert_unique: Lazy String -> a -> a;
+    _assert_unique = (
+        if !_EnableAssertUnique { |msg, a| a };
+        assert_unique
+    );
+
+    _check_unique: Lazy String -> RBTree a -> RBTree a;
+    _check_unique = (
+        if !_EnableAssertUnique { |msg, tree| tree };
+        |msg, tree|
+        tree
+        ._assert_unique(msg)
+        .mod__branches(_assert_unique(msg))
+        .mod_free_list(_assert_unique(msg))
+    );
+
+    _make_node: RBBranch a -> RBTree a -> (RBTree a, RBNodeIndex);
+    _make_node = |branch, tree| (
+        let size = tree.@_branches.get_size;
+        let tree = tree._check_unique(|_| "_make_node");
+        match tree.@free_list.get_last {
+            some(node) => (
+                let tree = tree.mod_free_list(pop_back);
+                let tree = tree.mod__branches(set(node, branch));
+                let tree = tree.mod_size(add(1));
+                (tree, node)
+            ),
+            none() => (
+                let node = size; // tree.@_branches.get_size;
+                let tree = tree.mod__branches(push_back(branch));
+                let tree = tree.mod_size(add(1));
+                (tree, node)
+            )
+        }
+    );
+
+    _free_node: RBNodeIndex -> RBTree a -> RBTree a;
+    _free_node = |node, tree| (
+        let tree = tree._check_unique(|_| "_free_node");
+        let tree = tree.mod_branch(node, set_elem(none()));
+        let tree = tree.mod_free_list(push_back(node));
+        let tree = tree.mod_size(add(-1));
+        tree
+    );
+
+    get_branch: RBNodeIndex -> RBTree a -> RBBranch a;
+    get_branch = |node, tree| (
+        if node == RBNodeIndex::empty { undefined("get_branch: empty") };
+        tree.@_branches.@(node)
+    );
+
+    set_branch: RBNodeIndex -> RBBranch a -> RBTree a -> RBBranch a;
+    set_branch = |node, branch, tree| (
+        let tree = tree._check_unique(|_| "set_branch");
+        if node == RBNodeIndex::empty { undefined("set_branch: empty") };
+        tree.mod__branches(set(node, branch))
+    );
+
+    mod_branch: RBNodeIndex -> (RBBranch a -> RBBranch a) -> RBTree a -> RBTree a;
+    mod_branch = |node, f, tree| (
+        let tree = tree._check_unique(|_| "mod_branch");
+        if node == RBNodeIndex::empty { undefined("mod_branch: empty") };
+        tree.mod__branches(mod(node, f))
+    );
+
+    // Gets the number of elements.
+    // The time complexity of this function is O(1).
+    get_size: RBTree a -> I64;
+    get_size = @size;
+
+    /*
+    get_size: RBNodeIndex -> RBTree a -> I64;
+    get_size = |node, tree| (
+        if node.is_empty { 0 };
+        let (left, right) = tree.get_left_right(node);
+        tree.get_size(left) + 1 + tree.get_size(right)
+    );
+    */
+
+    // If the node is a branch, `tree.get_triplet(node)` returns a triplet `(left, elem, right)`.
+    // If the node is empty, it will abort.
+    get_triplet: RBNodeIndex -> RBTree a -> (RBNodeIndex, a, RBNodeIndex);
+    get_triplet = |node, tree| (
+        let b = tree.get_branch(node);
+        (b.@left, b.@elem.as_some, b.@right)
+    );
+
+    set_triplet: RBNodeIndex -> (RBNodeIndex, a, RBNodeIndex) -> RBTree a -> RBTree a;
+    set_triplet = |node, (left, elem, right), tree| (
+        tree.mod_branch(node, |b| b.set_left(left).set_elem(some $ elem).set_right(right))
+    );
+
+    get_quad: RBNodeIndex -> RBTree a -> (RBColor, RBNodeIndex, a, RBNodeIndex);
+    get_quad = |node, tree| (
+        let b = tree.get_branch(node);
+        (b.@color, b.@left, b.@elem.as_some, b.@right)
+    );
+
+    set_quad: RBNodeIndex -> (RBColor, RBNodeIndex, a, RBNodeIndex) -> RBTree a -> RBTree a;
+    set_quad = |node, (color, left, elem, right), tree| (
+        tree.mod_branch(node, |b| b.set_color(color).set_left(left).set_elem(some $ elem).set_right(right))
+    );
+
+    get_color: RBNodeIndex -> RBTree a -> RBColor;
+    get_color = |node, tree| tree.get_branch(node).@color;
+
+    is_red: RBNodeIndex -> RBTree a -> Bool;
+    is_red = |node, tree| !node.is_empty && tree.get_color(node) == red;
+
+    is_black: RBNodeIndex -> RBTree a -> Bool;
+    is_black = |node, tree| !node.is_empty && tree.get_color(node) == black;
+
+    set_color: RBNodeIndex -> RBColor -> RBTree a -> RBTree a;
+    set_color = |node, color, tree| (
+        tree.mod_branch(node, set_color(color))
+    );
+
+    get_left_right: RBNodeIndex -> RBTree a -> (RBNodeIndex, RBNodeIndex);
+    get_left_right = |node, tree| (
+        let b = tree.get_branch(node);
+        (b.@left, b.@right)
+    );
+
+    get_left: RBNodeIndex -> RBTree a -> RBNodeIndex;
+    get_left = |node, tree| tree.get_branch(node).@left;
+
+    set_left: RBNodeIndex -> RBNodeIndex -> RBTree a -> RBTree a;
+    set_left = |node, left, tree| tree.mod_branch(node, set_left(left));
+
+    get_right: RBNodeIndex -> RBTree a -> RBNodeIndex;
+    get_right = |node, tree| tree.get_branch(node).@right;
+
+    set_right: RBNodeIndex -> RBNodeIndex -> RBTree a -> RBTree a;
+    set_right = |node, right, tree| tree.mod_branch(node, set_right(right));
+
+    //====================================================================
+    // Finding
+    //====================================================================
+
+    // `tree.find(x)` finds an element `elem` that is equivalent to `x`,
+    // ie. `!(tree.@less_than)(elem, x) && !(tree.@less_than)(x, elem)` is true.
+    find: a -> RBTree a -> Option a;
+    find = |x, tree| (
+        let lt = tree.@less_than;
+        let lt_begin = |elem| lt(elem, x);
+        let lt_end   = |elem| !lt(x, elem);
+        let iter = tree.find_range(lt_begin, lt_end);
+        iter.get_first
+    );
+
+    // `node.find_range(lt_begin, lt_end)` finds all elements `elem`
+    // such that `!elem.lt_begin && elem.lt_end` is true.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    find_range: (a -> Bool) -> (a -> Bool) -> RBTree a -> DynIterator a;
+    find_range = |lt_begin, lt_end, tree| (
+        tree._find_range(tree.@root, lt_begin, lt_end)
+    );
+
+    _find_range: RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> DynIterator a;
+    _find_range = |node, lt_begin, lt_end, tree| (
+        if node.is_empty { DynIterator::empty };
+        let next = |_| (
+            let (left, elem, right) = tree.get_triplet(node);
+            if elem.lt_begin {         // elem < begin
+                tree._find_range(right, lt_begin, lt_end)
+            } else if elem.lt_end {    // begin <= elem && elem < end
+                tree._find_range(left, lt_begin, lt_end)
+                ._fast_append(tree._find_range(right, lt_begin, lt_end)
+                        .push_front(elem).to_dyn)
+            } else {                    // end <= elem
+                tree._find_range(left, lt_begin, lt_end)
+            }
+        ).advance;
+        DynIterator { next: next }
+    );
+
+    // `tree.find_range_descending(lt_begin, lt_end)` finds all elements `elem`
+    // such that `!elem.lt_begin && elem.lt_end` is true, in descending order.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    find_range_descending: (a -> Bool) -> (a -> Bool) -> RBTree a -> DynIterator a;
+    find_range_descending = |lt_begin, lt_end, tree| (
+        tree._find_range_descending(tree.@root, lt_begin, lt_end)
+    );
+
+    _find_range_descending: RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> DynIterator a;
+    _find_range_descending = |node, lt_begin, lt_end, tree| (
+        if node.is_empty { DynIterator::empty };
+        let next = |_| (
+            let (left, elem, right) = tree.get_triplet(node);
+            if elem.lt_begin {         // elem < begin
+                tree._find_range_descending(right, lt_begin, lt_end)
+            } else if elem.lt_end {    // begin <= elem && elem < end
+                tree._find_range_descending(right, lt_begin, lt_end)
+                ._fast_append(tree._find_range_descending(left, lt_begin, lt_end)
+                        .push_front(elem).to_dyn)
+            } else {                    // end <= elem
+                tree._find_range_descending(left, lt_begin, lt_end)
+            }
+        ).advance;
+        DynIterator { next: next }
+    );
+
+    // Same as `Iterator::append` but a little fast.
+    _fast_append : DynIterator a -> DynIterator a -> DynIterator a;
+    _fast_append = |rhs, lhs| (
+        let next = |_| (
+            let opt = lhs.advance;
+            if opt.is_none { rhs.advance };
+            let (lhs, e) = opt.as_some;
+            some $ (lhs._fast_append(rhs), e)
+        );
+        DynIterator { next : next }
+    );
+
+    // Gets the first element (that is, the smallest element) of the tree.
+    get_first: RBTree a -> Option a;
+    get_first = |tree| (
+        tree._get_first(tree.@root)
+    );
+
+    _get_first: RBNodeIndex -> RBTree a -> Option a;
+    _get_first = |node, tree| (
+        if node.is_empty { none() };
+        let (left, elem, right) = tree.get_triplet(node);
+        if left.is_empty { some(elem) };
+        tree._get_first(left)
+    );
+
+    // Gets the last element (that is, the largest element) of the tree.
+    get_last: RBTree a -> Option a;
+    get_last = |tree| (
+        tree._get_last(tree.@root)
+    );
+
+    _get_last: RBNodeIndex -> RBTree a -> Option a;
+    _get_last = |node, tree| (
+        if node.is_empty { none() };
+        let (left, elem, right) = tree.get_triplet(node);
+        if right.is_empty { some(elem) };
+        tree._get_last(right)
+    );
+
+    //====================================================================
+    // Upsert
+    //====================================================================
+
+    _balance: RBNodeIndex -> RBTree a -> (RBTree a, RBNodeIndex);
+    _balance = |node, tree| (
+        if node.is_empty || tree.is_red(node) { (tree, node) };
+        let (left, right) = tree.get_left_right(node);
+        if !tree.is_red(left) {
+            tree._balance_right(node, right)
+        };
+        let (left_left, left_right) = tree.get_left_right(left);
+        if tree.is_red(left_left) {
+            //let (left, e3, n4) = node.get_triplet; // as_black;
+            //let (left_left, e2, n3) = left.get_triplet; //as_red;
+            //let (n1, e1, n2) = left_left.get_triplet; //as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let tree = tree.mod_branch(node, |b| b.set_left(left_right));
+            let tree = tree.mod_branch(left_left, set_color(black));
+            let tree = tree.mod_branch(left, |b| b.set_left(left_left).set_right(node));
+            (tree, left)
+        };
+        if tree.is_red(left_right) {
+            //let (left, e3, n4) = node.get_triplet; // .as_black;
+            //let (n1, e1, left_right) = left.get_triplet; // .as_red;
+            //let (n2, e2, n3) = left_right.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (n2, n3) = tree.get_left_right(left_right);
+            let tree = tree.mod_branch(node, |b| b.set_left(n3));
+            let tree = tree.mod_branch(left, |b| b.set_color(black).set_right(n2));
+            let tree = tree.mod_branch(left_right, |b| b.set_left(left).set_right(node));
+            (tree, left_right)
+        };
+        tree._balance_right(node, right)
+    );
+
+    _balance_right: RBNodeIndex -> RBNodeIndex -> RBTree a -> (RBTree a, RBNodeIndex);
+    _balance_right = |node, right, tree| (
+        if !tree.is_red(right) { (tree, node) };
+
+        let (right_left, right_right) = tree.get_left_right(right);
+
+        if tree.is_red(right_left) {
+            //let (n1, e1, right) = node.get_triplet; // .as_black;
+            //let (right_left, e3, n4) = right.get_triplet; // .as_red;
+            //let (n2, e2, n3) = right_left.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let (n2, n3) = tree.get_left_right(right_left);
+            let tree = tree.mod_branch(node, |b| b.set_right(n2));
+            let tree = tree.mod_branch(right, |b| b.set_color(black).set_left(n3));
+            let tree = tree.mod_branch(right_left, |b| b.set_left(node).set_right(right));
+            (tree, right_left)
+        };
+        if tree.is_red(right_right) {
+            //let (n1, e1, right) = node.get_triplet; // .as_black;
+            //let (n2, e2, right_right) = right.get_triplet; // .as_red;
+            //let (n3, e3, n4) = right_right.get_triplet; // .as_red;
+            //red $ (black $ (n1, e1, n2), e2, black $ (n3, e3, n4))
+            let tree = tree.mod_branch(node, |b| b.set_right(right_left));
+            let tree = tree.mod_branch(right_right, |b| b.set_color(black));
+            let tree = tree.mod_branch(right, |b| b.set_left(node).set_right(right_right));
+            (tree, right)
+        };
+         (tree, node)
+    );
+
+    _upsert_inner: RBNodeIndex -> a -> (a -> a) -> RBTree a -> (RBTree a, RBNodeIndex);
+    _upsert_inner = |node, x, updater, tree| (
+        if node.is_empty {
+            // if `x` is not found, insert `x`.
+            tree._make_node(
+                RBBranch{
+                    color: red,
+                    left: RBNodeIndex::empty,
+                    elem: some $ x,
+                    right: RBNodeIndex::empty,
+                }
+            )
+        };
+        let (left, elem, right) = tree.get_triplet(node);
+        let tree = tree._check_unique(|_| "_upsert_inner");
+        let less_than = tree.@less_than;
+        if less_than(x, elem) {
+            let (tree, left) = tree._upsert_inner(left, x, updater);
+            let tree = tree.set_left(node, left);
+            tree._balance(node)
+        };
+        if less_than(elem, x) {
+            let (tree, right) = tree._upsert_inner(right, x, updater);
+            let tree = tree.set_right(node, right);
+            tree._balance(node)
+        };
+        // If neither `x < elem` nor `elem < x` holds, replace `elem` with `updater(elem)`.
+        let tree = tree.mod_branch(node, mod_elem(map(updater)));
+        (tree, node)
+    );
+
+    // `tree.upsert(x, updater)` inserts or updates using `tree.@less_than` ordering.
+    // Returns the changed tree.
+    // If `tree` does not contain an element equivalent to `x`, `x` is inserted.
+    // If `tree` already contains an element `y` equivalent to `x`,
+    // ie. `!(tree.@less_than)(x,y) && !(tree.@less_than)(y,x)` is true,
+    // then `y` is updated with `updater(y)`.
+    upsert: [a: RBNodeElem] a -> (a -> a) ->  RBTree a -> RBTree a;
+    upsert = |x, updater, tree| (
+        let (tree, root) = tree._upsert_inner(tree.@root, x, updater);
+        let tree = tree.set_color(root, black);
+        eval if _Debug { eval tree.validate(root); () } else { () };
+        let tree = tree.set_root(root);
+        tree
+    );
+
+    //====================================================================
+    // Insertion
+    //====================================================================
+
+    // `tree.insert(x)` inserts an element `x` using `tree.@less_than` ordering.
+    // Returns the changed tree.
+    // If `tree` already contains an element `y` equivalent to `x`,
+    // ie. `!(tree.@less_than)(x,y) && !(tree.@less_than)(y,x)` is true,
+    // then `y` is replaced with `x`.
+    insert: [a: RBNodeElem] a -> RBTree a -> RBTree a;
+    insert = |x, tree| (
+        tree.upsert(x, |_| x)
+    );
+
+    //====================================================================
+    // Removal
+    //====================================================================
+
+    // `tree.remove(x)` removes any element `y` equivalent to `x`,
+    // ie. `!(tree.@less_than)(x,y) && !(tree.@less_than)(y,x)` is true.
+    // Returns the changed tree.
+    remove: [a: RBNodeElem] a -> RBTree a -> RBTree a;
+    remove = |x, tree| (
+        eval _debug_eprintln_lazy(|_| "remove: tree.size=" + tree.get_size.to_string + " x=" + x.to_string);
+        //let tree = tree._check_unique(|_| "remove");
+        let less_than = tree.@less_than;
+        let lt_begin = |elem| less_than(elem, x);
+        let lt_end   = |elem| !less_than(x, elem);
+        //let tree = tree._check_unique(|_| "remove2");
+        tree.remove_range(lt_begin, lt_end)
+    );
+
+    // `tree.remove_range(lt_begin, lt_end)` removes all elements `elem`
+    // where `!elem.lt_begin && elem.lt_end` is true.
+    // Returns the changed tree.
+    // NOTE: `lt_begin` and `lt_end` must meet following condition:
+    // for all `x`, `x.lt_begin` is true then `x.lt_end` must be true.
+    remove_range: [a: RBNodeElem] (a -> Bool) -> (a -> Bool) -> RBTree a -> RBTree a;
+    remove_range = |lt_begin, lt_end, tree| (
+        //let tree = tree._check_unique(|_| "remove_range");
+        let (tree, opt) = tree._try_remove_range(tree.@root, lt_begin, lt_end);
+        if opt.is_none { tree };
+        let (active, root) = opt.as_some;
+        let tree = tree.set_root(root);
+        eval if _Debug { eval tree.validate(tree.@root); () } else { () };
+        tree.remove_range(lt_begin, lt_end)  // repeat recursively
+    );
+
+    // `tree._try_remove_range(node, lt_begin, lt_end)` tries to remove single element `elem`
+    // where `!elem.lt_begin && elem.lt_end` is true.
+    // Even if there are several elements that holds the condition, only one of them
+    // are removed.
+    // Returns `(tree, some $ (active, removed))` if removal is succeeded
+    // where `removed` is the node after removal,
+    // and `active` is true iff `removed.level == node.level - 1`.
+    // Returns `(tree, none())` if removal is failed, i.e. there is no element such that
+    // `!elem.lt_begin && elem.lt_end` is true.
+    //
+    // NOTE: We need to return `tree` even if removal is failed. If not, in `remove` and `remove_range`,
+    //       we will need to retain the original tree in addition to the modified tree,
+    //       which will result in cloning the entire node array, which will be significantly slower. 
+    _try_remove_range: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
+    _try_remove_range = |node, lt_begin, lt_end, tree| (
+        let tree = tree._check_unique(|_| "_try_remove_range");
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: node=" + tree._to_string(node));
+        let (tree, opt) = tree._try_remove_range_inner(node, lt_begin, lt_end);
+        eval _debug_eprintln_lazy(|_| "_try_remove_range: result=" + 
+            opt.map(|(active, node)| (active, tree._to_string(node))).to_string
+        );
+        (tree, opt)
+    );
+
+    _try_remove_range_inner: [a: RBNodeElem] RBNodeIndex -> (a -> Bool) -> (a -> Bool) -> RBTree a -> (RBTree a, Option (Bool, RBNodeIndex));
+    _try_remove_range_inner = |node, lt_begin, lt_end, tree| (
+        let tree = tree._check_unique(|_| "_try_remove_range_inner");
+        if node.is_empty {
+            (tree, none())
+        };
+        let (left, elem, right) = tree.get_triplet(node);
+        let (tree, left_result) = if !left.is_empty && !elem.lt_begin {
+            let (tree, opt) = tree._try_remove_range(left, lt_begin, lt_end);
+            if opt.is_none { (tree, none()) };
+            let (active, left) = opt.as_some;
+            let tree = tree.set_left(node, left);
+            let (active, tree, node) = _remove_fix_left $ (active, tree, node);
+            (tree, some $ (active, node))
+        } else {
+            (tree, none())
+        };
+        if left_result.is_some {
+            (tree, left_result)
+        };
+
+        let (tree, right_result) = if !right.is_empty && elem.lt_end {
+            let (tree, opt) = tree._try_remove_range(right, lt_begin, lt_end);
+            if opt.is_none { (tree, none()) };
+            let (active, right) = opt.as_some;
+            let tree = tree.set_right(node, right);
+            let (active, tree, node) = _remove_fix_right $ (active, tree, node);
+            (tree, some $ (active, node))
+        } else {
+            (tree, none())
+        };
+        if right_result.is_some {
+            (tree, right_result)
+        };
+
+        // this result
+        if !elem.lt_begin && elem.lt_end {
+            // remove this node
+            eval _debug_eprintln_lazy(|_| "remove this node: node="+node.to_string);
+            let tree = tree._check_unique(|_| "_try_remove_range_inner remove this node");
+            if !left.is_empty {
+                eval _debug_eprintln_lazy(|_| "left is nonempty");
+                let (active, tree, left, max) = tree._remove_max(left);
+                eval _debug_eprintln_lazy(|_| "left nonempty _remove_max done: left=" + left.to_string + " max=" + max.to_string);
+                let tree = tree.set_triplet(node, (left, max, right));
+                let (active, tree, node) = _remove_fix_left $ (active, tree, node);
+                (tree, some $ (active, node))
+            };
+            if !right.is_empty {
+                eval _debug_eprintln_lazy(|_| "right is nonempty");
+                let (active, tree, right, min) = tree._remove_min(right);
+                let tree = tree.set_triplet(node, (left, min, right));
+                let (active, tree, node) = _remove_fix_right $ (active, tree, node);
+                eval _debug_eprintln_lazy(|_| "done");
+                (tree, some $ (active, node))
+            };
+            eval _debug_eprintln_lazy(|_| "both left and right is empty");
+            let tree = tree._check_unique(|_| "_try_remove_range_inner before free 1");
+            let node_was_black = tree.is_black(node);
+            let tree = tree._check_unique(|_| "_try_remove_range_inner before free 2");
+            let tree = tree._free_node(node);
+            eval _debug_eprintln_lazy(|_| "free done");
+            (tree, some $ (node_was_black, RBNodeIndex::empty))
+        } else {
+            (tree, none())
+        }
+    );
+
+    // `tree._remove_max(node)` removes an maximum element.
+    // Returns `(active, tree, removed, max)` where `removed` is the node after removal,
+    // `max` is the maximum element,
+    // and `active` is true iff `removed.level == node.level - 1`.
+    _remove_max: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
+    _remove_max = |node, tree| (
+        eval _debug_eprintln_lazy(|_| "_remove_max: node="+node.to_string);
+        let tree = tree._check_unique(|_| "_remove_max");
+        assert_lazy(|_| "_remove_max: !node.is_empty", !node.is_empty) $ |_|
+        let (left, elem, right) = tree.get_triplet(node);
+        if !right.is_empty {
+            let (active, tree, right, max) = tree._remove_max(right);
+            let tree = tree.set_right(node, right);
+            let (active, tree, node) = _remove_fix_right $ (active, tree, node);
+            (active, tree, node, max)
+        };
+        // right is empty
+        // remove this node
+        let max = elem;
+        let node_was_black = tree.is_black(node);
+        let tree = tree._free_node(node);
+        (node_was_black, tree, left, max)
+    );
+
+    // `node._remove_min` removes an minimum element.
+    // Returns `(active, removed, min)` where `removed` is the node after removal,
+    // `min` is the minimum element,
+    // and `active` is true iff `removed.level == node.level - 1`.
+    _remove_min: [a: RBNodeElem] RBNodeIndex -> RBTree a -> (Bool, RBTree a, RBNodeIndex, a);
+    _remove_min = |node, tree| (
+        eval _debug_eprintln_lazy(|_| "_remove_min: node="+node.to_string);
+        let tree = tree._check_unique(|_| "_remove_min");
+        assert_lazy(|_| "_remove_min: !node.is_empty", !node.is_empty) $ |_|
+        let (left, elem, right) = tree.get_triplet(node);
+        if !left.is_empty {
+            let (active, tree, left, min) = tree._remove_min(left);
+            let tree = tree.set_left(node, left);
+            let (active, tree, node) = _remove_fix_left $ (active, tree, node);
+            (active, tree, node, min)
+        };
+        // left is empty
+        // remove this node
+        let min = elem;
+        let node_was_black = tree.is_black(node);
+        let tree = tree._free_node(node);
+        (node_was_black, tree, right, min)
+    );
+
+    _debug_assert_level_diff: [a: RBNodeElem] String -> String -> RBNodeIndex -> String -> RBNodeIndex -> I64 -> RBTree a -> ();
+    _debug_assert_level_diff = (
+        if !_Debug { |prefix, name1, node1, name2, node2, diff, tree| () };
+        |prefix, name1, node1, name2, node2, diff, tree|
+        let opt1 = tree._save_current_level(name1, node1);
+        let opt2 = tree._save_current_level(name2, node2);
+        _debug_assert_saved_level_diff(prefix, opt1, opt2, diff)
+    );
+
+    _save_current_level: [a: RBNodeElem] String -> RBNodeIndex -> RBTree a -> Option (String, I64, String);
+    _save_current_level = (
+        if !_Debug { |name, node, tree| none() };
+        |name, node, tree|
+        let level = tree.level_nonvalidate(node);
+        let node_str = tree._to_string(node);
+        some $ (name, level, node_str)
+    );
+
+    _debug_assert_saved_level_diff: String -> Option (String, I64, String) -> Option (String, I64, String) -> I64 -> ();
+    _debug_assert_saved_level_diff = (
+        if !_Debug { |prefix, opt1, opt2, diff| () };
+        |prefix, opt1, opt2, diff|
+        let (name1, level1, node1_str) = opt1.as_some;
+        let (name2, level2, node2_str) = opt2.as_some;
+        if !(level1 + diff == level2) {
+            undefined(
+                "_debug_assert_level_diff(" + prefix + ") failed:\n" +
+                "  " + name1 + ".level(" + level1.to_string + ") + " + diff.to_string + " != " +
+                       name2 + ".level(" + level2.to_string + ")\n" +
+                "  " + name1 + " = " + node1_str + "\n" +
+                "  " + name2 + " = " + node2_str)
+        };
+        ()
+    );
+
+    // Called when `node.left.level == node.right.level - 1`.
+    // Returns `(active, tree, fixed)` where `fixed` is the fixed node,
+    // and `active` is true iff `fixed.level = node.level - 1`.
+    _remove_fix_left: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
+    _remove_fix_left = |(active, tree, node)| (
+        if !active {
+            (active, tree, node)
+        };
+        let node_level = tree._save_current_level("node", node);
+        let (active, tree, fixed) = _remove_fix_left_inner $ (active, tree, node);
+        if fixed.is_empty {
+            (active, tree, fixed)
+        };
+        //let (left, elem, right) = tree.get_triplet(node);
+        let fixed_level = tree._save_current_level("fixed", fixed);
+        eval _debug_assert_saved_level_diff("_remove_fix_left postcheck",
+            fixed_level, node_level,
+            if active { 1 } else { 0 }
+        );
+        eval _debug_eprintln_lazy(|_| "_remove_fix_left done: active="+active.to_string + " fixed="+fixed.to_string);
+        (active, tree, fixed)
+    );
+
+    _remove_fix_left_inner: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
+    _remove_fix_left_inner = |(active, tree, node)| (
+        // see http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+        if !active {
+            (active, tree, node)
+        };
+        eval _debug_eprintln_lazy(|_| "_remove_fix_left: active="+active.to_string + " node="+tree._to_string(node));
+        let u = node;
+        let u_color = tree.get_color(u);
+        let u_was_black = (u_color == black);
+        let (t1, u_elem, v) = tree.get_triplet(u);
+        assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
+        eval tree._debug_assert_level_diff("_remove_fix_left precheck", "t1", t1, "v", v, 1);
+        if tree.is_black(v) {
+            let (v_left, v_right) = tree.get_left_right(v);
+            if tree.is_red(v_left) {
+                // pattern L1
+                let (w, v_elem, t4) = tree.get_triplet(v);
+                let (t2, w_elem, t3) = tree.get_triplet(w);
+                eval tree._debug_assert_level_diff("L1", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("L1", "t3", t3, "t4", t4, 0);
+                let tree = tree.set_quad(u, (black, t1, u_elem, t2));
+                let tree = tree.set_quad(v, (black, t3, v_elem, t4));
+                let tree = tree.set_quad(w, (u_color, u, w_elem, v));
+                let active = false;
+                (active, tree, w)
+            } else if tree.is_red(v_right) {
+                // pattern L2
+                let (t2, v_elem, w) = tree.get_triplet(v);
+                let (t3, w_elem, t4) = tree.get_triplet(w);
+                eval tree._debug_assert_level_diff("L2", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("L2", "t3", t3, "t4", t4, 0);
+                let tree = tree.set_quad(u, (black, t1, u_elem, t2));
+                let tree = tree.set_quad(w, (black, t3, w_elem, t4));
+                let tree = tree.set_quad(v, (u_color, u, v_elem, w));
+                let active = false;
+                (active, tree, v)
+            } else {
+                // pattern L3
+                let (t2, v_elem, t3) = tree.get_triplet(v);
+                let tree = tree.set_quad(v, (red, t2, v_elem, t3));
+                eval tree._debug_assert_level_diff("L3", "t1", t1, "v", v, 0);
+                let tree = tree.set_quad(u, (black, t1, u_elem, v));
+                let active = u_was_black;
+                (active, tree, u)
+            }
+        } else {    // v.is_red
+            // pattern L4
+            assert_lazy(|_| "L4: u_was_black", u_was_black) $ |_|
+            let (t2, v_elem, t3) = tree.get_triplet(v);
+            let tree = tree.set_quad(u, (red, t1, u_elem, t2));
+            let active = true;
+            let (active, tree, u) = _remove_fix_left $ (active, tree, u);
+            eval tree._debug_assert_level_diff("L4", "u", u, "t3", t3, 0);
+            let tree = tree.set_quad(v, (black, u, v_elem, t3));
+            (active, tree, v)
+        }
+    );
+
+    // Called when `node.right.level == node.level.level - 1`.
+    // Returns `(active, tree, fixed)` where `fixed` is the fixed node,
+    // and `active` is true iff `fixed.level = node.level - 1`.
+    _remove_fix_right: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
+    _remove_fix_right = |(active, tree, node)| (
+        if !active {
+            (active, tree, node)
+        };
+        let node_level = tree._save_current_level("node", node);
+        let (active, tree, fixed) = _remove_fix_right_inner $ (active, tree, node);
+        if fixed.is_empty {
+            (active, tree, fixed)
+        };
+        //let (left, elem, right) = tree.get_triplet(node);
+        let fixed_level = tree._save_current_level("fixed", fixed);
+        eval _debug_assert_saved_level_diff("_remove_fix_right postcheck",
+            fixed_level, node_level,
+            if active { 1 } else { 0 }
+        );
+        eval _debug_eprintln_lazy(|_| "_remove_fix_right done: active="+active.to_string + " fixed="+fixed.to_string);
+        (active, tree, fixed)
+    );
+
+    _remove_fix_right_inner: [a: RBNodeElem] (Bool, RBTree a, RBNodeIndex) -> (Bool, RBTree a, RBNodeIndex);
+    _remove_fix_right_inner = |(active, tree, node)| (
+        // see http://wwwa.pikara.ne.jp/okojisan/rb-tree/index.html#Delete
+        eval _debug_eprintln_lazy(|_| "_remove_fix_right: active="+active.to_string + " node="+node.to_string);
+        if !active {
+            (active, tree, node)
+        };
+        let u = node;
+        let u_color = tree.get_color(u);
+        let u_was_black = (u_color == black);
+        let (v, u_elem, t4) = tree.get_triplet(u);
+        assert_lazy(|_| "v is empty", !v.is_empty) $ |_|
+        eval tree._debug_assert_level_diff("_remove_fix_right precheck", "v", v, "t4", t4, -1);
+        if tree.is_black(v) {
+            let (v_left, v_right) = tree.get_left_right(v);
+            if tree.is_red(v_right) {
+                eval _debug_eprintln_lazy(|_| "R1");
+                // pattern R1
+                let (t1, v_elem, w) = tree.get_triplet(v);
+                let (t2, w_elem, t3) = tree.get_triplet(w);
+                eval tree._debug_assert_level_diff("R1", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("R1", "t3", t3, "t4", t4, 0);
+                let tree = tree.set_quad(v, (black, t1, v_elem, t2));
+                let tree = tree.set_quad(u, (black, t3, u_elem, t4));
+                let tree = tree.set_quad(w, (u_color, v, w_elem, u));
+                let active = false;
+                (active, tree, w)
+            } else if tree.is_red(v_left) {
+                eval _debug_eprintln_lazy(|_| "R2");
+                // pattern R2
+                let (w, v_elem, t3) = tree.get_triplet(v);
+                let (t1, w_elem, t2) = tree.get_triplet(w);
+                eval tree._debug_assert_level_diff("R2", "t1", t1, "t2", t2, 0);
+                eval tree._debug_assert_level_diff("R2", "t3", t3, "t4", t4, 0);
+                let tree = tree.set_quad(w, (black, t1, w_elem, t2));
+                let tree = tree.set_quad(u, (black, t3, u_elem, t4));
+                let tree = tree.set_quad(v, (u_color, w, v_elem, u));
+                let active = false;
+                (active, tree, v)
+            } else {
+                eval _debug_eprintln_lazy(|_| "R3");
+                // pattern R3
+                let (t1, v_elem, t2) = tree.get_triplet(v);
+                let t3 = t4;
+                let tree = tree.set_quad(v, (red, t1, v_elem, t2));
+                eval tree._debug_assert_level_diff("R3", "v", v, "t3", t3, 0);
+                let tree = tree.set_quad(u, (black, v, u_elem, t3));
+                let active = u_was_black;
+                (active, tree, u)
+            }
+        } else {    // v.is_red
+            eval _debug_eprintln_lazy(|_| "R4");
+            // pattern R4
+            assert_lazy(|_| "R4: u_was_black", u_was_black) $ |_|
+            let (t1, v_elem, t2) = tree.get_triplet(v);
+            let t3 = t4;
+            let tree = tree.set_quad(u, (red, t2, u_elem, t3));
+            let active = true;
+            let (active, tree, u) = _remove_fix_right $ (active, tree, u);
+            eval tree._debug_assert_level_diff("R4", "t1", t1, "u", u, 0);
+            let tree = tree.set_quad(v, (black, t1, v_elem, u));
+            (active, tree, v)
+        }
+    );
+
+    _to_array_inner: [a: RBNodeElem] RBNodeIndex -> Array a -> RBTree a -> Array a;
+    _to_array_inner = |node, arr, tree| (
+        if node.is_empty { arr };
+        let (left, elem, right) = tree.get_triplet(node);
+        let arr = tree._to_array_inner(left, arr);
+        let arr = arr.push_back(elem);
+        let arr = tree._to_array_inner(right, arr);
+        arr
+    );
+
+    to_array: [a: RBNodeElem] RBTree a -> Array a;
+    to_array = |tree| (
+        tree._to_array_inner(tree.@root, [])
+    );
+
+    to_iter: [a: RBNodeElem] RBTree a -> DynIterator a;
+    to_iter = |tree| (
+        tree._to_iter_inner(tree.@root)
+    );
+
+    _to_iter_inner: [a: RBNodeElem] RBNodeIndex -> RBTree a -> DynIterator a;
+    _to_iter_inner = |node, tree| (
+        if node.is_empty { DynIterator::empty };
+        let (left, elem, right) = tree.get_triplet(node);
+        tree._to_iter_inner(left)
+        ._fast_append(
+            tree._to_iter_inner(right)
+            .push_front(elem).to_dyn
+        )
+    );
+
+    from_iter_lt: [a: RBNodeElem, it: Iterator, Item it = a] (a -> a -> Bool) -> it -> RBTree a;
+    from_iter_lt = |less_than, iter| (
+        let tree = RBTree::make_lt(less_than);
+        iter.fold(tree, insert)
+    );
+
+    from_iter: [a: LessThan, a: RBNodeElem, it: Iterator, Item it = a] it -> RBTree a;
+    from_iter = |iter| (
+        iter.from_iter_lt(_less_than)
+    );
+
+}
+
+impl [a: RBNodeElem, a: ToString] RBTree a: ToString {
+//    to_string = |tree| tree._to_string(tree.@root);
+    to_string = |tree| "RBTree{ size=" + tree.get_size.to_string + " }";
+}
+
+_to_string: [a: RBNodeElem, a: ToString] RBNodeIndex -> RBTree a -> String;
+_to_string = |node, tree| (
+    if node.is_empty { "E" };
+    let level = tree.level_nonvalidate(node);
+    let color = if tree.is_black(node) { "B" } else { "R" };
+    let (left, elem, right) = tree.get_triplet(node);
+    color + "(" + tree._to_string(left) + "," + elem.to_string + "," + tree._to_string(right) + ")"
+);

@@ -1,0 +1,132 @@
+/*
+    Simple Integer Map using a Trie with U64 as an internal key
+*/
+module Minilib.Collection.IntMap;
+
+// external key type
+type IntKey = I64;
+
+// internal key type
+type UKey = U64;
+
+_ukey_offset: U64;
+_ukey_offset = 1_U64.shift_left(63_U64);    // 0x8000_0000_0000_0000
+
+_bits: U64;
+_bits = 2_U64;
+//_bits = 4_U64;
+//_bits = 8_U64;
+
+_branch_size: U64;
+_branch_size = 1_U64.shift_left(_bits);
+
+_num_levels: U64;
+_num_levels = (64_U64 + _bits - 1_U64) / _bits;
+
+// A type of combining function that resolves collisions.
+// `combine(old_value, new_value)` returns a combined value.
+type Combine a = a -> a -> a;
+
+overwrite: Combine a = |old_value, new_value| new_value;
+
+// Integer Map
+type IntMap a = unbox struct {
+    root: TrieNode a,
+};
+
+type TrieNode a = unbox union {
+    empty: (),
+    leaf: a,
+    branch: Array (TrieNode a),
+};
+
+impl [a: ToString] TrieNode a: ToString {
+    to_string = |node| node._node_to_string(0);
+}
+
+_node_to_string: [a: ToString] I64 -> TrieNode a -> String;
+_node_to_string = |indent, node| (
+    let indent_str: String = Array::fill(indent, ' ').push_back('\0').from_bytes.as_ok;
+    match node {
+        empty() => indent_str + "empty()",
+        leaf(value) => indent_str + "leaf(" + value.to_string + ")",
+        branch(children) => 
+            children.to_iter.fold(
+                indent_str + "branch()", |child, s|
+                s + "\n" + child._node_to_string(indent + 1)
+            )
+    }
+);
+
+empty: IntMap a;
+empty = IntMap { root: TrieNode::empty() };
+
+find: IntKey -> IntMap a -> Option a;
+find = |key, map| (
+    let ukey = key.to_U64 + _ukey_offset;
+    map.@root._lookup(_bits * (_num_levels - 1_U64), ukey)
+);
+
+_lookup: U64 -> UKey -> TrieNode a -> Option a;
+_lookup = |shift, ukey, node| (
+    match node {
+        empty() => none(),
+        leaf(value) => some(value),
+        branch(children) => (
+            let i = ukey.shift_right(shift).bit_and(_branch_size - 1_U64);
+            children.@(i.to_I64)._lookup(shift - _bits, ukey)
+        )
+    }
+);
+
+insert: Combine a -> IntKey -> a -> IntMap a -> IntMap a;
+insert = |combine, key, new_value, map| (
+    let ukey = key.to_U64 + _ukey_offset;
+    map.mod_root(_ins(_bits * (_num_levels - 1_U64), combine, ukey, new_value))
+);
+
+_ins: U64 -> Combine a -> UKey -> a -> TrieNode a -> TrieNode a;
+_ins = |shift, combine, ukey, new_value, node| (
+    if shift.to_I64 < 0 {
+        match node {
+            empty() => leaf(new_value),
+            leaf(old_value) => leaf(combine(old_value, new_value)),
+            branch(_) => undefined("branch found in level 0"),
+        }
+    } else {
+        let node = match node {
+            empty() => branch(Array::fill(_branch_size.to_I64, empty())),
+            leaf(_) => undefined("leaf found in level non-0"),
+            branch(_) => node,
+        };
+        let i = ukey.shift_right(shift).bit_and(_branch_size - 1_U64);
+        node.mod_branch(mod(i.to_I64, _ins(shift - _bits, combine, ukey, new_value)))
+    }
+);
+
+
+to_iter: IntMap a -> DynIterator (I64, a);
+to_iter = |map| (
+    map.@root._to_iter(0_U64, _bits * (_num_levels - 1_U64))
+);
+
+_to_iter: UKey -> U64 -> TrieNode a -> DynIterator (I64, a);
+_to_iter = |ukey, shift, node| (
+    match node {
+        empty() => Iterator::empty.to_dyn,
+        leaf(value) => (
+            let key = (ukey - _ukey_offset).to_I64;
+            pure((key, value))
+        ),
+        branch(children) => (
+            range(0, children.get_size)
+            .filter(|i| !children.@(i).is_empty)
+            .map(|i|
+                let shift1 = shift - _bits;
+                let ukey1 = ukey + i.to_U64.shift_left(shift);
+                children.@(i)._to_iter(ukey1, shift1)
+            )
+            .flatten.to_dyn
+        ),
+    }
+);

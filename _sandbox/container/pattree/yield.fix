@@ -1,0 +1,82 @@
+// `Yield e a` is a computation which generates a sequence of type `e`,
+// and a final result of type `a`.
+module Minilib.Monad.Yield;
+
+//import Minilib.Monad.Trans;
+
+trait MonadYield = Functor + Monad + MonadYieldIF;
+
+trait [m: * -> *] m: MonadYieldIF {
+    type YieldType m;
+    yield: YieldType m -> m ();
+}
+
+//
+type Yield e a = unbox union {
+    y_pure: a,
+    y_yield: (e, () -> Yield e a),
+};
+
+impl Yield e: Monad {
+    pure = y_pure;
+    bind = |f, ma| (
+        match ma {
+            y_pure(a) => f(a),
+            y_yield((e, next)) => y_yield((e, next >> bind(f))),
+        }
+    );
+}
+
+impl Yield e: Functor {
+    map = |f| bind(f >> pure);
+}
+
+impl Yield e: MonadYieldIF {
+    type YieldType (Yield e) = e;
+    // yield: e -> Yield e ();
+    yield = |e| y_yield $ (e, |_| pure());
+}
+
+// `Yield e a` can be used as an Iterator of `e`.
+// Note that iterators do not return the final state, so `a` is discarded.
+impl Yield e a: Iterator {
+    type Item (Yield e a) = e;
+    advance = |ma| (
+        match ma {
+            y_pure(a) => none(),     // `a` is discarded
+            y_yield((e, next)) => some $ (next(), e),
+        }
+    );
+}
+
+// `map_yield(f)` converts `Yield d a` to `Yield e a`, where the type of `f` is `d -> e`.
+// This is almost same functionality as `Iterator::map`.
+map_yield: (d -> e) -> Yield d a -> Yield e a;
+map_yield = |f, ma| (
+    match ma {
+        y_pure(a) => y_pure(a),
+        y_yield((d, next)) => y_yield((f(d), next >> map_yield(f))),
+    }
+);
+
+// Returns at most `n` yielded elements and the remaining state.
+take_array: I64 -> Yield e a -> (Array e, Yield e a);
+take_array = |n, ma| (
+    loop(
+        ([], ma), |(arr,ma)|
+        if arr.get_size >= n { break $ (arr, ma) };
+        match ma {
+            y_pure(a) => break $ (arr, y_pure(a)),
+            y_yield((e, next)) => continue $ (arr.push_back(e), next()),
+        }
+    )
+);
+
+fold_yield: s -> (e -> s -> s) -> (a -> s -> s) -> Yield e a -> s;
+fold_yield = |s, f, g, ma| (
+    match ma {
+        y_pure(a) => g(a, s),
+        y_yield((e, next)) => next().fold_yield(f(e), f, g),
+    }
+);
+

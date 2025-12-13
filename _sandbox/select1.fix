@@ -1,0 +1,133 @@
+module Main;
+
+//import Math;
+
+type Timeval = unbox struct {
+    arr: Array U64
+};
+
+namespace Timeval {
+    from_seconds: F64 -> Timeval;
+    from_seconds = |seconds| (
+        //let sec: U64 = Math::floor(seconds).to_U64;
+        //let usec: U64 = ((seconds - Math::floor(seconds)) * 1.0e6).to_U64;
+        let sec: U64 = seconds.to_U64;
+        let usec: U64 = ((seconds - sec.to_F64) * 1.0e6).to_U64;
+        Timeval { arr: [sec, usec] }
+    );
+
+    mutate_arr_io: (Ptr -> IO b) -> Timeval -> IO (Timeval, b);
+    mutate_arr_io = |f, timeval| (
+        // TODO: use type Wrapper b a = IO (a, b) and act_arr
+        let Timeval {
+            arr: arr
+        } = timeval;
+        let (arr, b) = *arr.mutate_boxed_io(f);
+        let timeval = Timeval { arr: arr };
+        pure $ (timeval, b)
+    );
+}
+
+impl Timeval: Zero {
+    zero = Timeval::from_seconds(0.0);
+}
+
+type FDSet = unbox struct {
+    arr: Array U32,
+    nfds: I64
+};
+
+namespace FDSet {
+    _max_nfds: I64;
+    _max_nfds = 1024;
+
+    make: I64 -> FDSet;
+    make = |nfds| (
+        let nfds = min(nfds, _max_nfds);
+        FDSet {
+            arr: Array::fill(_max_nfds / 32, 0_U32),
+            nfds: nfds
+        }
+    );
+
+    mutate_arr_io: (Ptr -> IO b) -> FDSet -> IO (FDSet, b);
+    mutate_arr_io = |f, fdset| (
+        // TODO: use type Wrapper b a = IO (a, b) and act_arr
+        let FDSet {
+            arr: arr,
+            nfds: nfds
+        } = fdset;
+        let (arr, b) = *arr.mutate_boxed_io(f);
+        let fdset = FDSet { arr: arr, nfds: nfds };
+        pure $ (fdset, b)
+    );
+
+    _idx: I64 -> I64;
+    _idx = |fd| fd / 32;
+
+    _mask: I64 -> U32;
+    _mask = |fd| 1_U32.shift_left(fd.bit_and(31).to_U32);
+
+    is_set: I64 -> FDSet -> Bool;
+    is_set = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.@arr.@(idx).bit_and(mask) != 0_U32
+    );
+
+    set_bit: I64 -> FDSet -> FDSet;
+    set_bit = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.mod_arr(|arr|
+            arr.set(idx, arr.@(idx).bit_or(mask))
+        )
+    );
+
+    clear_bit: I64 -> FDSet -> FDSet;
+    clear_bit = |fd, fdset| (
+        let idx = _idx(fd);
+        let mask = _mask(fd);
+        fdset.mod_arr(|arr|
+            arr.set(idx, arr.@(idx).bit_and(U32::maximum - mask))
+        )
+    );
+}
+
+select: (FDSet, FDSet, FDSet, Timeval) -> IOFail (FDSet, FDSet, FDSet, Timeval);
+select = |(readfds, writefds, exceptfds, timeout)| (
+    pure();;
+    let nfds = max(readfds.@nfds, max(writefds.@nfds, exceptfds.@nfds));
+    let (readfds, (writefds, (exceptfds, (timeout, ret)))) = 
+        *readfds.mutate_arr_io(|p_readfds_arr|
+        writefds.mutate_arr_io(|p_writefds_arr|
+        exceptfds.mutate_arr_io(|p_exceptfds_arr|
+        timeout.mutate_arr_io(|p_timeout_arr|
+        FFI_CALL_IO[I32 select(I32, Ptr, Ptr, Ptr, Ptr), 
+            nfds.to_I32, p_readfds_arr, p_writefds_arr, p_exceptfds_arr, p_timeout_arr]
+    )))).lift;
+    if ret == -1_I32 {
+        throw $ "select failed"
+    };
+    pure $ (readfds, writefds, exceptfds, timeout)
+);
+
+main: IO ();
+main = do {
+    let readfds = FDSet::make(5);
+    let writefds = FDSet::make(5);
+    let exceptfds = FDSet::make(5);
+    let readfds = readfds.set_bit(0);  // stdin
+    //let writefds = writefds.set_bit(1);  // stdout
+    //let writefds = writefds.set_bit(2);  // stderr
+    let sec = 5;
+    let timeout = Timeval::from_seconds(sec.to_F64);
+    let print_log = println >> lift;
+    print_log("Please type enter key in any moment during " + sec.to_string + " seconds");;
+    print_log("--- start ---");;
+    print_log((readfds.@arr, timeout.@arr).to_string);;
+    let (readfds, writefds, exceptfds, timeout) =  *select((readfds, writefds, exceptfds, timeout));
+    print_log("--- end --- ");;
+    print_log((readfds.@arr, timeout.@arr).to_string);;
+    print_log(readfds.is_set(0).to_string)
+}.try(eprintln);

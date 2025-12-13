@@ -1,0 +1,120 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+
+type SIO e a = StateT e IOFail a;
+
+//--------------------------------------------------
+// Users
+//--------------------------------------------------
+
+type Users = unbox struct {
+    users: Array User,
+};
+
+trait e: HasUsers {
+    on_users: [f: Functor] (Users -> f Users) -> (e -> f e);
+}
+
+impl Users: HasUsers {
+    on_users = |f| f;
+}
+
+namespace Users {
+    empty: Users = Users { users: [] };
+
+    add_user: [e: HasUsers] String -> SIO e ();
+    add_user = |name| lens_state_t(on_users) $ do {
+        mod_state_(mod_users(push_back(User::make(name))))
+    };
+
+    list_users: [e: HasUsers] SIO e (Array String);
+    list_users = lens_state_t(on_users) $ do {
+        let users = *get_state;
+        pure $ users.@users.map(@name)
+    };
+}
+
+type User = unbox struct {
+    name: String,
+    last_login: I64,
+};
+
+namespace User {
+    make: String -> User;
+    make = |name| User { name: name, last_login: -1 };
+}
+
+//--------------------------------------------------
+// Logger
+//--------------------------------------------------
+
+type Logger = unbox struct {
+    messages: Array String,
+};
+
+trait e: HasLogger {
+    on_logger: [f: Functor] (Logger -> f Logger) -> (e -> f e);
+}
+
+impl Logger: HasLogger {
+    on_logger = |f| f;
+}
+
+namespace Logger {
+    empty: Logger = Logger { messages: [] };
+
+    write_log: [e: HasLogger] String -> SIO e ();
+    write_log = |str| lens_state_t(on_logger) $ do {
+        mod_state_(mod_messages(push_back(str)))
+    };
+}
+
+//--------------------------------------------------
+// App
+//--------------------------------------------------
+
+type App = unbox struct {
+    users: Users,
+    logger: Logger,
+};
+
+namespace App {
+    empty: App = App {
+        users: Users::empty,
+        logger: Logger::empty,
+    };
+}
+
+impl App: HasUsers {
+    on_users = act_users;
+}
+impl App: HasLogger {
+    on_logger = act_logger;
+}
+
+//--------------------------------------------------
+// Usage
+//--------------------------------------------------
+
+
+test_app: SIO App ();
+test_app = (
+    write_log("add users");;
+    add_user("alice");;
+    add_user("bob");;
+    let arr = *list_users;
+    println("users=" + arr.to_string).lift_io;;
+    write_log("done");;
+    pure()
+);
+
+main: IO ();
+main = (
+    do {
+        let app = App::empty;
+        test_app.eval_state_t(app)
+    }.try(eprintln)
+);

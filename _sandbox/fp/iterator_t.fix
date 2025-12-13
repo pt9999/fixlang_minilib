@@ -1,0 +1,202 @@
+module Minilib.Monad.IteratorT;
+
+// https://hackage.haskell.org/package/list-transformer-1.1.1
+
+import Minilib.Monad.Trans;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+
+// A monadic iterator, ie. a monad transformer of an iterator.
+type [m: * -> *] IteratorT m a = box struct {
+    next: m (Option (IteratorT m a, a))
+};
+
+namespace IteratorT {
+    // Creates an monadic iterator from a monad of next value and next iterator.
+    make: [m: * -> *] m (Option (IteratorT m a, a)) -> IteratorT m a;
+    make = |next| IteratorT { next: next };
+
+    // Gets a monad of next value and next iterator.
+    advance: [m: * -> *] IteratorT m a -> m (Option (IteratorT m a, a));
+    advance = @next;
+
+    // Creates an empty monadic iterator.
+    empty: [m: Monad] IteratorT m a;
+    empty = IteratorT::make $ pure $ none();
+
+    // Check if the monadic iterator is empty.
+    is_empty: [m: Monad] IteratorT m a -> m Bool;
+    is_empty = |xs| xs.advance.bind(|opt| pure $ opt.is_none);
+
+    // Gets a monad of the first element of a monadic iterator.
+    // If the monadic iterator is empty, this function returns `pure(none())`.
+    get_first: [m: Monad] IteratorT m a -> m (Option a);
+    get_first = |xs| xs.advance.bind(|opt| pure $ opt.map(Tuple2::@1));
+
+    // Pushes an element to a monadic iterator.
+    push_front: [m: Monad] a -> IteratorT m a -> IteratorT m a;
+    push_front = |x, xs| IteratorT::make $ pure $ some $ (xs, x);
+
+    // Pushes a monad of an element to a monadic iterator.
+    push_m_front: [m: Monad] m a -> IteratorT m a -> IteratorT m a;
+    push_m_front = |x, xs| IteratorT::make $ do {
+        pure $ some $ (xs, *x)
+    };
+
+    // Creates a monadic iterator from an iterator of monads of elements.
+    from_m_iter: [m: Monad, iter: Iterator, Item iter = m a] iter -> IteratorT m a;
+    from_m_iter = |xs| IteratorT::make $ do {
+        pure();;    // make it lazy, since it may be an infinite iterator
+        match xs.advance {
+            none() => pure $ none(),
+            some((xs2, x)) => pure $ some((IteratorT::from_m_iter(xs2), *x))
+        }
+    };
+
+    // Creates a monadic iterator from an iterator of elements.
+    from_iter: [m: Monad, iter: Iterator, Item iter = a] iter -> IteratorT m a;
+    from_iter = |xs| IteratorT::make $ do {
+        pure();;    // make it lazy, since it may be an infinite iterator
+        match xs.advance {
+            none() => pure $ none(),
+            some((xs2, x)) => pure $ some((IteratorT::from_iter(xs2), x))
+        }
+    };
+
+    // Synonym for `from_iter`.
+    lift_iter: [m: Monad, iter: Iterator, Item iter = a] iter -> IteratorT m a;
+    lift_iter = from_iter;
+
+    // Creates a monadic iterator from an array of elements.
+    from_array: [m: Monad] Array a -> IteratorT m a;
+    from_array = |arr| IteratorT::from_iter(arr.to_iter);
+
+    // Converts a monadic iterator to a monad of an array of elements.
+    to_array_m: [m : Monad] IteratorT m a -> m (Array a);
+    to_array_m = |xs| (
+        xs.fold_m(
+            [], |x, array|
+            pure $ array.push_back(x)
+        )
+    );
+
+    // Converts a monadic iterator to a monad of an array of elements, then convert it to an iterator.
+    to_iter_m: [m : Monad] IteratorT m a -> m (DynIterator a);
+    to_iter_m = |xs| (
+        let arr = *xs.to_array_m;
+        pure $ arr.to_iter.to_dyn
+    );
+
+    // Appends a monadic iterator to a monadic iterator.
+    //
+    // Note: Since `iter1.append(iter2)` puts `iter2` after `iter1`, `append(ys, xs)` puts `ys` after `xs`.
+    append: [m: Monad] IteratorT m a -> IteratorT m a -> IteratorT m a;
+    append = |ys, xs| IteratorT::make $ do {
+        match *xs.advance {
+            none() => ys.advance,
+            some((xs2, x)) => pure $ some $ (xs2.append(ys), x)
+        }
+    };
+
+    // Folds a monadic iterator from left to right by monadic action.
+    fold_m: [m : Monad] b -> (a -> b -> m b) -> IteratorT m a -> m b;
+    fold_m = |init, op, iter| (
+        loop_m((init, iter), |(accum, iter)| (
+            let next = *iter.advance;
+            if next.is_none { break_m $ accum };
+            let (iter, next) = next.as_some;
+            let accum = *op(next, accum);
+            continue_m $ (accum, iter)
+        ))
+    );
+
+    // Takes at most n elements from a monadic iterator.
+    take : [m : Monad] I64 -> IteratorT m a -> IteratorT m a;
+    take = |n, iter| (
+        IteratorT::make $ do {
+            if n <= 0 { pure $ none() };
+            match *iter.advance {
+                none() => pure $ none(),
+                some((next, a)) => pure $ some $ (next.take(n-1), a)
+            }
+        }
+    );
+
+    // Skips at most n elements from a monadic iterator.
+    skip: [m : Monad] I64 -> IteratorT m a -> IteratorT m a;
+    skip = |n, iter| (
+        IteratorT::make $ do {
+            loop_m(
+                (0, iter), |(i, iter)|
+                if i >= n { break_m $ *iter.advance };
+                match *iter.advance {
+                    none() => break_m $ none(),
+                    some((iter, a)) => continue_m $ (i + 1, iter)
+                }
+            )
+        }
+    );
+}
+
+impl [m: Functor] IteratorT m: Functor {
+    // Maps every element of a monadic iterator by a function.
+    map = |f, xs| (
+        IteratorT::make $ xs.advance.map(
+            |opt| opt.map(
+                |(xs2, x)| (xs2.map(f), f(x))
+            )
+        )
+    );
+}
+
+impl [m: Monad] IteratorT m: Monad {
+    // Creates a monadic iterator of a single element.
+    pure = |x| IteratorT::make $ pure $ some $ (IteratorT::empty, x);
+    // Binds a function to a monadic iterator with comprehension of elements.
+    // Similar to `bind` function for `DynIterator`.
+    bind = |f, xs| (
+        IteratorT::make $ do {
+            match *xs.advance {
+                none() => pure $ none(),
+                some((ys, x)) => f(x).append(ys.bind(f)).advance
+            }
+        }
+    );
+}
+
+impl IteratorT: MonadTrans {
+    // Creates a monadic iterator of a single element,
+    // whose value is lifted from the monad.
+    lift_t = |ma| (
+        IteratorT::empty.push_m_front(ma)
+    );
+}
+
+impl [m: MonadError] IteratorT m: MonadErrorIF {
+    // Creates a monadic iterator such that retrieving the first element causes an error.
+    error = lift_t << error;
+
+    // Catches an error at any element of a monadic iterator.
+    // If retrieving any element of the monadic iterator causes an error,
+    // that element and the tail part is replaced by the handler.
+    catch = |handler, xs| (
+        IteratorT::make $ do {
+            match *xs.advance {
+                none() => pure $ none(),
+                some((xs2, x)) => pure $ some $ (xs2.catch(handler), x)
+            }
+        }.catch(handler >> advance)
+    );
+}
+
+impl [m: MonadIO] IteratorT m: MonadIOIF {
+    // Creates a monadic iterator of a single element,
+    // whose value is lifted from an `IO a`.
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] IteratorT m: MonadIOFailIF {
+    // Creates a monadic iterator of a single element,
+    // whose value is lifted from an `IOFail a`.
+    lift_iofail = lift_t << lift_iofail;
+}

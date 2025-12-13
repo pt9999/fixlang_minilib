@@ -1,0 +1,110 @@
+module Minilib.Crypto.Cert.X509Path;
+
+import HashMap;
+
+import Minilib.Common.Assert;
+import Minilib.Common.DebugLog;
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.CACertificates;
+import Minilib.Crypto.Cert.X509;
+import Minilib.Crypto.Cert.X509Signature;
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cipher.CipherApi;
+import Minilib.Monad.Error;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+
+type CertificatePath = unbox struct {
+    data: Array Certificate,
+};
+
+namespace CertificatePath {
+    make: [m: MonadError] Array Certificate -> CACertificates -> m CertificatePath;
+    make = |certs, ca_certs| (
+        if certs.get_size == 0 { error $ "certificate list is empty" };
+        _check_certs_order(certs);;
+        let ca = *_find_ca_cert(certs, ca_certs);
+        pure $ CertificatePath {
+            data: certs.push_back(ca)
+        }
+    );
+
+    _check_certs_order: [m: MonadError] Array Certificate -> m ();
+    _check_certs_order = |certs| (
+        Iterator::range(0, certs.get_size - 1).to_dyn.foreach_m(|i|
+            let prev_issuer = certs.@(i).@tbs_certificate.@issuer;
+            let next_subject = certs.@(i + 1).@tbs_certificate.@subject;
+            if prev_issuer != next_subject {
+                error $ "issuer and subject unmatch:" +
+                        (i, prev_issuer).format("\n  certs[{}].issuer={}") +
+                        (i + 1, next_subject).format("\n  certs[{}].subject={}")
+            };
+            pure()
+        )
+    );
+
+    _find_ca_cert: [m: MonadError] Array Certificate -> CACertificates -> m Certificate;
+    _find_ca_cert = |certs, ca_certs| (
+        let last_cert_issuer = certs.get_last.as_some.@tbs_certificate.@issuer;
+        let ca = ca_certs.find(last_cert_issuer);
+        if ca.is_none {
+            error $ "ca certificate not found: " + last_cert_issuer.to_string
+        };
+        pure $ ca.as_some
+    );
+
+    validate_certificate_signatures: [m: MonadError] CipherApi -> CertificatePath -> m ();
+    validate_certificate_signatures = |cipher_api, cert_path| (
+        let arr = validate_certificate_signatures_mt(cipher_api, cert_path);
+        arr.foreach_m(|lazy| lazy()).from_result_t
+    );
+
+    validate_certificate_signatures_mt: CipherApi -> CertificatePath -> Array (Lazy (Result ErrMsg ()));
+    validate_certificate_signatures_mt = |cipher_api, cert_path| (
+        let certs = cert_path.@data;
+        assert_lazy(|_| "empty cert path", certs.get_size > 0) $ |_|
+
+        let validate_ith_cert: I64 -> Lazy (Result ErrMsg ()) = |i, _| (
+            let prev_cert = certs.@(i);
+            let next_cert = certs.@(i + 1);
+            eval log_debug([prev_cert.get_subject, next_cert.get_subject].format("validate {} using public key of {}"));
+            let public_key = next_cert.@tbs_certificate.@subject_public_key_info;
+            validate_certificate_signature(cipher_api, public_key, prev_cert);;
+            eval log_debug([prev_cert.get_subject, next_cert.get_subject].format("finished: validate {} using public key of {}"));
+            pure()
+        );
+        let validate_ca_cert: Lazy (Result ErrMsg ()) = |_| (
+            let ca_cert = certs.get_last.as_some;
+            eval log_debug([ca_cert.get_subject].format("validate {} using own public key"));
+            let public_key = ca_cert.@tbs_certificate.@subject_public_key_info;
+            validate_certificate_signature(cipher_api, public_key, ca_cert);;
+            eval log_debug([ca_cert.get_subject].format("finished: validate {} using own public key"));
+            pure()
+        );
+        Iterator::range(0, certs.get_size - 1).to_array.map(validate_ith_cert)
+        .push_back(validate_ca_cert)
+    );
+
+    validate_date: [m: MonadError] Option X509Time -> CertificatePath -> m ();
+    validate_date = |time, cert_path| (
+        if time.is_none { pure () };
+        let time = time.as_some;
+        eval log_debug("validate_date: time=" + time.to_string);
+        let certs = cert_path.@data;
+        certs.foreach_m(|cert|
+            let validity = cert.@tbs_certificate.@validity;
+            if !validity.is_valid_at(time) {
+                error $ (validity, cert.get_subject).format("certificate is out of date: validity={} subject={}")
+            };
+            pure()
+        )
+    );
+}
+
+impl CertificatePath: ToString {
+    to_string = |obj| (
+        "CertificatePath {" +
+        " data=" + obj.@data.map(|cert| cert.@tbs_certificate.@subject).to_string +
+        " }"
+    );
+}

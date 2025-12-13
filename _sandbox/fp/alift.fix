@@ -1,0 +1,123 @@
+// Auto alifter
+module Main;
+
+import Minilib.Monad.Iden;
+import Minilib.Monad.IO;
+import Minilib.Monad.State;
+import Minilib.Monad.Option;
+import Minilib.Monad.Trans;
+//import Minilib.Monad.Error;
+
+// A trait which converts a value of a type to a value of another type.
+trait lf: ALifter {
+    // A type that the `alifter` converts from.
+    type ALiftFrom lf;
+    // A type that the `alifter` converts to.
+    type ALiftTo lf;
+    // A singleton instance of the alifter.
+    // NOTE: This instance is required to select the implementation of `ALifter` trait.
+    alifter: lf;
+    // Converts a value of type `ALiftFrom lf` to a value of type `ALiftTo lf`.
+    // NOTE: The second argument `lf` is ignored. It is required to select the implementation of `ALifter` trait.
+    alift_from: (ALiftFrom lf) -> lf -> (ALiftTo lf);
+}
+
+// An empty structure for `ALifter` implementation.
+type [n: * -> *, m: * -> *] ALifterImpl from to = unbox struct {};
+
+// A alifter implementation which lifts `Iden` monad to any monad.
+impl [m: Monad] ALifterImpl (Iden a) (m a): ALifter {
+    type ALiftFrom (ALifterImpl (Iden a) (m a)) = Iden a;
+    type ALiftTo (ALifterImpl (Iden a) (m a)) = m a;
+    alifter = ALifterImpl{};
+    alift_from = |iden, alifter| pure $ iden.Iden::get;
+}
+
+// A alifter implementation which lifts `IO` monad to a monad of `MonadIO`.
+impl [m: MonadIO] ALifterImpl (IO a) (m a): ALifter {
+    type ALiftFrom (ALifterImpl (IO a) (m a)) = IO a;
+    type ALiftTo (ALifterImpl (IO a) (m a)) = m a;
+    alifter = ALifterImpl{};
+    alift_from = |io, alifter| io.lift_io;
+}
+
+// A alifter implementation which lifts `IOFail` monad to a monad of `MonadIOFail`.
+impl [m: MonadIOFail] ALifterImpl (IOFail a) (m a): ALifter {
+    type ALiftFrom (ALifterImpl (IOFail a) (m a)) = IOFail a;
+    type ALiftTo (ALifterImpl (IOFail a) (m a)) = m a;
+    alifter = ALifterImpl{};
+    alift_from = |iof, alifter| iof.lift_iofail;
+}
+
+impl [m: Monad, t: MonadTrans] ALifterImpl (m a) (t m a): ALifter {
+    type ALiftFrom (ALifterImpl (m a) (t m a)) = m a;
+    type ALiftTo (ALifterImpl (m a) (t m a)) = t m a;
+    alifter = ALifterImpl{};
+    alift_from = |ma, alifter| ma.lift_t;
+}
+
+trait [n: *->*] n: ALift {
+    type [m: *->*] ALifterType n m a;
+}
+
+impl Iden: ALift
+{
+    type ALifterType Iden m a = ALifterImpl (Iden a) (m a);
+}
+
+impl IO: ALift
+{
+    type ALifterType IO m a = ALifterImpl (IO a) (m a);
+}
+
+impl IOFail: ALift
+{
+    type ALifterType IOFail m a = ALifterImpl (IOFail a) (m a);
+}
+
+impl [n: Monad] OptionT n: ALift
+{
+    type ALifterType (OptionT n) m a = ALifterImpl (OptionT n a) (m a);
+}
+
+alift: [
+        n: ALift, 
+        m: Monad, 
+        ALifterType n m a = lf, 
+        lf: ALifter, 
+        ALiftFrom lf = n a, 
+        ALiftTo lf = m a
+    ] n a -> m a = |na| (
+    let lf: lf = alifter;
+    lf.alift_from(na)
+);
+
+test1: IO () = (
+    let sm: StateT String IOFail () = do {
+        let s = *get_state;
+        let a = *Iden::make(42).alift;
+        println("hello").alift;;
+        (throw("error"): IOFail ()).alift;;
+        put_state("end")
+    };
+    
+    sm.eval_state_t("start")
+    .try(eprintln)
+);
+
+test2: IO () = (
+    let sm: StateT String (OptionT IO) () = do {
+        let str = *get_state;
+        let opt: OptionT IO String = some(" test2").lift_option;
+        let str2 = *opt.alift;
+        println(str + str2).alift;;
+        put_state("end")
+    };
+    sm.eval_state_t("start")
+    .run_option_t
+    .forget
+);
+
+main: IO () = (
+    test1;; test2
+);

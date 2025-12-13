@@ -1,0 +1,56 @@
+module Main;
+
+fibonacci_sequence : Iterator I64;
+
+fibonacci_sequence = Iterator::generate ((0, 1), |(a, b)|
+    let c = a + b;
+    some $ (c, (b, c))
+);
+
+print_fibs : I64 -> IO ();
+
+print_fibs = |count| (
+    let fibs = fibonacci_sequence.take (count);
+    fibs.loop_iter_m ((), |b, a|
+        println (a.to_string);;
+        continue_m $ ()
+    )
+);
+
+write_number: I64 -> IOHandle  -> IOFail ();
+write_number = |number, handle| (
+    write_string (handle, number.to_string + "\n")
+);
+
+write_fibs: I64 -> IOHandle  -> IOFail ();
+write_fibs = |count, handle| (
+    let fibs = fibonacci_sequence.take (count);
+    fibs.loop_iter_m ((), |b, a|
+        println(a.to_string).lift;;
+        write_number (a, handle);;
+        continue_m $ ()
+    )
+);
+
+with_file_debug : Path -> String -> (IOHandle -> IOFail ()) -> IOFail ();
+with_file_debug = |path, mode, func| (
+    println ("Opening " + path.to_string).lift;;
+    with_file (path, mode, func);;
+    println ("Closing " + path.to_string).lift;;
+    pure()
+);
+
+write_fibs_to_file: Path -> I64 -> IOFail ();
+write_fibs_to_file = |path, count| (
+    with_file_debug (path, "w", write_fibs (count))
+);
+
+
+main : IO ();
+main = (
+    //print_fibs (10)
+    do {
+        write_fibs_to_file("fib3.log", 10)
+    }.try(exit_with_msg(1))
+);
+

@@ -1,0 +1,136 @@
+module Main;
+
+trait a: Default {
+    default: a;
+}
+
+trait b: TBool {
+    type IfElse b t f;
+}
+
+type TTrue = struct {};
+
+impl TTrue: Default {
+    default = TTrue {};
+}
+
+impl TTrue: ToString {
+    to_string = |_| "true";
+}
+
+impl TTrue: TBool {
+    type IfElse TTrue t f = t;
+}
+
+type TFalse = struct {};
+
+impl TFalse: Default {
+    default = TFalse {};
+}
+
+impl TFalse: ToString {
+    to_string = |_| "false";
+}
+
+impl TFalse: TBool {
+    type IfElse TFalse t f = f;
+}
+
+type EqType2 ab c = struct {};
+
+impl EqType2 ab c: Default {
+    default = EqType2 {};
+}
+
+impl EqType2 (a, a) c: TBool {
+    type IfElse (EqType2 (a, a) c) t f = t;
+}
+
+impl EqType2 (a, a) c: ToString {   // error: Two trait implementations for `Std::ToString` are overlapping.
+    to_string = |_| "true";
+}
+
+impl EqType2 ab (c,) : TBool {
+    type IfElse (EqType2 ab (c,)) t f = f;
+}
+
+impl EqType2 ab (c,): ToString {
+    to_string = |_| "false";
+}
+
+type EqType a b = EqType2 (a, b) ((), );
+
+test_eqtype: IO ();
+test_eqtype = (
+    println("=== test_eqtype ===");;
+    let p: EqType I64 I64 = default;
+    println("EqType I64 I64 = " + p.to_string);;
+    let p: EqType I64 I32 = default;
+    println("EqType I64 I32 = " + p.to_string);;
+    let q: IfElse (EqType I64 I64) String (Option I64) = "abc";
+    let q: IfElse (EqType I64 I32) String (Option I64) = some(1);
+    pure()
+);
+
+trait l: TList {
+    type TContains l a;
+    type TAdd l a;
+    type TRemove l a;
+}
+
+type TNull = struct {};
+
+impl TNull: Default {
+    default = TNull {};
+}
+
+impl TNull: TList {
+    type TContains TNull a = TFalse;
+    type TAdd TNull a = TCons a TNull;
+    type TRemove TNull a = TNull;
+}
+
+type TCons car cdr = struct {};
+
+impl TCons car cdr: Default {
+    default = TCons {};
+}
+
+impl [cdr: TList] TCons car cdr: TList {
+    type TContains (TCons car cdr) a = IfElse (EqType car a) TTrue (TContains cdr a);
+    type TAdd (TCons car cdr) a = IfElse (EqType car a) (TCons car cdr) (TCons car (TAdd cdr a));
+    type TRemove (TCons car cdr) a = IfElse (EqType car a) (TRemove cdr a) (TCons car (TRemove cdr a)); 
+}
+
+show_contains: [l: TList, r: Default, r: ToString, TContains l a = r] a -> String -> l -> IO ();
+show_contains = |_, label, _| (
+    let b: TContains l a = default;
+    println(label + ": " + b.to_string)
+);
+
+tadd: [l: TList, r: Default, TAdd l a = r] a -> l -> TAdd l a;
+tadd = |_, _| default;
+
+tremove: [l: TList, r: Default, TRemove l a = r] a -> l -> TRemove l a;
+tremove = |_, _| default;
+
+test_tlist: IO () = (
+    println("=== test_tlist ===");;
+    let l: TCons I16 (TCons I32 TNull) = default;
+    l.show_contains(123, "contains([I16, I32], I64)");;
+    l.show_contains(123_I32, "contains([I16, I32], I32)");;
+    let l = l.tadd(123);
+    let l = l.tremove(234_I32);     // compiler panicks
+    l.show_contains(123, "contains([I16, I64], I64)");;
+    l.show_contains(123_I32, "contains([I16, I64], I32)");;
+    pure()
+);
+
+
+//------------------------------------
+main: IO ();
+main = (
+    test_eqtype;;
+    test_tlist;;
+    pure()
+);

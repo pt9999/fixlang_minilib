@@ -1,0 +1,226 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.Free;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Iden;
+//import Minilib.Text.Hex;
+
+/*
+type Wrap a = unbox struct {
+    data: a
+};
+
+namespace Wrap {
+    wrap: a -> Wrap a;
+    wrap = |a| Wrap { data: a };
+
+    unwrap: Wrap a -> a;
+    unwrap = @data;
+}
+*/
+
+//-------------------------------------------
+
+type Toy next = box union {
+    t_output: (String, next),
+    t_bell: next,
+    t_done: () 
+};
+
+impl Toy: Functor {
+    map = |f, toy| (
+        match toy {
+            t_output((x, next)) => t_output((x, f(next))),
+            t_bell(next) => t_bell(f(next)),
+            t_done() => t_done(),   // t_done()にはnextがないため、fは呼び出されない。
+        }
+    );
+}
+
+// orphan rule のため、Free f a : ToString は Free モジュールの外部では定義できない。
+// また、[f a: ToString] という条件も書けない。
+// このため、to_string_ として定義する。
+to_string_: [a: ToString] Free Toy a -> String;
+to_string_ = |wma| (
+    match wma {
+        f_functor(toy) => match toy {
+            t_output((x, next)) => "output " + x + "\n" + next.to_string_,
+            t_bell(next) => "bell\n" + next.to_string_,
+            t_done() => "done\n",
+        },
+        f_pure(value) => "pure " + value.to_string + "\n",
+    }
+);
+
+test_toy_1: IO ();
+test_toy_1 = (
+    let toy1: Toy (Toy ()) = t_output $ ("A", t_done());
+    let toy2: Toy (Toy (Toy ()))  = t_bell $ t_output $ ("A", t_done());
+    pure()
+);
+
+
+output: String -> Free Toy ();
+output = |x| t_output((x, ())).lift_f;
+
+bell: Free Toy ();
+bell = t_bell().lift_f;
+
+done: Free Toy ();
+done = t_done().lift_f;
+
+test_toy_f_free: IO ();
+test_toy_f_free = (
+    println("=== test_toy_f_free ===");;
+    let toy : Free Toy I64 = do {
+        output("A");;
+        bell;;
+        //done;;  // doneがあるとそれ以降は何をbindしても捨てられる。実行されない
+        bell;;
+        output("B");;
+        pure $ 123
+    };
+    print(toy.to_string_)
+);
+
+test_toy_f_free2: IO ();
+test_toy_f_free2 = (
+    println("=== test_toy_f_free2 ===");;
+    let pretty = |toy| (
+        println("------------");;
+        print(toy.to_string_)
+    );
+    pretty(output("A"));;
+    pretty(pure("A").bind(output));;
+    pretty(output("A").bind(pure));;
+    pretty(output("A");; output("B"));;
+    pretty(output("A");; done;; output("B"));;
+    pure()
+);
+
+//-------------------------------------------
+// Free monad as a coroutine
+
+type StrParser = Free (Reader String);
+
+parse_text123: StrParser (Array String);
+parse_text123 = (
+    // Readerモナドでは MonadReaderIF::ask の結果は毎回同じだが、Free Reader にすることでaskの結果を毎回変えられる
+    let line1 = *ask.lift_f;    
+    let line2 = *ask.lift_f;
+    let line3 = *ask.lift_f;
+    pure $ [line1, line2, line3]
+);
+
+test_str_parser: IO ();
+test_str_parser = (
+    println("=== test_str_parser ===");;
+    let parser = parse_text123;
+    loop_m(
+        (parser, 1), |(parser, i)|
+        match parser {
+            f_pure(value) => (
+                println(value.to_string);;
+                break_m $ ()
+            ),
+            f_functor(reader) => (
+                // ここで1ステップごとに ask の中身を変える
+                let parser = reader.run_reader("Line " + i.to_string);
+                continue_m $ (parser, i + 1)
+            ),
+        }
+    )
+);
+
+//-------------------------------------------
+// Free monad as a effect
+
+trait [m: * -> *] m: MonadCommIF {
+    send_bytes: Array U8 -> m ();
+    recv_bytes: I64 -> m (Array U8);
+    gen_bytes: I64 -> m (Array U8);
+}
+
+trait MonadComm = Monad + MonadCommIF;
+
+type Comm next = box union {
+    comm_send_bytes: (Array U8, () -> next),
+    comm_recv_bytes: (I64, Array U8 -> next),
+    comm_gen_bytes: (I64, Array U8 -> next),
+};
+
+impl Comm: Functor {
+    map = |f, obj| (
+        match obj {
+            comm_send_bytes(tuple2) => comm_send_bytes $ tuple2.map(|g| g >> f),
+            comm_recv_bytes(tuple2) => comm_recv_bytes $ tuple2.map(|g| g >> f),
+            comm_gen_bytes(tuple2) => comm_gen_bytes $ tuple2.map(|g| g >> f),
+        }
+    );
+}
+
+impl Free Comm: MonadCommIF {
+    send_bytes = |bytes| f_functor $ comm_send_bytes $ (bytes, pure);
+    recv_bytes = |length| f_functor $ comm_recv_bytes $ (length, pure);
+    gen_bytes = |length| f_functor $ comm_gen_bytes $ (length, pure);
+}
+
+namespace FreeComm {
+    interpret: [m: MonadComm] Free Comm a -> m a;
+    interpret = |free| (
+        match free {
+            f_pure(value) => pure(value),
+            f_functor(comm) => match comm {
+                comm_send_bytes((bytes, cont)) => cont(*send_bytes(bytes)).interpret,
+                comm_recv_bytes((length, cont)) => cont(*recv_bytes(length)).interpret,
+                comm_gen_bytes((length, cont)) => cont(*gen_bytes(length)).interpret,
+            }
+        }
+    );
+}
+
+impl IO: MonadCommIF {
+    send_bytes = |bytes| (
+        println("send_bytes: " + bytes.to_string);;
+        pure()
+    );
+    recv_bytes = |length| (
+        let bytes = Array::from_map(length, |i| i.to_U8);
+        println("recv_bytes: " + bytes.to_string);;
+        pure $ bytes
+    );
+    gen_bytes = |length| (
+        let bytes = Array::from_map(length, |i| ((i + 33) * 31).to_U8);
+        println("gen_bytes: " + bytes.to_string);;
+        pure $ bytes
+    );
+}
+
+monad_comm_1: [m: MonadComm] m ();
+monad_comm_1 = (
+    let size = 20;
+    let bytes = *gen_bytes(size);
+    send_bytes(bytes);;
+    let bytes = *recv_bytes(size);
+    send_bytes(bytes);;
+    pure()
+);
+
+test_monad_comm: IO ();
+test_monad_comm = (
+    println("=== test_monad_comm ===");;
+    // Record a computation as a free monad
+    let ma: Free Comm () = monad_comm_1;
+    // Interpret the free monad as an IO monad
+    ma.interpret
+);
+
+main: IO ();
+main = (
+    test_toy_f_free;;
+    test_toy_f_free2;;
+    test_str_parser;;
+    test_monad_comm;;
+    pure()
+);

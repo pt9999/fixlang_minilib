@@ -1,0 +1,79 @@
+module Main;
+
+import Minilib.Encoding.Toml.TomlReader;
+import Minilib.Text.SimpleParser;
+import Minilib.Testing.UnitTest;
+
+eval_parser_str: String -> Parser a -> Result ErrMsg a;
+eval_parser_str = |str, p| (
+    p.run_parser_str(str).map(Tuple2::@0)
+);
+
+test_parse_ws: TestCase;
+test_parse_ws = (
+    make_table_test("test_parse_ws",
+        [
+            ("", ok $ ""),
+            ("abc", ok $ ""),
+            ("  \t\t\nabc", ok $ "  \t\t"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_ws.eval_parser_str(input))
+    )
+);
+
+test_parse_newline: TestCase;
+test_parse_newline = (
+    make_table_test("test_parse_newline",
+        [
+            ("", err $ _NotMatch),
+            ("a\n", err $ _NotMatch),
+            ("\n\n", ok $ "\n"),
+            ("\r\n\n", ok $ "\r\n"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_newline.eval_parser_str(input))
+    )
+);
+
+test_parse_comment: TestCase;
+test_parse_comment = (
+    make_table_test("test_parse_comment",
+        [
+            ("", err $ _NotMatch),
+            ("#  \t\tabc あいう\n", ok $ "#  \t\tabc あいう"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_comment.eval_parser_str(input))
+    )
+);
+
+// test_parse_keyval
+// test_parse_key
+// test_parse_simple_key
+
+test_parse_unquoted_key: TestCase;
+test_parse_unquoted_key = (
+    make_table_test("test_parse_unquoted_key",
+        [
+            ("", err $ _NotMatch),
+            ("-_  ", ok $ "-_"),
+            ("AXZ--axz__059!?", ok $ "AXZ--axz__059"),
+            ("123", ok $ "123"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_unquoted_key.eval_parser_str(input))
+    )
+);
+
+
+main: IO ();
+main = (
+    [
+        test_parse_ws,
+        test_parse_newline,
+        test_parse_comment,
+        test_parse_unquoted_key,
+    ]
+    .run_test_driver
+);

@@ -1,0 +1,61 @@
+module Test;
+
+import AsyncTask;
+import Subprocess;
+
+import Minilib.Common.IOEx;
+import Minilib.IO.FileSystem;
+import Minilib.Text.StringEx;
+import Minilib.Trait.Traversable;
+
+exit_status_to_string: ExitStatus -> String;
+exit_status_to_string = |ex| (
+    match ex {
+        exit(u8) => "exit(" + u8.to_string + ")",
+        signaled(u8) => "signaled(" + u8.to_string + ")",
+        wait_failed() => "wait_failed()"
+    }
+);
+
+worker: (IOHandle, IOHandle, IOHandle) -> IOFail ();
+worker = |(proc_stdin, proc_stdout, proc_stderr)| (
+    proc_stdin.close_file.lift;;
+    let drain_output: IOHandle -> IOHandle -> IO (Result ErrMsg ()) = |proc_out, out| (
+        loop_lines_io(proc_out, (), |_, line|
+            if line.is_empty { break_m $ () };
+            write_string(out, line);;
+            fflush(out);;
+            continue_m $ ()
+        ).to_result
+    );
+    let tasks = [
+        *AsyncIOTask::make(drain_output(proc_stdout, IO::stdout)).lift,
+        *AsyncIOTask::make(drain_output(proc_stderr, IO::stderr)).lift,
+    ];
+    tasks.foreach_m(|task| task.get.from_io_result)
+);
+
+run_test_file: String -> IOFail ();
+run_test_file = |filepath| (
+    println("=== " + filepath + " ===").lift;;
+    let com = "fix";
+    let args = ["fix", "run", "-f", filepath];
+    let (_, exit_status) = *Subprocess::run_with_stream(com, args, worker);
+    if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+        pure()
+    } else {
+        throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+    }
+);
+
+test: IO ();
+test = do {
+    let files = *find_files("tests");
+    let files = files.to_iter.filter(ends_with("_test.fix")).to_array;
+    files.foreach_m(run_test_file);;
+    IO::exit(0).lift
+}
+.try(|errmsg|
+    eprintln(errmsg);;
+    IO::exit(1)
+);

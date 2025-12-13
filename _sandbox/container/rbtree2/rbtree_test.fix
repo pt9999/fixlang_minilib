@@ -1,0 +1,248 @@
+module RbtreeTest;
+
+import Minilib.Collection.RBTree;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let node: RBNode I64 = [1,2,3].to_iter.from_iter;
+    let (dsize, node) = node.remove(1);
+    assert_equal("dsize", -1, dsize);;
+    //eprintln(node.to_string).lift;;
+    assert_equal("eq", 2, node.to_iter.to_array.get_size);;
+    pure()
+);
+
+test_insert_remove_ok: (I64, Reorder, Reorder) -> TestCase;
+test_insert_remove_ok = |(n, insert_reorder, remove_reorder)| (
+    let testname = "test_insert_remove_ok("+ n.to_string + "," +
+                    insert_reorder.to_string + "," +
+                    remove_reorder.to_string + ")";
+    make_test(testname) $ |_|
+    let array = Iterator::range(0, n).to_array;
+
+    // test insert
+    let shuffled = array.reorder(insert_reorder);
+    //eprintln("shuffled="+ shuffled.to_iter.map(to_string).join(",")).lift;;
+    let node = *shuffled.to_iter.fold_m(
+        RBNode::empty(), |x, node|
+        let (dsize, node) = node.insert_lt(x, less_than);
+        assert_equal("insert_lt dsize 1", 1, dsize);;
+        let (dsize, node) = node.insert_lt(x, less_than);
+        assert_equal("insert_lt dsize 0", 0, dsize);;
+        pure $ node
+    );
+    let sorted = node.to_iter.to_array;
+    //eprintln("sorted="+sorted.to_iter.map(to_string).join(",")).lift;;
+    assert_equal("array == sorted", array, sorted);;
+
+    // test from_iter
+    let shuffled = array.reorder(insert_reorder);
+    let node: RBNode I64 = shuffled.to_iter.from_iter;
+    let sorted = node.to_iter.to_array;
+    //eprintln("sorted="+sorted.to_iter.map(to_string).join(",")).lift;;
+    assert_equal("array == sorted", array, sorted);;
+
+    // test remove
+    let shuffled = array.reorder(remove_reorder);
+    let node = *shuffled.to_iter.zip(Iterator::count_up(0)).fold_m(
+        node, |(i, idx), node|
+        eval _debug_eprintln_lazy(|_| "removing: idx="+idx.to_string+" i="+i.to_string + " node="+node.to_string);
+        eval _debug_eprintln_lazy(|_| "node.level=" + node.level.to_string);
+        let (dsize, node) = node.remove(i);
+        assert_equal("remove dsize -1", -1, dsize);;
+        let (dsize, node) = node.remove(i);
+        assert_equal("remove dsize 0", 0, dsize);;
+        let expect_size = shuffled.get_size - idx - 1;
+        let actual_size = node.to_iter.to_array.get_size;
+        assert_equal("expect_size == actual_size", expect_size, actual_size);;
+        pure $ node
+    );
+    let removed = node.to_iter.to_array;
+    //eprintln("removed="+removed.to_iter.map(to_string).join(",")).lift;;
+    assert_true("removed.is_empty", removed.is_empty);;
+
+    pure()      // success
+);
+
+test_insert_remove: TestCase;
+test_insert_remove = (
+    do {
+        let n = 30;
+        let insert_reorder = *[skip(15), ascending(), descending(), shuffle(123)];
+        let remove_reorder = *[skip(15), ascending(), descending(), shuffle(345)];
+        pure $ test_insert_remove_ok $ (n, insert_reorder, remove_reorder)
+    }.run_tests
+);
+
+test_get_first_last: TestCase;
+test_get_first_last = (
+    let testname = "test_get_first_last";
+    make_test(testname) $ |_|
+    [
+        (0, ascending()),
+        (30, ascending()),
+        (40, shuffle(234)),
+        (50, shuffle(345))
+    ].to_iter.fold_m(
+        (), |(n, insert_reorder), _|
+        let array = Iterator::range(0, n).to_array;
+        let node: RBNode I64 = array.reorder(insert_reorder).to_iter.from_iter;
+        eval *assert_equal("get_first: n="+n.to_string, 
+            if n == 0 { none() } else { some(0) }, node.get_first);
+        eval *assert_equal("get_last: n="+n.to_string, 
+            if n == 0 { none() } else { some(n-1) }, node.get_last);
+        pure()
+    )
+);
+
+test_find_range_ok: Reorder -> TestCase;
+test_find_range_ok = |insert_reorder| (
+    let testname = "test_find_range_ok(" + insert_reorder.to_string + ")";
+    make_test(testname) $ |_|
+    let n = 30;
+    let array = Iterator::range(0, n).to_array;
+    let node: RBNode I64 = array.reorder(insert_reorder).to_iter.from_iter;
+    let test_patterns = [
+        ([1,2,3,4,5], (1,6)),
+        ([13,14,15,16,17,18,19,20], (13,21)),
+        ([0,1,2,3], (0,4)),
+        ([0,1,2,3], (-1,4)),
+        ([n-3,n-2,n-1], (n-3, n)),
+        ([n-3,n-2,n-1], (n-3, n+1)),
+        ([3], (3, 4)),
+        ([], (3, 3)),
+        ([], (3, 2)),
+        ([], (-1, 0)),
+        ([], (n, n+1))
+    ];
+    test_patterns.to_iter.fold_m(
+        (), |(expected, (begin, end)), _|
+        let actual = node.find_range(|x| x < begin, |x| x < end).to_array;
+        assert_equal("find_range", expected, actual);;
+        let expected = expected.to_iter.reverse.to_array;
+        let actual = node.find_range_descending(|x| x < begin, |x| x < end).to_array;
+        assert_equal("find_range_descending", expected, actual);;
+        pure()
+    )
+);
+
+test_find_range: TestCase;
+test_find_range = (
+    do {
+        let insert_reorder = *[ascending(), descending(), skip(13), shuffle(543)];
+        pure $ test_find_range_ok $ insert_reorder
+    }.run_tests
+);
+
+test_find_range_perf: TestCase;
+test_find_range_perf = (
+    let testname = "test_find_range_perf";
+    make_test(testname) $ |_|
+    let n = 1000000;
+    let array = Iterator::range(0, n).to_array;
+    let (shuffled, shuffled_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ array.reorder(shuffle(543))
+    }).lift;
+    let (node, create_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.RBNode::from_iter
+    }).lift;
+    let query = |begin, end| (
+        node.find_range(|x| x < begin, |x| x < end)
+    );
+    let (ans, ans_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ query((n.to_F64*0.1).to_I64, (n.to_F64*0.9).to_I64)
+    }).lift;
+    let (first, first_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ ans.get_first
+    }).lift;
+    let (size, size_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ ans.fold(0, |i, _| i + 1)
+    }).lift;
+    println("shuffled, create =" + (shuffled_time, create_time).to_string).lift;;
+    println("ans, first, size, total=" + (ans_time, first_time, size_time, ans_time + first_time + size_time).to_string).lift;;
+    pure()
+);
+
+test_to_iter: TestCase;
+test_to_iter = (
+    make_test("test_to_iter") $ |_|
+    let iter = Iterator::range(0, 10);
+    let node: RBNode I64 = from_iter(iter);
+    assert_equal("eq", iter.to_array, node.to_iter.to_array);;
+    pure()
+);
+
+test_to_array: TestCase;
+test_to_array = (
+    make_test("test_to_array") $ |_|
+    let iter = Iterator::range(0, 10);
+    let node: RBNode I64 = from_iter(iter);
+    assert_equal("eq", iter.to_array, node.to_array);;
+    pure()
+);
+
+test_to_iter_to_array_perf: TestCase;
+test_to_iter_to_array_perf = (
+    make_test("test_to_iter_to_array_perf") $ |_|
+    //let n = 1000000;
+    let n = 100000;
+    println("test_to_iter_to_array_perf (n=" + n.to_string + ")").lift;;
+    let array = Iterator::range(0, n).to_array;
+    let shuffled = array.reorder(shuffle(5432));
+    let (node, from_iter_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.RBNode::from_iter
+    }).lift;
+    println(" from_iter: " + from_iter_time.to_string + " seconds").lift;;
+    let (ans1, ans1_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ node.to_iter.to_array
+    }).lift;
+    println(" to_iter.to_array: " + ans1_time.to_string + " seconds").lift;;
+    let (ans2, ans2_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ node.to_array
+    }).lift;
+    println(" to_array: " + ans2_time.to_string + " seconds").lift;;
+    let (node, remove_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ shuffled.to_iter.fold(
+            node, |x, node| let (dsize, node) = node.remove(x); node
+        )
+    }).lift;
+    println(" remove: " + remove_time.to_string + " seconds").lift;;
+    assert_equal("eq", ans1, array);;
+    assert_equal("eq", ans2, array);;
+    pure()
+);
+
+
+main: IO ();
+main = (
+    [
+        /*
+        test_simple,
+        test_insert_remove,
+        test_get_first_last,
+        test_find_range,
+        //test_find_range_perf,
+        test_to_iter,
+        test_to_array,
+        */
+        test_to_iter_to_array_perf,
+        TestCase::empty
+    ]
+    .run_test_driver
+);
+
+

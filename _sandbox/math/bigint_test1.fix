@@ -1,0 +1,760 @@
+module Main;
+
+import Random;
+
+import Minilib.Common.Assert;
+import Minilib.Math.BigNat;
+import Minilib.Math.BigInt;
+//import Minilib.Math.BigIntPrime;
+import Minilib.Math.Types;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+import Minilib.Common.TimeEx;
+
+or_abort: Result ErrMsg a -> a;
+or_abort = |res| (
+    if res.is_err {
+        undefined("err: " + res.as_err)
+    };
+    res.as_ok
+);
+
+namespace Karatsuba {
+
+    _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
+    _get_sub_or_zero = |begin, end, a| (
+        assert_lazy(|_| "invalid range", begin < end) $ |_|
+        let n = a.get_size;
+        if begin >= n { BigNat::_zero };
+        let end = min(end, n);
+        if begin == 0 && end == n { a };
+        a.get_sub(begin, end)
+    );
+
+    // Calculates `a * b`.
+    _mul_karatsuba: Array U32 -> Array U32 -> Array U32;
+    _mul_karatsuba = |a, b| (
+        let thresh = 64;
+        if a.get_size <= thresh && b.get_size <= thresh {
+            _mul(a,b)
+        };
+        let n = max(a.get_size, b.get_size);
+        let m = (n + 1) / 2;
+        let a0 = a._get_sub_or_zero(0, m);
+        let a1 = a._get_sub_or_zero(m, n);
+        let b0 = b._get_sub_or_zero(0, m);
+        let b1 = b._get_sub_or_zero(m, n);
+        let z0 = _mul_karatsuba(a0, b0);
+        let z2 = _mul_karatsuba(a1, b1);
+        let z3 = _mul_karatsuba(_add(a1, a0), _add(b1, b0));
+        let z1 = _sub(_sub(z3, z2), z0);
+        let z = _add_with_offset1(z0, (z1,m));
+        let z = _add_with_offset1(z, (z2,2*m));
+        z
+    );
+
+
+    mul_karatsuba: BigInt -> BigInt -> BigInt;
+    mul_karatsuba = |a, b| (
+        let nat = _mul_karatsuba(a.@nat, b.@nat);
+        let nat = nat._remove_last_zeros;
+        BigInt::make(a.@sign * b.@sign, nat)
+    );
+}
+
+/*
+namespace BigNatEx {
+    _bit_length: Array U32 -> U64;
+    _bit_length = |a| (
+        let a = a._remove_last_zeros;
+        let n = a.get_size;
+        let bit_length = n.to_U64 * _log2_base;
+        let d = a.@(n-1).to_U64;
+        loop(
+            (bit_length, _log2_base.to_I64 - 1), |(bit_length, i)|
+            if i < 0 { break $ bit_length };
+            if d.bit_and(1_U64.shift_left(i.to_U64)) != 0_U64 {
+                break $ bit_length
+            };
+            continue $ (bit_length - 1_U64, i - 1)
+        )
+    );
+
+    // Calculates `a^n`.
+    _pow_by_U64: Array U32 -> U64 -> Array U32;
+    _pow_by_U64 = |a, n| (
+        loop(
+            ([1_U32], a, n), |(prod, a, n)|
+            if n == 0_U64 {
+                break $ prod
+            };
+            let prod = if n.bit_and(1_U64) != 0_U64 {
+                _mul(prod, a)
+            } else { prod };
+            continue $ (prod, _mul(a,a), n.shift_right(1_U64))
+        )
+    );
+
+    _shift_left: U64 -> Array U32 -> Array U32;
+    _shift_left = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, 0), |(a, carry, i)|
+            if i >= n {
+                break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_right(_log2_base - shift);
+            let d = d.shift_left(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i + 1)
+        );
+        if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+    );
+
+    _shift_right: U64 -> Array U32 -> Array U32;
+    _shift_right = |shift, a| (
+        if shift == 0_U64 { a };
+        let (off, shift) = _divmod_log2_base(shift);
+        let a = if off == 0_U64 { a }
+        else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+        else { [0_U32] };
+        let n = a.get_size;
+        let a = loop(
+            (a, 0_U64, n-1), |(a, carry, i)|
+            if i < 0 {
+                break $ a
+            };
+            let d = a.@(i).to_U64;
+            let carry2 = d.shift_left(_log2_base - shift);
+            let d = d.shift_right(shift).bit_or(carry);
+            let a = a.set(i, d.to_U32);
+            continue $ (a, carry2, i - 1)
+        );
+        a._remove_last_zeros
+    );
+}
+*/
+
+namespace Goldschmidt {
+
+    _add_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _add_exp = |a0, exp0, a1, exp1| (
+        if exp1 < exp0 { _add_exp(a1, exp1, a0, exp0) };
+        let dexp1 = (exp1 - exp0).to_U64;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);
+        let a2 = _add_with_offset1(a0, (a1, off1.to_I64));
+        let exp2 = exp0;
+        (a2, exp2)
+    );
+
+    _sub_exp: Array U32 -> I64 -> Array U32 -> I64 -> Result ErrMsg (Array U32, I64);
+    _sub_exp = |a0, exp0, a1, exp1| (
+        if exp1 < exp0 {
+            let dexp0 = (exp0 - exp1).to_U64;
+            let (off0, dexp0) = _divmod_log2_base(dexp0);
+            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);      // TODO: is it ok to use just _shift_left?
+            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));     // TODO: use _signed_sub_with_offset
+            let exp2 = exp1 + off2 * _log2_base.to_I64;
+            pure $ (a2, exp2)
+        };
+        let dexp1 = (exp1 - exp0).to_U64;
+        let (off1, dexp1) = _divmod_log2_base(dexp1);
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);          // TODO: is it ok to use just _shift_left?
+        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.to_I64));
+        let exp2 = exp0 + off2 * _log2_base.to_I64;
+        pure $ (a2, exp2)
+    );
+
+    _mul_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
+    _mul_exp = |a0, exp0, a1, exp1| (
+        let a2 = _mul(a0, a1);
+        (a2, exp0 + exp1)
+    );
+
+    _truncate_exp: Array U32 -> I64 -> U64 -> (Array U32, I64);
+    _truncate_exp = |a0, exp0, bit_length| (
+        let a0_bit_length = a0._bit_length;
+        if a0_bit_length <= bit_length { (a0, exp0) };
+        let shift = a0_bit_length - bit_length;
+        let a0 = a0._shift_right(shift);
+        let exp0 = exp0 + shift.to_I64;
+        (a0, exp0)
+    );
+
+
+    _goldschmidt: Array U32 -> Array U32 -> Result ErrMsg (Array U32);
+    _goldschmidt = |a, b| (
+        let a_bit_length = a._bit_length;
+        let b_bit_length = b._bit_length;
+        // scale a and b such that 0.5 <= b < 1
+        let b_exp = -b._bit_length.to_I64;         // exponent of 2
+        let a_exp = b_exp;
+        let (a, a_exp, b, b_exp) = *loop_m(
+            (a, a_exp, b, b_exp, 0), |(a, a_exp, b, b_exp, i)|
+            //eval debug_eprintln((i, (a,a_exp),(b,b_exp)).format("{}: a={} b={}"));
+            if i >= 100 {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            let (f, f_exp) = *_sub_exp([2_U32], 0, b, b_exp);
+            //eval debug_eprintln((f, f_exp).format("f=({},{})"));
+            let (a1, a1_exp) = _mul_exp(a, a_exp, f, f_exp);
+            let (b1, b1_exp) = _mul_exp(b, b_exp, f, f_exp);
+            //eval debug_eprintln((i, (a1,a1_exp),(b1,b1_exp)).format("{}: a1={} b1={}"));
+            let (a1, a1_exp) = _truncate_exp(a1, a1_exp, a_bit_length);
+            let (b1, b1_exp) = _truncate_exp(b1, b1_exp, b_bit_length);
+            if (b, b_exp) == (b1, b1_exp) {
+                break_m $ (a, a_exp, b, b_exp)
+            };
+            continue_m $ (a1, a1_exp, b1, b1_exp, i + 1)
+        );
+        let a = if a_exp >= 0 { a._shift_left(a_exp.to_U64) }
+        else { a._shift_right((-a_exp).to_U64) };
+        //eval debug_eprintln((a).format("_goldschmidt: result a={}"));
+        pure $ a._remove_last_zeros
+    );
+
+    // Calculates `a0 - a1`.
+    // returns the result and the sign.
+    _signed_sub: Array U32 -> Array U32 -> (Array U32, I64);
+    _signed_sub = |a0, a1| (
+        let res = _sub_with_offset((a0, 0), (a1, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, 1)
+        };
+        let res = _sub_with_offset((a1, 0), (a0, 0));
+        if res.is_ok {
+            let (a2, _) = res.as_ok;
+            (a2, -1)
+        };
+        undefined("error: " + res.as_err)
+    );
+
+    _divmod2: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod2 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        let (quo, rem, rem_sign) = *loop_m(
+            ([0_U32], a, 1), |(quo, a, a_sign)|
+            let q = *_goldschmidt(a, b);
+            let (rem, rem_sign) = _signed_sub(a, _mul(b, q));
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 { _add(quo, q) } else { _sub(quo, q) };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break_m $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue_m $ (quo, rem, rem_sign)
+        );
+        let (quo, rem) = if rem_sign > 0 || rem == BigNat::_zero {
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        };
+        pure $ (quo, rem)
+    ).or_abort;
+}
+
+namespace DivMod3 {
+    // Calculates `a0 * pow(_base, offset0) - a1 * pow(_base, offset1)`.
+    // Returns err if the result is negative.
+    _sub_with_offset: (Array U32, I64) -> (Array U32, I64) -> Result ErrMsg (Array U32, I64);
+    _sub_with_offset = |(a0, offset0), (a1, offset1)| (
+        if _cmp((a0, offset0), (a1, offset1)) < 0 {
+            err $ "underflow"
+        };
+        let n0 = a0.get_size + offset0;
+        let n1 = a1.get_size + offset1;
+        let n2 = max(n0, n1);
+        let offset2 = min(offset0, offset1);
+        let a2 = Array::empty(n2 - offset2);
+        let (a2, borrow) = loop(
+            (a2, offset2, 0_U64), |(a2, i, borrow)|
+            if i >= n0 && i >= n1  {
+                break $ (a2, borrow)
+            };
+            let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
+            let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
+            let d0: U64 = d0.to_U64;
+            let d1: U64 = d1.to_U64 + borrow;
+            let (borrow, d2) = if d0 >= d1 {
+                (0_U64, d0 - d1)
+            } else {
+                (1_U64, _base + d0 - d1)
+            };
+            let a2 = a2.push_back(d2.to_U32);
+            continue $ (a2, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            assert_lazy(|_| "should not reach here", false) $ |_|
+            err $ "underflow"
+        };
+        ok $ (a2, offset2)
+    );
+
+    // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_log2_base-1)*a]`.
+    _make_shift_table: Array U32 -> Array (Array U32);
+    _make_shift_table = |a| (
+        Iterator::range(0, _log2_base.to_I64).map(|shift|
+            let u32 = 1_U32.shift_left(shift.to_U32);
+            _mul_u32(u32, a)
+        ).to_array
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod3: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod3 = |a0, a1| (
+        //let _debug: Lazy String -> () = |f| debug_eprintln(f());
+        let _debug: Lazy String -> () = |_| ();
+
+        let a0 = a0._remove_last_zeros;
+        let a1 = a1._remove_last_zeros;
+        assert_lazy(|_| "Divide by zero", a1 != [ 0_U32 ]) $ |_|
+        if a1.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a0, a1.@(0));
+            (quo, [rem])
+        };
+        let a1_shift_table = _make_shift_table(a1);
+        let n0 = a0.get_size;
+        let n1 = a1.get_size;
+        assert_lazy(|_| "Invalid array size", n0 > 0 && n1 > 0) $ |_|
+        if n0 < n1 {
+            ([0_U32], a0)
+        };
+        let n2 = n0;
+        let a2 = Array::fill(n2, 0_U32);
+
+        // a0 = numerator, a1 = denominator
+        // calc quotient(a2) and reminder(a0)
+        let (a0, a2) = loop(
+            (a0, a2, n2 - 1), |(a0, a2, i)|
+            let offset0 = 0;
+            let offset1 = i - (n1 - 1);
+            if offset1 < 0 {
+                break $ (a0, a2)
+            };
+            eval _debug(|_| "(i)="+(i).to_string);
+            eval _debug(|_| "(a0)="+(a0).to_string);
+            eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
+            eval _debug(|_| "(a2)="+(a2).to_string);
+            let (a0, a2) = loop(
+                (a0, a2, _log2_base.to_I64 - 1), |(a0, a2, shift)|
+                if shift < 0 {
+                    break $ (a0, a2)
+                };
+                let d2 = 1_U32.shift_left(shift.to_U32);
+                //let d2_mul_a1 = _mul_u32(d2, a1);
+                let d2_mul_a1 = a1_shift_table.@(shift);
+                let (a3, offset3) = (d2_mul_a1, offset1);
+                eval _debug(|_| "(a3, offset3, d2)="+(a3, offset3, d2).to_string);
+                let res = _sub_with_offset((a0, offset0), (a3, offset3));
+                if res.is_ok {
+                    let (a0, _) = res.as_ok;
+                    eval _debug(|_| "success: (a0)=" + (a0).to_string);
+                    let a2 = a2.mod(offset1, |x| x + d2);
+                    continue $ (a0, a2, shift - 1)
+                };
+                eval _debug(|_| "fail: (a0)=" + (a0).to_string);
+                continue $ (a0, a2, shift - 1)
+            );
+            let a0 = a0._remove_last_zeros;
+            continue $ (a0, a2, i - 1)
+        );
+        let a2 = a2._remove_last_zeros;
+        (a2, a0)
+    );
+
+}
+
+namespace DivMod4 {
+    // Appends trailing zeros until the size of the array is at least the specified size.
+    _append_last_zeros: I64 -> Array U32 -> Array U32;
+    _append_last_zeros = |n, a| (
+        loop (
+            a, |a|
+            if a.get_size >= n { break $ a };
+            continue $ a.push_back(0_U32)
+        )
+    );
+
+    // Calculates `a0 + a1 * _base ^ offset1`.
+    _add_u32_with_offset1: Array U32 -> U32 -> I64 -> Array U32;
+    _add_u32_with_offset1 = |a0, a1, offset1| (
+        let n0 = a0.get_size;
+        let n1 = 1 + offset1;
+        let n2 = max(n0, n1);
+        let a0 = a0._append_last_zeros(n2);
+        loop(
+            (a0, offset1, 0_U64), |(a0, i, carry)|
+            if i >= n2 {
+                let a0 = if carry == 0_U64 { a0 }
+                else { a0.push_back(carry.to_U32) };
+                break $ a0
+            };
+            if i >= n1 && carry == 0_U64 {
+                break $ a0
+            };
+            let d0: U32 = a0.@(i);
+            let d1: U32 = if i == offset1 { a1 } else { 0_U32 };
+            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let (carry, d2) = _divmod_base(d2);
+            let a0 = a0.set(i, d2.to_U32);
+            continue $ (a0, i + 1, carry)
+        )._remove_last_zeros
+    );
+
+    // Calculates `a - b * pow(_base, b_offset)`.
+    // returns the result and the sign.
+    _signed_sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_u32_with_offset = |a, b, b_offset| (
+        let na = a.get_size;
+        let nb = 1 + b_offset;
+        let na = max(na, nb);
+        let a = a._append_last_zeros(na);
+        let (a, borrow) = loop(
+            (a, b_offset, 0_U64), |(a, i, borrow)|
+            if i >= na  {
+                break $ (a, borrow)
+            };
+            if i >= nb && borrow == 0_U64 {
+                break $ (a, borrow)
+            };
+            let a_u32: U32 = a.@(i);
+            let b_u32: U32 = if i == b_offset { b } else { 0_U32 };
+            let sub_u64: U64 = b_u32.to_U64 + borrow;
+            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
+            let sub_lo: U32 = sub_lo.to_U32;
+
+            let (borrow, a_u32) = if a_u32 >= sub_lo {
+                (sub_hi, a_u32 - sub_lo)
+            } else {
+                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+            };
+            let a = a.set(i, a_u32);
+            continue $ (a, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            let a = a._neg;
+            let a = a._remove_last_zeros;
+            (a, -1)
+        };
+        let a = a._remove_last_zeros;
+        (a, 1)
+    );
+
+
+    // Calculates `a - b * pow(_base, b_offset) * q`.
+    // returns the result and the sign.
+    _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
+    _signed_sub_with_offset_mul = |a, b, q, b_offset| (
+        let na = a.get_size;
+        let nb = b.get_size + b_offset;
+        let na = max(na, nb + 1 /*for q*/);
+        let a = a._append_last_zeros(na);
+        let (a, borrow) = loop(
+            (a, b_offset, 0_U64), |(a, i, borrow)|
+            if i >= na  {
+                break $ (a, borrow)
+            };
+            if i >= nb && borrow == 0_U64 {
+                break $ (a, borrow)
+            };
+            let a_u32: U32 = a.@(i);
+            let b_u32: U32 = if b_offset <= i && i < nb { b.@(i - b_offset) } else { 0_U32 };
+            let sub_u64: U64 = b_u32.to_U64 * q.to_U64 + borrow;
+            let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
+            let sub_lo: U32 = sub_lo.to_U32;
+
+            let (borrow, a_u32) = if a_u32 >= sub_lo {
+                (sub_hi, a_u32 - sub_lo)
+            } else {
+                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+            };
+            let a = a.set(i, a_u32);
+            continue $ (a, i + 1, borrow)
+        );
+        if borrow > 0_U64 {
+            let a = a._neg;
+            let a = a._remove_last_zeros;
+            (a, -1)
+        };
+        let a = a._remove_last_zeros;
+        (a, 1)
+    );
+
+    // Calculates `(a0 / a1, a0 % a1)`.
+    // Aborts if any error occured.
+    _divmod4: Array U32 -> Array U32 -> (Array U32, Array U32);
+    _divmod4 = |a, b| (
+        let a = a._remove_last_zeros;
+        let b = b._remove_last_zeros;
+        assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
+        if b.get_size == 1 {
+            let (quo, rem) = _divmod_u32(a, b.@(0));
+            (quo, [rem])
+        };
+        let (quo, rem, rem_sign) = loop(
+            (BigNat::_zero, a, 1), |(quo, a, a_sign)|
+            let an = a.get_size;
+            let bn = b.get_size;
+            if an < bn {
+                break $ (quo, a, a_sign)
+            };
+            let (q:U32, qoff: I64) = if an == bn {
+                let b_u32 = b.@(bn - 1);
+                let a_u32 = a.@(an - 1);
+                let q: U32 = max(1_U32, a_u32 / b_u32);
+                let qoff = (an - 1) - (bn - 1);
+                (q, qoff)
+            } else {    // an > bn
+                let b_u64 = b.@(bn - 1).to_U64;
+                let a_u64 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+
+                // Vibrates significantly when a = 2^128 - 1, b = 2^65 - 1
+                // since a_u64 = 2^32-1, b_u64 = 1
+                let b_u64 = b_u64 + 1_U64;  // To avoid the vibration problem, add 1 to b_u64
+                // TODO: If b_u64 is too small, pull more bits from b.@(bn - 2) and
+                // append them to b_u64.  A native division will not give a good approximation of the division of big integers
+                // when the denominator contains few information.
+
+                let qoff = (an - 2) - (bn - 1);
+                let q: U64 = max(1_U64, a_u64 / b_u64);
+                if q >= _base {
+                    let q = q / _base;
+                    (q.to_U32, qoff + 1)
+                } else {
+                    (q.to_U32, qoff)
+                }
+            };
+            //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
+            let (rem, rem_sign) = _signed_sub_with_offset_mul(a, b, q, qoff);
+            let rem = rem._remove_last_zeros;
+            let rem_sign = rem_sign * a_sign;
+            let quo = if a_sign > 0 {
+                _add_u32_with_offset1(quo, q, qoff)
+            } else {
+                let (quo, sign) = _signed_sub_u32_with_offset(quo, q, qoff);
+                assert_lazy(|_| "quo subtraction underflow", sign > 0) $ |_|
+                quo
+            };
+            let quo = quo._remove_last_zeros;
+            if _cmp((rem,0), (b,0)) < 0 {
+                break $ (quo, rem, rem_sign)
+            };
+            //eval debug_eprintln((quo,rem).format("quo={} rem={}"));
+            continue $ (quo, rem, rem_sign)
+        );
+        if rem_sign > 0 || rem == BigNat::_zero {
+            (quo, rem)
+        } else {
+            let quo = _sub(quo, [1_U32]);
+            let rem = _sub(b, rem);
+            (quo, rem)
+        }
+    );
+
+}
+
+type DivModFunc = (Array U32 -> Array U32 -> (Array U32, Array U32));
+
+measure_time_graph: String -> F64 -> Lazy a -> IO a;
+measure_time_graph = |label, unit, f| (
+    let (time, result) = *measure_time(0.1, f);
+    let stars = Array::fill((time / unit).to_I64, '*')._unsafe_to_string;
+    println(label + ": " + stars + " " + time.to_string + " sec");;
+    pure $ result
+);
+
+test_karatsuba: IO ();
+test_karatsuba = (
+    println("test_karatsuba");;
+    let time = *FFI_CALL_IO[I32 time(Ptr), nullptr];
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 8192;   //1024;
+    let (random, a) = generate_bigint(bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
+    timeit("a*b", |_| a*b);;
+    timeit("mul_karatsuba(a,b)", |_| mul_karatsuba(a,b));;
+    assert_eq(|_| "eq", a*b, mul_karatsuba(a,b));;
+    pure()
+);
+
+test_perf_karatsuba: IO ();
+test_perf_karatsuba = (
+    println("=== test_perf_karatsuba ===");;
+    Iterator::range(0, 50).to_dyn.foreach_m(|i|
+        //let prec10 = (i+1) * 10;
+        //let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let bits = 32 * (i + 1) * 10;
+        let random = Random::init_by_seed((321 + i * 13).to_U64); // time.to_U64);
+        let (random, a) = generate_bigint(bits).run_state(random);
+        let (random, b) = generate_bigint(bits).run_state(random);
+        let unit = 1.0e-3;
+        eval *measure_time_graph("mul:           bits="+bits.to_string, unit, |_|
+                    let c = mul(a, b);
+                    ());
+        eval *measure_time_graph("mul_karatsuba: bits="+bits.to_string, unit, |_|
+                    let c = mul_karatsuba(a, b);
+                    ());
+        pure()
+    )
+);
+
+test_exp: IO ();
+test_exp = (
+    println("=== test_exp ===");;
+    let a = [1_U32];
+    let b = [1_U32];
+    notimeit("_add_exp(a,2,b,-1)", |_| _add_exp(a,2,b,-1));;
+    notimeit("_add_exp(a,2,b,1)", |_| _add_exp(a,2,b,1));;
+    notimeit("_sub_exp(a,2,b,-1)", |_| _sub_exp(a,2,b,-1));;
+    notimeit("_sub_exp(a,-1,b,2)", |_| _sub_exp(a,-1,b,2));;
+    pure()
+);
+
+test_shift_right: IO ();
+test_shift_right = (
+    println("=== test_shift_right ===");;
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 128;
+    do {
+        let sm: I64 -> U64 -> StateT Random IOFail () = |i, shift| (
+            let a = *generate_bigint(bits);
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_left(shift));
+            let c = a * n;
+            println(b.to_string).lift_io;;
+            assert_equal("left", c, b).lift_iofail;;
+
+            let n = BigInt::make(1, _pow_by_U64([2_U32], shift));
+            let b = BigInt::make(1, a.@nat._shift_right(shift));
+            let c = a / n;
+            println(b.to_string).lift_io;;
+            assert_equal("right", c, b).lift_iofail;;
+            pure()
+        );
+        let arr: Array (StateT Random IOFail ()) = do {
+            let i = *Iterator::range(0, 3).to_array;
+            let shift = *[1, 3, 31, 32, 33].map(to_U64);
+            pure $ sm(i, shift)
+        };
+        arr.sequence.eval_state_t(random).forget
+    }
+    .try(eprintln)
+);
+
+// Test whether a divmod function meets the specification.
+test_divmod_spec: DivModFunc -> IO ();
+test_divmod_spec = |divmod| (
+    println("=== test_divmod_spec ===");;
+    do {
+        let test: BigInt -> BigInt -> IOFail () = |a, b| (
+            eprintln("(a,b)=" + (a.@nat, b.@nat).to_string).lift;;
+            let (quo, rem) = divmod(a.@nat, b.@nat);
+            assert_equal("a == b * quo + rem", a.@nat, _add(_mul(b.@nat, quo), rem));;
+            assert_true("rem < b", _cmp((rem,0), (b.@nat,0)) < 0);;
+            eprintln("  (quo,rem)=" + (quo, rem).to_string).lift;;
+            pure()
+        );
+        let n = 64;
+        let arr: Array (IOFail ()) = do {
+            let a = *[-1, 0, 1];
+            let b = *[-1, 0, 1];
+            let a: BigInt = One::one.shift_left((2*n).to_U64) + BigInt::from_I64(a);
+            let b: BigInt = One::one.shift_left((n+1).to_U64) + BigInt::from_I64(b);
+            pure $ test(a,b)
+        };
+        arr.sequence.forget
+    }.try(eprintln)
+);
+
+// Compares the results of two divmod functions.
+compare_divmod_results: DivModFunc -> DivModFunc -> IO ();
+compare_divmod_results = |divmod1, divmod2| (
+    println("=== compare_divmod_results ===");;
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    Iterator::range(0, 10).to_dyn.foreach_m(|i|
+        let a = *generate_bigint(2*bits);
+        //let b = *generate_bigint(bits);
+        // The old algorithm of division was very slow when (b.bit_length % 32) is too small
+        let b = *generate_bigint(bits + 1);
+        let (quo1, rem1) = *timeit("(quo1, rem1)", |_| divmod1(a.@nat, b.@nat)).lift_io;
+        let (quo2, rem2) = *timeit("(quo2, rem2)", |_| divmod2(a.@nat, b.@nat)).lift_io;
+        assert_equal("quo", quo1, quo2).lift_iofail;;
+        assert_equal("rem", rem1, rem2).lift_iofail;;
+        pure()
+    ).eval_state_t(random)
+    .try(eprintln)
+);
+
+// Compares performances of several divmod functions.
+compare_divmod_performances: IO ();
+compare_divmod_performances = (
+    println("=== compare_divmod_performances ===");;
+    Iterator::range(0, 50).to_dyn.foreach_m(|i|
+        //let prec10 = (i+1) * 10;
+        //let bits = (prec10.to_F64 / 0.3010).to_I64;
+        let bits = 32 * (i + 1) * 10;
+        let random = Random::init_by_seed(12345_U64);
+        let (random, a) = generate_bigint(2*bits).run_state(random);
+        let (random, b) = generate_bigint(bits).run_state(random);
+        let unit = 1.0e-3;
+        measure_time_graph("_divmod: bits="+bits.to_string, unit, |_|
+                    let c = _divmod(a.@nat, b.@nat);        // about O(n^2)
+                    ());;
+        /*
+        measure_time_graph("_divmod2: bits="+bits.to_string, unit, |_|
+                    let c = _divmod2(a.@nat, b.@nat);      // goldschmidt is about O(n^2) but slow
+                    ());;
+        measure_time_graph("_divmod3: bits="+bits.to_string, unit, |_|
+                    let c = _divmod3(a.@nat, b.@nat);      // 
+                    ());;
+        */
+        pure()
+    )
+);
+
+// Repeat calculation of a divmod function. Useful for lldb debugging.
+repeat_divmod: DivModFunc -> IO ();
+repeat_divmod = |divmod| (
+    println("=== repeat_divmod ===");;
+    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let bits = 256;
+    let (random, a) = generate_bigint(2*bits).run_state(random);
+    let (random, b) = generate_bigint(bits).run_state(random);
+    eval loop(
+        0, |i|
+        if i >= 10000 { break $ () };
+        eval if i % 1000 == 0 { debug_println(i.to_string) } else {()};
+        let (quo, rem) = divmod(a.@nat, b.@nat);
+        continue $ i + 1
+    );
+    pure()
+);
+
+main: IO ();
+main = (
+    test_karatsuba;;
+    test_perf_karatsuba;;
+    test_exp;;
+    test_shift_right;;
+    test_divmod_spec(_divmod);;
+    compare_divmod_results(_divmod, _divmod2);;
+    compare_divmod_performances;;
+    repeat_divmod(_divmod);;
+    pure()
+);
+

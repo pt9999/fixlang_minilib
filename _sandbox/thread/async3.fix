@@ -1,0 +1,65 @@
+module Main;
+
+import AsyncTask;
+import Random;
+
+import Minilib.Common.TimeEx;
+
+parallel_map: (a -> b) -> Array a -> Array b;
+parallel_map = |f, arr| (
+    let tasks = arr.to_iter.fold(
+        [], |a, tasks|
+        let task = AsyncTask::make(|_| f(a));
+        tasks.push_back(task)
+    );
+    tasks.to_iter.fold(
+        [], |task, results|
+        let result = task.get;
+        results.push_back(result)
+    )
+);
+
+parallel_map_m: (a -> IO b) -> Array (IO a) -> IO (Array b);
+parallel_map_m = |f, arr| (
+    let tasks = *arr.to_iter.fold_m(
+        [], |a, tasks|
+        let task = *AsyncIOTask::make(a.bind(f));
+        pure $ tasks.push_back(task)
+    );
+    tasks.to_iter.fold_m(
+        [], |task, results|
+        let result = *task.get;
+        pure $ results.push_back(result)
+    )
+);
+
+
+//---------------------------------------------------
+
+_usleep: I64 -> IO ();
+_usleep = |usec| usleep(usec.to_U32).try(eprintln);
+
+test1: IO ();
+test1 = (
+    let rand_var = *Var::make(Random::init_by_seed(123_U64));
+    let sleep_random: IO () = (
+        let u64 = *rand_var.lock(|rand|
+            let (rand, u64) = rand.generate_U64;
+            rand_var.Var::set(rand);;
+            pure $ u64
+        );
+        _usleep((u64 % 5000000_U64).to_I64);;
+        pure()
+    );
+    let arr: Array I64 = Iterator::range(0, 100).to_array;
+    let arr: Array (IO String) = arr.parallel_map(to_string >> pure);
+    arr.parallel_map_m(|str|
+        sleep_random;;
+        print(str + "\n")
+    );;
+    pure()
+);
+
+main: IO ();
+main = test1;
+

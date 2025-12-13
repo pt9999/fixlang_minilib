@@ -1,0 +1,319 @@
+// Record Protocol for TLS 1.3
+//
+// RFC 8446 - The Transport Layer Security (TLS) Protocol Version 1.3
+// https://tex2e.github.io/rfc-translater/html/rfc8446.html
+module Minilib.Crypto.Tls.RecordProtocol;
+
+import Minilib.Common.Assert;
+import Minilib.Crypto.Tls.Types;
+import Minilib.Monad.BytesIO;
+import Minilib.Crypto.Tls.Alert;
+import Minilib.Encoding.Binary;
+import Minilib.Trait.Traversable;
+import Minilib.Monad.Error;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+// 5. Record Protocol
+
+// 5.1 Record Layer
+
+type ContentType = unbox union {
+    invalid: U8,
+    change_cipher_spec: (),
+    alert: (),
+    handshake: (),
+    application_data: ()
+};
+
+namespace ContentType {
+    to_U8: ContentType -> U8;
+    to_U8 = |obj| (
+        if obj.is_invalid { obj.as_invalid };
+        if obj.is_application_data { 23_U8 };
+        if obj.is_handshake { 22_U8 };
+        if obj.is_alert { 21_U8 };
+        if obj.is_change_cipher_spec { 20_U8 };
+        0_U8        // invalid
+    );
+}
+
+impl ContentType: Eq {
+    eq = |a, b| a.to_U8 == b.to_U8;
+}
+
+impl ContentType: ToString {
+    to_string = |obj| (
+        if obj.is_invalid { "invalid(" + obj.as_invalid.to_string + ")" };
+        if obj.is_application_data { "application_data(23)" };
+        if obj.is_handshake { "handshake(22)" };
+        if obj.is_alert { "alert(21)" };
+        if obj.is_change_cipher_spec { "change_cipher_spec(20)" };
+        "invalid"
+    );
+}
+
+impl ContentType: Marshal {
+    marshal = |obj, buf| (
+        buf.marshal(obj.to_U8)
+    );
+}
+
+impl ContentType: Unmarshal {
+    unmarshal = |buf| (
+        let (val: U8, buf) = *buf.unmarshal;
+        let obj = (
+            if val == 23_U8 { application_data() };
+            if val == 22_U8 { handshake() };
+            if val == 21_U8 { alert() };
+            if val == 20_U8 { change_cipher_spec() };
+            invalid(val)
+        );
+        pure $ (obj, buf)
+    );
+}
+
+type TLSPlaintext = unbox struct {
+    content_type: ContentType,              // original name is `type`, but `type` is a reserved keyword
+    legacy_record_version: ProtocolVersion,
+    //length: U16,
+    fragment: Array U8
+};
+
+namespace TLSPlaintext {
+    empty: TLSPlaintext;
+    empty = TLSPlaintext {
+        content_type: invalid(0_U8),
+        legacy_record_version: 0x0303_U16,
+        //length: 0_U16,
+        fragment: []
+    };
+
+}
+
+impl TLSPlaintext: ToString {
+    to_string = |obj| (
+        "TLSPlaintext {" +
+        " content_type=" + obj.@content_type.to_string +
+        " legacy_record_version=" + obj.@legacy_record_version.to_string_hex +
+        " fragment=" + obj.@fragment.to_string_hex +
+        " }"
+    );
+}
+
+impl TLSPlaintext: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@content_type);
+        let buf = buf.marshal(obj.@legacy_record_version);
+        assert_lazy(|_| "length overflow", obj.@fragment.get_size <= 16384) $ |_|    // = 2**14
+        let length: U16 = obj.@fragment.get_size.to_U16;
+        let buf = buf.marshal(length);
+        let buf = buf.marshal_fixed(obj.@fragment);
+        buf
+    );
+}
+
+impl TLSPlaintext: Unmarshal {
+    unmarshal = |buf| (
+        let (content_type: ContentType, buf) = *buf.unmarshal;
+        let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
+        let (length: U16, buf) = *buf.unmarshal;
+        // Because we define TLSRecord = TLSPlaintext, allow 16384 + 256 bytes
+        //if length.to_I64 > 16384 {
+        if length.to_I64 > 16384 + 256 {
+            err $ "TLSPlaintext: unmarshal: alert_record_overflow: length=" + length.to_string
+        };
+        let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let obj = TLSPlaintext {
+            content_type: content_type,
+            legacy_record_version: legacy_record_version,
+            //length: length,
+            fragment: fragment
+        };
+        pure $ (obj, buf)
+    );
+}
+
+// 5.2. Record Payload Protection
+
+type TLSInnerPlaintext = unbox struct {
+    content: Array U8,      // length = TLSPlaintext.length
+    content_type: ContentType,
+    zeros: Array U8,
+};
+
+namespace TLSInnerPlaintext {
+    make: Array U8 -> ContentType -> I64 -> TLSInnerPlaintext;
+    make = |content, content_type, zeros_length| TLSInnerPlaintext {
+        content: content,
+        content_type: content_type,
+        zeros: Array::fill(zeros_length, 0_U8)
+    };
+}
+
+impl TLSInnerPlaintext: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal_fixed(obj.@content);
+        let buf = buf.marshal(obj.@content_type);
+        let buf = buf.marshal_fixed(obj.@zeros);
+        buf
+    );
+}
+
+impl TLSInnerPlaintext: Unmarshal {
+    unmarshal = |buf| (
+        let start = buf.get_position;
+        let end = buf.get_size;
+        // find non-zero byte from end
+        let content_type_pos = loop(
+            end - 1, |i|
+            if i < start { break $ i };
+            if buf.@array.@(i) != 0_U8 { break $ i };
+            continue $ i - 1
+        );
+        if content_type_pos < start { err $ "content type not found" };
+
+        let (content, buf) = *buf.unmarshal_fixed(content_type_pos - start);
+        let (content_type, buf) = *buf.unmarshal;
+        let (zeros, buf) = *buf.unmarshal_fixed(end - (content_type_pos + 1));
+        let obj = TLSInnerPlaintext {
+            content: content,
+            content_type: content_type,
+            zeros: zeros
+        };
+        ok $ (obj, buf)
+    );
+}
+
+type TLSCiphertext = unbox struct {
+    opaque_type: ContentType, // = application_data; /* 23 */
+    legacy_record_version: ProtocolVersion, //  = 0x0303; /* TLS v1.2 */
+    //length: U16,
+    encrypted_record: Array U8,
+};
+
+namespace TLSCiphertext {
+    empty: TLSCiphertext;
+    empty = TLSCiphertext {
+        opaque_type: application_data(),
+        legacy_record_version: 0x0303_U16,
+        encrypted_record: []
+    };
+
+    to_ciphertext: TLSRecord -> TLSCiphertext;
+    to_ciphertext = |record| TLSCiphertext {
+        opaque_type: record.@content_type,
+        legacy_record_version: record.@legacy_record_version,
+        encrypted_record: record.@fragment
+    };
+
+    to_record: TLSCiphertext -> TLSRecord;
+    to_record = |ciphertext| TLSPlaintext {
+        content_type: ciphertext.@opaque_type,
+        legacy_record_version: ciphertext.@legacy_record_version,
+        fragment: ciphertext.@encrypted_record,
+    };
+
+    get_additional_data: TLSCiphertext -> Array U8;
+    get_additional_data = |ciphertext| (
+        ciphertext.get_additional_data_with_length(ciphertext.@encrypted_record.get_size)
+    );
+
+    get_additional_data_with_length: I64 -> TLSCiphertext -> Array U8;
+    get_additional_data_with_length = |length, ciphertext| (
+        // additional_data = TLSCiphertext.opaque_type ||
+        //                    TLSCiphertext.legacy_record_version ||
+        //                    TLSCiphertext.length
+        // TLSCiphertext.length = TLSInnerPlaintext.@content.get_size + 1(=content_type) + 16(=tag_len)
+        let buf =  ByteBuffer::empty(5, big_endian());
+        let buf = buf.marshal(ciphertext.@opaque_type);
+        let buf = buf.marshal(ciphertext.@legacy_record_version);
+        assert_lazy(|_| "length overflow", length <= 16384 + 256) $ |_|    // = 2**14 + 256
+        let buf = buf.marshal(length.to_U16);
+        buf.@array
+    );
+}
+
+impl TLSCiphertext: Marshal {
+    marshal = |obj, buf| (
+        let buf = buf.marshal(obj.@opaque_type);
+        let buf = buf.marshal(obj.@legacy_record_version);
+        assert_lazy(|_| "length overflow", obj.@encrypted_record.get_size <= 16384 + 256) $ |_|    // = 2**14 + 256
+        let length: U16 = obj.@encrypted_record.get_size.to_U16;
+        let buf = buf.marshal(length);
+        let buf = buf.marshal_fixed(obj.@encrypted_record);
+        buf
+    );
+}
+
+impl TLSCiphertext: Unmarshal {
+    unmarshal = |buf| (
+        let (opaque_type: ContentType, buf) = *buf.unmarshal;
+        let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
+        let (length: U16, buf) = *buf.unmarshal;
+        if length.to_I64 > 16384 + 256 {
+            err $ "TLSCiphertext: unmarshal: alert_record_overflow: length=" + length.to_string
+        };
+        let (encrypted_record: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let obj = TLSCiphertext {
+            opaque_type: opaque_type,
+            legacy_record_version: legacy_record_version,
+            //length: length,
+            encrypted_record: encrypted_record
+        };
+        pure $ (obj, buf)
+    );
+}
+
+type TLSRecord = TLSPlaintext;
+
+namespace TLSRecord {
+    // Splits data to fragments. Max size of each fragment is 16384 bytes.
+    split_fragments: ContentType -> Array U8 -> Array TLSRecord;
+    split_fragments = |content_type, data| (
+        let max_fragment_size = 16384;
+        let number_of_fragments = (data.get_size + max_fragment_size - 1) / max_fragment_size;
+        Iterator::range(0, number_of_fragments).map(|i|
+            let start = max_fragment_size * i;
+            let end  = min(max_fragment_size * (i + 1), data.get_size);
+            let fragment = data.get_sub(start, end);
+            TLSPlaintext::empty.set_content_type(content_type).set_fragment(fragment)
+        ).to_array
+    );
+
+    // Joins fragments of records.
+    join_fragments:  [m: MonadError] Array TLSRecord -> m (Array U8);
+    join_fragments = |records| (
+        if records.is_empty { pure $ [] };
+        let content_type = records.@(0).@content_type;
+        if records.find_by(|p| p.@content_type != content_type).is_some {
+            error $ "join_fragments: all `content_type`s should be same"
+        };
+        pure $ records.map(@fragment).flatten
+    );
+
+
+
+    send_record: [m: MonadBytesIO] TLSRecord -> m ();
+    send_record = |record| (
+        let bytes = marshal_to_bytes(record);
+        send_bytes_full(bytes)
+    );
+
+    send_records: [m: MonadBytesIO] Array TLSRecord -> m ();
+    send_records = |records| (
+        records.foreach_m(send_record)
+    );
+
+
+
+    recv_record:  [m: MonadBytesIO] m TLSRecord;
+    recv_record = do {
+        let header = *recv_n_bytes_full(5);
+        let length = get_u16_be(3, header);
+        let body = *recv_n_bytes_full(length.to_I64);
+        let bytes = header.append(body);
+        unmarshal_from_bytes(bytes).from_result_t
+    };
+}
+

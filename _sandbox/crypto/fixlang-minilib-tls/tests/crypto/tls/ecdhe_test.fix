@@ -1,0 +1,39 @@
+module Main;
+
+import AsyncTask;
+import Random;
+import HashMap;
+
+import Minilib.Crypto.Cipher.Ec.ECDSA;
+import Minilib.Crypto.Tls.ECDHE;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+test_ecdhe: TestCase;
+test_ecdhe = (
+    make_test("test_ecdhe") $ |_|
+    let random = Random::init_by_seed(123_U64);
+    do {
+        let ec = secp256r1;
+        let server_ecdhe = *ECDHE::make(ec);
+        let client_ecdhe = *ECDHE::make(ec);
+        let server_pub_key = server_ecdhe.get_pub_key;
+        let client_pub_key = client_ecdhe.get_pub_key;
+        let server_share_secret = *server_ecdhe.accept_remote_pub_key(client_pub_key).from_result.lift_t;
+        let client_share_secret = *client_ecdhe.accept_remote_pub_key(server_pub_key).from_result.lift_t;
+        //println("server_share_secret=" + server_share_secret.to_string_hex).lift.lift_t;;
+        //println("client_share_secret=" + client_share_secret.to_string_hex).lift.lift_t;;
+        assert_equal("eq", server_share_secret, client_share_secret).lift_t
+    }.eval_state_t(random)
+);
+
+main: IO ();
+main = (
+    [
+        test_ecdhe,
+    ]
+    .run_test_driver
+);

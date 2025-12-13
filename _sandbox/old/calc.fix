@@ -1,0 +1,161 @@
+module Main;
+
+import Character;
+
+import Minilib.Common.IOEx;
+
+type Value = I64;
+
+// box を書かないと stack overflow になる
+type Expr = box union {
+    ex_value: Value,
+    ex_add: (Expr, Expr),
+    ex_sub: (Expr, Expr),
+    ex_mul: (Expr, Expr),
+    ex_div: (Expr, Expr)
+};
+
+skip_whitespaces: DynIterator U8 -> DynIterator U8;
+skip_whitespaces = |itor| (
+    let res = itor.advance;
+    if res.is_none {
+        itor
+    };
+    let (next, ch) = res.as_some;
+    if (not(is_space(ch))) {
+        itor
+    };
+    skip_whitespaces (next)
+);
+
+
+take_while: (Array a, DynIterator a) -> (a -> Bool) -> (Array a, DynIterator a);
+take_while = |(arr, itor), filter| (
+    loop((arr, itor), |(arr, itor)| (
+        let next = itor.advance;
+        if next.is_none {
+            break $ (arr, itor)
+        };
+        let (next, a) = next.as_some;
+        if (not (filter(a))) {
+            break $ (arr, itor)
+        };
+        let arr = arr.push_back (a);
+        continue $ (arr, next)
+    ))
+);
+
+_unsafe_to_string: Array U8 -> String;
+_unsafe_to_string = |a| (
+    String::_unsafe_from_c_str (a.push_back(0_U8))
+);
+
+parse_value: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
+parse_value = |itor| (
+    let itor = skip_whitespaces (itor);
+    let (arr, itor) = take_while(([], itor), is_digit);
+    let str = arr._unsafe_to_string;
+    let res : Result ErrMsg I64 = from_string(str);
+    if res.is_err {
+        err (res.as_err.to_string + ": `" + str + "`")
+    };
+    let value : I64 = res.as_ok;
+    ok((ex_value(value), itor))
+);
+
+parse_mul_div: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
+parse_mul_div = |itor| (
+    let (expr, itor) = *parse_value (itor);
+    let itor = skip_whitespaces (itor);
+    let next = itor.advance;
+    if next.is_none {
+        ok((expr, itor))
+    };
+    let (next, op) = next.as_some;
+    if (op != '*' && op != '/') {
+        ok((expr, itor))
+    };
+    // これでは右結合になってしまう。。。
+    let (expr2, itor) = *parse_mul_div(next);
+    if (op == '*') {
+        ok((ex_mul((expr, expr2)), itor))
+    } else {
+        ok((ex_div((expr, expr2)), itor))
+    }
+);
+
+parse_add_sub: DynIterator U8 -> Result ErrMsg (Expr, DynIterator U8);
+parse_add_sub = |itor| (
+    let (expr, itor) = *parse_mul_div (itor);
+    let itor = skip_whitespaces (itor);
+    let next = itor.advance;
+    if next.is_none {
+        ok((expr, itor))
+    };
+    let (next, op) = next.as_some;
+    if (op != '+' && op != '-') {
+        ok((expr, itor))
+    };
+    // これでは右結合になってしまう。。。
+    let (expr2, itor) = *parse_add_sub(next);
+    if (op == '+') {
+        ok((ex_add((expr, expr2)), itor))
+    } else {
+        ok((ex_sub((expr, expr2)), itor))
+    }
+);
+
+evaluate: Expr -> Value;
+evaluate = |expr| (
+    if expr.is_ex_add {
+        let (a, b) = expr.as_ex_add;
+        evaluate(a) + evaluate(b)
+    };
+    if expr.is_ex_sub {
+        let (a, b) = expr.as_ex_sub;
+        evaluate(a) - evaluate(b)
+    };
+    if expr.is_ex_mul {
+        let (a, b) = expr.as_ex_mul;
+        evaluate(a) * evaluate(b)
+    };
+    if expr.is_ex_div {
+        let (a, b) = expr.as_ex_div;
+        evaluate(a) / evaluate(b)
+    };
+    expr.as_ex_value
+);
+
+calc: String -> String;
+calc = |line| (
+    let res = parse_add_sub (line.get_bytes.to_iter.to_dyn);
+    if res.is_err {
+        "Error: " + res.as_err.to_string
+    };
+    let (expr, itor) = res.as_ok;
+    let value = evaluate(expr);
+    value.to_string
+);
+
+main_loop : () -> IOFail ();
+main_loop = |_| (
+    write_string(stdout, "Calc ver 0.10\n");;
+    loop_m ((), |_|
+        write_string(stdout, ">> ");;
+        fflush(stdout);;
+        let line = *read_line(IO::stdin);
+        if (line == "") {
+            break_m $ ()
+        };
+        let line = calc(line) + "\n";
+        write_string (IO::stdout, line);;
+        continue_m $ ()
+    )
+);
+
+main : IO ();
+main = (
+    do {
+        main_loop()
+    }.try(exit_with_msg(1))
+);

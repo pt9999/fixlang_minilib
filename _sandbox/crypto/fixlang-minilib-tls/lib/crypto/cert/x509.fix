@@ -1,0 +1,560 @@
+// X.509 Certificate module
+//
+// RFC 5280 - Internet X.509 Public Key Infrastructure Certificate and Certificate Revocation List (CRL) Profile
+// https://tex2e.github.io/rfc-translater/html/rfc5280.html
+module Minilib.Crypto.Cert.X509;
+
+import Hash;
+
+import Minilib.Crypto.Cert.Asn1;
+import Minilib.Crypto.Cert.Asn1Der;
+import Minilib.Crypto.Cert.X509Time;
+import Minilib.Crypto.Cert.OID;
+import Minilib.Crypto.Cert.Pem;
+import Minilib.Encoding.Binary;
+import Minilib.Math.BigInt;
+import Minilib.Monad.State;
+import Minilib.Monad.Error;
+import Minilib.Monad.Trans;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+// Reads a certificate from a certificate file.
+// If the file does not contain exactly one certificate, an error will be reported.
+// Supported filename extensions: ".pem", ".crt", ".cer", ".der".
+read_certificate_from_file: Path -> IOFail Certificate;
+read_certificate_from_file = |path| (
+    let certificates = *read_certificates_from_file(path);
+    if certificates.get_size == 0 {
+        throw $ "No certificates found: " + path.to_string
+    };
+    if certificates.get_size >= 2 {
+        throw $ "two or more certificates found: " + path.to_string
+    };
+    pure $ certificates.@(0)
+);
+
+// Reads all certificates from a certificate file.
+// Supported filename extensions: ".pem", ".crt", ".cer", ".der".
+read_certificates_from_file: Path -> IOFail (Array Certificate);
+read_certificates_from_file = |path| (
+    let filepath = path.to_string.to_lower;
+    if filepath.ends_with(".pem") ||
+       filepath.ends_with(".crt") {
+        read_certificates_from_pem_file(path)
+    };
+    if filepath.ends_with(".cer") ||
+       filepath.ends_with(".der") {
+        read_certificate_from_der_file(path).map(|x|[x])
+    };
+    throw $ "read_certificates_from_file: unsupported extension: " + filepath
+);
+
+// Reads a certificate from a certificate file in DER encoding (".cer", ".der").
+read_certificate_from_der_file: Path -> IOFail Certificate;
+read_certificate_from_der_file = |path| (
+    let bytes = *read_file_bytes(path);
+    from_bytes(bytes).from_result
+);
+
+// Reads all certificates from a certificate file in PEM encoding (".pem", ".crt").
+read_certificates_from_pem_file: Path -> IOFail (Array Certificate);
+read_certificates_from_pem_file = |path| (
+    let contents = *read_file_string(path);
+    read_certificates_from_pem_string(contents).from_result
+);
+
+// Reads all certificates from a string in PEM encoding.
+read_certificates_from_pem_string: String -> Result ErrMsg (Array Certificate);
+read_certificates_from_pem_string = |contents| (
+    let cert_data_array = *read_cert_data_array_from_pem_string(contents);
+    cert_data_array.map_m(from_bytes)
+);
+
+// Reads a list of certificate data (DER-encoded bytes) from a string in PEM encoding.
+read_cert_data_array_from_pem_string: String -> Result ErrMsg (Array (Array U8));
+read_cert_data_array_from_pem_string = |contents| (
+    let entries = *parse_pem_entries(contents);
+    eval *entries.foreach_m(|entry|
+        if entry.@label != "CERTIFICATE" { err $ "unsupported PEM entry: " + entry.@label };
+        pure()
+    );
+    pure $ entries.map(@bytes)
+);
+
+// ---------------------------------------------------------------------------
+// X.509 Data Structures
+// ---------------------------------------------------------------------------
+
+// 4.1. Basic Certificate Fields
+
+// A X.509 certificate with signature
+type Certificate = unbox struct {
+    tbs_certificate: TBSCertificate,
+    tbs_certificate_bytes: Array U8,        // DER encoding of tbs_certificate
+    signature_algorithm:   AlgorithmIdentifier,
+    signature_value: BitString,
+};
+
+namespace Certificate {
+    // Gets the subject name.
+    get_subject: Certificate -> Name;
+    get_subject = |cert| cert.@tbs_certificate.@subject;
+
+    // Gets the subject public key.
+    get_subject_public_key: Certificate -> SubjectPublicKeyInfo;
+    get_subject_public_key = |cert| cert.@tbs_certificate.@subject_public_key_info;
+
+    find_extension: (Asn1::ObjectIdentifier -> Bool) -> Certificate -> Option Extension;
+    find_extension = |f, cert| (
+        let extensions = *cert.@tbs_certificate.@extensions;
+        extensions.to_iter.filter(@extn_id >> f).get_first
+    );
+}
+
+impl Certificate: ToString {
+    to_string = |obj| (
+        "Certificate {" +
+        "\n tbs_certificate=" + obj.@tbs_certificate.to_string.replace_all("\n", "\n  ") +
+        "\n signature_algorithm=" + obj.@signature_algorithm.to_string +
+        "\n signature_value=" + obj.@signature_value.to_string +
+        "\n }"
+    );
+}
+
+impl Certificate: FromBytes {
+    from_bytes = decode_der_from_bytes;
+}
+
+impl Certificate: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+
+            let start_pos = *get_pos;
+            let tbs_certificate = *decode_obj;
+            let end_pos = *get_pos;
+
+            // save DER encoding of tbs_certificate for signature validation
+            set_pos(start_pos);;
+            let tbs_certificate_bytes = *decode_contents(end_pos - start_pos);
+            set_pos(end_pos);;
+
+            pure $ Certificate {
+                tbs_certificate: tbs_certificate,
+                tbs_certificate_bytes: tbs_certificate_bytes,
+                signature_algorithm: *decode_obj,
+                signature_value: *decode_obj,
+            }
+        }
+    );
+}
+
+// Information associated with the subject of the certificate and the issuer.
+// 4.1.2. TBSCertificate
+type TBSCertificate = unbox struct {
+    version: Option Version,
+    serial_number: CertificateSerialNumber,
+    signature: AlgorithmIdentifier,
+    issuer: Name,
+    validity: Validity,
+    subject: Name,
+    subject_public_key_info: SubjectPublicKeyInfo,
+    issuer_unique_id: Option UniqueIdentifier,
+    subject_unique_id: Option UniqueIdentifier,
+    extensions: Option Extensions,
+};
+
+impl TBSCertificate: ToString {
+    to_string = |obj| (
+        "TBSCertificate {" +
+        "\n version=" + obj.@version.to_string +
+        "\n serial_number=" + obj.@serial_number.to_bytes.to_string_hex +
+        "\n signature=" + obj.@signature.to_string +
+        "\n issuer=" + obj.@issuer.to_string +
+        "\n validity=" + obj.@validity.to_string +
+        "\n subject=" + obj.@subject.to_string +
+        "\n subject_public_key_info=" + obj.@subject_public_key_info.to_string +
+        "\n issuer_unique_id=" + obj.@issuer_unique_id.to_string +
+        "\n subject_unique_id=" + obj.@subject_unique_id.to_string +
+        "\n extensions=" + obj.@extensions.map(map(|ex| "\n    " + ex.to_string)).to_string +
+        "\n }"
+    );
+}
+
+impl TBSCertificate: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ TBSCertificate {
+                version: *with_context(0, decode_obj).if_exists,
+                serial_number: *decode_obj,
+                signature: *decode_obj,
+                issuer: *decode_obj,
+                validity: *decode_obj,
+                subject: *decode_obj,
+                subject_public_key_info: *decode_obj,
+                issuer_unique_id: *with_context(1, decode_obj).if_exists,
+                subject_unique_id: *with_context(2, decode_obj).if_exists,
+                extensions: *with_context(3, _decode_extensions).if_exists,
+            }
+        }
+    );
+}
+
+// 4.1.2.1. Version
+type Version = Asn1::Integer; // v1(0), v2(1), v3(2)
+
+// 4.1.2.2. Serial Number
+type CertificateSerialNumber = BigInt;
+
+// 4.1.2.5. Validity
+type Validity = unbox struct {
+    not_before: X509Time,
+    not_after: X509Time,
+};
+
+namespace Validity {
+    is_valid_at: X509Time -> Validity -> Bool;
+    is_valid_at = |time, validity| (
+        validity.@not_before <= time && time <= validity.@not_after
+    );
+}
+
+impl Validity: ToString {
+    to_string = |obj| (
+        "Validity {" +
+        " not_before=" + obj.@not_before.to_string +
+        " not_after=" + obj.@not_after.to_string +
+        " }"
+    );
+}
+
+impl Validity: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let not_before = *decode_obj;
+            let not_after = *decode_obj;
+            pure $ Validity {
+                not_before: not_before,
+                not_after: not_after
+            }
+        }
+    );
+}
+
+
+// 4.1.2.8. Unique Identifiers
+type UniqueIdentifier = Asn1::BitString;
+
+// 4.1.2.7. Subject Public Key Info
+type SubjectPublicKeyInfo = unbox struct {
+    algorithm: AlgorithmIdentifier,
+    subject_public_key: Asn1::BitString,
+};
+
+impl SubjectPublicKeyInfo: ToString {
+    to_string = |obj| (
+        "SubjectPublicKeyInfo {" +
+        " algorithm=" + obj.@algorithm.to_string +
+        " subject_public_key=" + obj.@subject_public_key.to_string +
+        " }"
+    );
+}
+
+impl SubjectPublicKeyInfo: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let algorithm = *decode_obj;
+            let subject_public_key = *decode_obj;
+            pure $ SubjectPublicKeyInfo {
+                algorithm: algorithm,
+                subject_public_key: subject_public_key
+            }
+        }
+    );
+}
+
+// 4.1.2.4. Issuer
+
+type Name = unbox struct {
+    data: RDNSequence
+};
+
+namespace Name {
+    find_common_name: Name -> Option String;
+    find_common_name = |name| (
+        name.@data.flatten.to_iter
+        .filter(|(ty, val)| ty.match_name("id-at-commonName"))
+        .map(|(ty, val)| val)
+        // RFC2818: 3.1.  Server Identity:
+        // ... the (most specific) Common Name field in the Subject field of the certificate MUST be used.
+        .to_array.get_last
+    );
+}
+
+
+impl Name: Eq {
+    eq = |a, b| a.@data == b.@data;
+}
+
+impl Name: Hash {
+    hash = |obj| obj.@data.hash;
+}
+
+impl Name: ToString {
+    to_string = |obj| (
+        "Name { " +
+        obj.@data.map(|rdn|
+            rdn.map(|(type_, value)|
+                type_.to_string_ldap + "=" + value.to_string
+            )
+        ).to_string +
+        " }"
+    );
+}
+
+impl Name: DecodeDer {
+    decode_obj = (
+        pure $ Name {
+            data: *_decode_RDNSequence
+        }
+    );
+}
+
+type RDNSequence = Array RelativeDistinguishedName;
+
+_decode_RDNSequence: [m: MonadDerDecoder] m RDNSequence;
+_decode_RDNSequence = (
+    decode_sequence_of(_decode_RelativeDistinguishedName)
+);
+
+type RelativeDistinguishedName = Array AttributeTypeAndValue;
+
+_decode_RelativeDistinguishedName: [m: MonadDerDecoder] m RelativeDistinguishedName;
+_decode_RelativeDistinguishedName = (
+    decode_set_of(_decode_AttributeTypeAndValue)
+);
+
+type AttributeTypeAndValue = (AttributeType, AttributeValue);
+
+_decode_AttributeTypeAndValue: [m: MonadDerDecoder] m AttributeTypeAndValue;
+_decode_AttributeTypeAndValue = (
+    decode_sequence $ do {
+        let type_ = *decode_obj;
+        let value = *decode_obj;
+        pure $ (type_, value)
+    }
+);
+
+type AttributeType = Asn1::ObjectIdentifier;
+
+type AttributeValue = String;       // DirectoryString
+
+// 4.1.1.2. signatureAlgorithm
+type AlgorithmIdentifier = unbox struct {
+    algorithm: Asn1::ObjectIdentifier,
+    parameters: Array U8,
+};
+
+namespace AlgorithmIdentifier {
+    match_name: String -> AlgorithmIdentifier -> Bool;
+    match_name = |name, algorithm_identifier| (
+        algorithm_identifier.@algorithm.match_name(name)
+    );
+}
+
+impl AlgorithmIdentifier: ToString {
+    to_string = |obj| (
+        "AlgorithmIdentifier {" +
+        " algorithm=" + obj.@algorithm.to_string_with_name +
+        " parameters=" + obj.@parameters.to_string_hex +
+        " }"
+    );
+}
+
+impl AlgorithmIdentifier: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let algorithm = *decode_obj;
+            let parameters = *do { // ANY DEFINED BY algorithm OPTIONAL
+                decode_any
+            }.catch(|errmes|
+                if errmes == Asn1Der::__Err_EndOfStream { pure $ [] };
+                error $ errmes
+            );
+            pure $ AlgorithmIdentifier {
+                algorithm: algorithm,
+                parameters: parameters,
+            }
+        }
+    );
+}
+
+// 4.2. Certificate Extensions
+type Extensions = Array Extension;
+
+_decode_extensions:  [m: MonadDerDecoder] m Extensions;
+_decode_extensions = (
+    decode_sequence_of(decode_obj)
+);
+
+type Extension = unbox struct {
+    extn_id: Asn1::ObjectIdentifier,
+    critical: Asn1::Boolean,
+    extn_value: Asn1::OctetString,
+};
+
+impl Extension: ToString {
+    to_string = |obj| (
+        "Extension {" +
+        " extn_id=" + obj.@extn_id.to_string_with_name +
+        " critical=" + obj.@critical.to_string +
+        " extn_value=" + obj.@extn_value.to_string +
+        " }"
+    );
+}
+
+impl Extension: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            pure $ Extension {
+                extn_id: *decode_obj,
+                critical: *decode_obj.if_exists_or(false),
+                extn_value: *decode_obj
+            }
+        }
+    );
+}
+
+// 4.2.1. Standard Extensions
+
+// 4.2.1.1. Authority Key Identifier ... not implemented yet
+// 4.2.1.2. Subject Key Identifier   ... not implemented yet
+// 4.2.1.3. Key Usage                ... not implemented yet
+// 4.2.1.4. Certificate Policies     ... not implemented yet
+// 4.2.1.5. Policy Mappings          ... not implemented yet
+
+// 4.2.1.6. Subject Alternative Name
+
+type SubjectAltName = unbox struct {
+    data: GeneralNames
+};
+
+impl SubjectAltName: ToString {
+    to_string = |obj| (
+        "SubjectAltName { " +
+        obj.@data.to_string +
+        " }"
+    );
+}
+
+impl SubjectAltName: DecodeDer {
+    decode_obj = (
+        pure $ SubjectAltName {
+            data: *decode_sequence_of(decode_obj)
+        }
+    );
+}
+
+type GeneralNames = Array GeneralName;
+
+type GeneralName = unbox union {
+    otherName: Array U8, // [0] TODO: OtherName
+    rfc822Name: Asn1::IA5String, // [1]
+    dNSName: Asn1::IA5String, // [2]
+    x400Address: Array U8, // [3] TODO: ORAddress
+    directoryName: Array U8,  // [4] TODO: X509::Name
+    ediPartyName: Array U8, // [5] TODO: EDIPartyName
+    uniformResourceIdentifier: Asn1::IA5String, // [6]
+    iPAddress: Asn1::OctetString,           // [7]
+    registeredID: Array U8,    // [8] TODO: ObjectIdentifier
+};
+
+impl GeneralName: DecodeDer {
+    decode_obj = (
+        // make choice with context_specific tag
+        let identifier = *decode_identifier;
+        identifier.assert_tag_class(tc_context_specific);;
+        identifier.assert_primitive;;
+        let tag = identifier.@tag;
+        let length = *decode_length;
+        let contents = *decode_contents(length);
+        if tag == 0_U8 {
+            pure $ GeneralName::otherName $ contents
+        };
+        if tag == 1_U8 {
+            pure $ GeneralName::rfc822Name $ contents._unsafe_to_string
+        };
+        if tag == 2_U8 {
+            pure $ GeneralName::dNSName $ contents._unsafe_to_string
+        };
+        if tag == 3_U8 {
+            pure $ GeneralName::x400Address $ contents
+        };
+        if tag == 4_U8 {
+            pure $ GeneralName::directoryName $ contents
+        };
+        if tag == 5_U8 {
+            pure $ GeneralName::ediPartyName $ contents
+        };
+        if tag == 6_U8 {
+            pure $ GeneralName::uniformResourceIdentifier $ contents._unsafe_to_string
+        };
+        if tag == 7_U8 {
+            pure $ GeneralName::iPAddress $ Asn1::OctetString { data: contents }
+        };
+        if tag == 8_U8 {
+            pure $ GeneralName::registeredID $ contents
+        };
+        error $ "GeneralName: invalid tag: " + tag.to_string
+    );
+}
+
+impl GeneralName: ToString {
+    to_string = |obj| (
+        if obj.is_otherName { "otherName(" + obj.as_otherName.to_string_hex + ")" };
+        if obj.is_rfc822Name { "rfc822Name(" + obj.as_rfc822Name.to_string + ")" };
+        if obj.is_dNSName { "dNSName(" + obj.as_dNSName.to_string + ")" };
+        if obj.is_x400Address { "x400Address(" + obj.as_x400Address.to_string_hex + ")" };
+        if obj.is_directoryName { "directoryName(" + obj.as_directoryName.to_string_hex + ")" };
+        if obj.is_ediPartyName { "ediPartyName(" + obj.as_ediPartyName.to_string_hex + ")" };
+        if obj.is_uniformResourceIdentifier { "uniformResourceIdentifier(" + obj.as_uniformResourceIdentifier.to_string + ")" };
+        if obj.is_iPAddress { "iPAddress(" + obj.as_iPAddress.to_bytes.to_string_hex + ")" };
+        if obj.is_registeredID { "registeredID(" + obj.as_registeredID.to_string_hex + ")" };
+        ""
+    );
+}
+
+/*
+// RFC3279 2.2.3 ECDSA Signature Algorithm
+type EcdsaSigValue = unbox struct {
+    r: BigInt,
+    s: BigInt
+};
+
+impl EcdsaSigValue: ToString {
+    to_string = |obj| (
+        "EcdsaSigValue {" +
+        " r=" + obj.@r.to_string +
+        " s=" + obj.@s.to_string +
+        " }"
+    );
+}
+
+impl EcdsaSigValue: DecodeDer {
+    decode_obj = (
+        decode_sequence $ do {
+            let r = *decode_obj;
+            let s = *decode_obj;
+            pure $ EcdsaSigValue {
+                r: r,
+                s: s,
+            }
+        }
+    );
+}
+*/

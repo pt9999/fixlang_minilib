@@ -1,0 +1,97 @@
+module PatTree3Test;
+
+import Minilib.Collection.PatTree3;
+import Minilib.Monad.Yield;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Testing.TestUtilArray;
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let println = IO::println >> lift;
+    let tree: PTree String = PTree::empty;
+    let tree = tree.set__combine(Combine::append);
+    let tree = tree.insert(1_U64, "111");
+    let tree = tree.insert(2_U64, "222");
+    let tree = tree.insert(3_U64, "333");
+    let tree = tree.insert(2_U64, "aaa");
+    println("tree="+tree.to_string);;
+    println("tree.find(2)="+tree.find(2_U64).to_string);;
+
+    println("erasing 7");;
+    let tree = tree.erase(7_U64);
+    println(tree.to_string);;
+
+    let tree = *tree.to_array.to_iter.fold_m(
+        tree, |(key, value), tree|
+        println("erasing " + key.to_string);;
+        let tree = tree.erase(key);
+        println("tree=" + tree.to_string);;
+        println("tree.find("+key.to_string+")=" + tree.find(key).to_string);;
+        pure $ tree
+    );
+    assert_equal("not empty", tree.@_root, PNodeIndex::empty);;
+    pure()
+);
+
+test_perf: TestCase;
+test_perf = (
+    make_test("test_perf") $ |_|
+    let println = IO::println >> lift;
+    let n = 1000000;
+    //let n = 100000;
+    //let n = 100;
+    let array = Iterator::range(0, n).to_array;
+    let array = array.map(|x| (x * 12345) % 998244353);
+    let array = array.reorder(shuffle(345));
+    let (tree, insert_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ range(0,n).fold(
+            PTree::empty, |i, tree|
+            //eval if i % 10000 == 0 { debug_eprintln(i.to_string) } else { () };
+            tree.insert(array.@(i).to_U64, i))
+    }).lift;
+    println("n=" + n.to_string + " insert_time=" + insert_time.to_string_precision(3_U8) + " sec");;
+    assert_equal("size", n, tree.get_size);;
+    let (_, find_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ range(0,n).fold(
+            0, |i, ans|
+            let opt = tree.find(array.@(i).to_U64);
+            //eval if i % 10000 == 0 { debug_eprintln(i.to_string) } else { () };
+            //eval debug_eprintln(array.@(i).to_string + " -> " + i.to_string);
+            if opt != some(i) { undefined("find fail: " + opt.to_string) };
+            ans + opt.as_some
+        )
+    }).lift;
+    println("n=" + n.to_string + " find_time=" + find_time.to_string_precision(3_U8) + " sec");;
+    let (arr, to_array_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_array
+    }).lift;
+    println("n=" + n.to_string + " to_array_time=" + to_array_time.to_string_precision(3_U8) + " sec");;
+    let (arr2, to_iter_to_array_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ tree.to_iter.to_array
+    }).lift;
+    println("n=" + n.to_string + " to_iter_to_array_time=" + to_iter_to_array_time.to_string_precision(3_U8) + " sec");;
+    assert_equal("arr == arr2", arr, arr2);;
+    let (tree, remove_time) = *consumed_time_while_io(do {
+        pure();;
+        pure $ array.to_iter.fold(
+            tree, |x, tree| tree.erase(x.to_U64)
+        )
+    }).lift;
+    println("n=" + n.to_string + " remove_time=" + remove_time.to_string + " seconds");;
+    assert_equal("size", 0, tree.get_size);;
+    pure()
+);
+
+main: IO () = (
+    [
+        test_simple,
+        test_perf,
+    ]
+    .run_test_driver
+);

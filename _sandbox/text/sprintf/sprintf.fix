@@ -1,0 +1,175 @@
+module Minilib.Text.Sprintf;
+
+import Character;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type Flags = U64;
+
+namespace Flags {
+    flag_alternate_form: Flags = 1_U64;   // '#'
+    flag_zero_padding: Flags = 2_U64;     // '0'
+    flag_left_adjust: Flags = 4_U64;      // '-'
+    flag_space: Flags = 8_U64;            // ' '
+    flag_sign: Flags = 16_U64;            // '+'
+    flag_thousands: Flags = 32_U64;       // '\''
+
+    contains_flag: U64 -> Flags -> Bool;
+    contains_flag = |f, flags| (
+        flags.bit_and(f) == f
+    );
+
+    parse_flags: Parser Flags;
+    parse_flags = (
+        let flags = *repeat(do {
+            let c = *match_any_char.filter(|c| "#0- +'".find_byte(c).is_some);
+            if c == '#' { pure $ flag_alternate_form };
+            if c == '0' { pure $ flag_zero_padding };
+            if c == '-' { pure $ flag_left_adjust };
+            if c == ' ' { pure $ flag_space };
+            if c == '+' { pure $ flag_sign };
+            if c == '\'' { pure $ flag_thousands };
+            undefined("parse_flag: c not found")
+        });
+        pure $ flags.to_iter.fold(0_U64, bit_or)
+    );
+}
+
+parse_field_width: Parser (Option I64);
+parse_field_width = do {
+    match_integer
+}.if_exists;
+
+parse_precision: Parser (Option I64);
+parse_precision = do {
+    match_char('.');;
+    match_integer
+}.if_exists;
+
+parse_conversion_specifier: Parser U8;
+parse_conversion_specifier = do {
+    match_any_char.filter(|c| "diouxXeEfFgGaAcsCSPnm".find_byte(c).is_some)
+};
+
+type ConversionSpec = unbox struct {
+    flags: Flags,
+    field_width: Option I64,
+    precision: Option I64,
+    conversion_specifier: U8,
+};
+
+namespace ConversionSpec {
+    make: Flags -> Option I64 -> Option I64 -> U8 -> ConversionSpec;
+    make = |flags, field_width, precision, conversion_specifier| (
+        ConversionSpec {
+            flags: flags,
+            field_width: field_width,
+            precision: precision,
+            conversion_specifier: conversion_specifier,
+        }
+    );
+
+    parse_conversion_spec: Parser ConversionSpec;
+    parse_conversion_spec = do {
+        match_char('%');;
+        let flags = *parse_flags;
+        let field_width = *parse_field_width;
+        let precision = *parse_precision;
+        let conversion_specifier = *parse_conversion_specifier;
+        pure $ ConversionSpec {
+            flags: flags,
+            field_width: field_width,
+            precision: precision,
+            conversion_specifier: conversion_specifier,
+        }
+    };
+}
+
+impl ConversionSpec: ToString {
+    to_string = |c| (
+        "ConversionSpec {"
+        + " flags=" + c.@flags.to_string
+        + " field_width=" + c.@field_width.to_string
+        + " precision=" + c.@precision.to_string
+        + " conversion_specifier=" + c.@conversion_specifier.to_string
+        + " }"
+    );
+}
+
+impl ConversionSpec: Eq {
+    eq = |a, b| (
+        a.@flags == b.@flags &&
+        a.@field_width == b.@field_width &&
+        a.@precision == b.@precision &&
+        a.@conversion_specifier == b.@conversion_specifier
+    );
+}
+
+parse_ordinary_char: Parser U8;
+parse_ordinary_char = match_any_char.filter(|c| c != '%');
+
+parse_percent: Parser U8;
+parse_percent = do {
+    match_char('%');;
+    match_char('%');;
+    pure $ '%'
+};
+
+parse_literal: Parser String;
+parse_literal = do {
+    let chars = *one_or_more(
+        parse_ordinary_char
+        .or_else(parse_percent)
+    );
+    pure $ chars._unsafe_to_string
+};
+
+type Fmt = unbox union {
+    fmt_literal: String,
+    fmt_conversion_spec: ConversionSpec,
+};
+
+parse_fmt: Parser Fmt;
+parse_fmt = do {
+    parse_literal.map(fmt_literal)
+    .or_else(parse_conversion_spec.map(fmt_conversion_spec))
+};
+
+trait a: Convertible {
+    convert: a -> ConversionSpec -> String;
+}
+
+_to_string_oct: U64 -> String;
+_to_string_oct = |u| (
+    loop(
+        ([], u), |(a, u)|
+        if u == 0_U64 {
+            if a.is_empty { break $ "0" };
+            break $ a.reverse._unsafe_to_string
+        };
+        let a = a.push_back('0' + (u % 8_U64).to_U8);
+        continue $ (a, u / 8_U64)
+    )
+);
+
+impl I64: Convertible {
+    convert = |val, spec| (
+        let cs = spec.@conversion_specifier;
+        let str = if cs == 'd' || cs == 'i' || cs == 's' {
+            val.to_string
+        } else if cs == 'o' {
+            val.to_U64._to_string_oct
+        } else if cs == 'x' {
+            val.to_U64.to_string_hex
+        } else if cs == 'X' {
+            val.to_U64.to_string_hex.to_upper
+        } else if cs == 'c' {
+            val.to_U8.from_U8
+        } else {
+            undefined("not impl yet")    
+        };
+        let flags = spec.@flags;
+        undefined("not impl yet")
+    );
+}

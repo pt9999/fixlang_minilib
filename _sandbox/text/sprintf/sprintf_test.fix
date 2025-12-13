@@ -1,0 +1,124 @@
+module Main;
+
+import Minilib.Text.Sprintf;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+parse_trailing: Parser String;
+parse_trailing = repeat(match_any_char).map(_unsafe_to_string);
+
+and_trailing: Parser a -> Parser (a, String);
+and_trailing = |parser| (
+    let a = *parser;
+    let trailing = *parse_trailing;
+    pure $ (a, trailing)
+);
+
+test_parse_flags: TestCase;
+test_parse_flags = (
+    make_table_test("test_parse_flags",
+        [
+            ("xyz", (0_U64, "xyz")),
+            ("#ab", (Flags::flag_alternate_form, "ab")),
+            ("0", (Flags::flag_zero_padding, "")),
+            ("-", (Flags::flag_left_adjust, "")),
+            (" ", (Flags::flag_space, "")),
+            ("+", (Flags::flag_sign, "")),
+            ("'", (Flags::flag_thousands, "")),
+            ("-0#abc", (Flags::flag_alternate_form.bit_or(Flags::flag_zero_padding).bit_or(Flags::flag_left_adjust), "abc")),
+        ],
+        |(str, expected)|
+        let parser = parse_flags.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_contains_flag: TestCase;
+test_contains_flag = (
+    make_test("test_contains_flag") $ |_|
+    let flags = Flags::flag_alternate_form.bit_or(Flags::flag_zero_padding);
+    let f1 = Flags::flag_alternate_form;
+    let f2 = Flags::flag_space;
+    assert_equal("eq", true, flags.contains_flag(f1));;
+    assert_equal("eq", false, flags.contains_flag(f2));;
+    pure()
+);
+
+test_parse_field_width: TestCase;
+test_parse_field_width = (
+    make_table_test("test_parse_field_width",
+        [
+            ("d", (none(), "d")),
+            ("8d", (some(8), "d")),
+            ("08d", (some(8), "d")),    // currently we accept strings that starts with "0"
+            ("-1d", (none(), "-1d")),
+        ],
+        |(str, expected)|
+        let parser = parse_field_width.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_parse_precision: TestCase;
+test_parse_precision = (
+    make_table_test("test_parse_precision",
+        [
+            ("f", (none(), "f")),
+            (".8f", (some(8), "f")),
+            (".08f", (some(8), "f")),    // currently we accept strings that starts with "0"
+            (".-1f", (none(), ".-1f")),
+        ],
+        |(str, expected)|
+        let parser = parse_precision.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_parse_conversion_specifier: TestCase;
+test_parse_conversion_specifier = (
+    make_table_test("test_parse_conversion_specifier",
+        [
+            ("zabc", (none(), "zabc")),
+            ("ffff", (some('f'), "fff")),
+            ("dfff", (some('d'), "fff")),
+        ],
+        |(str, expected)|
+        let parser = parse_conversion_specifier.if_exists.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_parse_conversion_spec: TestCase;
+test_parse_conversion_spec = (
+    make_table_test("test_parse_conversion_spec",
+        [
+            ("zabc", (none(), "zabc")),
+            ("%dabc", (some(ConversionSpec::make(0_U64, none(), none(), 'd')), "abc")),
+            ("%08dabc", (some(ConversionSpec::make(Flags::flag_zero_padding, some(8), none(), 'd')), "abc")),
+            ("%+8.3fabc", (some(ConversionSpec::make(Flags::flag_sign, some(8), some(3), 'f')), "abc")),
+        ],
+        |(str, expected)|
+        let parser = parse_conversion_spec.if_exists.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+
+main: IO ();
+main = (
+    [
+        test_parse_flags,
+        test_contains_flag,
+        test_parse_field_width,
+        test_parse_precision,
+        test_parse_conversion_specifier,
+        test_parse_conversion_spec,
+    ]
+    .run_test_driver
+);

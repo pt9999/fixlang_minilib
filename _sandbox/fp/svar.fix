@@ -4,18 +4,16 @@ import Minilib.Monad.State;
 import Minilib.Monad.IO;
 import Minilib.Trait.Traversable;
 
-type [m: *->*] SStore s m a = (a -> Result a a) -> Result a s;
-
 // State variable
-type [m: *->*] SVar s m a = unbox struct {
-    data: s -> SStore s m a
+type SVar s a = unbox struct {
+    data: s -> (a -> Result a a) -> Result a s
 };
 
 namespace SVar {
-    make: [m: MonadState, StateType m = s] (s -> SStore s m a) -> SVar s m a;
+    make: (s -> (a -> Result a a) -> Result a s) -> SVar s a;
     make = |data| SVar { data: data };
 
-    get: [m: MonadState, StateType m = s] SVar s m a -> m a;
+    get: [m: MonadState, StateType m = s] SVar s a -> m a;
     get = |svar| (
         let s = *get_state;
         let store = (svar.@data)(s);
@@ -24,7 +22,7 @@ namespace SVar {
         pure $ sfa.as_err
     );
 
-    set: [m: MonadState, StateType m = s] a -> SVar s m a -> m ();
+    set: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
     set = |a, svar| (
         mod_state_(|s|
             let store = (svar.@data)(s);
@@ -34,10 +32,10 @@ namespace SVar {
         )
     );
 
-    sset: [m: MonadState, StateType m = s] a -> SVar s m a -> m ();
+    sset: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
     sset = SVar::set;
 
-    mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s m a -> m ();
+    mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s a -> m ();
     mod = |f, svar| (
         mod_state_(|s|
             let store = (svar.@data)(s);
@@ -70,21 +68,22 @@ test1 = (
         //let q: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^q]);
         let d = Array::from_map(n, |i| SVar::make(|z| z[^d][i]));
         let q = SVar::make(|z| z[^q]);
+        let bfs = |f, q| loop_m(
+            (), |_|
+            match (*q.get).get_last {
+                none() => break_m(),
+                some(v) => q.mod(pop_back);; f(v).map(continue)
+            }
+        );
         d.@(0).sset(0);;
         q.mod(push_back(0));;
-        loop_m(
-            (), |_|
-            let opt = (*q.get).get_last;
-            if opt.is_none { break_m $ () };
-            let v = opt.as_some;
-            q.mod(pop_back);;
+        q.bfs(|v|
             let u = v + 1;
             when(u < n) $ do {
                 let dv = *d.@(v).get;
                 d.@(u).mod(min(dv + 1));;
                 q.mod(push_back(u))
-            };;
-            continue_m $ ()
+            }
         );;
         println((*d.map_m(get)).to_string).lift_io;;
         pure()

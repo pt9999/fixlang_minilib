@@ -2,6 +2,7 @@ module Main;
 
 import Minilib.Monad.State;
 import Minilib.Monad.IO;
+import Minilib.Trait.Traversable;
 
 type SFun c a = unbox union {
     sf_id: a,
@@ -22,7 +23,7 @@ type [m: *->*] SVar s m a = unbox struct {
 };
 
 namespace SVar {
-    make: [m: MonadState, StateType m = s] (s -> SStore s m a) -> m (SVar s m a);
+    make: [m: MonadState, StateType m = s] (s -> SStore s m a) -> SVar s m a;
     make = |data| SVar { data: data };
 
     get: [m: MonadState, StateType m = s] SVar s m a -> m a;
@@ -41,6 +42,9 @@ namespace SVar {
             sfs.as_sf_id
         )
     );
+
+    sset: [m: MonadState, StateType m = s] a -> SVar s m a -> m ();
+    sset = SVar::set;
 
     mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s m a -> m ();
     mod = |f, svar| (
@@ -69,10 +73,10 @@ test1 = (
         d: Array::fill(n, inf),
         q: []
     };
-    let sm: SIO () = do {
-        let d: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^d]);
+    z.eval_state_t $ do {
+        let d: Array (SVar Z SIO I64) = Array::from_map(n, |i| SVar::make(|z: Z| z[^d][i]));
         let q: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^q]);
-        d.mod(set(0, 0));;
+        d.@(0).sset(0);;
         q.mod(push_back(0));;
         loop_m(
             (), |_|
@@ -81,16 +85,16 @@ test1 = (
             let v = opt.as_some;
             q.mod(pop_back);;
             let u = v + 1;
-            (
-                d.mod(set(u, (*d.get).@(v) + 1));;
+            when(u < n) $ do {
+                let dv = *d.@(v).get;
+                d.@(u).mod(min(dv + 1));;
                 q.mod(push_back(u))
-            ).when(u < n);;
+            };;
             continue_m $ ()
         );;
-        println((*d.get).to_string).lift_io;;
+        println((*d.map_m(get)).to_string).lift_io;;
         pure()
-    };
-    sm.eval_state_t(z)
+    }
 );
 
 main: IO () = test1;

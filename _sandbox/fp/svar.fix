@@ -1,0 +1,96 @@
+module Main;
+
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+
+type SFun c a = unbox union {
+    sf_id: a,
+    sf_const: c,
+};
+
+impl SFun c: Functor {
+    map = |f, sf| match sf {
+        sf_id(a) => sf_id(f(a)),
+        sf_const(c) => sf_const(c),
+    };
+}
+
+type [m: *->*] SStore s m a = (a -> SFun a a) -> SFun a s;
+
+type [m: *->*] SVar s m a = unbox struct {
+    data: s -> SStore s m a
+};
+
+namespace SVar {
+    make: [m: MonadState, StateType m = s] (s -> SStore s m a) -> m (SVar s m a);
+    make = |data| SVar { data: data };
+
+    get: [m: MonadState, StateType m = s] SVar s m a -> m a;
+    get = |svar| (
+        let s = *get_state;
+        let store = (svar.@data)(s);
+        let sfa = store(|a| sf_const(a));
+        pure $ sfa.as_sf_const
+    );
+
+    set: [m: MonadState, StateType m = s] a -> SVar s m a -> m ();
+    set = |a, svar| (
+        mod_state_(|s|
+            let store = (svar.@data)(s);
+            let sfs = store(|a0| sf_id(a));
+            sfs.as_sf_id
+        )
+    );
+
+    mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s m a -> m ();
+    mod = |f, svar| (
+        mod_state_(|s|
+            let store = (svar.@data)(s);
+            let sfs = store(|a| sf_id(f(a)));
+            sfs.as_sf_id
+        )
+    );
+}
+
+
+//--------------------------
+type Z = unbox struct {
+    d: Array I64,
+    q: Array I64,
+};
+
+type SIO = StateT Z IO;
+
+test1: IO ();
+test1 = (
+    let inf = 1e18;
+    let n = 30;
+    let z = Z {
+        d: Array::fill(n, inf),
+        q: []
+    };
+    let sm: SIO () = do {
+        let d: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^d]);
+        let q: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^q]);
+        d.mod(set(0, 0));;
+        q.mod(push_back(0));;
+        loop_m(
+            (), |_|
+            let opt = (*q.get).get_last;
+            if opt.is_none { break_m $ () };
+            let v = opt.as_some;
+            q.mod(pop_back);;
+            let u = v + 1;
+            (
+                d.mod(set(u, (*d.get).@(v) + 1));;
+                q.mod(push_back(u))
+            ).when(u < n);;
+            continue_m $ ()
+        );;
+        println((*d.get).to_string).lift_io;;
+        pure()
+    };
+    sm.eval_state_t(z)
+);
+
+main: IO () = test1;

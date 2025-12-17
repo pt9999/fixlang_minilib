@@ -1,18 +1,59 @@
+// A variable for State monad.
+// Stateモナドで管理している状態の全体または一部に束縛された変数です。
+// 変数の値を取得したり、設定したり、変更したりできます。
+// This is similar to `AsyncTask::Var`, but the operation results are State monad, not IO monad.
+//
+// # Examples
+// ```
+// type S = unbox struct { a: I64 };
+//
+// main: IO ();
+// main = (
+//    eval_state_t(S{ a: 123 }) $ do {
+//      let v = SVar::make(|s| s[^a]);
+//      let a = *v.get;
+//      println("a=" + a.to_string).lift_io;;
+//      v.SVar::set(456);;
+//      println("a=" + (*v.get).to_string).lift_io;;
+//      v.mod(|a| a + 78);;
+//      println("a=" + (*v.get).to_string).lift_io
+//    }
+// );
+// ```
 module Main;
 
 import Minilib.Monad.State;
 import Minilib.Monad.IO;
 import Minilib.Trait.Traversable;
 
-// State variable
 type SVar s a = unbox struct {
     data: s -> (a -> Result a a) -> Result a s
 };
 
 namespace SVar {
-    make: (s -> (a -> Result a a) -> Result a s) -> SVar s a;
-    make = |data| SVar { data: data };
+    // A state variable bound to the whole state.
+    whole_state: SVar s s;
+    whole_state = SVar::make(|s, f| f(s));
 
+    // Create a state variable bound to the part of the state.
+    //
+    // # Examples
+    // ```
+    // let svar = SVar::make(|s| s[^a]); 
+    // ```
+    // # Parameters
+    // - `f` - A function from the state to the store
+    make: (s -> (a -> Result a a) -> Result a s) -> SVar s a;
+    make = |f| SVar { data: f };
+
+    // Get the value of a state variable.
+    //
+    // # Examples
+    // ```
+    // let a = *svar.get;
+    // ```
+    // # Parameters
+    // - `svar` - A state variable
     get: [m: MonadState, StateType m = s] SVar s a -> m a;
     get = |svar| (
         let s = *get_state;
@@ -22,16 +63,34 @@ namespace SVar {
         pure $ sfa.as_err
     );
 
+    // Set the value of a state variable.
+    //
+    // # Examples
+    // ```
+    // svar.SVar::set(123);;
+    // ```
+    // # Parameters
+    // - `val` - A value to set
+    // - `svar` - A state variable
     set: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
-    set = |a, svar| (
+    set = |val, svar| (
         mod_state_(|s|
             let store = (svar.@data)(s);
             // uses `ok` as an identity functor
-            let sfs = store(|a0| ok(a));
+            let sfs = store(|a0| ok(val));
             sfs.as_ok
         )
     );
 
+    // Modify the value of a state variable.
+    //
+    // # Examples
+    // ```
+    // svar.mod(|val| val + 123);;
+    // ```
+    // # Parameters
+    // - `f` - A function to modify the value
+    // - `svar` - A state variable
     mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s a -> m ();
     mod = |f, svar| (
         mod_state_(|s|
@@ -195,4 +254,21 @@ main: IO () = (
     test_svar;;
     test_sidx;;
     pure()
+);
+
+type S = unbox struct { a: I64 };
+
+main2: IO ();
+main2 = (
+   eval_state_t(S{ a: 123 }) $ do {
+     let s = SVar::whole_state;
+     println("a=" + (*s.get).@a.to_string).lift_io;;
+     let v = SVar::make(|s| s[^a]);
+     let a = *v.get;
+     println("a=" + a.to_string).lift_io;;
+     v.SVar::set(456);;
+     println("a=" + (*v.get).to_string).lift_io;;
+     v.mod(|a| a + 78);;
+     println("a=" + (*v.get).to_string).lift_io
+   }
 );

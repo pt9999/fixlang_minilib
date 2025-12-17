@@ -4,20 +4,9 @@ import Minilib.Monad.State;
 import Minilib.Monad.IO;
 import Minilib.Trait.Traversable;
 
-type SFun c a = unbox union {
-    sf_id: a,
-    sf_const: c,
-};
+type [m: *->*] SStore s m a = (a -> Result a a) -> Result a s;
 
-impl SFun c: Functor {
-    map = |f, sf| match sf {
-        sf_id(a) => sf_id(f(a)),
-        sf_const(c) => sf_const(c),
-    };
-}
-
-type [m: *->*] SStore s m a = (a -> SFun a a) -> SFun a s;
-
+// State variable
 type [m: *->*] SVar s m a = unbox struct {
     data: s -> SStore s m a
 };
@@ -30,16 +19,18 @@ namespace SVar {
     get = |svar| (
         let s = *get_state;
         let store = (svar.@data)(s);
-        let sfa = store(|a| sf_const(a));
-        pure $ sfa.as_sf_const
+        // uses `err` as a const functor
+        let sfa = store(|a| err(a));
+        pure $ sfa.as_err
     );
 
     set: [m: MonadState, StateType m = s] a -> SVar s m a -> m ();
     set = |a, svar| (
         mod_state_(|s|
             let store = (svar.@data)(s);
-            let sfs = store(|a0| sf_id(a));
-            sfs.as_sf_id
+            // uses `ok` as an identity functor
+            let sfs = store(|a0| ok(a));
+            sfs.as_ok
         )
     );
 
@@ -50,8 +41,9 @@ namespace SVar {
     mod = |f, svar| (
         mod_state_(|s|
             let store = (svar.@data)(s);
-            let sfs = store(|a| sf_id(f(a)));
-            sfs.as_sf_id
+            // uses `ok` as an identity functor
+            let sfs = store(|a| ok(f(a)));
+            sfs.as_ok
         )
     );
 }
@@ -74,8 +66,10 @@ test1 = (
         q: []
     };
     z.eval_state_t $ do {
-        let d: Array (SVar Z SIO I64) = Array::from_map(n, |i| SVar::make(|z: Z| z[^d][i]));
-        let q: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^q]);
+        //let d: Array (SVar Z SIO I64) = Array::from_map(n, |i| SVar::make(|z: Z| z[^d][i]));
+        //let q: SVar Z SIO (Array I64) = SVar::make(|z: Z| z[^q]);
+        let d = Array::from_map(n, |i| SVar::make(|z| z[^d][i]));
+        let q = SVar::make(|z| z[^q]);
         d.@(0).sset(0);;
         q.mod(push_back(0));;
         loop_m(

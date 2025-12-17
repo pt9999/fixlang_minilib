@@ -70,28 +70,31 @@ test_adjacent = (
 
 //-------------------------------------------------------------------------
 
-type TailsIterator i = unbox struct { i: i };
+type TailsIterator i = unbox struct { oi: Option i };
 
 impl [i: Iterator] TailsIterator i : Iterator {
     type Item (TailsIterator i) = i;
-    advance = |TailsIterator { i: i }| (
-        match i.advance {
+    advance = |TailsIterator { oi: oi }| (
+        match oi {
             none() => none(),
-            some((next, a)) => some((TailsIterator {i: next}, i))
+            some(i) => match i.advance {
+                none() => some((TailsIterator {oi: none()}, i)),
+                some((next, a)) => some((TailsIterator {oi: some(next)}, i))
+            }
         }
     );
 }
 
 tails: [i: Iterator] i -> TailsIterator i;
-tails = |i| TailsIterator { i: i };
+tails = |i| TailsIterator { oi: some(i) };
 
 test_tails: IO ();
 test_tails = (
     println("=== test_tails ===");;
     [
-        ([1, 2, 3, 4, 5], [[1, 2, 3, 4, 5], [2, 3, 4, 5], [3, 4, 5], [4, 5], [5]]),
-        ([1], [[1]]),
-        ([], []),
+        ([1, 2, 3, 4, 5], [[1, 2, 3, 4, 5], [2, 3, 4, 5], [3, 4, 5], [4, 5], [5], []]),
+        ([1], [[1], []]),
+        ([], [[]]),
     ]
     .to_iter.fold_m(
         (), |(arr, expected), _|

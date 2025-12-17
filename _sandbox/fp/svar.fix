@@ -32,9 +32,6 @@ namespace SVar {
         )
     );
 
-    sset: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
-    sset = SVar::set;
-
     mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s a -> m ();
     mod = |f, svar| (
         mod_state_(|s|
@@ -46,7 +43,6 @@ namespace SVar {
     );
 }
 
-
 //--------------------------
 type Z = unbox struct {
     d: Array I64,
@@ -55,8 +51,9 @@ type Z = unbox struct {
 
 type SIO = StateT Z IO;
 
-test1: IO ();
-test1 = (
+test_svar: IO ();
+test_svar = (
+    println("=== test_svar ===");;
     let inf = 1e18;
     let n = 30;
     let z = Z {
@@ -75,7 +72,7 @@ test1 = (
                 some(v) => q.mod(pop_back);; f(v).map(continue)
             }
         );
-        d.@(0).sset(0);;
+        d.@(0).SVar::set(0);;
         q.mod(push_back(0));;
         q.bfs(|v|
             let u = v + 1;
@@ -90,4 +87,94 @@ test1 = (
     }
 );
 
-main: IO () = test1;
+//------------------------------------------------------
+
+/*
+type SVarElem svar idx elem = unbox struct {
+    svar: svar,
+    idx: idx,
+    val: Option elem
+};
+
+trait [a: Indexable] SVar s a : Indexable {
+    type Elem (SVar s a) = SVarElem (SVar s a) (Index a) (Elem a);
+    type Index (SVar s a) = Index a;
+//    act_at_index : [f : Functor] Index c -> (Elem c -> f (Elem c)) -> c -> f c;
+    act_at_index = |idx, f, svar| (
+        let se = SVarElem { svar: svar, idx: idx, val: none() }: Elem (SVar s a);
+        let fse = f(se);
+        let fc = fse.map(|SVarElem { svar: svar, idx: idx, val: none() }|
+
+        )
+    );
+}
+
+sset: a -> ((a -> f a) -> f (SVar s (Array a))) -> m ();
+
+*/
+
+type SStore s a = (a -> Result a a) -> Result a s;
+namespace SStore {
+    sget: SStore s a -> a;
+    sget = |store| store(|a| err(a)).as_err;
+
+    sset: [m: MonadState, StateType m = s] a -> SStore s a -> m ();
+    sset = |a, store| (
+        put_state $ store(|_| ok(a)).as_ok
+    );
+
+    smod: [m: MonadState, StateType m = s] (a -> a) -> SStore s a -> m ();
+    smod = |f, store| (
+        put_state $ store(|a| ok(f(a))).as_ok
+    );
+}
+
+test_sidx: IO ();
+test_sidx = (
+    println("=== test_sidx ===");;
+    let inf = 1e18;
+    let n = 30;
+    let z = Z {
+        d: Array::fill(n, inf),
+        q: []
+    };
+    z.eval_state_t $ do {
+        let z: SIO Z = get_state;
+        let bfs = |f| loop_m(
+            (), |_|
+            match (*z)[^q].sget.get_last {
+                none() => break_m(),
+                some(v) => (*z)[^q].smod(pop_back);; f(v).map(continue)
+            }
+        );
+        // z を get_state してから put_state しているので遅い。配列のcopyが発生する。
+        // やりたいことは、dが配列のSVarの場合に、d[0].sset(0);; とできるようにしたい。
+        // d[0].iget: 配列の要素のSVar
+        // d[0].iset(sv): 配列の要素のSVarを設定したら、配列のSVarができる
+        // d: SVar s (Array a)
+        // d[0]: (a -> f a) -> f (SVar s (Array a))
+        // d[0].sset(42): m ()
+        // d[0] = store
+        // store(|ae| err(ae.set_v(42))): err(SVar s (Array a))
+        // ae = { svar, i, v }
+
+        (*z)[^d][0].sset(0);;
+        (*z)[^q].smod(push_back(0));;
+        bfs(|v|
+            let u = v + 1;
+            when(u < n) $ do {
+                let dv = (*z)[^d][v].sget;
+                (*z)[^d][u].smod(min(dv + 1));;
+                (*z)[^q].smod(push_back(u))
+            }
+        );;
+        println((*z)[^d].sget.to_string).lift_io;;
+        pure()
+    }
+);
+
+main: IO () = (
+    test_svar;;
+    test_sidx;;
+    pure()
+);

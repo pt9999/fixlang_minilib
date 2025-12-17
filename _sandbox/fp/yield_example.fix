@@ -3,58 +3,94 @@ module Main;
 import Minilib.Monad.Yield;
 //import Minilib.Monad.IO;
 //import Minilib.Monad.Trans;
-//import Minilib.Trait.Traversable;
+import Minilib.Trait.Traversable;
 
 yield3: I64 -> Yield I64 ();
 yield3 = |i| (
+    // `yield(a)` is similar to `write(a)` of a Writer monad
     yield(i);;
     yield(i+1);;
     yield(i+2);;
     pure()
 );
 
-collatz: I64 -> Yield I64 ();
-collatz = |i| (
-    yield(i);;
-    if i <= 1 { pure() };
-    if i % 2 == 0 { collatz(i/2) } else { collatz(3 * i + 1) }
-);
-
 test1: IO ();
 test1 = (
     println("=== test1 ===");;
-    let ma: Yield I64 () = count_up(0).fold_m(
-        (), |i, _|
-        //yield(i).when(i % 7 == 0)
-        //yield3(i)
-        collatz(i)
-    );
-    let (arr, ma) = ma.take_array(100);
-    println(arr.to_iter.Iterator::map(to_string).join(","));;
-    let itor = ma.Iterator::map(to_string).take(100);
-    println(itor.join(","))
+    // Yield is a Monad
+    let y: Yield I64 () = count_up(0).foreach_m(|i| yield3(i));
+    // Yield is an Iterator
+    y.take(30).map(to_string).join(",").println
 );
 
 test2: IO ();
 test2 = (
     println("=== test2 ===");;
-    let step: I64 -> Yield String I64 = |i| (
-        yield("(" + i.to_string + ")");;
-        pure $ if i % 2 == 0 { i/2 } else { 3 * i + 1 }
+    // Generates collatz sequence
+    let collatz: I64 -> Yield I64 () = fix $ |collatz, i| (
+        yield(i);;
+        if i <= 1 { pure() };
+        if i % 2 == 0 { collatz(i/2) } else { collatz(3 * i + 1) }
     );
-    let ma: Yield String () = loop_m(
-        7, |i|
-        let i2 = *step(i);
-        if i == 1 { break_m $ () };
-        continue_m $ i2
+    // Yield is a Monad
+    let yy: Yield (Yield I64 ()) () = count_up(0).fold_m(   // foreach_m でも ok
+        (), |i, _|
+        yield(collatz(i))
     );
-    // Yield is an iterator
-    ma.join("->").println
+    // Yield is an Iterator
+    let yy = yy.Iterator::map(|y| 
+        y.Iterator::map(to_string).join("->")
+    );
+    let n = 30;
+    yy.take(n).foreach_m(println)
+);
+
+drop : [i: Iterator] I64 -> i -> i;
+drop = |n, iter| (
+    if n <= 0 { iter };
+    match iter.advance {
+        none() => iter,
+        some((next, a)) => next.drop(n-1)
+    }
+);
+
+test3: IO ();
+test3 = (
+    println("=== test3 ===");;
+    let n = 1e6;
+    let ma: Yield I64 () = loop_m(
+        0, |i|
+        if i >= n { break_m $ () };
+        yield(i);;
+        continue_m $ i + 1
+    );
+    // Yield is an Iterator
+    ma.drop(n-3).to_array.to_string.println
+);
+
+test_map: IO ();
+test_map = (
+    println("=== test_map ===");;
+    let y: Yield I64 I64 = do {
+        yield(1);;
+        yield(2);;
+        yield(3);;
+        pure(42)
+    };
+    let y2: Yield I64 String = y.Functor::map(|i| "<" + i.to_string + ">");
+    let y3: MapIterator (Yield I64 I64) I64 String = y.Iterator::map(|i| "<" + i.to_string + ">");
+    println("Functor::map: " + 
+        let (arr, str) = y2.fold_yield([], push_back);
+        arr.to_string + " final=" + str
+    );;
+    println("Iterator::map: " + y3.join(","))
 );
 
 main: IO () = (
     test1;;
     test2;;
+    test3;;
+    test_map;;
     pure()
 );
 

@@ -88,44 +88,71 @@ test_svar = (
 );
 
 //------------------------------------------------------
+// インデックス構文を使うためのhack. あまり綺麗じゃない
 
-/*
-type SVarElem svar idx elem = unbox struct {
-    svar: svar,
-    idx: idx,
-    val: Option elem
+type SStore c a = ((a -> Result a a) -> Result a c);
+
+type SAct s c a = unbox struct {
+    svar_c: SVar s c,
+    act_a: c -> SStore c a
 };
 
-trait [a: Indexable] SVar s a : Indexable {
-    type Elem (SVar s a) = SVarElem (SVar s a) (Index a) (Elem a);
-    type Index (SVar s a) = Index a;
+impl [c: Indexable] SVar s c : Indexable {
+    type Elem (SVar s c) = SAct s c (Elem c);
+    type Index (SVar s c) = Index c;
 //    act_at_index : [f : Functor] Index c -> (Elem c -> f (Elem c)) -> c -> f c;
-    act_at_index = |idx, f, svar| (
-        let se = SVarElem { svar: svar, idx: idx, val: none() }: Elem (SVar s a);
-        let fse = f(se);
-        let fc = fse.map(|SVarElem { svar: svar, idx: idx, val: none() }|
+    act_at_index = |idx, f, svar_c| (
+        let sa = SAct {
+            svar_c: svar_c,
+            act_a: |c, f| c[idx].iact(f)
+        };
 
+        let fsa = f(sa);
+        fsa.map(|sa|
+            svar_c
         )
     );
 }
 
-sset: a -> ((a -> f a) -> f (SVar s (Array a))) -> m ();
+namespace SStore {
 
+/*
+    sget: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
+        SStore (SVar s c) (SAct s c a) -> m a;
+    sget = |store_sa| (
+        let s = *get_state;
+        let sa: SAct s c a = store_sa(|sa| err(sa)).as_err;
+        let SAct { svar_c: svar_c, act_a: act_a } = sa;
+        let act_c: s -> SStore s c = svar_c.@data;
+        let store_c = act_c(s);
+        let a = store_c(|c:c|
+            let a = act_a(c, |a:a| err(a): Result a a).as_err;
+            err(a): Result c c  // ここでは Result c c を返す必要があるが、Result a c しか返せない
+        ).as_err;
+        pure $ a
+    );
 */
 
-type SStore s a = (a -> Result a a) -> Result a s;
-namespace SStore {
-    sget: SStore s a -> a;
-    sget = |store| store(|a| err(a)).as_err;
-
-    sset: [m: MonadState, StateType m = s] a -> SStore s a -> m ();
-    sset = |a, store| (
-        put_state $ store(|_| ok(a)).as_ok
+    smod: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
+        (a -> a) -> SStore (SVar s c) (SAct s c a) -> m ();
+    smod = |f, store_sa| (
+        mod_state_(|s|
+            let sa: SAct s c a = store_sa(|sa| err(sa)).as_err;
+            let SAct { svar_c: svar_c, act_a: act_a } = sa;
+            let act_c: s -> SStore s c = svar_c.@data;
+            let store_c = act_c(s);
+            let s = store_c(|c:c| 
+                let c = act_a(c, |a:a| ok(f(a)): Result a a).as_ok;
+                ok(c): Result c c
+            ).as_ok;
+            s
+        )
     );
 
-    smod: [m: MonadState, StateType m = s] (a -> a) -> SStore s a -> m ();
-    smod = |f, store| (
-        put_state $ store(|a| ok(f(a))).as_ok
+    sset: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
+        a -> SStore (SVar s c) (SAct s c a) -> m ();
+    sset = |a, store_sa| (
+        store_sa.smod(|_| a)
     );
 }
 
@@ -139,36 +166,27 @@ test_sidx = (
         q: []
     };
     z.eval_state_t $ do {
-        let z: SIO Z = get_state;
-        let bfs = |f| loop_m(
+        let d = SVar::make(|z| z[^d]);
+        let q = SVar::make(|z| z[^q]);
+        let bfs = |f, q| loop_m(
             (), |_|
-            match (*z)[^q].sget.get_last {
+            match (*q.get).get_last {
                 none() => break_m(),
-                some(v) => (*z)[^q].smod(pop_back);; f(v).map(continue)
+                some(v) => q.mod(pop_back);; f(v).map(continue)
             }
         );
-        // z を get_state してから put_state しているので遅い。配列のcopyが発生する。
-        // やりたいことは、dが配列のSVarの場合に、d[0].sset(0);; とできるようにしたい。
-        // d[0].iget: 配列の要素のSVar
-        // d[0].iset(sv): 配列の要素のSVarを設定したら、配列のSVarができる
-        // d: SVar s (Array a)
-        // d[0]: (a -> f a) -> f (SVar s (Array a))
-        // d[0].sset(42): m ()
-        // d[0] = store
-        // store(|ae| err(ae.set_v(42))): err(SVar s (Array a))
-        // ae = { svar, i, v }
-
-        (*z)[^d][0].sset(0);;
-        (*z)[^q].smod(push_back(0));;
-        bfs(|v|
+        d[0].sset(0);;
+        q.mod(push_back(0));;
+        q.bfs(|v|
             let u = v + 1;
             when(u < n) $ do {
-                let dv = (*z)[^d][v].sget;
-                (*z)[^d][u].smod(min(dv + 1));;
-                (*z)[^q].smod(push_back(u))
+                //let dv = *(d[v].sget);
+                let dv = (*d.get).@(v);
+                d[u].smod(min(dv + 1));;
+                q.mod(push_back(u))
             }
         );;
-        println((*z)[^d].sget.to_string).lift_io;;
+        println((*d.get).to_string).lift_io;;
         pure()
     }
 );

@@ -25,6 +25,7 @@ make = (
     pure $ curl
 );
 
+// `glue._check_error(io)` performs an IO monad and checks if any error occured.
 _check_error: IO CInt -> Ptr -> IOFail ();
 _check_error = |io_code, glue| (
     let code = *io_code.lift;
@@ -35,6 +36,7 @@ _check_error = |io_code, glue| (
     pure()
 );
 
+// `curl._borrow_glue_iofail(|glue| iofail)` borrows the glue pointer and performs an IOFail monad.
 _borrow_glue_iofail: (Ptr -> IOFail a) -> Curl -> IOFail a;
 _borrow_glue_iofail = |f, curl| (
     curl.@dtor.borrow_io(|glue| f(glue).to_result).from_io_result
@@ -60,9 +62,13 @@ perform = |curl| (
     )
 );
 
-set_boxed_value: I64 -> Box a -> Curl -> IOFail ();
-set_boxed_value = |index, boxed, curl| (
+// `curl._set_boxed_value(index, boxed)` sets an element of the internal array of boxed objects.
+// `index` must be in the range: `0 <= index && index < MAX_BOXED_VALUES`.
+// `boxed` will be marked as threaded.
+_set_boxed_value: I64 -> Box a -> Curl -> IOFail ();
+_set_boxed_value = |index, boxed, curl| (
     pure();;
+    let boxed = mark_threaded(boxed);
     curl._borrow_glue_iofail(|glue|
         let retained_ptr = *FFI::boxed_to_retained_ptr(boxed).lift;
         let retain = FFI::get_funptr_retain(|_| boxed);
@@ -71,16 +77,18 @@ set_boxed_value = |index, boxed, curl| (
     )
 );
 
-get_boxed_value: I64 -> Curl -> IOFail (Box a);
-get_boxed_value = |index, curl| (
+// `curl._get_boxed_value(index)` gets the element of the internal array of boxed objects.
+_get_boxed_value: I64 -> Curl -> IOFail (Box a);
+_get_boxed_value = |index, curl| (
     pure();;
     curl._borrow_glue_iofail(|glue|
-        _get_boxed_value(index, glue).lift
+        __get_boxed_value(index, glue).lift
     )
 );
 
-_get_boxed_value: I64 -> Ptr -> IO (Box a);
-_get_boxed_value = |index, glue| (
+// `glue.__get_boxed_value(index)` gets the element of the internal array of boxed objects.
+__get_boxed_value: I64 -> Ptr -> IO (Box a);
+__get_boxed_value = |index, glue| (
     let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
     FFI::boxed_from_retained_ptr(retained_ptr)
 );
@@ -100,7 +108,7 @@ _callback_write_function = |ptr, size, nmemb, userdata| (
             FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
         ).lift;;
 
-        let boxed: Box (Destructor WriteFunc) = *glue._get_boxed_value(0).lift;
+        let boxed: Box (Destructor WriteFunc) = *glue.__get_boxed_value(0).lift;
         boxed.@value.borrow_io(|write_func|
             write_func(bytes).map(to_CSizeT).to_result
         ).from_io_result
@@ -112,6 +120,7 @@ FFI_EXPORT[_callback_write_function, _callback_write_function];
 
 type WriteFunc = Array U8 -> IOFail I64;
 
+// Sets a callback function for writing to the Curl object.
 set_write_callback: WriteFunc -> Curl -> IOFail ();
 set_write_callback = |func, curl| (
     pure();;
@@ -121,8 +130,7 @@ set_write_callback = |func, curl| (
             pure $ func
         )
     };
-    let boxed = mark_threaded(boxed);
-    curl.set_boxed_value(0, boxed);;
+    curl._set_boxed_value(0, boxed);;
     curl._borrow_glue_iofail(|glue|
         glue._check_error(FFI_CALL_IO[CInt curl_glue_set_write_callback(Ptr), glue])
     )

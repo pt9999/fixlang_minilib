@@ -1,6 +1,6 @@
 module Minilib.Net.Curl;
 
-import AsyncTask;
+//import AsyncTask;
 import Minilib.Common.Assert;
 import Minilib.Text.StringEx;
 
@@ -8,6 +8,7 @@ type Curl = box struct {
     dtor: Destructor Ptr
 };
 
+// Creates a Curl object.
 make: IOFail Curl;
 make = (
     pure();;
@@ -39,6 +40,7 @@ _borrow_glue_iofail = |f, curl| (
     curl.@dtor.borrow_io(|glue| f(glue).to_result).from_io_result
 );
 
+// Sets an URL of a Curl object.
 set_url: String -> Curl -> IOFail ();
 set_url = |url, curl| (
     pure();;
@@ -49,6 +51,7 @@ set_url = |url, curl| (
     )
 );
 
+// Sends an HTTP request and receives an HTTP response.
 perform: Curl -> IOFail ();
 perform = |curl| (
     pure();;
@@ -61,7 +64,7 @@ set_boxed_value: I64 -> Box a -> Curl -> IOFail ();
 set_boxed_value = |index, boxed, curl| (
     pure();;
     curl._borrow_glue_iofail(|glue|
-        let retained_ptr = FFI::boxed_to_retained_ptr(boxed);
+        let retained_ptr = *FFI::boxed_to_retained_ptr(boxed).lift;
         let retain = FFI::get_funptr_retain(|_| boxed);
         let release = FFI::get_funptr_release(|_| boxed);
         FFI_CALL_IO[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release].lift
@@ -79,7 +82,7 @@ get_boxed_value = |index, curl| (
 _get_boxed_value: I64 -> Ptr -> IO (Box a);
 _get_boxed_value = |index, glue| (
     let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
-    pure $ FFI::boxed_from_retained_ptr(retained_ptr)
+    FFI::boxed_from_retained_ptr(retained_ptr)
 );
 
 // NOTE: This function is called from libcurl as a callback, so we can't use an IO monad as its return value.

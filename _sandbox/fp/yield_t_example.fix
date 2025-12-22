@@ -1,0 +1,97 @@
+module Main;
+
+import Minilib.Monad.YieldT;
+import Minilib.Monad.Iden;
+//import Minilib.Monad.IO;
+//import Minilib.Monad.Trans;
+import Minilib.Trait.Traversable;
+
+yield3: [m: Monad] I64 -> YieldT I64 m ();
+yield3 = |i| (
+    // `yield(a)` is similar to `write(a)` of a Writer monad
+    yield(i);;
+    yield(i+1);;
+    yield(i+2);;
+    pure()
+);
+
+test1: IO ();
+test1 = (
+    println("=== test1 ===");;
+    // Yield is a Monad
+    let y: YieldT I64 Iden () = count_up(0).foreach_m(|i| yield3(i));
+    // Yield is an Iterator
+    y.take(30).map(to_string).join(",").println
+);
+
+test2: IO ();
+test2 = (
+    println("=== test2 ===");;
+    // Generates collatz sequence
+    let collatz: I64 -> YieldT I64 Iden () = fix $ |collatz, i| (
+        yield(i);;
+        if i <= 1 { pure() };
+        if i % 2 == 0 { collatz(i/2) } else { collatz(3 * i + 1) }
+    );
+    // Yield is a Monad
+    let yy: YieldT (YieldT I64 Iden ()) Iden () = count_up(0).fold_m(   // foreach_m でも ok
+        (), |i, _|
+        yield(collatz(i))
+    );
+    // Yield is an Iterator
+    let yy = yy.Iterator::map(|y| 
+        y.Iterator::map(to_string).join("->")
+    );
+    let n = 30;
+    yy.take(n).foreach_m(println)
+);
+
+drop : [i: Iterator] I64 -> i -> i;
+drop = |n, iter| (
+    if n <= 0 { iter };
+    match iter.advance {
+        none() => iter,
+        some((next, a)) => next.drop(n-1)
+    }
+);
+
+test3: IO ();
+test3 = (
+    println("=== test3 ===");;
+    let n = 1e6;
+    let ma: YieldT I64 Iden () = loop_m(
+        0, |i|
+        if i >= n { break_m $ () };
+        yield(i);;
+        continue_m $ i + 1
+    );
+    // Yield is an Iterator
+    ma.drop(n-3).to_array.to_string.println
+);
+
+test_map: IO ();
+test_map = (
+    println("=== test_map ===");;
+    let y: YieldT I64 Iden I64 = do {
+        yield(1);;
+        yield(2);;
+        yield(3);;
+        pure(42)
+    };
+    let y2: YieldT I64 Iden String = y.Functor::map(|i| "<" + i.to_string + ">");
+    let y3: MapIterator (YieldT I64 Iden I64) I64 String = y.Iterator::map(|i| "<" + i.to_string + ">");
+    println("Functor::map: " + 
+        let (arr, str) = y2.fold_yield_t([], push_back).get;
+        arr.to_string + " final=" + str
+    );;
+    println("Iterator::map: " + y3.join(","))
+);
+
+main: IO () = (
+    test1;;
+    test2;;
+    test3;;
+    test_map;;
+    pure()
+);
+

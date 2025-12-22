@@ -1,0 +1,94 @@
+// `YieldT e m a` is a generator that produces a sequence of type `e`,
+// and terminates with the final result of type `a`.
+module Minilib.Monad.YieldT;
+
+import Minilib.Monad.Iden;
+import Minilib.Monad.Trans;
+
+// A trait for the interface of generic generator monads.
+trait MonadYield = Functor + Monad + MonadYieldIF;
+
+// A trait for generic generator monads that supports `yield` operation.
+trait [m: * -> *] m: MonadYieldIF {
+    // The type of an element.
+    type YieldType m;
+    // `yield(e)` writes an element to the generator output.
+    yield: YieldType m -> m ();
+}
+
+// `YieldT e m a` is a generator that produces a sequence of type `e`,
+// terminating with the final result of type `a`.
+type [m: *->*] YieldT e m a = box union {
+    y_pure: a,
+    y_monad: m (YieldT e m a),
+    y_yield: (e, () -> YieldT e m a),
+};
+
+// `YieldT e m` is a monad.
+// - `pure` produces a monadic value, which may be the final result.
+// - `bind` combines two generator outputs.
+impl [m: Monad] YieldT e m: Monad {
+    pure = y_pure;
+    bind = |f, y| (
+        match y {
+            y_pure(a) => f(a),
+            y_monad(ma) => y_monad(ma.bind(bind(f) >> pure)),
+            y_yield((e, next)) => y_yield((e, next >> bind(f))),
+        }
+    );
+}
+
+// `YieldT e m` is a functor.
+//
+// Note that `YieldT e m` supports both `Functor::map` and `Iterator::map`,
+// but their functionality is completely different.
+// - `Functor::map(f: a -> b)` transforms `YieldT e m a` to `YieldT e m b`.
+// - `Iterator::map(f: e -> e2)` transforms `YieldT e m a` to an iterator of type `e2`.
+impl [m: Monad] YieldT e m: Functor {
+    map = |f| bind(f >> pure);
+}
+
+// `YieldT e m` is a generator of type `e`.
+impl [m: Monad] YieldT e m: MonadYieldIF {
+    type YieldType (YieldT e m) = e;
+    yield = |e| y_yield $ (e, |_| pure());
+}
+
+// `YieldT e Iden a` is not an Iterator of type `e`.
+// Note that iterators do not return the final state, so `a` will be discarded.
+impl YieldT e Iden a: Iterator {
+    type Item (YieldT e Iden a) = e;
+    advance = |y| (
+        match y {
+            y_pure(a) => none(),     // `a` is discarded
+            y_monad(ma) => ma.get.advance,
+            y_yield((e, next)) => some $ (next(), e),
+        }
+    );
+}
+
+// Returns at most `n` yielded elements and the remaining state.
+take_array_t: [m: Monad] I64 -> YieldT e m a -> m (Array e, YieldT e m a);
+take_array_t = |n, y| (
+    loop_m(
+        ([], y), |(arr,y)|
+        if arr.get_size >= n { break_m $ (arr, y) };
+        match y {
+            y_pure(a) => break_m $ (arr, y_pure(a)),
+            y_monad(ma) => let y = *ma; continue_m $ (arr, y),
+            y_yield((e, next)) => continue_m $ (arr.push_back(e), next()),
+        }
+    )
+);
+
+// `fold_yield_t(s, f)` folds all elements to a state `s` using `f`. 
+// Returns the folded state and the final result.
+fold_yield_t: [m: Monad] s -> (e -> s -> s) -> YieldT e m a -> m (s, a);
+fold_yield_t = |s, f, y| (
+    match y {
+        y_pure(a) => pure $ (s, a),
+        y_monad(ma) => let y = *ma; fold_yield_t(s, f, y),
+        y_yield((e, next)) => next().fold_yield_t(f(e, s), f),
+    }
+);
+

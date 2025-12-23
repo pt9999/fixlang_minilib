@@ -1,0 +1,53 @@
+module Main;
+
+import Minilib.FFI.TypeName;
+import Minilib.FFI.TypedPtr;
+
+type Obj = box struct {
+    data: Destructor I64,
+};
+
+impl Obj: GetTypeName { 
+    get_typename = |_| "Obj"; 
+}
+
+impl Obj: ToString {
+    to_string = |obj| obj.@data.borrow(to_string);
+}
+
+namespace Obj {
+    make: I64 -> Obj;
+    make = |i| Obj { 
+        data: Destructor::make(i, 
+            |i| eprintln("destructor is called: i=" + i.to_string);; 
+            pure $ 0
+        )
+    };
+}
+
+make_typed_ptrs: () -> IO (TypedPtr, TypedPtr, TypedPtr);
+make_typed_ptrs = |_| (
+    let pa = *"abc".to_typed_ptr;
+    let pb = *Obj::make(123).to_typed_ptr;
+    let pc = *Obj::make(234).to_typed_ptr;
+    pure $ (pa, pb, pc)
+);
+
+test_typed_ptr: IO ();
+test_typed_ptr = (
+    println("=== test_typed_ptr ===");;
+    let (pa, pb, pc) = *make_typed_ptrs();
+    range(0,2).fold_m(
+        (pa, pb, pc), |_, (pa, pb, pc)|
+        let (pa, a: String) = pa.get;
+        let (pb, b: Obj) = pb.get;
+        let (pc, c: Obj) = pc.get;   // retain されたまま
+        eprintln("a="+ a.to_string + " b=" + b.to_string);;
+        pure $ (pa, pb, pc)
+    ).forget
+);
+
+main: IO () = (
+    test_typed_ptr;;
+    pure()
+);

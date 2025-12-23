@@ -1,0 +1,39 @@
+module Minilib.FFI.TypedPtr;
+
+import Minilib.Common.Common;
+import Minilib.FFI.TypeName;
+import Minilib.FFI.RetainedPtr;
+
+type TypedPtr = unbox struct {
+    typename: String,
+    dtor: Destructor Ptr,   // retained ptr of `Box a`
+};
+
+to_typed_ptr: [a: GetTypeName] a -> IO TypedPtr;
+to_typed_ptr = |a| (
+    pure $ TypedPtr {
+        typename: (typeinfo: TypeInfo a).get_typename,
+        dtor: Destructor::make(
+            *Box::make(a).boxed_to_retained_ptr,             // retain ptr
+            |ptr|
+            if ptr == nullptr { pure $ nullptr };
+            eprintln("TypedPtr: destructor is called: ptr=" + ptr.to_string);;
+            let ba: Box a = *ptr.boxed_from_retained_ptr;    // release ptr
+            pure $ nullptr
+        )
+    }
+);
+
+get: [a: GetTypeName] TypedPtr -> (TypedPtr, a);
+get = |typed_ptr| (
+    let typename = (typeinfo: TypeInfo a).get_typename;
+    if typename != typed_ptr.@typename {
+        undefined("from_typed_ptr: type mismatch: typed_ptr:" + typed_ptr.@typename + " target:" + typename)
+    };
+    typed_ptr.act_dtor(
+        |dtor| dtor.mutate_unique(
+            |ptr| eprintln("mutate_unique ctor");; pure $ ptr,   // should call boxed_to_retained_ptr?
+            |ptr| eprintln("mutate_unique action");; let ba: Box a = *ptr.boxed_from_retained_ptr; pure $ ba.@value
+        ).swap
+    ).swap
+);

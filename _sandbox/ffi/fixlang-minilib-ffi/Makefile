@@ -1,6 +1,7 @@
 all:
 
-test: 
+test:
+	fix test
 
 examples: ex-retained-ptr ex-typename ex-typed-ptr
 

@@ -1,0 +1,93 @@
+module RetainedPtrTest;
+
+import AsyncTask;       // for Var
+
+import Minilib.FFI.RetainedPtr;
+import Minilib.Testing.UnitTest;
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let rp = *(
+        let str = "hello";
+        RetainedPtr::make(str).lift
+    );
+    let str2: String = *rp.get.lift;
+    assert_equal("eq", "hello", str2)
+);
+
+type Obj = box struct {
+    dtor: Destructor (Var I64),
+};
+
+namespace Obj {
+    make: Var I64 -> IO Obj;
+    make = |v| pure $ Obj { 
+        dtor: Destructor::make(v, |v| 
+            v.lock(|i|
+                if i == 0 { pure $ v };
+                //eprintln("destructor is called: i=" + i.to_string);; 
+                v.Var::set(0);;
+                pure $ v
+            )
+        )
+    };
+
+    get: Obj -> IO I64;
+    get = |obj| obj.@dtor.borrow_io(|v| v.get);
+
+    get_var: Obj -> IO (Var I64);
+    get_var = |obj| obj.@dtor.borrow_io(|v| pure $ v);
+}
+
+test_dtor: TestCase;
+test_dtor = (
+    make_test("test_dtor") $ |_|
+    let rp = *(
+        let v: Var I64 = *Var::make(42).lift;
+        let obj = *Obj::make(v).lift;
+        RetainedPtr::make(obj).lift
+    );
+    let obj2: Obj = *rp.get.lift;
+    // now rp is dead, but obj2 is alive
+    assert_equal("eq", 42, *obj2.get.lift);;
+    let v: Var I64 = *obj2.get_var.lift;
+    // now obj2 is dead, but v is alive
+    assert_equal("eq", 0, *v.get.lift)
+);
+
+copy_rp: RetainedPtr -> IOFail RetainedPtr;
+copy_rp = |RetainedPtr{dtor:dtor}| pure $ RetainedPtr{dtor:dtor};   // dtor is a boxed object, so only the reference of dtor is copyed
+
+check_rp: I64 -> I64 -> RetainedPtr -> IOFail ();
+check_rp = |expected1, expected2, rp| (
+    let obj: Obj = *rp.get.lift;
+    assert_equal("eq", expected1, *obj.get.lift);;
+    let v: Var I64 = *obj.get_var.lift;
+    assert_equal("eq", expected2, *v.get.lift)
+);
+
+test_dtor_multi: TestCase;
+test_dtor_multi = (
+    make_test("test_dtor_multi") $ |_|
+    let rp = *(
+        let v: Var I64 = *Var::make(42).lift;
+        let obj = *Obj::make(v).lift;
+        RetainedPtr::make(obj).lift
+    );
+    let rp = *copy_rp(rp);
+    check_rp(42, 42, rp);;
+    let rp = *copy_rp(rp);
+    check_rp(42, 42, rp);;
+    check_rp(42, 0, rp)     // obj is destructed at last
+);
+
+main: IO ();
+main = (
+    [
+        test_simple,
+        test_dtor,
+        test_dtor_multi,
+    ]
+    .run_test_driver
+);

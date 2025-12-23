@@ -5,44 +5,41 @@ import AsyncTask;       // for Var
 _unsafe_debug_eprintln: String -> ();
 _unsafe_debug_eprintln = debug_eprintln;
 
-type RetainedPtrIO = unbox struct {
+type RetainedPtr = unbox struct {
     dtor: Destructor (Var Ptr),   // retained ptr of Boxed object
 };
 
-namespace RetainedPtrIO {
-    make: a -> IO RetainedPtrIO;
-    make = |a| (
-        let box_a: Box a = Box::make(a);
-        let ptr = *box_a.boxed_to_retained_ptr; // retain ptr
-        let var_ptr = *Var::make(ptr);
-        pure $ RetainedPtrIO {
-            dtor: Destructor::make(
-                var_ptr,
-                |var_ptr|
-                var_ptr.lock(|ptr|
-                    if ptr == nullptr { pure() };
-                    eval _unsafe_debug_eprintln("RetainedPtrIO: destructor is called: ptr=" + ptr.to_string);
-                    let box_a: Box a = *ptr.boxed_from_retained_ptr;    // release ptr
-                    eval box_a;                                        // ensure box_a is evaluated
-                    var_ptr.Var::set(nullptr)
-                );;
-                pure $ var_ptr
-            )
-        }
-    );
-
-    get: RetainedPtrIO -> IO a;
-    get = |rp| (
-        rp.@dtor.borrow_io(
+make: a -> IO RetainedPtr;
+make = |a| (
+    let box_a: Box a = Box::make(a);
+    let ptr = *box_a.boxed_to_retained_ptr; // retain ptr
+    let var_ptr = *Var::make(ptr);
+    pure $ RetainedPtr {
+        dtor: Destructor::make(
+            var_ptr,
             |var_ptr|
             var_ptr.lock(|ptr|
-                if ptr == nullptr { undefined("RetainedPtrIO::get: ptr == nullptr") };
+                if ptr == nullptr { pure() };
+                eval _unsafe_debug_eprintln("RetainedPtr: destructor is called: ptr=" + ptr.to_string);
                 let box_a: Box a = *ptr.boxed_from_retained_ptr;    // release ptr
-                let ptr = *box_a.boxed_to_retained_ptr; // retain ptr
-                var_ptr.Var::set(ptr);;
-                pure $ box_a.@value
-            )
+                eval box_a;                                        // ensure box_a is evaluated
+                var_ptr.Var::set(nullptr)
+            );;
+            pure $ var_ptr
         )
-    );
-    
-}
+    }
+);
+
+get: RetainedPtr -> IO a;
+get = |rp| (
+    rp.@dtor.borrow_io(
+        |var_ptr|
+        var_ptr.lock(|ptr|
+            if ptr == nullptr { undefined("RetainedPtr::get: ptr == nullptr") };
+            let box_a: Box a = *ptr.boxed_from_retained_ptr;    // release ptr
+            let ptr = *box_a.boxed_to_retained_ptr; // retain ptr
+            var_ptr.Var::set(ptr);;
+            pure $ box_a.@value
+        )
+    )
+);

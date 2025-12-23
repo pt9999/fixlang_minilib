@@ -12,22 +12,27 @@ trait a: GetTypeName {
 }
 
 
-type TypeNameCons car cdr = unbox struct {};
-type TypeName0 = unbox struct {};
-type TypeName1 a = TypeNameCons a TypeName0;
-type TypeName2 a b = TypeNameCons a (TypeName1 b);
-type TypeName3 a b c = TypeNameCons a (TypeName2 b c);
+type TypeListCons car cdr = unbox struct {};
+type TypeList0 = unbox struct {};
+type TypeList1 a = TypeListCons a TypeList0;
+type TypeList2 a b = TypeListCons a (TypeList1 b);
+type TypeList3 a b c = TypeListCons a (TypeList2 b c);
+type TypeList4 a b c d = TypeListCons a (TypeList3 b c d);
+type TypeList5 a b c d e = TypeListCons a (TypeList4 b c d e);
 
-trait a: BuildTypeName {
-    build_typename: TypeInfo a -> String -> String;
+trait a: TypeList {
+    typelist: a;
+    apply_types: a -> String -> String;
 }
 
-impl TypeName0: BuildTypeName {
-    build_typename = |_, str| "(" + str + ")";
+impl TypeList0: TypeList {
+    typelist = TypeList0 {};
+    apply_types = |_, str| "(" + str + ")";
 }
 
-impl [a: GetTypeName, cdr: BuildTypeName] TypeNameCons a cdr: BuildTypeName {
-    build_typename = |_, str| build_typename(typeinfo: TypeInfo cdr, str + " " + (typeinfo: TypeInfo a).get_typename);
+impl [a: GetTypeName, cdr: TypeList] TypeListCons a cdr: TypeList {
+    typelist = TypeListCons {};
+    apply_types = |_, str| apply_types(typelist: cdr, str + " " + (typeinfo: TypeInfo a).get_typename);
 }
 
 // --------------------------------------------------------------
@@ -35,7 +40,7 @@ impl [a: GetTypeName, cdr: BuildTypeName] TypeNameCons a cdr: BuildTypeName {
 // --------------------------------------------------------------
 
 impl [a: GetTypeName] IO a: GetTypeName {
-    get_typename = |_| "(IO " + (typeinfo: TypeInfo a).get_typename + ")";
+    get_typename = |_| "IO".apply_types(typelist: TypeList1 a);
 }
 
 impl Ptr: GetTypeName { get_typename = |_| "Ptr"; }
@@ -51,7 +56,7 @@ impl F32: GetTypeName { get_typename = |_| "F32"; }
 impl F64: GetTypeName { get_typename = |_| "F64"; }
 
 impl [a: GetTypeName, b: GetTypeName] Arrow a b: GetTypeName {
-    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + " -> " + (typeinfo: TypeInfo b).get_typename + ")";
+    get_typename = |_| "Arrow".apply_types(typelist: TypeList2 a b);
 }
 
 /*
@@ -74,27 +79,27 @@ impl IOState: GetTypeName { get_typename = |_| "IOState"; }
 impl Bool: GetTypeName { get_typename = |_| "Bool"; }
 
 impl [a: GetTypeName] Array a: GetTypeName {
-    get_typename = |_| "Array".build_typename(typeinfo: TypeInfo (TypeName1 a));
+    get_typename = |_| "Array".apply_types(typelist: TypeList1 a);
 }
 
 /*  same as `Arrow () a`
 impl [a: GetTypeName] Lazy a: GetTypeName {
-    get_typename = |_| "Lazy".build_typename(typeinfo: TypeInfo (TypeName1 a));
+    get_typename = |_| "Lazy".apply_types(typeinfo: TypeInfo (TypeList1 a));
 }
 */
 
 impl [a: GetTypeName] Destructor a: GetTypeName {
-    get_typename = |_| "Destructor".build_typename(typeinfo: TypeInfo (TypeName1 a));
+    get_typename = |_| "Destructor".apply_types(typelist: TypeList1 a);
 }
 
 impl String: GetTypeName { get_typename = |_| "String"; }
 
 impl [a: GetTypeName] Identity a: GetTypeName {
-    get_typename = |_| "(Identity " + (typeinfo: TypeInfo a).get_typename + ")";
+    get_typename = |_| "Identity".apply_types(typelist: TypeList1 a);
 }
 
 impl [a: GetTypeName, b: GetTypeName] Const a b: GetTypeName {
-    get_typename = |_| "(Const " + (typeinfo: TypeInfo a).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+    get_typename = |_| "Const".apply_types(typelist: TypeList2 a b);
 }
 
 // --------------------------------------------------------------
@@ -105,38 +110,23 @@ impl (): GetTypeName {
     get_typename = |_| "()"; 
 }
 impl [a: GetTypeName] (a, ): GetTypeName { 
-    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + ",)"; 
+    get_typename = |_| "Tuple1".apply_types(typelist: TypeList1 a);
 }
 
 impl [a: GetTypeName, b: GetTypeName] (a, b): GetTypeName { 
-    get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + "," + (typeinfo: TypeInfo b).get_typename +")"; 
+    get_typename = |_| "Tuple2".apply_types(typelist: TypeList2 a b);
 }
 
 impl [a: GetTypeName, b: GetTypeName, c: GetTypeName] (a, b, c): GetTypeName { 
-    get_typename = |_| "("
-    + (typeinfo: TypeInfo a).get_typename
-    + "," + (typeinfo: TypeInfo b).get_typename 
-    + "," + (typeinfo: TypeInfo c).get_typename 
-    + ")"; 
+    get_typename = |_| "Tuple3".apply_types(typelist: TypeList3 a b c);
 }
 
 impl [a: GetTypeName, b: GetTypeName, c: GetTypeName, d: GetTypeName] (a, b, c, d): GetTypeName { 
-    get_typename = |_| "("
-    + (typeinfo: TypeInfo a).get_typename
-    + "," + (typeinfo: TypeInfo b).get_typename 
-    + "," + (typeinfo: TypeInfo c).get_typename 
-    + "," + (typeinfo: TypeInfo d).get_typename 
-    + ")"; 
+    get_typename = |_| "Tuple4".apply_types(typelist: TypeList4 a b c d);
 }
 
 impl [a: GetTypeName, b: GetTypeName, c: GetTypeName, d: GetTypeName, e: GetTypeName] (a, b, c, d, e): GetTypeName { 
-    get_typename = |_| "("
-    + (typeinfo: TypeInfo a).get_typename
-    + "," + (typeinfo: TypeInfo b).get_typename 
-    + "," + (typeinfo: TypeInfo c).get_typename 
-    + "," + (typeinfo: TypeInfo d).get_typename 
-    + "," + (typeinfo: TypeInfo e).get_typename 
-    + ")"; 
+    get_typename = |_| "Tuple5".apply_types(typelist: TypeList5 a b c d e);
 }
 // --------------------------------------------------------------
 // Type names appeared in `fixlang/src/fix/std.fix`
@@ -183,5 +173,5 @@ impl [a: GetTypeName] Option a: GetTypeName {
 
 impl [e: GetTypeName, a: GetTypeName] Result e a: GetTypeName {
 //    get_typename = |_| "(Result " + (typeinfo: TypeInfo e).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
-    get_typename = |_| "Result".build_typename(typeinfo: TypeInfo (TypeName2 e a));
+    get_typename = |_| "Result".apply_types(typelist: TypeList2 e a);
 }

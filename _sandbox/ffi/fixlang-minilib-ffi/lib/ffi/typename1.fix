@@ -1,0 +1,48 @@
+module Main;
+
+type TypeInfo a = unbox struct {};
+
+typeinfo: TypeInfo a = TypeInfo{};
+
+trait a: GetTypeName {
+    get_typename: TypeInfo a -> String;
+}
+
+impl I16: GetTypeName { get_typename = |_| "I16"; }
+impl I32: GetTypeName { get_typename = |_| "I32"; }
+impl I64: GetTypeName { get_typename = |_| "I64"; }
+
+type TypeListCons car cdr = unbox struct {};
+type TypeList0 = unbox struct {};
+type TypeList1 a = TypeListCons a TypeList0;
+type TypeList2 a b = TypeListCons a (TypeList1 b);
+type TypeList3 a b c = TypeListCons a (TypeList2 b c);
+
+trait a: TypeList {
+    typelist: a;
+    apply_types: a -> String -> String;
+}
+
+impl TypeList0: TypeList {
+    typelist = TypeList0 {};
+    apply_types = |_, str| "(" + str + ")";
+}
+
+impl [a: GetTypeName, cdr: TypeList] TypeListCons a cdr: TypeList {
+    typelist = TypeListCons {};
+    apply_types = |_, str| (
+        apply_types(typelist: cdr, str + " " + (typeinfo: TypeInfo a).get_typename)
+    );
+}
+
+impl [a: GetTypeName, b: GetTypeName, c: GetTypeName] Tuple3 a b c: GetTypeName { 
+    get_typename = |_| "Tuple3".apply_types(typelist: TypeList3 a b c);
+}
+
+main: IO ();
+main = (
+    let name: String = "Tuple3".apply_types(typelist: TypeList3 I64 I32 I16);
+    println(name);;     //  "(Tuple3 I64 I32 I16)"
+    let name: String = (typeinfo: TypeInfo (Tuple3 I64 I32 I16)).get_typename;
+    println(name)       //  "(Tuple3 I64 I16 I16)" // get_typename経由だと `b` が `c` になる？
+);

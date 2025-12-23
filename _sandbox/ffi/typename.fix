@@ -90,16 +90,16 @@ type TypedPtr = unbox struct {
 };
 
 namespace TypedPtr {
-    to_typed_ptr: [a: GetTypeName] a -> TypedPtr;
+    to_typed_ptr: [a: GetTypeName] a -> IO TypedPtr;
     to_typed_ptr = |a| (
-        TypedPtr {
+        pure $ TypedPtr {
             typename: (typeinfo: TypeInfo a).get_typename,
             dtor: Destructor::make(
-                Box::make(a).boxed_to_retained_ptr,             // retain ptr
+                *Box::make(a).boxed_to_retained_ptr,             // retain ptr
                 |ptr|
                 if ptr == nullptr { pure $ nullptr };
                 eprintln("TypedPtr: destructor is called: ptr=" + ptr.to_string);;
-                let ba: Box a = ptr.boxed_from_retained_ptr;    // release ptr
+                let ba: Box a = *ptr.boxed_from_retained_ptr;    // release ptr
                 pure $ nullptr
             )
         }
@@ -114,7 +114,7 @@ namespace TypedPtr {
         typed_ptr.act_dtor(
             |dtor| dtor.mutate_unique(
                 |ptr| eprintln("mutate_unique ctor");; pure $ ptr,   // should call boxed_to_retained_ptr?
-                |ptr| eprintln("mutate_unique action");; let ba: Box a = ptr.boxed_from_retained_ptr; pure $ ba.@value
+                |ptr| eprintln("mutate_unique action");; let ba: Box a = *ptr.boxed_from_retained_ptr; pure $ ba.@value
             ).swap
         ).swap
     );
@@ -142,18 +142,18 @@ namespace Obj {
     };
 }
 
-make_typed_ptrs: () -> (TypedPtr, TypedPtr, TypedPtr);
+make_typed_ptrs: () -> IO (TypedPtr, TypedPtr, TypedPtr);
 make_typed_ptrs = |_| (
-    let pa = "abc".to_typed_ptr;
-    let pb = Obj::make(123).to_typed_ptr;
-    let pc = Obj::make(234).to_typed_ptr;
-    (pa, pb, pc)
+    let pa = *"abc".to_typed_ptr;
+    let pb = *Obj::make(123).to_typed_ptr;
+    let pc = *Obj::make(234).to_typed_ptr;
+    pure $ (pa, pb, pc)
 );
 
 test_typed_ptr: IO ();
 test_typed_ptr = (
     println("=== test_typed_ptr ===");;
-    let (pa, pb, pc) = make_typed_ptrs();
+    let (pa, pb, pc) = *make_typed_ptrs();
     range(0,2).fold_m(
         (pa, pb, pc), |_, (pa, pb, pc)|
         let (pa, a: String) = pa.get;

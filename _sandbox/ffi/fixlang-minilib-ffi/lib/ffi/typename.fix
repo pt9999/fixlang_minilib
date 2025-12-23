@@ -4,47 +4,102 @@ type TypeInfo a = unbox struct {};
 
 typeinfo: TypeInfo a = TypeInfo{};
 
+typeof: a -> TypeInfo a;
+typeof = |_| typeinfo;
+
 trait a: GetTypeName {
     get_typename: TypeInfo a -> String;
 }
 
-impl I8: GetTypeName { get_typename = |_| "I8"; }
-impl I16: GetTypeName { get_typename = |_| "I16"; }
-impl I32: GetTypeName { get_typename = |_| "I32"; }
-impl I64: GetTypeName { get_typename = |_| "I64"; }
-impl U8: GetTypeName { get_typename = |_| "U8"; }
-impl U16: GetTypeName { get_typename = |_| "U16"; }
-impl U32: GetTypeName { get_typename = |_| "U32"; }
-impl U64: GetTypeName { get_typename = |_| "U64"; }
-impl F32: GetTypeName { get_typename = |_| "F32"; }
-impl F64: GetTypeName { get_typename = |_| "F64"; }
-impl Ptr: GetTypeName { get_typename = |_| "Ptr"; }
 
-impl String: GetTypeName { get_typename = |_| "String"; }
+type TypeNameCons car cdr = unbox struct {};
+type TypeName0 = unbox struct {};
+type TypeName1 a = TypeNameCons a TypeName0;
+type TypeName2 a b = TypeNameCons a (TypeName1 b);
+type TypeName3 a b c = TypeNameCons a (TypeName2 b c);
 
-impl [a: GetTypeName] Array a: GetTypeName {
-    get_typename = |_| "(Array " + (typeinfo: TypeInfo a).get_typename + ")";
+trait a: BuildTypeName {
+    build_typename: TypeInfo a -> String -> String;
 }
 
-impl [a: GetTypeName] Option a: GetTypeName {
-    get_typename = |_| "(Option " + (typeinfo: TypeInfo a).get_typename + ")";
+impl TypeName0: BuildTypeName {
+    build_typename = |_, str| "(" + str + ")";
 }
 
-impl [e: GetTypeName, a: GetTypeName] Result e a: GetTypeName {
-    get_typename = |_| "(Result " + (typeinfo: TypeInfo e).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+impl [a: GetTypeName, cdr: BuildTypeName] TypeNameCons a cdr: BuildTypeName {
+    build_typename = |_, str| build_typename(typeinfo: TypeInfo cdr, str + " " + (typeinfo: TypeInfo a).get_typename);
 }
+
+// --------------------------------------------------------------
+// Type names appeared in `fixlang/src/constants.rs`
+// --------------------------------------------------------------
 
 impl [a: GetTypeName] IO a: GetTypeName {
     get_typename = |_| "(IO " + (typeinfo: TypeInfo a).get_typename + ")";
 }
 
-impl [a: GetTypeName] IOFail a: GetTypeName {
-    get_typename = |_| "(IOFail " + (typeinfo: TypeInfo a).get_typename + ")";
-}
+impl Ptr: GetTypeName { get_typename = |_| "Ptr"; }
+impl U8: GetTypeName { get_typename = |_| "U8"; }
+impl I8: GetTypeName { get_typename = |_| "I8"; }
+impl U16: GetTypeName { get_typename = |_| "U16"; }
+impl I16: GetTypeName { get_typename = |_| "I16"; }
+impl I32: GetTypeName { get_typename = |_| "I32"; }
+impl U32: GetTypeName { get_typename = |_| "U32"; }
+impl I64: GetTypeName { get_typename = |_| "I64"; }
+impl U64: GetTypeName { get_typename = |_| "U64"; }
+impl F32: GetTypeName { get_typename = |_| "F32"; }
+impl F64: GetTypeName { get_typename = |_| "F64"; }
 
 impl [a: GetTypeName, b: GetTypeName] Arrow a b: GetTypeName {
     get_typename = |_| "(" + (typeinfo: TypeInfo a).get_typename + " -> " + (typeinfo: TypeInfo b).get_typename + ")";
 }
+
+/*
+impl CChar: GetTypeName { get_typename = |_| "CChar"; }
+impl CUnsignedChar: GetTypeName { get_typename = |_| "CUnsignedChar"; }
+impl CShort: GetTypeName { get_typename = |_| "CShort"; }
+impl CUnsignedShort: GetTypeName { get_typename = |_| "CUnsignedShort"; }
+impl CInt: GetTypeName { get_typename = |_| "CInt"; }
+impl CUnsignedInt: GetTypeName { get_typename = |_| "CUnsignedInt"; }
+impl CLong: GetTypeName { get_typename = |_| "CLong"; }
+impl CUnsignedLong: GetTypeName { get_typename = |_| "CUnsignedLong"; }
+impl CLongLong: GetTypeName { get_typename = |_| "CLongLong"; }   // same as CLong?
+impl CUnsignedLongLong: GetTypeName { get_typename = |_| "CUnsignedLongLong"; }   // same as CUnsignedLong?
+impl CSizeT: GetTypeName { get_typename = |_| "CSizeT"; } // same as CUnsignedLong?
+impl CFloat: GetTypeName { get_typename = |_| "CFloat"; } // same as F32?
+impl CDouble: GetTypeName { get_typename = |_| "CDouble"; } // same as F64?
+*/
+
+impl IOState: GetTypeName { get_typename = |_| "IOState"; }
+impl Bool: GetTypeName { get_typename = |_| "Bool"; }
+
+impl [a: GetTypeName] Array a: GetTypeName {
+    get_typename = |_| "Array".build_typename(typeinfo: TypeInfo (TypeName1 a));
+}
+
+/*  same as `Arrow () a`
+impl [a: GetTypeName] Lazy a: GetTypeName {
+    get_typename = |_| "Lazy".build_typename(typeinfo: TypeInfo (TypeName1 a));
+}
+*/
+
+impl [a: GetTypeName] Destructor a: GetTypeName {
+    get_typename = |_| "Destructor".build_typename(typeinfo: TypeInfo (TypeName1 a));
+}
+
+impl String: GetTypeName { get_typename = |_| "String"; }
+
+impl [a: GetTypeName] Identity a: GetTypeName {
+    get_typename = |_| "(Identity " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName, b: GetTypeName] Const a b: GetTypeName {
+    get_typename = |_| "(Const " + (typeinfo: TypeInfo a).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+// --------------------------------------------------------------
+// Tuples (up to Tuple5)
+// --------------------------------------------------------------
 
 impl (): GetTypeName { 
     get_typename = |_| "()"; 
@@ -63,4 +118,70 @@ impl [a: GetTypeName, b: GetTypeName, c: GetTypeName] (a, b, c): GetTypeName {
     + "," + (typeinfo: TypeInfo b).get_typename 
     + "," + (typeinfo: TypeInfo c).get_typename 
     + ")"; 
+}
+
+impl [a: GetTypeName, b: GetTypeName, c: GetTypeName, d: GetTypeName] (a, b, c, d): GetTypeName { 
+    get_typename = |_| "("
+    + (typeinfo: TypeInfo a).get_typename
+    + "," + (typeinfo: TypeInfo b).get_typename 
+    + "," + (typeinfo: TypeInfo c).get_typename 
+    + "," + (typeinfo: TypeInfo d).get_typename 
+    + ")"; 
+}
+
+impl [a: GetTypeName, b: GetTypeName, c: GetTypeName, d: GetTypeName, e: GetTypeName] (a, b, c, d, e): GetTypeName { 
+    get_typename = |_| "("
+    + (typeinfo: TypeInfo a).get_typename
+    + "," + (typeinfo: TypeInfo b).get_typename 
+    + "," + (typeinfo: TypeInfo c).get_typename 
+    + "," + (typeinfo: TypeInfo d).get_typename 
+    + "," + (typeinfo: TypeInfo e).get_typename 
+    + ")"; 
+}
+// --------------------------------------------------------------
+// Type names appeared in `fixlang/src/fix/std.fix`
+// --------------------------------------------------------------
+
+impl [s: GetTypeName, r: GetTypeName] LoopState s r: GetTypeName {
+    get_typename = |_| "(LoopState " + (typeinfo: TypeInfo s).get_typename + " " + (typeinfo: TypeInfo r).get_typename + ")";
+}
+
+impl [a: GetTypeName] Box a: GetTypeName {
+    get_typename = |_| "(Box " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl IOHandle: GetTypeName { get_typename = |_| "IOHandle"; }
+
+impl [a: GetTypeName] IOFail a: GetTypeName {
+    get_typename = |_| "(IOFail " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName] ArrayIterator a: GetTypeName {
+    get_typename = |_| "(ArrayIterator " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [a: GetTypeName] EmptyIterator a: GetTypeName {
+    get_typename = |_| "(EmptyIterator " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl RangeIterator: GetTypeName { get_typename = |_| "RangeIterator"; }
+impl RangeStepIterator: GetTypeName { get_typename = |_| "RangeStepIterator"; }
+impl CountUpIterator: GetTypeName { get_typename = |_| "CountUpIterator"; }
+impl [s: GetTypeName, a: GetTypeName] StateIterator s a: GetTypeName {
+    get_typename = |_| "(StateIterator " + (typeinfo: TypeInfo s).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [i: GetTypeName, a: GetTypeName, b: GetTypeName] MapIterator i a b: GetTypeName {
+    get_typename = |_| "(MapIterator " + (typeinfo: TypeInfo i).get_typename + " " + (typeinfo: TypeInfo a).get_typename + " " + (typeinfo: TypeInfo b).get_typename + ")";
+}
+
+// TODO
+
+impl [a: GetTypeName] Option a: GetTypeName {
+    get_typename = |_| "(Option " + (typeinfo: TypeInfo a).get_typename + ")";
+}
+
+impl [e: GetTypeName, a: GetTypeName] Result e a: GetTypeName {
+//    get_typename = |_| "(Result " + (typeinfo: TypeInfo e).get_typename + " " + (typeinfo: TypeInfo a).get_typename + ")";
+    get_typename = |_| "Result".build_typename(typeinfo: TypeInfo (TypeName2 e a));
 }

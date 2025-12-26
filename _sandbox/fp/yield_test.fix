@@ -1,0 +1,177 @@
+module Main;
+
+import Minilib.Monad.Yield;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+drop : [i: Iterator] I64 -> i -> i;
+drop = |n, iter| (
+    if n <= 0 { iter };
+    match iter.advance {
+        none() => iter,
+        some((next, a)) => next.drop(n-1)
+    }
+);
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let yield3: Yield I64 () = do {
+        yield(1);;
+        yield(2);;
+        yield(3)
+    };
+    let expected = [1, 2, 3];
+    let actual = yield3.to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_monad: TestCase;
+test_yield_monad = (
+    make_test("test_yield_monad") $ |_|
+    let ma: Yield String I64 = do {
+        yield("hello");;
+        pure $ 100
+    };
+    let mb: Yield String I64 = do {
+        yield("world");;
+        pure $ 200
+    };
+    let mc: Yield String String = do {
+        let a = *ma;
+        let b = *mb;
+        yield((a,b).format("a={} b={}"));;
+        pure $ "done"
+    };
+    let expected = (["hello", "world", "a=100 b=200"], "done");
+    let actual = mc.fold_yield([], push_back);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_monad2: TestCase;
+test_yield_monad2 = (
+    make_test("test_yield_monad2") $ |_|
+    let n = 100000;
+    let k = 5;
+    let ma: Yield I64 I64 = range(0,n).fold_m(
+        0, |i, sum|
+        yield(i);;
+        pure $ sum + i
+    );
+    let expected = (range(n-k,n).to_array, n * (n-1) / 2);
+    let actual = ma.drop(n-k).fold_yield([], push_back);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_functor: TestCase;
+test_yield_functor = (
+    make_test("test_yield_functor") $ |_|
+    let n = 100000;
+    let k = 5;
+    let f: I64 -> Yield I64 I64 = fix $ |f, i| (
+        if i >= n { pure $ i };
+        yield(i);;
+        f(i + 1)
+    );
+    let ma = f(0);
+    let mb = ma.Functor::map(|result| "result=" + result.to_string);
+    let expected = (range(n-k,n).to_array, "result=" + n.to_string);
+    let actual = mb.drop(n-k).fold_yield([], push_back);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_iterator_map: TestCase;
+test_yield_iterator_map = (
+    make_test("test_yield_iterator_map") $ |_|
+    let n = 100000;
+    let k = 5;
+    let f: I64 -> Yield I64 I64 = fix $ |f, i| (
+        if i >= n { pure $ i };
+        yield(i);;
+        f(i + 1)
+    );
+    let ma = f(0);
+    let g: I64 -> String = |i| "<" + i.to_string + ">";
+    let iter = ma.Iterator::map(g);
+    let expected = range(n-k,n).Iterator::map(g).to_array;
+    let actual = iter.drop(n-k).to_array;
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_iterator_fold: TestCase;
+test_yield_iterator_fold = (
+    make_test("test_yield_iterator_fold") $ |_|
+    let ma: Yield String () = do {
+        range(1, 10 + 1).foreach_m(|i|
+            yield(" ").when(i != 1);;
+            yield("Fizz").when(i % 3 == 0);;
+            yield("Buzz").when(i % 5 == 0);;
+            yield(i.to_string).unless(i % 3 == 0 || i % 5 == 0);;
+            pure()
+        )
+    };
+    let expected = "1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz";
+    let actual = ma.fold("", |b, a| a + b);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_take_array: TestCase;
+test_yield_take_array = (
+    make_test("test_yield_take_array") $ |_|
+    let n = 100000;
+    let k = 5;
+    let f: I64 -> Yield I64 I64 = fix $ |f, i| (
+        if i >= n { pure $ i };
+        yield(i);;
+        f(i + 1)
+    );
+    let ma = f(0);
+    let expected = range(0, k).to_array;
+    let (actual, ma) = ma.take_array(k);
+    assert_equal("eq", expected, actual);;
+    let expected = (range(n-k,n).to_array, n);
+    let actual = ma.drop(n-2*k).fold_yield([], push_back);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_fold_yield: TestCase;
+test_yield_fold_yield = (
+    make_test("test_yield_fold_yield") $ |_|
+    let n = 10;
+    let ma: Yield I64 I64 = do {
+        range(0, n).foreach_m(|i| yield(i));;
+        pure $ 99
+    };
+    let expected = (n * (n-1) / 2, 99);
+    let actual = ma.fold_yield(0, add);
+    assert_equal("eq", expected, actual)
+);
+
+test_yield_collect: TestCase;
+test_yield_collect = (
+    make_test("test_yield_collect") $ |_|
+    let n = 10;
+    let ma: Yield I64 I64 = do {
+        range(0, n).foreach_m(|i| yield(i));;
+        pure $ 99
+    };
+    let expected = (range(0, n).to_array, 99);
+    let actual = ma.collect;
+    assert_equal("eq", expected, actual)
+);
+
+main: IO ();
+main = (
+    [
+        test_simple,
+        test_yield_monad,
+        test_yield_monad2,
+        test_yield_functor,
+        test_yield_iterator_map,
+        test_yield_iterator_fold,
+        test_yield_take_array,
+        test_yield_fold_yield,
+        test_yield_collect,
+    ].run_test_driver
+);

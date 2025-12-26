@@ -1,5 +1,5 @@
-// `Yield e a` is a generator that produces a sequence of type `e`,
-// and terminates with the final result of type `a`.
+// `Yield e a` is a generator that yields elements of type `e`,
+// then terminates with the final result of type `a`.
 module Minilib.Monad.Yield;
 
 // A trait for the interface of generic generator monads.
@@ -9,12 +9,16 @@ trait MonadYield = Functor + Monad + MonadYieldIF;
 trait [m: * -> *] m: MonadYieldIF {
     // The type of an element.
     type YieldType m;
-    // `yield(e)` writes an element to the generator output.
+    // Writes an element to the generator output.
+    //
+    // # Parameters
+    //
+    // * `e` - An element to be yielded.
     yield: YieldType m -> m ();
 }
 
-// `Yield e a` is a generator that produces a sequence of type `e`,
-// terminating with the final result of type `a`.
+// `Yield e a` is a generator that yields elements of type `e`,
+// then terminates with the final result of type `a`.
 type Yield e a = unbox union {
     y_pure: a,
     y_yield: (e, () -> Yield e a),
@@ -25,8 +29,8 @@ type Yield e a = unbox union {
 // - `bind` combines two generator outputs.
 impl Yield e: Monad {
     pure = y_pure;
-    bind = |f, ma| (
-        match ma {
+    bind = |f, y| (
+        match y {
             y_pure(a) => f(a),
             y_yield((e, next)) => y_yield((e, next >> bind(f))),
         }
@@ -53,34 +57,63 @@ impl Yield e: MonadYieldIF {
 // Note that iterators do not return the final state, so `a` will be discarded.
 impl Yield e a: Iterator {
     type Item (Yield e a) = e;
-    advance = |ma| (
-        match ma {
+    advance = |y| (
+        match y {
             y_pure(a) => none(),     // `a` is discarded
             y_yield((e, next)) => some $ (next(), e),
         }
     );
 }
 
-// Returns at most `n` yielded elements and the remaining state.
+// Collects elements upto the specified count.
+//
+// # Parameters
+//
+// * `count` - The maximum number of elements to be collected.
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the remaining generator.
 take_array: I64 -> Yield e a -> (Array e, Yield e a);
-take_array = |n, ma| (
+take_array = |n, y| (
     loop(
-        ([], ma), |(arr,ma)|
-        if arr.get_size >= n { break $ (arr, ma) };
-        match ma {
+        ([], y), |(arr,y)|
+        if arr.get_size >= n { break $ (arr, y) };
+        match y {
             y_pure(a) => break $ (arr, y_pure(a)),
             y_yield((e, next)) => continue $ (arr.push_back(e), next()),
         }
     )
 );
 
-// `fold_yield(s, f)` folds all elements to a state `s` using `f`. 
-// Returns the folded state and the final result.
+// Folds the elements of a generator from left to right.
+//
+// # Parameters
+//
+// * `s` - The initial state.
+// * `body` - The function to be called on the pair of an element and the current state.
+// * `gen` - The generator to be folded.
+//
+// # Return value
+//
+// The folded state and the final result of the generator.
 fold_yield: s -> (e -> s -> s) -> Yield e a -> (s, a);
-fold_yield = |s, f, ma| (
-    match ma {
+fold_yield = |s, body, gen| (
+    match gen {
         y_pure(a) => (s, a),
-        y_yield((e, next)) => next().fold_yield(f(e, s), f),
+        y_yield((e, next)) => next().fold_yield(body(e, s), body),
     }
 );
 
+// Collects all elements of a generator.
+//
+// # Parameters
+//
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the final result of the generator.
+collect: Yield e a -> (Array e, a);
+collect = |gen| gen.fold_yield([], push_back);

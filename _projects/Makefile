@@ -36,7 +36,7 @@ test-document: $(SUBPROJECTS:%=%.test-document)
 
 # Build all examples.
 examples:
-	$(MAKE) -C fixlang-minilib-examples clean all
+	$(MAKE) -C fixlang-minilib-examples clean all regression-test
 
 # Clean all subprojects and examples.
 clean: $(SUBPROJECTS:%=%.clean)

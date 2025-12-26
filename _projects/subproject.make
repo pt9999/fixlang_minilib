@@ -14,6 +14,7 @@ test-fix:
 	fix test -O max
 
 test-document:
+	fix deps update
 	fix docs -o docs
 
 clean:
@@ -51,7 +52,7 @@ publish:
 		git add fixdeps.lock; \
 		git commit -m 'update deps' -- fixdeps.lock; \
 	fi
-	python3 ../_verup.py --update-document --commit --tag --push
+	python3 ../_verup.py --update-document --commit --tag --push --no-confirm
 
 # Version up.
 # - Increment the patch version of `[general]version` in `fixproj.toml`

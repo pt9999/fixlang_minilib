@@ -153,8 +153,9 @@ def upgrade_project_version(args, project_dir):
         new_version = increment_version(old_version)
     else:
         new_version = args.version
-    new_version = ask_new_version(new_version)
-    confirm_upgrade(old_version, new_version)
+    if args.confirm:
+        new_version = ask_new_version(new_version)
+        confirm_upgrade(old_version, new_version)
     project_file.set_project_version(new_version)
     project_file.save()
     if args.update_document:
@@ -177,6 +178,7 @@ def parse_args():
     parser = argparse.ArgumentParser(prog="verup")
     parser.add_argument("version", help="version", nargs="?", default=None)
     parser.add_argument("--update-document", action="store_true", help="upate document", default=False)
+    parser.add_argument("--confirm", action=argparse.BooleanOptionalAction, help="confirm", default=True)
     parser.add_argument("--commit", action="store_true", help="commit", default=False)
     parser.add_argument("--tag", action="store_true", help="add tag", default=False)
     parser.add_argument(

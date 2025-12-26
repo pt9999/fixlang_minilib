@@ -1,6 +1,11 @@
-// A variable for State monad.
-// Stateモナドで管理している状態の全体または一部に束縛された変数です。
-// 変数の値を取得したり、設定したり、変更したりできます。
+module Main;
+
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Trait.Traversable;
+
+// A variable bound to a substate of the State monad. 
+// You can get, set, and modify the bound substate.
 // This is similar to `AsyncTask::Var`, but the operation results are State monad, not IO monad.
 //
 // # Examples
@@ -20,40 +25,34 @@
 //    }
 // );
 // ```
-module Main;
-
-import Minilib.Monad.State;
-import Minilib.Monad.IO;
-import Minilib.Trait.Traversable;
-
 type SVar s a = unbox struct {
     data: s -> (a -> Result a a) -> Result a s
 };
 
 namespace SVar {
-    // A state variable bound to the whole state.
+    // A variable bound to the whole state.
     whole_state: SVar s s;
     whole_state = SVar::make(|s, f| f(s));
 
-    // Create a state variable bound to the part of the state.
+    // Create a variable bound to a substate.
     //
     // # Examples
     // ```
     // let svar = SVar::make(|s| s[^a]); 
     // ```
     // # Parameters
-    // - `f` - A function from the state to the store
+    // - `f` - A function from a state to the store of a substate.
     make: (s -> (a -> Result a a) -> Result a s) -> SVar s a;
     make = |f| SVar { data: f };
 
-    // Get the value of a state variable.
+    // Get the substate from a variable.
     //
     // # Examples
     // ```
     // let a = *svar.get;
     // ```
     // # Parameters
-    // - `svar` - A state variable
+    // - `svar` - A variable
     get: [m: MonadState, StateType m = s] SVar s a -> m a;
     get = |svar| (
         let s = *get_state;
@@ -63,7 +62,7 @@ namespace SVar {
         pure $ sfa.as_err
     );
 
-    // Set the value of a state variable.
+    // Set the substate to a variable.
     //
     // # Examples
     // ```
@@ -71,7 +70,7 @@ namespace SVar {
     // ```
     // # Parameters
     // - `val` - A value to set
-    // - `svar` - A state variable
+    // - `svar` - A variable
     set: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
     set = |val, svar| (
         mod_state_(|s|
@@ -82,15 +81,15 @@ namespace SVar {
         )
     );
 
-    // Modify the value of a state variable.
+    // Modify the substate using a variable.
     //
     // # Examples
     // ```
     // svar.mod(|val| val + 123);;
     // ```
     // # Parameters
-    // - `f` - A function to modify the value
-    // - `svar` - A state variable
+    // - `f` - A function to modify the substate
+    // - `svar` - A variable
     mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s a -> m ();
     mod = |f, svar| (
         mod_state_(|s|

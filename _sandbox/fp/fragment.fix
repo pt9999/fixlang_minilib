@@ -68,14 +68,26 @@ impl [m: Monad] m a: Singleton {
 write_one: [m: Monad] e -> WriterT (Fragment e) m ();
 write_one = |e| write(pure(e));
 
-//fragment_test1: [f: Monad, fe: Monoid, fe = f I64, m: Monad] I64 -> I64 -> WriterT (f I64) m I64;
-fragment_test1: [m: Monad] I64 -> I64 -> WriterT (Fragment I64) m I64;
-fragment_test1 = |n, sum| (
+//fragment_test_rec: [f: Monad, fe: Monoid, fe = f I64, m: Monad] I64 -> I64 -> WriterT (f I64) m I64;
+fragment_test_rec: [m: Monad] I64 -> I64 -> WriterT (Fragment I64) m I64;
+fragment_test_rec = |n, sum| (
     write_one(sum);;
     if n <= 0 {
         pure $ sum 
     };
-    fragment_test1(n - 1, sum + n)
+    fragment_test_rec(n - 1, sum + n)
+);
+
+fragment_test_loop: [m: Monad] I64 -> I64 -> WriterT (Fragment I64) m I64;
+fragment_test_loop = |n, sum| (
+    loop_m(
+        (n, sum), |(n, sum)|
+        write_one(sum);;
+        if n <= 0 {
+            break_m $ sum 
+        };
+        continue_m $ (n-1, sum + n)
+    )
 );
 
 fragment_perf: I64 -> IO ();
@@ -83,7 +95,7 @@ fragment_perf = |n| (
     println("=== fragment_perf ===");;
     let (_, time) = *consumed_time_while_io(do {
         pure();;
-        let (fa, sum) = fragment_test1(n, 0).run_writer : (Fragment I64, I64);
+        let (fa, sum) = fragment_test_loop(n, 0).run_writer : (Fragment I64, I64);
         println("sum=" + sum.to_string);;
         println("arr.size=" + fa.to_array.get_size.to_string);;
         pure $ ()
@@ -115,10 +127,10 @@ array_perf = |n| (
 
 main: IO ();
 main = (
-    //let n = 200000;
+    let n = 200000;
     //let n = 100000;     // requires building with `-O max`,
                         // but sometimes a stack overflow still occurs
-    let n = 50000;
+    //let n = 50000;
     fragment_perf(n);;  // n = 50000 time=8.723 msec
     array_perf(n)       // n = 50000 time=6155.792 msec
 );

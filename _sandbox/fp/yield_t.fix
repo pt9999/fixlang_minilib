@@ -24,6 +24,10 @@ type [m: *->*] YieldT e m a = box union {
     y_yield: (e, () -> YieldT e m a),
 };
 
+// `Yield e a` is a generator that produces a sequence of type `e`,
+// terminating with the final result of type `a`.
+type Yield e a = YieldT e Iden a;
+
 // `YieldT e m` is a monad.
 // - `pure` produces a monadic value, which may be the final result.
 // - `bind` combines two generator outputs.
@@ -48,13 +52,18 @@ impl [m: Monad] YieldT e m: Functor {
     map = |f| bind(f >> pure);
 }
 
+// `YieldT e` is a Monad Transformer.
+impl YieldT e: MonadTrans {
+    lift_t = |ma| y_monad(ma);
+}
+
 // `YieldT e m` is a generator of type `e`.
 impl [m: Monad] YieldT e m: MonadYieldIF {
     type YieldType (YieldT e m) = e;
     yield = |e| y_yield $ (e, |_| pure());
 }
 
-// `YieldT e Iden a` is not an Iterator of type `e`.
+// `YieldT e Iden a` is an Iterator of type `e`.
 // Note that iterators do not return the final state, so `a` will be discarded.
 impl YieldT e Iden a: Iterator {
     type Item (YieldT e Iden a) = e;
@@ -67,28 +76,101 @@ impl YieldT e Iden a: Iterator {
     );
 }
 
-// Returns at most `n` yielded elements and the remaining state.
+// Collects elements upto the specified count.
+//
+// # Parameters
+//
+// * `count` - The maximum number of elements to be collected.
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the remaining generator.
 take_array_t: [m: Monad] I64 -> YieldT e m a -> m (Array e, YieldT e m a);
-take_array_t = |n, y| (
+take_array_t = |count, gen| (
     loop_m(
-        ([], y), |(arr,y)|
-        if arr.get_size >= n { break_m $ (arr, y) };
-        match y {
+        ([], gen), |(arr,gen)|
+        if arr.get_size >= count { break_m $ (arr, gen) };
+        match gen {
             y_pure(a) => break_m $ (arr, y_pure(a)),
-            y_monad(ma) => let y = *ma; continue_m $ (arr, y),
+            y_monad(ma) => let gen = *ma; continue_m $ (arr, gen),
             y_yield((e, next)) => continue_m $ (arr.push_back(e), next()),
         }
     )
 );
 
-// `fold_yield_t(s, f)` folds all elements to a state `s` using `f`. 
-// Returns the folded state and the final result.
+// Collects elements upto the specified count.
+//
+// # Parameters
+//
+// * `count` - The maximum number of elements to be collected.
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the remaining generator.
+take_array: I64 -> Yield e a -> (Array e, Yield e a);
+take_array = |count, gen| (
+    gen.take_array_t(count).get
+);
+
+// Folds the elements of a generator from left to right.
+//
+// # Parameters
+//
+// * `s` - The initial state.
+// * `body` - The function to be called on the pair of an element and the current state.
+// * `gen` - The generator to be folded.
+//
+// # Return value
+//
+// The folded state and the final result of the generator.
 fold_yield_t: [m: Monad] s -> (e -> s -> s) -> YieldT e m a -> m (s, a);
-fold_yield_t = |s, f, y| (
-    match y {
+fold_yield_t = |s, body, gen| (
+    match gen {
         y_pure(a) => pure $ (s, a),
-        y_monad(ma) => let y = *ma; fold_yield_t(s, f, y),
-        y_yield((e, next)) => next().fold_yield_t(f(e, s), f),
+        y_monad(ma) => let gen = *ma; fold_yield_t(s, body, gen),
+        y_yield((e, next)) => next().fold_yield_t(body(e, s), body),
     }
 );
+
+// Folds the elements of a generator from left to right.
+//
+// # Parameters
+//
+// * `s` - The initial state.
+// * `body` - The function to be called on the pair of an element and the current state.
+// * `gen` - The generator to be folded.
+//
+// # Return value
+//
+// The folded state and the final result of the generator.
+fold_yield: s -> (e -> s -> s) -> Yield e a -> (s, a);
+fold_yield = |s, body, gen| (
+    gen.fold_yield_t(s, body).get
+);
+
+// Collects all elements of a generator.
+//
+// # Parameters
+//
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the final result of the generator.
+collect_yield_t: [m: Monad] YieldT e m a -> m (Array e, a);
+collect_yield_t = |gen| gen.fold_yield_t([], push_back);
+
+// Collects all elements of a generator.
+//
+// # Parameters
+//
+// * `gen` - The generator.
+//
+// # Return value
+//
+// The array of elements and the final result of the generator.
+collect_yield: Yield e a -> (Array e, a);
+collect_yield = |gen| gen.fold_yield([], push_back);
 

@@ -3,6 +3,7 @@
 module Minilib.Monad.YieldT;
 
 import Minilib.Monad.Iden;
+import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
 
 // A trait for the interface of generic generator monads.
@@ -52,11 +53,6 @@ impl [m: Monad] YieldT e m: Functor {
     map = |f| bind(f >> pure);
 }
 
-// `YieldT e` is a Monad Transformer.
-impl YieldT e: MonadTrans {
-    lift_t = |ma| y_monad(ma);
-}
-
 // `YieldT e m` is a generator of type `e`.
 impl [m: Monad] YieldT e m: MonadYieldIF {
     type YieldType (YieldT e m) = e;
@@ -74,6 +70,18 @@ impl YieldT e Iden a: Iterator {
             y_yield((e, next)) => some $ (next(), e),
         }
     );
+}
+
+impl YieldT e: MonadTrans {
+    lift_t = |ma| y_monad(ma.bind(pure >> pure));
+}
+
+impl [m: MonadIO] YieldT e m: MonadIOIF {
+    lift_io = lift_t << lift_io;
+}
+
+impl [m: MonadIOFail] YieldT e m: MonadIOFailIF {
+    lift_iofail = lift_t << lift_iofail;
 }
 
 // Collects elements upto the specified count.

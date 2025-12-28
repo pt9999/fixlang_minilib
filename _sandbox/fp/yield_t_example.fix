@@ -2,11 +2,13 @@ module Main;
 
 import Minilib.Monad.YieldT;
 import Minilib.Monad.Iden;
+import Minilib.Monad.State;
 import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
 import Minilib.Trait.Traversable;
 
 // 単純に Writer でもいい気がする
+// YieldT は Writer よりは軽快
 
 split_with_semicolon: IOHandle -> String -> YieldT String IOFail ();
 split_with_semicolon = |handle, buf| (
@@ -28,6 +30,15 @@ split_with_semicolon = |handle, buf| (
     split_with_semicolon(handle, buf)   // tail-recursive
 );
 
+drop : [i: Iterator] I64 -> i -> i;
+drop = |n, iter| (
+    if n <= 0 { iter };
+    match iter.advance {
+        none() => iter,
+        some((next, a)) => next.drop(n-1)
+    }
+);
+
 test_split_with_semicolon: IO ();
 test_split_with_semicolon = (
     println("=== test_split_with_semicolon ===");;
@@ -36,12 +47,29 @@ test_split_with_semicolon = (
         with_file(filepath, "r", |handle| 
             let y = split_with_semicolon(handle, "");
             let (arr, res) = *y.collect_yield_t;
-            arr.to_iter.foreach_m(println).lift
+            arr.to_iter.drop(20).take(10).foreach_m(println).lift
         )
     }.try(eprintln)
 );
+
+yield_t_array: I64 -> YieldT I64 Array ();
+yield_t_array = |i| (
+    yield(i);;
+    let j = *[ 2*i, 2*i + 1 ].lift_t;
+    yield_t_array(j)
+);
+
+test_yield_t_array: IO ();
+test_yield_t_array = (
+    println("=== test_yield_t_array ===");;
+    let y = yield_t_array(1);
+    let arr: Array (Array I64) = y.take_array_t(5).map(Tuple2::@0);
+    println(arr.to_string)
+);
+
 main: IO () = (
     test_split_with_semicolon;;
+    test_yield_t_array;;
     pure()
 );
 

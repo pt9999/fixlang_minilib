@@ -2,9 +2,11 @@ module Main;
 
 import Minilib.Common.TimeEx;
 import Minilib.Monad.Yield;
+import Minilib.Monad.Writer;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
+import Minilib.Trait.Monoid;
 
 drop : [i: Iterator] I64 -> i -> i;
 drop = |n, iter| (
@@ -67,30 +69,67 @@ test_yield_monad2 = (
 
 type Wrap a = unbox struct {data: a};
 impl Wrap a: ToString { to_string = |_| ""; }
+namespace Wrap {
+    wrap: a -> Wrap a = |a| Wrap { data: a };
+    unwrap: Wrap a -> a = @data;
+}
 
 // requires building with `-O max`
 test_yield_monad2_perf: TestCase;
 test_yield_monad2_perf = (
     make_test("test_yield_monad2_perf") $ |_|
     let n = 100000;
-    //let n = 10;
     let k = 5;
-    let ma: Yield I64 I64 = (*timeit_io("test_yield_monad2_perf: creating yield",
-        do {
-            pure();;
-            pure $ Wrap { data: range(0,n).fold_m(
-                0, |i, sum|
-                yield(i);;
-                pure $ sum + i
-            ) }
-        }
-    ).lift).@data;
+    let ma: Yield I64 I64 = Wrap::unwrap $ 
+        *timeit_io("test_yield_monad2_perf: creating yield",
+            // time/loop=0.067 usec = 0.000000067 sec
+            do {
+                pure();;
+                pure $ wrap $ range(0,n).fold_m(
+                    0, |i, sum|
+                    yield(i);;
+                    pure $ sum + i
+                )
+            }
+        ).lift;
     let expected = (range(n-k,n).to_array, n * (n-1) / 2);
     let actual = 
         *timeit_io("test_yield_monad2_perf: folding yield",
+            // time/loop=7.057 msec = 0.0007057 sec
             do {
                 pure();;
                 pure $ ma.drop(n-k).fold_yield([], push_back)
+            }
+        ).lift;
+    assert_equal("eq", expected, actual)
+);
+
+test_writer_monad2_perf: TestCase;
+test_writer_monad2_perf = (
+    make_test("test_writer_monad2_perf") $ |_|
+    let n = 100000;
+    let k = 5;
+    let ma: Writer (Array I64) I64 = Wrap::unwrap $
+        *timeit_io("test_writer_monad2_perf: creating yield",
+            // time/loop=22.797 sec = 22.797000000 sec
+            do {
+                pure();;
+                pure $ wrap $ range(0,n).fold_m(
+                    0, |i, sum|
+                    write([i]);;
+                    pure $ sum + i
+                )
+            }
+        ).lift;
+    let expected = (range(n-k,n).to_array, n * (n-1) / 2);
+    let actual = 
+        *timeit_io("test_writer_monad2_perf: folding yield",
+            // time/loop=0.033 usec = 0.000000033 sec
+            do {
+                pure();;
+                let (arr, a) = ma.run_writer;
+                let n = arr.get_size;
+                pure $ (arr.get_sub(n-k, n), a)
             }
         ).lift;
     assert_equal("eq", expected, actual)
@@ -200,6 +239,7 @@ main = (
         test_yield_monad,
         test_yield_monad2,
         test_yield_monad2_perf,
+        test_writer_monad2_perf,
         test_yield_functor,
         test_yield_iterator_map,
         test_yield_iterator_fold,

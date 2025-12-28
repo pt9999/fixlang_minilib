@@ -5,18 +5,21 @@ import Minilib.Trait.Semigroup;
 import Minilib.Trait.Monoid;
 import Minilib.Monad.Writer;
 
-type Fragment a = unbox union {
+type Fragment a = box union {
     empty: (),
-    single: a,
-    array: Array a,
+    leaf: a,
+    branch: (Fragment a, Fragment a),
 };
 
 namespace Fragment {
     to_array: Fragment a -> Array a;
-    to_array = |fa| match fa {
-        empty() => [],
-        single(x) => [x],
-        array(xs) => xs,
+    to_array = |fa| fa._collect_array([]);
+
+    _collect_array: Array a -> Fragment a -> Array a;
+    _collect_array = |out, fa| match fa {
+        empty() => out,
+        leaf(x) => out.push_back(x),
+        branch((left, right)) => right._collect_array(left._collect_array(out))
     };
 }
 
@@ -25,43 +28,25 @@ impl Fragment a: MEmpty {
 }
 
 impl Fragment a: Semigroup {
-    sappend = |f2, f1| (
-        match f1 {
-            empty() => f2,
-            single(x) => match f2 {
-                empty() => f1,
-                single(y) => array $ [x, y],
-                array(ys) => array $ [x].append(ys),
-            },
-            array(xs) => match f2 {
-                empty() => f1,
-                single(y) => array $ xs.push_back(y),
-                array(ys) => array $ xs.append(ys),
-            },
-        }
+    sappend = |right, left| (
+        branch((left, right))
     );
 }
 
 impl Fragment: Functor {
     map = |f, fa| match fa {
         empty() => empty(),
-        single(x) => single(f(x)),
-        array(xs) => array(xs.map(f)),
+        leaf(x) => leaf(f(x)),
+        branch((left, right)) => branch(left.map(f), right.map(f)),
     };
 }
 
 impl Fragment: Monad {
-    pure = |a| single(a);
+    pure = |a| leaf(a);
     bind = |f, fa| match fa {
         empty() => empty(),
-        single(x) => f(x),
-        array(xs) => (
-            //xs.to_iter.map(f).mconcat
-            xs.to_iter.fold(
-                mempty, |x, fa2|
-                fa2.sappend(f(x))
-            )
-        ),
+        leaf(x) => f(x),
+        branch((left, right)) => branch(left.bind(f), right.bind(f)),
     };
 }
 
@@ -129,7 +114,9 @@ array_perf = |n| (
 main: IO ();
 main = (
     //let n = 200000;
-    let n = 20000;
-    fragment_perf(n);;
-    array_perf(n)
+    //let n = 100000;     // requires building with `-O max`,
+                        // but sometimes a stack overflow still occurs
+    let n = 50000;
+    fragment_perf(n);;  // n = 50000 time=13.209 msec
+    array_perf(n)       // n = 50000 time=6122.529 msec
 );

@@ -13,6 +13,7 @@ type SIO s = StateT s IOFail;
 type App = unbox struct {
     window: Window,
     loadavg: Array F64,
+    time: I64,
     status: String,
 };
 
@@ -23,6 +24,7 @@ namespace App {
         pure $ App {
             window: win,
             loadavg: [],
+            time: 0,
             status: "",
         }
     );
@@ -42,12 +44,13 @@ namespace App {
     collect_loadavg: I64 -> SIO App ();
     collect_loadavg = |count| (
         let value = *read_loadavg.lift_iofail;
-        mod_state_(
-            mod_loadavg(|values|
+        mod_state_(|app|
+            app.mod_loadavg(|values|
                 let values = values.push_back(value);
                 if values.get_size <= count { values };
                 values.get_sub(values.get_size - count, values.get_size)
             )
+            .mod_time(add(1))
         )
     );
 
@@ -56,24 +59,29 @@ namespace App {
         let app = *get_state;
         let window = app.@window;
         let (w, h) = *window.get_window_size.lift_iofail;
-        let max_samples = w - 5;
+        let max_samples = w - 10;
         let max_bar_size = h - 3;
         collect_loadavg(max_samples);;
         let loadavg = app.@loadavg;
+        let time = app.@time;
         do {
             window.clear;;
+            let colors = [ cp_red, cp_green, cp_blue ];
             range(0, loadavg.get_size).fold_m(
                 (), |x, _|
+                let xt = x + (time - loadavg.get_size);
+                let color = colors.@(xt % colors.get_size);
+                window.set_attr(color_pair(color));;
                 let sample = loadavg.@(x);
-                let scale = 0.333;
+                let scale = 1.0;
                 let bar_size = (sample * scale * max_bar_size.to_F64).to_I64;
                 let bar_size = bar_size.max(0).min(max_bar_size);
-                let bar = Array::fill(bar_size, '#')._unsafe_to_string;
                 range(0, bar_size).fold_m(
                     (), |y, _|
-                    window.move_add_str(x, h - 2 - y, "#")
+                    window.move_add_wstr(x, h - 2 - y, "█")     // U+2588	█	FULL BLOCK
                 )
             );;
+            window.set_attr(color_pair(cp_white));;
             let num = loadavg.get_last.as_some_or(0.0).to_string_precision(2_U8);
             window.move_add_str(5, 0, "loadavg: " + num);;
             window.move_add_str(5, h-1, app.@status);;

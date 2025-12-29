@@ -1,5 +1,8 @@
+#define _XOPEN_SOURCE_EXTENDED
+#include <locale.h>
+#include <wchar.h>
+#include <ncursesw/ncurses.h>
 #include <sys/types.h>
-#include <ncurses.h>
 #include <unistd.h>
 #include <signal.h>
 #include <stdint.h>
@@ -30,6 +33,8 @@ void handle_fatal_signal(int signum)
 
 void minilib_ncurses_initialize()
 {
+    setlocale(LC_ALL, "");  // enable unicode
+
     initscr();      // init screen
 
     signal(SIGABRT, handle_fatal_signal);

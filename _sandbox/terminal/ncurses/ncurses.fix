@@ -1,6 +1,7 @@
 module Minilib.Terminal.Ncurses;
 
 import Minilib.Monad.IO;
+import Minilib.Text.Unicode;
 
 type Ncurses = unbox struct {
     dtor: Destructor ()
@@ -113,11 +114,22 @@ namespace Window {
         )
     };
 
+    // Moves the cursor to `(x,y)`, then write the ASCII string.
     move_add_str: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
     move_add_str = |x, y, str, win| lift_iofail $ do {
         win._check_cint_err("move_add_str") $ |p_win|
         str.borrow_c_str_io(|p_str|
             FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_str]
+        )
+    };
+
+    // Moves the cursor to `(x,y)`, then write the Unicode string.
+    move_add_wstr: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
+    move_add_wstr = |x, y, str, win| lift_iofail $ do {
+        win._check_cint_err("move_add_wstr") $ |p_win|
+        let wchars = utf8_to_utf32(str.get_bytes.pop_back, []).push_back(0_U32);
+        wchars.borrow_boxed_io(|p_wstr|
+            FFI_CALL_IO[CInt mvwaddwstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_wstr]
         )
     };
 

@@ -13,6 +13,7 @@ type SIO s = StateT s IOFail;
 type App = unbox struct {
     window: Window,
     loadavg: Array F64,
+    status: String,
 };
 
 namespace App {
@@ -22,6 +23,7 @@ namespace App {
         pure $ App {
             window: win,
             loadavg: [],
+            status: "",
         }
     );
 
@@ -54,20 +56,27 @@ namespace App {
         let app = *get_state;
         let window = app.@window;
         let (w, h) = *window.get_window_size.lift_iofail;
-        collect_loadavg(h-1);;
+        let max_samples = w - 5;
+        let max_bar_size = h - 3;
+        collect_loadavg(max_samples);;
         let loadavg = app.@loadavg;
         do {
             window.clear;;
             range(0, loadavg.get_size).fold_m(
-                (), |y, _|
-                let value = loadavg.@(y) / 3.0;
-                let max_bar_size = w - 10;
-                let bar_size = (max_bar_size.to_F64 * value).to_I64;
+                (), |x, _|
+                let sample = loadavg.@(x);
+                let scale = 0.333;
+                let bar_size = (sample * scale * max_bar_size.to_F64).to_I64;
                 let bar_size = bar_size.max(0).min(max_bar_size);
                 let bar = Array::fill(bar_size, '#')._unsafe_to_string;
-                let num = loadavg.@(y).to_string_precision(2_U8);
-                window.move_add_str(0, y, bar + " " + num)
+                range(0, bar_size).fold_m(
+                    (), |y, _|
+                    window.move_add_str(x, h - 2 - y, "#")
+                )
             );;
+            let num = loadavg.get_last.as_some_or(0.0).to_string_precision(2_U8);
+            window.move_add_str(5, 0, "loadavg: " + num);;
+            window.move_add_str(5, h-1, app.@status);;
             window.refresh
         }.lift_iofail
     );
@@ -84,8 +93,9 @@ main = do {
         loop_m(
             (), |_|
             App::render;;
-            let key = *app.@window.getch.lift_iofail;
-            //if key < 0 { break_m $ () };
+            let key = *app.@window.get_key.lift_iofail;
+            if key == "q" || key == "^[" { break_m $ () };
+            mod_state_(|app| app.set_status("key=" + key.to_string));;
             continue_m $ ()
         ).eval_state_t(app)
     )

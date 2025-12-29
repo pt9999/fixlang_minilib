@@ -121,24 +121,47 @@ namespace Window {
         )
     };
 
+    // Refreshes curses windows and lines.
+    // This function must be called to get actual output to the terminal, as other routines merely manipulate data structures.
+    // For details, see [wrefresh(3) - Linux man page](https://linux.die.net/man/3/wrefresh).
     refresh: [m: MonadIOFail] Window -> m ();
     refresh = |win| lift_iofail $ do {
         win._check_cint_err("refresh") $ |p_win|
         FFI_CALL_IO[CInt wrefresh(Ptr), p_win]
     };
 
+    // Reads a character from the window.
+    // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch).
     getch: [m: MonadIOFail] Window -> m I64;
     getch = |win| lift_iofail $ do {
         win.@dtor.borrow_io(|p_win|
             FFI_CALL_IO[CInt wgetch(Ptr), p_win]
-        ).map(to_I64).lift
+        ).map(to_I64).lift_io
     };
 
+    // Reads a character from the window, then convert it to a keyname.
+    // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch) and
+    // [keyname(3) - Linux man page](https://linux.die.net/man/3/keyname).
     get_key: [m: MonadIOFail] Window -> m String;
     get_key = |win| lift_iofail $ do {
         let ch = *win.getch;
+        if ch < 0 { pure $ "" };
         pure $ *keyname(ch)
     };
+
+    // Sets timeout for `getch` and `get_key`.
+    // For details, see [wtimeout(3) - Linux man page](https://linux.die.net/man/3/wtimeout).
+    //
+    // # Parameters
+    // * `delay`: If negative, blocking read is used. If `delay` is zero, non-blocking read is used.
+    //            If `delay` is positive, then read blocks for `delay` milliseconds.
+    // * `win`: A Window.
+    timeout: [m: MonadIOFail] I64 -> Window -> m I64;
+    timeout = |delay, win| (
+        win.@dtor.borrow_io(|p_win|
+            FFI_CALL_IO[CInt wtimeout(Ptr, CInt), p_win, delay.to_CInt]
+        ).map(to_I64).lift_io
+    );
 }
 
 type Color = I16;

@@ -66,12 +66,14 @@ namespace App {
         let time = app.@time;
         do {
             window.clear;;
-            let colors = [ cp_red, cp_green, cp_blue ];
+            //let colors = [ cp_red, cp_green, cp_blue ];
             range(0, loadavg.get_size).fold_m(
                 (), |x, _|
                 let xt = x + (time - loadavg.get_size);
-                let color = colors.@(xt % colors.get_size);
-                window.set_attr(color_pair(color));;
+                let (beg, end) = custom_color_range;
+                //let (beg, end) = (1, 32);
+                let color = xt % (end - beg) + beg;
+                window.set_attr(color_pair(color).bit_or(bold));;
                 let sample = loadavg.@(x);
                 let scale = 1.0;
                 let bar_size = (sample * scale * max_bar_size.to_F64).to_I64;
@@ -90,18 +92,69 @@ namespace App {
     );
 }
 
+// Converts HSV to RGB.
+// 
+// # Parameters
+// * `h`: a hue (0.0 .. 360.0)
+// * `s`: a saturation (0.0 .. 1.0)
+// * `v`: a value (0.0 .. 1.0)
+// # Returns
+// `(r, g, b)`: a tuple of red/green/blue component (0.0 .. 1.0)
+hsv_to_rgb: (F64, F64, F64) -> (F64, F64, F64);
+hsv_to_rgb = |(h, s, v)| (
+    let modulo = |x: F64, m: F64| (
+        let x = x - (x / m).to_I64.to_F64 * m;
+        if x < 0.0 { x + m } else { x }
+    );
+    let h = modulo(h, 360.0);
+    let h = h / 60.0;
+    let hf = (modulo(h, 2.0) - 1.0).abs;
+    let v0 = v;
+    let v1 = v * (1.0 - s * hf);
+    let v2 = v * (1.0 - s);
+    if h < 1.0 {
+        (v0, v1, v2)
+    } else if h < 2.0 {
+        (v1, v0, v2)
+    } else if h < 3.0 {
+        (v2, v0, v1)
+    } else if h < 4.0 {
+        (v2, v1, v0)
+    } else if h < 5.0 {
+        (v1, v2, v0)
+    } else {
+        (v0, v2, v1)
+    }
+);
+
+custom_color_range: (I64, I64) = (16, 100);
+
+init_custom_color_pairs: IOFail ();
+init_custom_color_pairs = (
+    pure();;    // make it lazy
+    let (begin, end) = custom_color_range;
+    range(begin, end).foreach_m(|color|
+        let hue = 360.0 * (color - begin).to_F64 / (end - begin).to_F64;
+        let (r, g, b) = hsv_to_rgb((hue, 1.0, 1.0));
+        let to_i = |v| max(0, min(255, (v * 255.0).to_I64));
+        init_color(color.to_I16, r.to_i, g.to_i, b.to_i);;
+        init_color_pair(color, color.to_I16, black);;
+        pure()
+    )
+);
 
 main: IO ();
 main = do {
     Ncurses::run $ |win| (
-        //init_custom_color_pairs;;
         let app = *App::make(win);
-        let key_input_timeout = 1000; // milliseconds
+        init_custom_color_pairs;;
+        //let key = *app.@window.get_key;
+        let key_input_timeout = 100; // milliseconds
         app.@window.timeout(key_input_timeout);;
         loop_m(
             (), |_|
             App::render;;
-            let key = *app.@window.get_key.lift_iofail;
+            let key = *app.@window.get_key;
             if key == "q" || key == "^[" { break_m $ () };
             mod_state_(|app| app.set_status("key=" + key.to_string));;
             continue_m $ ()

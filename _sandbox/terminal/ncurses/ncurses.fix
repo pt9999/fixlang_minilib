@@ -179,6 +179,35 @@ namespace Window {
 type Color = I16;
 
 namespace Color {
+    has_colors: [m: MonadIO] m Bool;
+    has_colors = lift_io $ do {
+        FFI_CALL_IO[CChar has_colors()]
+    }.map(|c| c.to_I64 != 0);
+
+    can_change_color: [m: MonadIO] m Bool;
+    can_change_color = lift_io $ do {
+        FFI_CALL_IO[CChar can_change_color()]
+    }.map(|c| c.to_I64 != 0);
+
+    get_max_colors: [m: MonadIO] m I64;
+    get_max_colors = lift_io $ do {
+        FFI_CALL_IO[CInt minilib_ncurses_get_max_colors()]
+    }.map(to_I64);
+
+    // Changes the definition of a color.
+    //
+    // # Parameters
+    // * `color`: a legal color value.
+    // * `r`: red components (in range 0 through 255).
+    // * `g`: green components (in range 0 through 255).
+    // * `b`: blue components (in range 0 through 255).
+    init_color: [m: MonadIOFail] Color -> I64 -> I64 -> I64 -> m ();
+    init_color = |color, r, g, b| lift_iofail $ do {
+        let err = *FFI_CALL_IO[CInt init_color(I16, I16, I16, I16), color.to_I16, r.to_I16, g.to_I16, b.to_I16].lift;
+        if err != 0.to_CInt { throw $ "init_color failed! " + (color, r, g, b, *has_colors, *can_change_color, *get_max_colors).to_string};
+        pure()
+    };
+
     black: Color;
     black = 0_I16;
 
@@ -207,10 +236,15 @@ namespace Color {
 type ColorPair = I64;
 
 namespace ColorPair {
+    get_max_color_pairs: [m: MonadIO] m I64;
+    get_max_color_pairs = lift_io $ do {
+        FFI_CALL_IO[CInt minilib_ncurses_get_max_color_pairs()]
+    }.map(to_I64);
+
     init_color_pair: [m: MonadIOFail] ColorPair -> Color -> Color -> m ();
     init_color_pair = |color_pair, fore_color, back_color| lift_iofail $ do {
         let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
-        if err != 0.to_CInt { throw $ "init_color_pair failed!" };
+        if err != 0.to_CInt { throw $ "init_color_pair failed! " + (color_pair, fore_color, back_color, *get_max_color_pairs).to_string };
         pure()
     };
 

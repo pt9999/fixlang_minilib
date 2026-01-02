@@ -92,3 +92,12 @@ int minilib_ncurses_draw_border(WINDOW* win)
     return box(win, ACS_VLINE, ACS_HLINE);
 }
 
+int minilib_ncurses_get_max_colors()
+{
+    return COLORS;
+}
+
+int minilib_ncurses_get_max_color_pairs()
+{
+    return COLOR_PAIRS;
+}

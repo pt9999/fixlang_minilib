@@ -78,6 +78,9 @@ class DocumentHelper(object):
 
 Field = namedtuple("Field", ["key", "value", "line_index"])
 
+class Field(namedtuple("Field", ["key", "value", "line_index"])):
+    def unquote(self):
+        return self.value.replace('"', "")
 
 class ProjectFile(object):
     def __init__(self, filepath: str) -> None:
@@ -107,10 +110,11 @@ class ProjectFile(object):
                 return Field(key, value, line_index)
         raise Exception("field not found: {section_to_find}.{key_to_find}")
 
+    def get_project_name(self) -> str:
+        return self.find_field("general", "name").unquote()
+
     def get_project_version(self) -> str:
-        field = self.find_field("general", "version")
-        version = field.value.replace('"', "")
-        return version
+        return self.find_field("general", "version").unquote()
 
     def set_project_version(self, version: str) -> None:
         field = self.find_field("general", "version")
@@ -127,7 +131,8 @@ def check_up_to_date(old_version: str) -> None:
         print(f"Project is up to date with {old_version}")
         sys.exit(0)
 
-def ask_new_version(new_version: str) -> str:
+def ask_new_version(project_name: str, new_version: str) -> str:
+    print(f"Project name: {project_name}")
     answer = input(f"Input new version (default: {new_version}): ")
     if answer != "":
         new_version = answer
@@ -146,6 +151,7 @@ def confirm_upgrade(old_version: str, new_version: str) -> None:
 def upgrade_project_version(args, project_dir):
     project_file_path = f"{project_dir}/fixproj.toml"
     project_file = ProjectFile(filepath=project_file_path)
+    project_name = project_file.get_project_name()
     old_version = project_file.get_project_version()
     if not args.force:
         check_up_to_date(old_version)
@@ -154,7 +160,7 @@ def upgrade_project_version(args, project_dir):
     else:
         new_version = args.version
     if args.confirm:
-        new_version = ask_new_version(new_version)
+        new_version = ask_new_version(project_name, new_version)
         confirm_upgrade(old_version, new_version)
     project_file.set_project_version(new_version)
     project_file.save()

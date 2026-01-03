@@ -2,6 +2,12 @@
 
 .PHONY: all build test test-fix test-document clean document update-deps
 
+### Options for `_verup.py`
+CONFIRM = --confirm
+CONFIRM_OPTS = $(if $(CONFIRM), $(CONFIRM), --no-confirm)
+VERUP_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS)
+# VERUP_OPTS = $(CONFIRM_OPTS)
+
 all: build
 
 build:
@@ -22,6 +28,7 @@ clean:
 	rm -rf *.out
 
 document:
+	fix deps install
 	fix docs -o docs
 	if ! git diff --quiet HEAD -- docs; then \
 		git add docs; \
@@ -42,7 +49,7 @@ update-deps:
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
-	# git diff --exit-code HEAD											# Check if uncommit files exist
+	git diff --exit-code HEAD											# Check if uncommit files exist
 	/usr/bin/test "$$(git rev-parse --abbrev-ref HEAD)" == "main"		# Check if current branch is main
 	fix clean
 	fix deps update
@@ -52,7 +59,7 @@ publish:
 		git add fixdeps.lock; \
 		git commit -m 'update deps' -- fixdeps.lock; \
 	fi
-	python3 ../_verup.py --update-document --commit --tag --push --no-confirm
+	python3 ../_verup.py $(VERUP_OPTS)
 
 # Version up.
 # - Increment the patch version of `[general]version` in `fixproj.toml`
@@ -61,4 +68,4 @@ publish:
 # - Add tag to the local git repository
 # - Push to the remote git repository
 verup:
-	python3 ../_verup.py --update-document --commit --tag --push
+	python3 ../_verup.py $(VERUP_OPTS)

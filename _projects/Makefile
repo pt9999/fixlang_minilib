@@ -24,6 +24,9 @@ EXAMPLES = \
 
 SUBPROJECT_MAKEFILE = $$(pwd)/subproject.make
 
+### Options for `_verup.py`, passed to subproject.make
+CONFIRM = --confirm
+
 .PHONY: all test examples clean publish
 .SUFFIXES: .test .test-document .clean .document .update-deps .publish .verup
 
@@ -92,7 +95,7 @@ push-submodules:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) update-deps
 
 %.publish:
-	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) publish
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) publish CONFIRM=$(CONFIRM)
 
 %.verup:
-	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) verup
+	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) verup CONFIRM=$(CONFIRM)

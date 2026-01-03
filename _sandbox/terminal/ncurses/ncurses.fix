@@ -3,11 +3,16 @@ module Minilib.Terminal.Ncurses;
 import Minilib.Monad.IO;
 import Minilib.Text.Unicode;
 
+// Ncurses アプリケーション全体を表すオブジェクト。(ライブラリ内部で利用)
 type Ncurses = unbox struct {
     dtor: Destructor ()
 };
 
 namespace Ncurses {
+    // スクリーンを初期化してアプリケーションのメインルーチンを実行し、スクリーンを元の状態に戻す。
+    //
+    // # Parameters
+    // * `runner`: 標準ウィンドウを引数に取り、アプリケーションのメインルーチンを実行する関数
     run: (Window -> IOFail ()) -> IOFail ();
     run = |runner| (
         FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
@@ -18,19 +23,25 @@ namespace Ncurses {
                 pure()
             )
         };
-        let win = *ncurses.get_standard_window;
+        let win = *ncurses._get_standard_window;
         runner(win);;
         eval ncurses;
         pure()
     );
 
-    get_standard_window: [m: MonadIOFail] Ncurses -> m Window;
-    get_standard_window = |ncurses| lift_iofail $ do {
+    // スクリーン全体を表す標準ウィンドウを取得する。
+    _get_standard_window: [m: MonadIOFail] Ncurses -> m Window;
+    _get_standard_window = |ncurses| lift_iofail $ do {
         let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_standard_window()].lift;
         pure $ Window {
             dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
         }
     };
+
+    // An error value.
+    error: CInt;
+    error = FFI_CALL[CInt minilib_ncurses_err()];
+
 }
 
 type Window = unbox struct {
@@ -38,24 +49,38 @@ type Window = unbox struct {
 };
 
 namespace Window {
+    // Refreshes curses windows and lines.
+    // This function must be called to get actual output to the terminal, as other routines merely manipulate data structures.
+    // For details, see [wrefresh(3) - Linux man page](https://linux.die.net/man/3/wrefresh).
+    refresh: [m: MonadIOFail] Window -> m ();
+    refresh = |win| lift_iofail $ do {
+        win._check_err("refresh") $ |p_win|
+        FFI_CALL_IO[CInt wrefresh(Ptr), p_win]
+    };
+
+    // Makes a sub window:
+    //
+    // # Parameters
+    // * `x`: the left position on the screen.
+    // * `y`: the top position on the screen.
+    // * `w`: the number of columns.
+    // * `h`: the number of lines.
+    // * `parent`: the parent window.
     make_sub_window: [m: MonadIOFail] I64 -> I64 -> I64 -> I64 -> Window -> m Window;
     make_sub_window = |x, y, w, h, parent| lift_iofail $ do {
         let p_win = *parent.@dtor.borrow_io(|p_parent|
             FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt]
         ).lift;
-        if p_win == nullptr {
-            throw $ "subwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
-        };
-        let err = *FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt].lift;
-        if err != 0.to_CInt {
-            throw $ "keypad failed!"
-        };
         let win = Window {
             dtor: Destructor::make(p_win, |p_win|
                 FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
                 pure $ nullptr
             )
         };
+        lift_iofail $ do {
+            win._check_err("keypad") $ |p_win|
+            FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt]
+        };;
         pure $ win
     };
 
@@ -69,97 +94,95 @@ namespace Window {
         pure $ (w, h)
     };
 
-    _check_cint_err: String -> Window -> (Ptr -> IO CInt) -> IOFail ();
-    _check_cint_err = |name, win, ffi_call_io| (
-        let err = *win.@dtor.borrow_io(|p_win| ffi_call_io(p_win)).lift;
-        if err != 0.to_CInt { throw $ name + " failed!" };
-        pure()
+    _check_err_i: [m: MonadIOFail] String -> Window -> (Ptr -> IO CInt) -> m CInt;
+    _check_err_i = |name, win, ffi_call_io| lift_iofail $ do {
+        let ret = *win.@dtor.borrow_io(|p_win| ffi_call_io(p_win)).lift;
+        if ret == Ncurses::error { throw $ name + " failed!" };
+        pure $ ret
+    };
+
+    _check_err: [m: MonadIOFail] String -> Window -> (Ptr -> IO CInt) -> m ();
+    _check_err = |name, win, ffi_call_io| (
+        let ret = *_check_err_i(name, win, ffi_call_io);
+        pure() // ignore ret
     );
 
     clear: [m: MonadIOFail] Window -> m ();
-    clear = |win| lift_iofail $ do {
-        win._check_cint_err("clear") $ |p_win|
+    clear = |win| (
+        win._check_err("clear") $ |p_win|
         FFI_CALL_IO[CInt erase(Ptr), p_win]
-    };
+    );
 
     draw_border: [m: MonadIOFail] Window -> m ();
-    draw_border = |win| lift_iofail $ do {
-        win._check_cint_err("draw_border") $ |p_win|
+    draw_border = |win| (
+        win._check_err("draw_border") $ |p_win|
         FFI_CALL_IO[CInt minilib_ncurses_draw_border(Ptr), p_win]
-    };
+    );
 
     set_attr: [m: MonadIOFail] ChType -> Window -> m ();
-    set_attr = |chtype, win| lift_iofail $ do {
-        win._check_cint_err("set_attr") $ |p_win|
+    set_attr = |chtype, win| (
+        win._check_err("set_attr") $ |p_win|
         FFI_CALL_IO[CInt wattrset(Ptr, U32), p_win, chtype]
-    };
+    );
 
     set_color_pair: [m: MonadIOFail] ColorPair -> Attr -> Window -> m ();
-    set_color_pair = |color_pair, attr, win| lift_iofail $ do {
-        win._check_cint_err("set_color_pair") $ |p_win|
+    set_color_pair = |color_pair, attr, win| (
+        win._check_err("set_color_pair") $ |p_win|
         FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.to_U16, nullptr]
-    };
+    );
 
     move_to: [m: MonadIOFail] I64 -> I64 -> Window -> m ();
-    move_to = |x, y, win| lift_iofail $ do {
-        win._check_cint_err("move_to") $ |p_win|
+    move_to = |x, y, win| (
+        win._check_err("move_to") $ |p_win|
         FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.to_CInt, x.to_CInt]
-    };
+    );
 
     add_str: [m: MonadIOFail] String -> Window -> m ();
-    add_str = |str, win| lift_iofail $ do {
-        win._check_cint_err("add_str") $ |p_win|
+    add_str = |str, win| (
+        win._check_err("add_str") $ |p_win|
         str.borrow_c_str_io(|p_str|
             FFI_CALL_IO[CInt waddstr(Ptr, Ptr), p_win, p_str]
         )
-    };
+    );
 
     // Moves the cursor to `(x,y)`, then write the ASCII string.
     move_add_str: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
-    move_add_str = |x, y, str, win| lift_iofail $ do {
-        win._check_cint_err("move_add_str") $ |p_win|
+    move_add_str = |x, y, str, win| (
+        win._check_err("move_add_str") $ |p_win|
         str.borrow_c_str_io(|p_str|
             FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_str]
         )
-    };
+    );
 
     // Moves the cursor to `(x,y)`, then write the Unicode string.
     move_add_wstr: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
-    move_add_wstr = |x, y, str, win| lift_iofail $ do {
-        win._check_cint_err("move_add_wstr") $ |p_win|
+    move_add_wstr = |x, y, str, win| (
+        win._check_err("move_add_wstr") $ |p_win|
         let wchars = utf8_to_utf32(str.get_bytes.pop_back, []).push_back(0_U32);
         wchars.borrow_boxed_io(|p_wstr|
             FFI_CALL_IO[CInt mvwaddwstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_wstr]
         )
-    };
-
-    // Refreshes curses windows and lines.
-    // This function must be called to get actual output to the terminal, as other routines merely manipulate data structures.
-    // For details, see [wrefresh(3) - Linux man page](https://linux.die.net/man/3/wrefresh).
-    refresh: [m: MonadIOFail] Window -> m ();
-    refresh = |win| lift_iofail $ do {
-        win._check_cint_err("refresh") $ |p_win|
-        FFI_CALL_IO[CInt wrefresh(Ptr), p_win]
-    };
+    );
 
     // Reads a character from the window.
+    // If any error occurs, this function returns `Ncurses::error.to_I64`.
     // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch).
-    getch: [m: MonadIOFail] Window -> m I64;
-    getch = |win| lift_iofail $ do {
+    getch: [m: MonadIO] Window -> m I64;
+    getch = |win| lift_io $ do {
         win.@dtor.borrow_io(|p_win|
             FFI_CALL_IO[CInt wgetch(Ptr), p_win]
-        ).map(to_I64).lift_io
+        ).map(to_I64)
     };
 
     // Reads a character from the window, then convert it to a keyname.
     // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch) and
     // [keyname(3) - Linux man page](https://linux.die.net/man/3/keyname).
     get_key: [m: MonadIOFail] Window -> m String;
-    get_key = |win| lift_iofail $ do {
+    get_key = |win| (
         let ch = *win.getch;
-        if ch < 0 { pure $ "" };
+        if ch == Ncurses::error.to_I64 { pure $ "" };
         pure $ *keyname(ch)
-    };
+    );
 
     // Sets timeout for `getch` and `get_key`.
     // For details, see [wtimeout(3) - Linux man page](https://linux.die.net/man/3/wtimeout).
@@ -168,11 +191,10 @@ namespace Window {
     // * `delay`: If negative, blocking read is used. If `delay` is zero, non-blocking read is used.
     //            If `delay` is positive, then read blocks for `delay` milliseconds.
     // * `win`: A Window.
-    timeout: [m: MonadIOFail] I64 -> Window -> m I64;
+    timeout: [m: MonadIOFail] I64 -> Window -> m ();
     timeout = |delay, win| (
-        win.@dtor.borrow_io(|p_win|
-            FFI_CALL_IO[CInt wtimeout(Ptr, CInt), p_win, delay.to_CInt]
-        ).map(to_I64).lift_io
+        win._check_err("getch") $ |p_win|
+        FFI_CALL_IO[CInt wtimeout(Ptr, CInt), p_win, delay.to_CInt]
     );
 }
 

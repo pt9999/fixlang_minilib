@@ -75,6 +75,11 @@ void minilib_ncurses_finialize()
     endwin();       // finalize screen
 }
 
+int minilib_ncurses_err()
+{
+    return ERR;
+}
+
 WINDOW* minilib_ncurses_get_standard_window()
 {
     return stdscr;

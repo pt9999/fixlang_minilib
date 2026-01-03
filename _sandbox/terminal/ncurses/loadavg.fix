@@ -34,7 +34,7 @@ namespace App {
 
     read_loadavg: [m: MonadIOFail] m F64;
     read_loadavg = (
-        lift_iofail $ 
+        lift_iofail $
         with_file("/proc/loadavg", "r", |handle|
             let line = *read_line(handle);
             let fields = line.split(" ").to_array;
@@ -126,7 +126,7 @@ namespace Rainbow {
         let diffs = diffs.to_iter.flat_map(|diff| Iterator::from_map(|_| diff).take(5));
         let (rgbs, rgb) = diffs.fold(
             ([], (5, 0, 0)), |(dr, dg, db), (rgbs, (r, g, b))|
-            let rgbs = rgbs.push_back(rgb);
+            let rgbs = rgbs.push_back((r, g, b));
             let rgb = (r + dr, g + dg, b + db);
             (rgbs, rgb)
         );
@@ -138,22 +138,19 @@ namespace Rainbow {
         color_pairs.to_iter.foreach_m(|color|
             init_color_pair(color, color.to_I16, black)
         );;
-        //eval debug_eprintln("color_pairs=" + color_pairs.to_string);
-        //if true { lift_iofail $ throw $ "color_pairs=" + color_pairs.to_string };
         pure $ Rainbow {
             color_pairs: color_pairs
-            //color_pairs: range(1, 256).to_array
         }
     );
 
     make_rainbow_custom: [m: MonadIOFail] m Rainbow;
     make_rainbow_custom = (
-        let custom_color_range = (16, 100);
+        let custom_color_range = (16, 16 + 6 * 5);
         let (begin, end) = custom_color_range;
         range(begin, end).foreach_m(|color|
             let hue = 360.0 * (color - begin).to_F64 / (end - begin).to_F64;
             let (r, g, b) = hsv_to_rgb((hue, 1.0, 1.0));
-            let to_i = |v| max(0, min(255, (v * 255.0).to_I64));
+            let to_i = |v| max(0, min(1000, (v * 1000.0).to_I64));
             init_color(color.to_I16, r.to_i, g.to_i, b.to_i);;
             init_color_pair(color, color.to_I16, black);;
             pure()
@@ -164,7 +161,7 @@ namespace Rainbow {
     );
 
     // Converts HSV to RGB.
-    // 
+    //
     // # Parameters
     // * `h`: a hue (0.0 .. 360.0)
     // * `s`: a saturation (0.0 .. 1.0)
@@ -204,7 +201,6 @@ main: IO ();
 main = do {
     Ncurses::run $ |win| (
         let app = *App::make(win);
-        //init_custom_color_pairs;;
         let key_input_timeout = 100; // milliseconds
         app.@window.timeout(key_input_timeout);;
         loop_m(

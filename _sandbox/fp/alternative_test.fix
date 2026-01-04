@@ -67,29 +67,34 @@ test_array = (
     assert_equal("arr-arr", [1,2,3,4], a.or_else(b))
 );
 
-type ST a = StateT (String, I64) Option a;
-parse: String -> ST a -> Option a = |input, st| (
+type Parser a = StateT (String, I64) Option a;
+
+parse: String -> Parser a -> Option a = |input, st| (
     let ((input, pos), a) = *st.run_state_t((input, 0));
     pure $ a
 );
 
+match_any_char: Parser String = do {
+    let (input, pos) = *get_state;
+    if pos >= input.get_size { fail };
+    put_state((input, pos+1));;
+    pure $ input.get_sub(pos, pos+1)
+};
+
+match_alpha: Parser String = do {
+    match_any_char.filter(|c| "a" <= c && c <= "z")
+};
+
+match_digit: Parser String = do {
+    match_any_char.filter(|c| "0" <= c && c <= "9")
+};
+
+match_alpha_or_digit: Parser String = match_alpha.or_else(match_digit);
+
 test_state: TestCase;
 test_state = (
     make_test("test_state") $ |_|
-    let match_any_char: ST String = do {
-        let (input, pos) = *get_state;
-        if pos >= input.get_size { fail };
-        put_state((input, pos+1));;
-        pure $ input.get_sub(pos, pos+1)
-    };
-    let match_alpha = do {
-        match_any_char.filter(|c| "a" <= c && c <= "z")
-    };
-    let match_digit = do {
-        match_any_char.filter(|c| "0" <= c && c <= "9")
-    };
-    let match_alpha_or_digit = match_alpha.or_else(match_digit);
-    assert_equal("fail", none(), (fail: ST String).parse("abc"));;
+    assert_equal("fail", none(), (fail: Parser String).parse("abc"));;
     assert_equal("match_alpha", some("a"), match_alpha.parse("abc"));;
     assert_equal("match_alpha", none(), match_alpha.parse("012"));;
     assert_equal("match_digit", none(), match_digit.parse("abc"));;
@@ -103,6 +108,46 @@ test_state = (
     pure()
 );
 
+test_guard: TestCase;
+test_guard = (
+    make_test("test_guard") $ |_|
+    let arr = do {
+        let a = *[3, 4, 5];
+        let b = *[1, 2, 3];
+        guard(a % b == 0);;
+        pure $ a * 100 + b
+    };
+    assert_equal("eq", [301, 303, 401, 402, 501], arr)
+);
+
+test_filter: TestCase;
+test_filter = (
+    make_test("test_filter") $ |_|
+    let arr = do {
+        let a = *[3, 4, 5].filter(|x| x % 2 != 0);
+        let b = *[1, 2, 3].filter(|x| x % 2 != 0);
+        pure $ a * 100 + b
+    };
+    assert_equal("eq", [301, 303, 501, 503], arr)
+);
+
+test_if_exists: TestCase;
+test_if_exists = (
+    make_test("test_if_exists") $ |_|
+    let p: Parser String = do {
+        let a = *match_alpha.if_exists;
+        let b = *match_digit.if_exists;
+        // TODO: implement combine: [m: MonadAlt] (a -> a -> a) -> m a -> m a -> m a
+        // or implement concat: [t: Traversable, m: MonadAlt] (a -> a -> a) -> t (m a) -> m a
+        pure $ a.as_some_or("") + b.as_some_or("")
+    };
+    assert_equal("abc", some("a"), p.parse("abc"));;
+    assert_equal("012", some("0"), p.parse("012"));;
+    assert_equal("a0b1c2", some("a0"), p.parse("a0b1c2"));;
+    assert_equal("!#$", some(""), p.parse("!#$"));;
+    pure()
+);
+
 main: IO ();
 main = (
     [
@@ -111,6 +156,9 @@ main = (
         test_iofail,
         test_array,
         test_state,
+        test_guard,
+        test_filter,
+        test_if_exists,
     ]
     .run_test_driver
 );

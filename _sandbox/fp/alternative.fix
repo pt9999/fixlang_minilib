@@ -7,6 +7,7 @@ import Minilib.Monad.Error;
 trait MonadAlt = Monad + Functor + MonadAltIF;
 
 // An interface of monad which returns a successful result, or fails.
+// For each type `a`, the type `m a` should be a monoid, where `fail` is a unit and `or_else` is a binary operation.
 trait [m: * -> *] m: MonadAltIF {
     // `fail` is a monad which always fails.
     fail: m a;
@@ -67,7 +68,7 @@ guard = |condition| (
     pure()
 );
 
-// `monad.filter(condition)` attempts to perform `monad`, then check if the condition holds.
+// `monad.filter(condition)` performs `monad`, and if it succeeds, then checks whether the condition holds.
 // If the condition does not hold, it fails.
 filter: [m: MonadAlt] (a -> Bool) -> m a -> m a;
 filter = |condition, monad| (
@@ -76,13 +77,16 @@ filter = |condition, monad| (
     pure $ a
 );
 
+// `monad.if_exists` performs `monad`.
+// If `monad` succeeded, returns `some(x)` where `x` is the result value of `monad`.
+// If `monad` failed, returns `none()`.
 if_exists: [m: MonadAlt] m a -> m (Option a);
 if_exists = |monad| (
     monad.map(some).or_else(pure $ none())
 );
 
-// `zero_or_more(monad)` attempts to perform `monad` repeatedly until it fails,
-// then returns an array of the collected results.
+// `zero_or_more(monad)` attempts to perform `monad` repeatedly until it fails.
+// Returns an array of the succeeded results. The returned array may be empty.
 zero_or_more: [m: MonadAlt] m a -> m (Array a);
 zero_or_more = |monad| (
     let inner = fix $ |inner, out| (
@@ -94,9 +98,9 @@ zero_or_more = |monad| (
     inner([])
 );
 
-// `one_or_more(monad)` attempts to perform `monad` repeatedly until it fails,
-// then returns an array of the collected results.
-// If no result has been collected, it fails.
+// `one_or_more(monad)` attempts to perform `monad` repeatedly until it fails.
+// Returns an array of the succeeded results when `monad` succeeded at least once.
+// If `monad` failed with no success, it fails.
 one_or_more: [m: MonadAlt] m a -> m (Array a);
 one_or_more = |monad| (
     let inner = fix $ |inner, out| (
@@ -110,9 +114,9 @@ one_or_more = |monad| (
 );
 
 
-// `try_first(monads)` attempts to perform each monad in turn,
-// and returns the first successful result.
-// If all monads failed, it fails.
+// `try_first(monads)` performs each monad in turn until any of them succeeds.
+// If any of `monads` succeeded, returns its result.
+// If all of `monads` failed, it fails.
 try_first: [m: MonadAlt] Array (m a) -> m a;
 try_first = |monads| (
     monads.to_iter.fold(

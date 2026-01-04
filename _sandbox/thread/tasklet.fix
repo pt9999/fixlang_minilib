@@ -1,0 +1,86 @@
+module Main;
+
+import Minilib.Common.TimeEx;
+import Minilib.Thread.Future;
+import Minilib.Thread.TaskPool;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Monad.Trans;
+import Minilib.Trait.Traversable;
+
+type AIO a = StateT TaskPool IOFail a;
+
+trait fac: FutureFactory {
+    make_future: IOFail a -> fac -> IOFail (Future (Result ErrMsg a));
+}
+
+impl TaskPool: FutureFactory {
+    make_future = |iof, pool| (
+        Future::make(pool, iof.to_result)
+    );
+}
+
+type Tasklet a = Future (Result ErrMsg a);
+
+namespace Tasklet {
+    make_tasklet: IOFail a -> AIO (Tasklet a);
+    make_tasklet = |iof| (
+        let pool = *get_state;
+        Future::make(pool, iof.to_result).lift_iofail
+    );
+
+    then: (a -> IOFail b) -> Tasklet a -> AIO (Tasklet b);
+    then = |f, tasklet| (
+        make_tasklet(do {
+            let res_a = *tasklet.get;
+            match res_a {
+                err(e) => throw $ e,
+                ok(a) => f(a)
+            }
+        })
+    );
+
+    catch: (ErrMsg -> IOFail a) -> Tasklet a -> AIO (Tasklet a);
+    catch = |f, tasklet| (
+        make_tasklet(do {
+            let res_a = *tasklet.get;
+            match res_a {
+                err(e) => f(e),
+                ok(a) => pure $ a
+            }
+        })
+    );
+
+    collect: Array (Tasklet a) -> AIO (Tasklet (Array (Result ErrMsg a)));
+    collect = |tasklets| (
+        make_tasklet(do {
+            tasklets.to_iter.map(get).collect_m
+        })
+    );
+}
+
+
+test1: IO ();
+test1 = do {
+    println("=== test1 ===").lift;;
+    let sm: AIO () = do {
+        let tasklets = *range(0,8).map(|i|
+            let tasklet = *make_tasklet(do {
+                usleep((100 * (i+1)).to_U32);;
+                if i % 2 == 1 { throw $ "fail" + i.to_string };
+                pure $ i
+            });
+            let tasklet = *tasklet.then(|i| pure $ "success" + i.to_string);
+            let tasklet = *tasklet.catch(|err| pure $ "error:" + err);
+            let tasklet = *tasklet.then(|str| println(str).lift);
+            pure $ tasklet
+        ).collect_m;
+        let tasklet = *tasklets.collect;
+        tasklet.get.forget.lift_iofail
+        //usleep(10000_U32).lift_iofail // TODO: consider waiting all tasklets
+    };
+    let pool = *TaskPool::make(3).lift;
+    sm.eval_state_t(pool)
+}.try(eprintln);
+
+main: IO () = test1;

@@ -31,6 +31,12 @@ impl Var TaskPool: MakeFuture {
     );
 }
 
+make_future_rio: [e: HasTaskPool] IOFail a -> RIO e (Future (Result ErrMsg a));
+make_future_rio = |iof| (
+    let var_pool = (*ask).get_taskpool;
+    var_pool.make_future(iof.to_result)
+);
+
 type Tasklet e a = unbox union {
     tl_pure: a,
     tl_rio: RIO e (Future (Result ErrMsg a))
@@ -42,32 +48,38 @@ namespace Tasklet {
 
     from_iofail: [e: HasTaskPool] IOFail a -> Tasklet e a;
     from_iofail = |iof| (
-        Tasklet::from_rio $ do {
-            let var_pool = (*ask).get_taskpool;
-            var_pool.make_future(iof.to_result)
-        }
+        Tasklet::from_rio $ make_future_rio $ iof
     );
 
-    run: Tasklet e a -> RIO e (Future (Result ErrMsg a));
-    run = @data;
+    to_rio_future: [e: HasTaskPool] Tasklet e a -> RIO e (Future (Result ErrMsg a));
+    to_rio_future = |tasklet| (
+        match tasklet {
+            tl_pure(a) => make_future_rio(pure(a)),
+            tl_rio(rio) => rio
+        }
+    );
 
     then: [e: HasTaskPool] (a -> Tasklet e b) -> Tasklet e a -> Tasklet e b;
     then = |f, tasklet| (
         match tasklet {
             tl_pure(a) => f(a),
             tl_rio(rio) => Tasklet::from_rio $ do {
-                let var_pool =  (*ask).get_taskpool;
-                let future = *rio;
-                let res_a = *future.get.lift_iofail;
-                match res_a {
-                    err(e) => throw(e).lift_iofail, // TODO: this causes failure of RIO
-                    ok(a) => (
-                        let tasklet = f(a);
-                        let res = *tasklet.get;
-                        let iof = res.from_result;
-                        var_pool.make_future(iof.to_result)
-                    )
-                }
+                let env = *ask;
+                let iof = do {
+                    let future = *rio.run_reader_t(env);
+                    let res_a = *future.get.lift_iofail;
+                    match res_a {
+                        err(e) => (
+                            err(e).from_result
+                        ),
+                        ok(a) => (
+                            let tasklet = f(a);
+                            let res = *tasklet.get.run_reader_t(env);
+                            res.from_result
+                        )
+                    }
+                };
+                make_future_rio(iof)
             }
         }
     );
@@ -77,7 +89,6 @@ namespace Tasklet {
         match tasklet {
             tl_pure(a) => tl_pure(a),
             tl_rio(rio) => Tasklet::from_rio $ do {
-                let var_pool =  (*ask).get_taskpool;
                 let future = *rio;
                 let iof = do {
                     let res_a = *future.get;
@@ -86,7 +97,7 @@ namespace Tasklet {
                         ok(a) => pure $ a
                     }
                 };
-                var_pool.make_future(iof.to_result)
+                make_future_rio(iof)
             }
         }
     );
@@ -104,7 +115,10 @@ namespace Tasklet {
 
     get_all: [e: HasTaskPool] Array (Tasklet e a) -> RIO e (Array (Result ErrMsg a));
     get_all = |tasklets| (
-        tasklets.to_iter.map(get).collect_m
+        // start all futures
+        let futures = *tasklets.to_iter.map(to_rio_future).collect_m;
+        // wait for all futures
+        futures.to_iter.map(get).collect_m.lift_iofail
     );
 }
 
@@ -128,8 +142,10 @@ test1 = do {
     let rio: RIO (Var TaskPool) () = do {
         let tasklets = range(0,8).map(|i|
             let tasklet = Tasklet::from_iofail(do {
-                usleep((100 * (i+1)).to_U32);;
-                //if i % 2 == 1 { throw $ "fail" + i.to_string };
+                println(i.to_string + " sleep start").lift;;
+                usleep((300 * 1000 * (10-i)).to_U32);;
+                println(i.to_string + " sleep end").lift;;
+                if i % 2 == 1 { throw $ "fail" + i.to_string };
                 pure $ i
             });
             let tasklet = tasklet.then(|i| pure $ "success" + i.to_string);
@@ -138,10 +154,10 @@ test1 = do {
             tasklet
         ).to_array;
         tasklets.get_all.forget;;
-        usleep(10000000_U32).lift_iofail;;
+        //usleep(10000000_U32).lift_iofail;;
         pure()
     };
-    let pool = *TaskPool::make(3).lift;
+    let pool = *TaskPool::make(30).lift;    // Deadlocks if too few tasks are created
     let var_pool = *Var::make(pool).lift;
     rio.run_reader_t(var_pool)
 }.try(eprintln);

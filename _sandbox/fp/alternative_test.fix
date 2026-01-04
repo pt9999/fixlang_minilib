@@ -2,6 +2,8 @@ module Main;
 
 import Minilib.Monad.Alternative;
 import Minilib.Monad.State;
+import Minilib.Monad.Option;
+import Minilib.Monad.Result;
 import Minilib.Monad.Trans;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
@@ -39,6 +41,8 @@ test_result = (
     }
     .sequence.forget
 );
+
+// TODO: add OptionT, ResultT test
 
 test_iofail: TestCase;
 test_iofail = (
@@ -148,49 +152,87 @@ test_if_exists = (
     pure()
 );
 
-count_down: StateT I64 Option I64;
-count_down = do {
+// StateT s Option a == s -> Option (s, a)
+// where the state is not changed when it failed
+count_down_so: StateT I64 Option I64;
+count_down_so = do {
     let i = *get_state;
     if i <= 0 { fail };
     put_state(i - 1);;
     pure $ i
 };
 
-test_zero_or_more: TestCase;
-test_zero_or_more = (
-    make_test("test_zero_or_more") $ |_|
-    assert_equal("3", some $ [3,2,1], zero_or_more(count_down).eval_state_t(3));;
-    assert_equal("1", some $ [1], zero_or_more(count_down).eval_state_t(1));;
-    assert_equal("0", some $ [], zero_or_more(count_down).eval_state_t(0));;
+// OptionT (State s) a == s -> (s, Option a)
+// where the state may be changed even if it failed
+count_down_os: OptionT (State I64) I64;
+count_down_os = do {
+    let i = *get_state.lift_t;
+    if i <= 0 { fail };
+    put_state(i - 1).lift_t;;
+    pure $ i
+};
+
+run_so: s -> StateT s Option a -> Option (s, a);
+run_so = |s, so| so.run_state_t(s);
+
+run_os: s -> OptionT (State s) a -> (s, Option a);
+run_os = |s, os| os.run_option_t.run_state(s);
+
+test_zero_or_more_so: TestCase;
+test_zero_or_more_so = (
+    make_test("test_zero_or_more_so") $ |_|
+    assert_equal("3", some $ (0, [3,2,1]), zero_or_more(count_down_so).run_so(3));;
+    assert_equal("1", some $ (0, [1]), zero_or_more(count_down_so).run_so(1));;
+    assert_equal("0", some $ (0, []), zero_or_more(count_down_so).run_so(0));;
     pure()
 );
 
-test_one_or_more: TestCase;
-test_one_or_more = (
-    make_test("test_one_or_more") $ |_|
-    assert_equal("3", some $ [3,2,1], one_or_more(count_down).eval_state_t(3));;
-    assert_equal("1", some $ [1], one_or_more(count_down).eval_state_t(1));;
-    assert_equal("0", none(), one_or_more(count_down).eval_state_t(0));;
+test_one_or_more_so: TestCase;
+test_one_or_more_so = (
+    make_test("test_one_or_more_so") $ |_|
+    assert_equal("3", some $ (0, [3,2,1]), one_or_more(count_down_so).run_so(3));;
+    assert_equal("1", some $ (0, [1]), one_or_more(count_down_so).run_so(1));;
+    assert_equal("0", none(), one_or_more(count_down_so).run_so(0));;
     pure()
 );
 
-test_try_first: TestCase;
-test_try_first = (
-    make_test("test_try_first") $ |_|
+test_try_first_opt: TestCase;
+test_try_first_opt = (
+    make_test("test_try_first_opt") $ |_|
     let opt_array = range_step(10, 0, -1).map(|i| some(i)).to_array;
-    assert_equal("7", some $ 7, try_first(opt_array.map(filter(|x| x % 5 == 2))));;
+    assert_equal("2mod5", some $ 7, try_first(opt_array.map(filter(|x| x % 5 == 2))));;
     assert_equal("3", some $ 3, try_first(opt_array.map(filter(|x| x == 3))));;
     assert_equal("11", none(), try_first(opt_array.map(filter(|x| x == 11))));;
     pure()
 );
 
-test_try_all: TestCase;
-test_try_all = (
-    make_test("test_try_all") $ |_|
+test_try_first_os: TestCase;
+test_try_first_os = (
+    make_test("test_try_first_os") $ |_|
+    let os_array = Array::fill(20, count_down_os);
+    assert_equal("2mod5", (6, some $ 7), try_first(os_array.map(filter(|x| x % 5 == 2))).run_os(10));;
+    assert_equal("3", (2, some $ 3), try_first(os_array.map(filter(|x| x == 3))).run_os(10));;
+    assert_equal("11", (0, none()), try_first(os_array.map(filter(|x| x == 11))).run_os(10));;
+    pure()
+);
+
+test_try_all_opt: TestCase;
+test_try_all_opt = (
+    make_test("test_try_all_opt") $ |_|
     let opt_array = range_step(10, 0, -1).map(|i| some(i)).to_array;
-    assert_equal("7", some $ [7, 2], try_all(opt_array.map(filter(|x| x % 5 == 2))));;
+    assert_equal("2mod5", some $ [7, 2], try_all(opt_array.map(filter(|x| x % 5 == 2))));;
     assert_equal("3", some $ [3], try_all(opt_array.map(filter(|x| x == 3))));;
     assert_equal("11", some $ [], try_all(opt_array.map(filter(|x| x == 11))));;
+    pure()
+);
+
+test_try_all_os: TestCase;
+test_try_all_os = (
+    make_test("test_try_all_os") $ |_|
+    let os_array = Array::fill(20, count_down_os);
+    assert_equal("2mod5", (0, some $ [7,2]), try_all(os_array.map(filter(|x| x % 5 == 2))).run_os(10));;
+    assert_equal("3", (0, some $ [3]), try_all(os_array.map(filter(|x| x == 3))).run_os(10));;
+    assert_equal("11", (0, some $ []), try_all(os_array.map(filter(|x| x == 11))).run_os(10));;
     pure()
 );
 
@@ -205,10 +247,12 @@ main = (
         test_guard,
         test_filter,
         test_if_exists,
-        test_zero_or_more,
-        test_one_or_more,
-        test_try_first,
-        test_try_all,
+        test_zero_or_more_so,
+        test_one_or_more_so,
+        test_try_first_opt,
+        test_try_first_os,
+        test_try_all_opt,
+        test_try_all_os,
     ]
     .run_test_driver
 );

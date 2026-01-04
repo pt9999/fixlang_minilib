@@ -3,33 +3,31 @@ module Main;
 import Minilib.Common.TimeEx;
 import Minilib.Thread.Future;
 import Minilib.Thread.TaskPool;
-import Minilib.Monad.State;
+import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
 import Minilib.Trait.Traversable;
 
-type AIO a = StateT TaskPool IOFail a;
+type RIO e a = ReaderT e IOFail a;
 
-trait fac: FutureFactory {
-    make_future: IOFail a -> fac -> IOFail (Future (Result ErrMsg a));
+trait e: HasTaskPool {
+    get_taskpool: e -> TaskPool;
 }
 
-impl TaskPool: FutureFactory {
-    make_future = |iof, pool| (
-        Future::make(pool, iof.to_result)
-    );
+impl TaskPool: HasTaskPool {
+    get_taskpool = |e| e;
 }
 
 type Tasklet a = Future (Result ErrMsg a);
 
 namespace Tasklet {
-    make_tasklet: IOFail a -> AIO (Tasklet a);
+    make_tasklet: [e: HasTaskPool] IOFail a -> RIO e (Tasklet a);
     make_tasklet = |iof| (
-        let pool = *get_state;
+        let pool = (*ask).get_taskpool;
         Future::make(pool, iof.to_result).lift_iofail
     );
 
-    then: (a -> IOFail b) -> Tasklet a -> AIO (Tasklet b);
+    then: [e: HasTaskPool] (a -> IOFail b) -> Tasklet a -> RIO e (Tasklet b);
     then = |f, tasklet| (
         make_tasklet(do {
             let res_a = *tasklet.get;
@@ -40,7 +38,7 @@ namespace Tasklet {
         })
     );
 
-    catch: (ErrMsg -> IOFail a) -> Tasklet a -> AIO (Tasklet a);
+    catch: [e: HasTaskPool] (ErrMsg -> IOFail a) -> Tasklet a -> RIO e (Tasklet a);
     catch = |f, tasklet| (
         make_tasklet(do {
             let res_a = *tasklet.get;
@@ -51,7 +49,7 @@ namespace Tasklet {
         })
     );
 
-    collect: Array (Tasklet a) -> AIO (Tasklet (Array (Result ErrMsg a)));
+    collect: [e: HasTaskPool] Array (Tasklet a) -> RIO e (Tasklet (Array (Result ErrMsg a)));
     collect = |tasklets| (
         make_tasklet(do {
             tasklets.to_iter.map(get).collect_m
@@ -63,7 +61,7 @@ namespace Tasklet {
 test1: IO ();
 test1 = do {
     println("=== test1 ===").lift;;
-    let sm: AIO () = do {
+    let rio: RIO TaskPool () = do {
         let tasklets = *range(0,8).map(|i|
             let tasklet = *make_tasklet(do {
                 usleep((100 * (i+1)).to_U32);;
@@ -80,7 +78,7 @@ test1 = do {
         //usleep(10000_U32).lift_iofail // TODO: consider waiting all tasklets
     };
     let pool = *TaskPool::make(3).lift;
-    sm.eval_state_t(pool)
+    rio.run_reader_t(pool)
 }.try(eprintln);
 
 main: IO () = test1;

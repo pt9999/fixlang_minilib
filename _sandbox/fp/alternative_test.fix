@@ -1,0 +1,117 @@
+module Main;
+
+import Minilib.Monad.Alternative;
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+test_option: TestCase;
+test_option = (
+    make_test("test_option") $ |_|
+    assert_equal("fail", none(): Option I64, fail);;
+    assert_equal("none-none", none(): Option I64, none().or_else(none()));;
+    assert_equal("some-none", some(1), some(1).or_else(none()));;
+    assert_equal("none-some", some(2), none().or_else(some(2)));;
+    assert_equal("some-some", some(1), some(1).or_else(some(2)));;
+    do {
+        let x = *[none(), some(1)];
+        let y = *[none(), some(2)];
+        let z = *[none(), some(3)];
+        pure $ assert_equal("assoc:" + (x,y,z).to_string, x.or_else(y).or_else(z), x.or_else(y.or_else(z)))
+    }
+    .sequence.forget
+);
+
+test_result: TestCase;
+test_result = (
+    make_test("test_result") $ |_|
+    assert_equal("fail", err(""): Result ErrMsg I64, fail);;
+    assert_equal("err-err", err("e2"): Result ErrMsg I64, err("e1").or_else(err("e2")));;
+    assert_equal("ok-err", ok(1): Result ErrMsg I64, ok(1).or_else(err("e2")));;
+    assert_equal("err-ok", ok(2): Result ErrMsg I64, err("e1").or_else(ok(2)));;
+    assert_equal("ok-ok", ok(1): Result ErrMsg I64, ok(1).or_else(ok(2)));;
+    do {
+        let x = *[err("e1"), ok(1)];
+        let y = *[err("e2"), ok(2)];
+        let z = *[err("e3"), ok(3)];
+        pure $ assert_equal("assoc:" + (x,y,z).to_string, x.or_else(y).or_else(z), x.or_else(y.or_else(z)))
+    }
+    .sequence.forget
+);
+
+test_iofail: TestCase;
+test_iofail = (
+    make_test("test_iofail") $ |_|
+    let to_res = |iof: IOFail I64| iof.to_result.lift;
+    assert_equal("fail", err(""): Result ErrMsg I64, *fail.to_res);;
+    assert_equal("throw-throw", err("e2"): Result ErrMsg I64, *throw("e1").or_else(throw("e2")).to_res);;
+    assert_equal("pure-throw", ok(1): Result ErrMsg I64, *pure(1).or_else(throw("e2")).to_res);;
+    assert_equal("throw-pure", ok(2): Result ErrMsg I64, *throw("e1").or_else(pure(2)).to_res);;
+    assert_equal("pure-pure", ok(1): Result ErrMsg I64, *pure(1).or_else(pure(2)).to_res);;
+    do {
+        let x = *[throw("e1"), pure(1)];
+        let y = *[throw("e2"), pure(2)];
+        let z = *[throw("e3"), pure(3)];
+        pure $ do { assert_equal("assoc:" + (*x.to_res,*y.to_res,*z.to_res).to_string, *x.or_else(y).or_else(z).to_res, *x.or_else(y.or_else(z)).to_res) }
+    }
+    .sequence.forget
+);
+
+test_array: TestCase;
+test_array = (
+    make_test("test_array") $ |_|
+    assert_equal("fail", []: Array I64, fail);;
+    let a = [1,2];
+    let b = [3,4];
+    assert_equal("arr-arr", [1,2,3,4], a.or_else(b))
+);
+
+type ST a = StateT (String, I64) Option a;
+parse: String -> ST a -> Option a = |input, st| (
+    let ((input, pos), a) = *st.run_state_t((input, 0));
+    pure $ a
+);
+
+test_state: TestCase;
+test_state = (
+    make_test("test_state") $ |_|
+    let match_any_char: ST String = do {
+        let (input, pos) = *get_state;
+        if pos >= input.get_size { fail };
+        put_state((input, pos+1));;
+        pure $ input.get_sub(pos, pos+1)
+    };
+    let match_alpha = do {
+        match_any_char.filter(|c| "a" <= c && c <= "z")
+    };
+    let match_digit = do {
+        match_any_char.filter(|c| "0" <= c && c <= "9")
+    };
+    let match_alpha_or_digit = match_alpha.or_else(match_digit);
+    assert_equal("fail", none(), (fail: ST String).parse("abc"));;
+    assert_equal("match_alpha", some("a"), match_alpha.parse("abc"));;
+    assert_equal("match_alpha", none(), match_alpha.parse("012"));;
+    assert_equal("match_digit", none(), match_digit.parse("abc"));;
+    assert_equal("match_digit", some("0"), match_digit.parse("012"));;
+    assert_equal("match_alpha_or_digit", some("a"), match_alpha_or_digit.parse("abc"));;
+    assert_equal("match_alpha_or_digit", some("0"), match_alpha_or_digit.parse("012"));;
+    assert_equal("zero_or_more(match_alpha_or_digit)", some(["a", "0", "b", "1"]), zero_or_more(match_alpha_or_digit).parse("a0b1!#c2"));;
+    assert_equal("zero_or_more(match_alpha_or_digit)", some([]), zero_or_more(match_alpha_or_digit).parse("!#$"));;
+    assert_equal("one_or_more(match_alpha_or_digit)", some(["a", "0", "b", "1"]), one_or_more(match_alpha_or_digit).parse("a0b1!#c2"));;
+    assert_equal("one_or_more(match_alpha_or_digit)", none(), one_or_more(match_alpha_or_digit).parse("!#$"));;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_option,
+        test_result,
+        test_iofail,
+        test_array,
+        test_state,
+    ]
+    .run_test_driver
+);
+

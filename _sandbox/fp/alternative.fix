@@ -1,0 +1,131 @@
+module Minilib.Monad.Alternative;
+
+import Minilib.Monad.State;
+import Minilib.Monad.Trans;
+import Minilib.Monad.Error;
+
+trait MonadAlt = Monad + Functor + MonadAltIF;
+
+// An interface of monad which returns a successful result, or fails.
+trait [m: * -> *] m: MonadAltIF {
+    // `fail` is a monad which always fails.
+    fail: m a;
+    // `first.or_else(second)` is a monad. It performs `first` first, and if it failed, then performs `second`.
+    //
+    // # Parameters
+    // * `second`: a monad which is performed secondly.
+    // * `first`: a monad which is performed firstly.
+    or_else: m a -> m a -> m a;
+}
+
+impl Option: MonadAltIF {
+    fail = none();
+    or_else = |second, first| (
+        if first.is_some { first };
+        second
+    );
+}
+
+impl [e: Zero] Result e: MonadAltIF {
+    fail = err(zero);
+    or_else = |second, first| (
+        if first.is_ok { first };
+        second
+    );
+}
+
+impl IOFail: MonadAltIF {
+    fail = throw $ "";
+    or_else = |second, first| (
+        first.catch(|errmsg| second)
+    );
+}
+
+impl Array: MonadAltIF {
+    fail = [];
+    or_else = |second, first| (
+        first + second
+    );
+}
+
+impl [m: MonadAlt] StateT s m: MonadAltIF {
+    fail = fail.lift_t;
+    or_else = |second, first| (
+        make_state_t_monad $ |s|
+        first.run_state_t(s)
+        .or_else(
+            second.run_state_t(s)
+        )
+    );
+}
+
+// `guard(condition)` checks if the condition holds.
+// If the condition does not hold, it fails.
+guard: [m: MonadAlt] Bool -> m ();
+guard = |condition| (
+    if ! condition { fail };
+    pure()
+);
+
+// `monad.filter(condition)` attempts to perform `monad`, then check if the condition holds.
+// If the condition does not hold, it fails.
+filter: [m: MonadAlt] (a -> Bool) -> m a -> m a;
+filter = |condition, monad| (
+    let a = *monad;
+    if ! condition(a) { fail };
+    pure $ a
+);
+
+if_exists: [m: MonadAlt] m a -> m (Option a);
+if_exists = |monad| (
+    monad.map(some).or_else(pure $ none())
+);
+
+// `zero_or_more(monad)` attempts to perform `monad` repeatedly until it fails,
+// then returns an array of the collected results.
+zero_or_more: [m: MonadAlt] m a -> m (Array a);
+zero_or_more = |monad| (
+    let inner = fix $ |inner, out| (
+        do {
+            let a = *monad;
+            inner(out.push_back(a))
+        }.or_else(pure $ out)
+    );
+    inner([])
+);
+
+// `one_or_more(monad)` attempts to perform `monad` repeatedly until it fails,
+// then returns an array of the collected results.
+// If no result has been collected, it fails.
+one_or_more: [m: MonadAlt] m a -> m (Array a);
+one_or_more = |monad| (
+    let inner = fix $ |inner, out| (
+        do {
+            let a = *monad;
+            inner(out.push_back(a))
+        }.or_else(pure $ out)
+    );
+    let a = *monad;
+    inner([a])
+);
+
+
+// `try_first(monads)` attempts to perform each monad in turn,
+// and returns the first successful result.
+// If all monads failed, it fails.
+try_first: [m: MonadAlt] Array (m a) -> m a;
+try_first = |monads| (
+    monads.to_iter.fold(
+        fail, |monad, ret|
+        ret.or_else(monad)
+    )
+);
+
+// `try_all(monads)` attempts to perform each monad in turn,
+// and returns the all successful results.
+// If all monads failed, it returns an empty array.
+try_all: [m: MonadAlt] Array (m a) -> m (Array a);
+try_all = |monads| (
+    let array: Array (Option a) = *monads.to_iter.map(if_exists);
+    pure $ array.to_iter.filter_map(|opt| opt).to_array
+);

@@ -1,9 +1,12 @@
 all:
 
-test: test-applicative test-array-t test-compose test-const \
+test: test-alternative test-applicative test-array-t test-compose test-const \
 		test-effect test-either-t test-eq1 \
 		test-free test-free-t test-iterator-t test-pipe test-pipe-t \
 		test-traversable-a test-yield test-yield-t test-misc
+
+test-alternative:
+	fix run -f alternative.fix -f alternative_test.fix
 
 test-applicative:
 	fix run -f applicative.fix -f applicative_test.fix

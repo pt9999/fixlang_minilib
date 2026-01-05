@@ -4,8 +4,8 @@
 
 #include <uv.h>
 
-//#define LOG_DEBUG(X) printf X
-#define LOG_DEBUG(X)
+#define LOG_DEBUG(X) printf X
+//#define LOG_DEBUG(X)
 
 // ==================================
 // Type definitions and constants
@@ -95,18 +95,18 @@ uv_req_t* minilib_uv_req_init(size_t size, void* cleanup_func)
     return req;
 }
 
-void minilib_uv_req_ref(uv_req_t* req)
+void minilib_uv_req_retain(uv_req_t* req)
 {
-    LOG_DEBUG(("minilib_uv_req_ref req=%p\n", req));
+    LOG_DEBUG(("minilib_uv_req_retain req=%p\n", req));
     if (req != NULL && req->data != NULL) {
         minilib_uv_reqdata_t* data = req->data;
         data->refcount++;
     }
 }
 
-void minilib_uv_req_unref(uv_req_t* req)
+void minilib_uv_req_release(uv_req_t* req)
 {
-    LOG_DEBUG(("minilib_uv_req_unref req=%p\n", req));
+    LOG_DEBUG(("minilib_uv_req_release req=%p\n", req));
     if (req != NULL && req->data != NULL) {
         minilib_uv_reqdata_t* data = req->data;
         data->refcount--;

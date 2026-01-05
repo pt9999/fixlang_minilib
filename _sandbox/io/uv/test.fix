@@ -1,3 +1,49 @@
 module Test;
 
-test: IO () = pure();
+import AsyncTask;
+import Minilib.IO.Uv;
+import Minilib.Testing.UnitTest;
+
+test_loop_simple: TestCase;
+test_loop_simple = (
+    make_test("test_loop_simple") $ |_|
+    let loop = *UvLoop::make;
+    loop.run_default;;
+    pure()
+);
+
+test_loop_default: TestCase;
+test_loop_default = (
+    make_test("test_loop_default") $ |_|
+    let loop = UvLoop::default;
+    loop.run_default;;
+    pure()
+);
+
+test_fs_open: TestCase;
+test_fs_open = (
+    make_test("test_fs_open") $ |_|
+    let var = *Var::make(0).lift;
+    let loop = *UvLoop::make;
+    let path = "tmp.file.tmp";
+    let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
+    let mode = 0o666.to_CInt;
+    let cb = |fs: UvFs| (
+        //println("fs open callback called");;
+        var.Var::mod(add(1))
+    );
+    let fs = *UvFs::open(loop, path, flags, mode, cb);
+    loop.run_default;;
+    assert_equal("eq", 1, *var.get.lift);;
+    pure()
+);
+
+test: IO ();
+test = (
+    [
+        test_loop_simple,
+        test_loop_default,
+        test_fs_open,
+    ]
+    .run_test_driver
+);

@@ -1,3 +1,220 @@
 module Minilib.IO.Uv;
 
-test1: IO () = pure();
+log_debug: String -> ();
+//log_debug = debug_eprintln;
+log_debug = |str| ();
+
+//-----------------------------------------------------------------
+// MonadBorrow
+//-----------------------------------------------------------------
+
+trait MonadBorrow = Monad + MonadBorrowIF;
+
+trait [m: * -> *] m: MonadBorrowIF {
+    borrow_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m b;
+    borrow_m: (a -> m b) -> Destructor a -> m b;
+    borrow_c_str_m: (Ptr -> m b) -> String -> m b;
+}
+
+/*
+impl Iden: MonadBorrowIF {
+    borrow_boxed_m = |f| borrow_boxed(f >> Iden::get) >> Iden::make;
+    borrow_m = |f| borrow(f >> Iden::get) >> Iden::make;
+    borrow_c_str_m = |f| borrow_c_str(f >> Iden::get) >> Iden::make;
+}
+*/
+
+impl IO: MonadBorrowIF {
+    borrow_boxed_m = borrow_boxed_io;
+    borrow_m = borrow_io;
+    borrow_c_str_m = borrow_c_str_io;
+}
+
+impl IOFail: MonadBorrowIF {
+    borrow_boxed_m = |f| borrow_boxed_io(f >> to_result) >> from_io_result;
+    borrow_m = |f| borrow_io(f >> to_result) >> from_io_result;
+    borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
+}
+
+//-----------------------------------------------------------------
+// UvWrappedPtr
+//-----------------------------------------------------------------
+
+type UvWrappedPtr = unbox union {
+    owned: Destructor Ptr,
+    borrowed: Ptr,
+};
+
+namespace UvWrappedPtr {
+    make_owned: Ptr -> (Ptr -> IO Ptr) -> IO UvWrappedPtr;
+    make_owned = |ptr, dtor| (
+        pure $ owned $ *Destructor::make(ptr, dtor)
+    );
+
+    make_borrowed: Ptr -> UvWrappedPtr;
+    make_borrowed = borrowed;
+
+    borrow_ptr_m: [m: MonadBorrow] (Ptr -> m b) -> UvWrappedPtr -> m b;
+    borrow_ptr_m = |f, wrapped_ptr| (
+        match wrapped_ptr {
+            owned(dtor) => dtor.borrow_m(f),
+            borrowed(ptr) => f(ptr),
+        }
+    );
+}
+
+//-----------------------------------------------------------------
+// Error Handling
+//-----------------------------------------------------------------
+
+_check_err_i: IO CInt -> IOFail CInt;
+_check_err_i = |io| (
+    let err = *io.lift;
+    if err >= 0.to_CInt {
+        pure $ err
+    };
+    let buflen = 65536;
+    let buf = Array::fill(buflen, 0_U8);
+    let (buf, _) = *buf.mutate_boxed_io(|buf|
+        FFI_CALL_IO[() uv_strerror_r(CInt, Ptr, CSizeT), err, buf, buflen.to_CSizeT]
+    ).lift;
+    let errmsg: String = buf.push_back(0_U8).from_bytes.as_ok;
+    throw $ errmsg
+);
+
+_check_err: IO CInt -> IOFail ();
+_check_err = |io| (
+    io._check_err_i.forget
+);
+
+//-----------------------------------------------------------------
+// UvLoop
+//-----------------------------------------------------------------
+
+type UvLoop = unbox struct {
+    wptr: UvWrappedPtr
+};
+
+namespace UvLoop {
+    make: IOFail UvLoop;
+    make = (
+        let ptr = *FFI_CALL_IO[Ptr minilib_uv_loop_init()].lift;
+        if ptr == nullptr { throw $ "uv_loop_init failed!" };
+        pure $ UvLoop {
+            wptr: *UvWrappedPtr::make_owned(ptr, |ptr|
+                eval log_debug("dtor called");
+                FFI_CALL_IO[() minilib_uv_loop_close(Ptr), ptr].when(ptr != nullptr);;
+                pure $ nullptr
+            ).lift
+        }
+    );
+
+    default: UvLoop;
+    default = (
+        UvLoop {
+            wptr: UvWrappedPtr::make_borrowed $
+                FFI_CALL[Ptr uv_default_loop()]
+        }
+    );
+
+    borrow_loop_m: [m: MonadBorrow] (Ptr -> m b) -> UvLoop -> m b;
+    borrow_loop_m = |f, loop| (
+        loop.@wptr.borrow_ptr_m(f)
+    );
+
+    run_default: UvLoop -> IOFail ();
+    run_default = |loop| (
+        loop.borrow_loop_m(|p_loop|
+            _check_err $ FFI_CALL_IO[CInt minilib_uv_loop_run_default(Ptr), p_loop]
+        )
+    );
+}
+
+//-----------------------------------------------------------------
+// UvFs
+//-----------------------------------------------------------------
+
+type UvFs = unbox struct {
+    dtor: Destructor Ptr
+};
+
+type UvFsCallback = UvFs -> IO ();
+
+namespace UvFs {
+    init: IOFail UvFs;
+    init = (
+        let p_req = *FFI_CALL_IO[Ptr minilib_uv_fs_init()].lift;
+        if p_req == nullptr { throw $ "minilib_uv_fs_init failed!" };
+        UvFs::from_ptr(p_req).lift
+    );
+
+    from_ptr: Ptr -> IO UvFs;
+    from_ptr = |p_req| (
+        FFI_CALL_IO[() minilib_uv_req_ref(Ptr), p_req];;
+        pure $ UvFs {
+            dtor: *Destructor::make(p_req, |p_req|
+                FFI_CALL_IO[() minilib_uv_req_unref(Ptr), p_req];;
+                pure $ nullptr
+            )
+        }
+    );
+
+    open: UvLoop -> String -> CInt -> CInt -> UvFsCallback -> IOFail UvFs;
+    open = |loop, path, flags, mode, cb| (
+        let fs = *UvFs::init;
+        loop.borrow_loop_m(|p_loop|
+            fs.@dtor.borrow_m(|p_req|
+                // リクエスト発生のためリテインする
+                FFI_CALL_IO[() minilib_uv_req_ref(Ptr), p_req].lift;;
+                let box_cb: Box UvFsCallback = Box::make(cb);
+                let p_cb: Ptr = *box_cb.boxed_to_retained_ptr.lift;
+                eval log_debug("UvFs::open: (p_loop, p_req, p_cb)=" + (p_loop, p_req, p_cb).to_string);
+                FFI_CALL_IO[() minilib_uv_req_set_fix_cb(Ptr, Ptr), p_req, p_cb].lift;;
+                path.borrow_c_str_m(|p_path|
+                    FFI_CALL_IO[CInt minilib_uv_fs_open(Ptr, Ptr, Ptr, CInt, CInt), p_loop, p_req, p_path, flags.to_CInt, mode.to_CInt]
+                    ._check_err
+                )
+            )
+        );;
+        pure $ fs
+    );
+
+    // fs はあくまでもリクエストで、ファイルディスクリプタは fs->result に返ってくる
+    // リクエストの生存期間は、リクエスト発生からコールバックの呼び出しが完了するまでにするべき。
+    // コールバック内でリクエストのクリーンアップ処理を呼ぶべき。
+    // リクエストをキャンセルしないのなら、すぐに忘れてもいい。
+
+    minilib_uv_fs_open_callback : Ptr -> ();
+    minilib_uv_fs_open_callback = |p_req| (
+        let io: IO () = do {
+            eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
+            let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
+            eval log_debug("minilib_uv_fs_open_callback: p_cb=" + p_cb.to_string);
+            let box_cb: Box UvFsCallback = *p_cb.boxed_from_retained_ptr;
+            let cb: UvFsCallback = box_cb.@value;
+            let fs = *UvFs::from_ptr(p_req);
+            cb(fs);;
+            // コールバック完了のためリリースする
+            FFI_CALL_IO[() minilib_uv_req_unref(Ptr), p_req]  // release on callback end
+        };
+        io.unsafe_perform
+    );
+    FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
+}
+
+namespace UvFsFlags {
+    _find_flag: String -> CInt;
+    _find_flag = |name| (
+        name.borrow_c_str(|p_name|
+            FFI_CALL[CInt minilib_uv_fs_find_flag(Ptr), p_name]
+        )
+    );
+
+    _O_RDONLY: CInt = _find_flag("O_RDONLY");
+    _O_WRONLY: CInt = _find_flag("O_WRONLY");
+    _O_RDWR: CInt = _find_flag("O_RDWR");
+    _O_CREAT: CInt = _find_flag("O_CREAT");
+    _O_EXCL: CInt = _find_flag("O_EXCL");
+    _O_TRUNC: CInt = _find_flag("O_TRUNC");
+    _O_APPEND: CInt = _find_flag("O_APPEND");
+}

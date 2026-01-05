@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <uv.h>
+
+//#define LOG_DEBUG(X) printf X
+#define LOG_DEBUG(X)
 
 // ==================================
 // Type definitions and constants
@@ -17,138 +21,175 @@ typedef struct {
 
 /*
 typedef struct {
-    CURL *curl;                                 // curl_easy handle
-    char error_buf[CURL_ERROR_SIZE];            // a buffer where error messages are written
     BoxedValue boxed_values[MAX_BOXED_VALUES];  // manages many boxed values
-} CurlGlue;
+} UvGlue;
 */
+
 // ==================================
 // Prototype declarations
 // ==================================
 
-/*
-int _curl_glue_set_write_callback(CurlGlue* glue);
-void _curl_glue_release_boxed_value(CurlGlue* glue, int index);
-*/
+void minilib_uv_fs_open_callback(uv_fs_t *req);
+
 // ==================================
 // Functions
 // ==================================
 
-/*
-// Initializes a curl_glue structure.
-CurlGlue* curl_glue_init() {
-    // initializes a curl_easy handle
-    CURL* curl = curl_easy_init();
-    if (curl == NULL) {
-        return NULL;
-    }
+// ----------------------------------
+// uv_loop_t
+// ----------------------------------
 
-    // creates a curl_glue structure
-    CurlGlue* glue = (CurlGlue*) calloc(1, sizeof(CurlGlue));
-    glue->curl = curl;
-
-    // sets the error buffer
-    CURLcode res;
-    res = curl_easy_setopt(glue->curl, CURLOPT_ERRORBUFFER, glue->error_buf);
-    if (res != CURLE_OK) {
-        goto error;
-    }
-
-    return glue;
-
-error:
-    curl_easy_cleanup(glue->curl);
-    free(glue);
-    return NULL;
+uv_loop_t* minilib_uv_loop_init()
+{
+    uv_loop_t *loop = malloc(sizeof(uv_loop_t));
+    if (loop == NULL) return NULL;
+    uv_loop_init(loop);
+    LOG_DEBUG(("minilib_uv_loop_init loop=%p\n", loop))
+    return loop;
 }
 
-// Destructs a curl_glue structure.
-void curl_glue_cleanup(CurlGlue* glue) {
-    if (glue != NULL) {
-        if (glue->curl != NULL) {
-            curl_easy_cleanup(glue->curl);
-            glue->curl = NULL;
+void minilib_uv_loop_run_default(uv_loop_t* loop)
+{
+    LOG_DEBUG(("minilib_uv_loop_run_default loop=%p\n", loop))
+    uv_run(loop, UV_RUN_DEFAULT);
+}
+
+void minilib_uv_loop_close(uv_loop_t* loop)
+{
+    LOG_DEBUG(("minilib_uv_loop_close loop=%p\n", loop))
+    uv_loop_close(loop);
+    free(loop);
+}
+
+// ----------------------------------
+// uv_req_t
+// ----------------------------------
+
+typedef void (*minilib_uv_req_cleanup_func)(uv_req_t*);
+
+struct minilib_uv_reqdata_s {
+    uv_req_t* req;
+    minilib_uv_req_cleanup_func cleanup;
+    int refcount;
+    void* fix_cb;
+    void* client_data;
+};
+typedef struct minilib_uv_reqdata_s minilib_uv_reqdata_t;
+
+uv_req_t* minilib_uv_req_init(size_t size, void* cleanup_func)
+{
+    uv_req_t* req = calloc(size, 1);
+    if (req == NULL) return NULL;
+
+    minilib_uv_reqdata_t* data = calloc(sizeof(minilib_uv_reqdata_t), 1);
+    if (data == NULL) return NULL;
+    req->data = data;
+
+    data->req = req;
+    data->cleanup = cleanup_func;
+    data->refcount = 0;
+    data->fix_cb = NULL;
+    data->client_data = NULL;
+
+    return req;
+}
+
+void minilib_uv_req_ref(uv_req_t* req)
+{
+    LOG_DEBUG(("minilib_uv_req_ref req=%p\n", req))
+    if (req != NULL && req->data != NULL) {
+        minilib_uv_reqdata_t* data = req->data;
+        data->refcount++;
+    }
+}
+
+void minilib_uv_req_unref(uv_req_t* req)
+{
+    LOG_DEBUG(("minilib_uv_req_unref req=%p\n", req))
+    if (req != NULL && req->data != NULL) {
+        minilib_uv_reqdata_t* data = req->data;
+        data->refcount--;
+        if (data->refcount <= 0) {
+            minilib_uv_req_cleanup_func cleanup = data->cleanup;
+            (*cleanup)(data->req);
+            free(req);
+            free(data);
         }
-        for (int index = 0; index < MAX_BOXED_VALUES; index++) {
-            _curl_glue_release_boxed_value(glue, index);
-        }
-        free(glue);
     }
 }
 
-// Sets the target url.
-int curl_glue_set_url(CurlGlue* glue, const char* url) {
-    CURLcode res = curl_easy_setopt(glue->curl, CURLOPT_URL, url);
-    return (int) res;
+void minilib_uv_req_set_fix_cb(uv_req_t* req, void* fix_cb)
+{
+    minilib_uv_reqdata_t* data = req->data;
+    data->fix_cb = fix_cb;
+    LOG_DEBUG(("minilib_uv_req_set_fix_cb req=%p fix_cb=%p\n", req, fix_cb))
 }
 
-// Sends an HTTP request, and receives an HTTP response.
-int curl_glue_perform(CurlGlue* glue) {
-    CURLcode res = curl_easy_perform(glue->curl);
-    return (int) res;
+void* minilib_uv_req_get_fix_cb(uv_req_t* req)
+{
+    minilib_uv_reqdata_t* data = req->data;
+    return data->fix_cb;
 }
 
-// Retrieves an error message when an error has occured.
-const char* curl_glue_get_error_message(CurlGlue* glue) {
-    return glue->error_buf;
+void minilib_uv_req_set_client_data(uv_req_t* req, void* client_data)
+{
+    minilib_uv_reqdata_t* data = req->data;
+    data->client_data = client_data;
+    LOG_DEBUG(("minilib_uv_req_set_data req=%p client_data=%p\n", req, client_data))
 }
 
-// Sets a boxed value, such as a write callback function.
-// the index should be in range: 0 <= index && index < MAX_BOXED_VALUES.
-void curl_glue_set_boxed_value(CurlGlue* glue, int index, void* retained_ptr, void (*retain) (void*), void (*release) (void*)) {
-    if (index < 0 || MAX_BOXED_VALUES <= index) {
-        return;
-    }
-    BoxedValue boxed = {
-        retained_ptr, retain, release
-    };
-    glue->boxed_values[index] = boxed;
+void* minilib_uv_req_get_client_data(uv_req_t* req)
+{
+    minilib_uv_reqdata_t* data = req->data;
+    return data->client_data;
 }
 
-void _curl_glue_release_boxed_value(CurlGlue* glue, int index) {
-    if (index < 0 || MAX_BOXED_VALUES <= index) {
-        return;
-    }
-    BoxedValue boxed = glue->boxed_values[index];
-    if (boxed.retained_ptr == NULL) {
-        return;
-    }
-    if (boxed.release != NULL) {
-        //fprintf(stderr, "calling release\n");
-        (*boxed.release)(boxed.retained_ptr);
-        //fprintf(stderr, "calling release end\n");
-    }
-    boxed.retained_ptr = NULL;
-    boxed.retain = NULL;
-    boxed.release = NULL;
-    glue->boxed_values[index] = boxed;
+// ----------------------------------
+// uv_fs_t
+// ----------------------------------
+
+uv_fs_t* minilib_uv_fs_init()
+{
+    uv_fs_t *req = (uv_fs_t*) minilib_uv_req_init(sizeof(uv_fs_t), uv_fs_req_cleanup);
+    LOG_DEBUG(("minilib_uv_fs_init req=%p\n", req))
+    return req;
 }
 
-// Retrieves `retained_ptr` of the specified boxed value.
-void* curl_glue_get_boxed_value(CurlGlue* glue, int index) {
-    if (index < 0 || MAX_BOXED_VALUES <= index) {
-        return NULL;
+struct flagnames {
+    const char* name;
+    int flag;
+} flagnames[] = {
+    { "O_RDONLY", O_RDONLY },
+    { "O_WRONLY", O_WRONLY },
+    { "O_RDWR", O_RDWR },
+    { "O_CREAT", O_CREAT },
+    { "O_EXCL", O_EXCL },
+    { "O_TRUNC", O_TRUNC },
+    { "O_APPEND", O_APPEND },
+};
+
+int minilib_uv_fs_find_flag(const char* flagname)
+{
+    for (int i = 0; i < sizeof(flagnames) / sizeof(flagnames[0]); i++) {
+        if (0 == strcmp(flagname, flagnames[i].name))
+            return flagnames[i].flag;
     }
-    BoxedValue boxed = glue->boxed_values[index];
-    if (boxed.retained_ptr == NULL) {
-        return NULL;
-    }
-    if (boxed.retain != NULL) {
-        //fprintf(stderr, "calling retain\n");
-        (*boxed.retain)(boxed.retained_ptr);
-        //fprintf(stderr, "calling retain end\n");
-    }
-    return boxed.retained_ptr;
+    return 0;
 }
 
-int curl_glue_set_write_callback(CurlGlue* glue) {
-    CURLcode res;
-    res = curl_easy_setopt(glue->curl, CURLOPT_WRITEDATA, (void*) glue);
-    if (res != CURLE_OK) {
-        return (int) res;
-    }
-    extern size_t _callback_write_function(char*, size_t, size_t, void*);
-    res = curl_easy_setopt(glue->curl, CURLOPT_WRITEFUNCTION, _callback_write_function);
-    return (int) res;
+int minilib_uv_fs_open(uv_loop_t *loop, uv_fs_t *req, const char *path, int flags, int mode)
+{
+    LOG_DEBUG(("minilib_uv_fs_open loop=%p req=%p data=%p\n", loop, req, req->data))
+    return uv_fs_open(loop, req, path, flags, mode, minilib_uv_fs_open_callback);
 }
-*/
+
+int64_t minilib_uv_fs_get_result(uv_fs_t* req)
+{
+    ssize_t result = req->result;
+    return (int64_t) result;
+}
+
+uv_loop_t* minilib_uv_fs_get_loop(uv_fs_t* req)
+{
+    return req->loop;
+}

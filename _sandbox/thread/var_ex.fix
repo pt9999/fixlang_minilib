@@ -4,8 +4,17 @@ import AsyncTask;
 import Minilib.Testing.UnitTest;
 
 namespace VarEx {
-    act: (a -> IOFail (b, a)) -> Var a -> IOFail b;
+    act: (a -> IO (b, a)) -> Var a -> IO b;
     act = |f, var| (
+        var.lock(|a|
+            let (b, a) = *f(a);
+            var.Var::set(a);;
+            pure $ b
+        )
+    );
+
+    act_iof: (a -> IOFail (b, a)) -> Var a -> IOFail b;
+    act_iof = |f, var| (
         var.lock(|a|
             let res = *f(a).to_result;
             if res.is_err { pure $ err $ res.as_err };
@@ -19,11 +28,21 @@ namespace VarEx {
     act_xchg = |scapegoat, f, var| (
         var.lock(|a|
             var.Var::set(scapegoat);;
-            // we cannot use IOFail here, since if it fails, we have to restore the original `a`,
-            // and it makes `a` non-unique.
             let (b, a) = *f(a);
             var.Var::set(a);;
             pure $ b
+        )
+    );
+
+    //act_xchg_iof: a -> (a -> IOFail (b, a)) -> Var a -> IOFail b;
+    // we cannot privide `act_xchg_iof`, since if `IOFail` fails, we have to restore the original `a`,
+    // and it makes `a` non-unique.
+
+    mod_iof: (a -> IOFail a) -> Var a -> IOFail ();
+    mod_iof = |f, var| (
+        var.act_iof(|a| 
+            let a = *f(a);
+            pure $ ((), a)
         )
     );
 }
@@ -32,10 +51,25 @@ test_act: TestCase;
 test_act = (
     make_test("test_act") $ |_|
     let var: Var I64 = *Var::make(42).lift;
-    let str = *var.act(|i64| pure $ (i64.to_string, i64 + 1));
+    let str = *var.act(|i64| pure $ (i64.to_string, i64 + 1)).lift;
     assert_equal("str", "42", str);;
     let i64 = *var.get.lift;
     assert_equal("i64", 43, i64);;
+    pure()
+);
+
+test_act_iof: TestCase;
+test_act_iof = (
+    make_test("test_act_iof") $ |_|
+    let var: Var I64 = *Var::make(42).lift;
+    let str = *var.act_iof(|i64| pure $ (i64.to_string, i64 + 1));
+    assert_equal("str", "42", str);;
+    let i64 = *var.get.lift;
+    assert_equal("i64", 43, i64);;
+    let res: Result ErrMsg String = *var.act_iof(|i64| var.Var::mod(add(1)).lift;; throw $ "err").to_result.lift;
+    assert_equal("res", err("err"), res);;
+    let i64 = *var.get.lift;
+    assert_equal("i64", 44, i64);;
     pure()
 );
 
@@ -55,11 +89,28 @@ test_act_xchg = (
     pure()
 );
 
+test_mod_iof: TestCase;
+test_mod_iof = (
+    make_test("test_mod_iof") $ |_|
+    let f = |i64| if i64 % 2 != 0 { throw $ "err" } else { pure $ i64 + 1 };
+    let var: Var I64 = *Var::make(42).lift;
+    var.mod_iof(f);;
+    let i64 = *var.get.lift;
+    assert_equal("i64", 43, i64);;
+    let res = *var.mod_iof(f).to_result.lift;
+    assert_equal("res", err("err"), res);;
+    let i64 = *var.get.lift;
+    assert_equal("i64", 43, i64);;
+    pure()
+);
+
 main: IO ();
 main = (
     [
         test_act,
+        test_act_iof,
         test_act_xchg,
+        test_mod_iof,
     ]
     .run_test_driver 
 );

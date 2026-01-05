@@ -1,0 +1,65 @@
+module Main;
+
+import AsyncTask;
+import Minilib.Testing.UnitTest;
+
+namespace VarEx {
+    act: (a -> IOFail (b, a)) -> Var a -> IOFail b;
+    act = |f, var| (
+        var.lock(|a|
+            let res = *f(a).to_result;
+            if res.is_err { pure $ err $ res.as_err };
+            let (b, a) = res.as_ok;
+            var.Var::set(a);;
+            pure $ ok $ b
+        ).from_io_result
+    );
+
+    act_xchg: a -> (a -> IO (b, a)) -> Var a -> IO b;
+    act_xchg = |scapegoat, f, var| (
+        var.lock(|a|
+            var.Var::set(scapegoat);;
+            // we cannot use IOFail here, since if it fails, we have to restore the original `a`,
+            // and it makes `a` non-unique.
+            let (b, a) = *f(a);
+            var.Var::set(a);;
+            pure $ b
+        )
+    );
+}
+
+test_act: TestCase;
+test_act = (
+    make_test("test_act") $ |_|
+    let var: Var I64 = *Var::make(42).lift;
+    let str = *var.act(|i64| pure $ (i64.to_string, i64 + 1));
+    assert_equal("str", "42", str);;
+    let i64 = *var.get.lift;
+    assert_equal("i64", 43, i64);;
+    pure()
+);
+
+test_act_xchg: TestCase;
+test_act_xchg = (
+    make_test("test_act_xchg") $ |_|
+    let arr = Array::fill(1000, 0);
+    let arr = arr.set(0, 42);
+    let var = *Var::make(arr).lift;
+    let str = *var.act_xchg([], |arr|
+        let arr = arr.assert_unique(|_| "not unique");
+        pure $ (arr.@(0).to_string, arr.mod(0, add(1)))
+    ).lift;
+    assert_equal("str", "42", str);;
+    let arr = *var.get.lift;
+    assert_equal("arr.@(0)", 43, arr.@(0));;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_act,
+        test_act_xchg,
+    ]
+    .run_test_driver 
+);

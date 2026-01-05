@@ -235,6 +235,54 @@ namespace UvFs {
         io.unsafe_perform
     );
     FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
+
+/*
+    type UvFsWriteCallback = I64 -> UvFs -> IO ();
+
+    write: UvLoop -> UvFile -> Array U8 -> UvFsWriteCallback -> IOFail UvFs;
+    write = |loop, file, buf, cb| (
+        let fs = *UvFs::init;
+        loop.borrow_loop_m(|p_loop|
+            fs.@dtor.borrow_m(|p_req|
+                // リクエスト発生のためリテインする
+                FFI_CALL_IO[() minilib_uv_req_ref(Ptr), p_req].lift;;
+                eval log_debug("UvFs::write: (p_loop, p_req)=" + (p_loop, p_req).to_string);
+                // ユーザが用意したコールバック関数を設定する
+                fs.set_user_callback(cb).lift;;
+                let bufsize = buf.get_size.to_CSizeT;
+                buf.borrow_boxed_m(|p_buf|
+                    FFI_CALL_IO[CInt minilib_uv_fs_write(Ptr, Ptr, CInt, Ptr, CSizeT), p_loop, p_req, file, p_buf, bufsize]
+                    ._check_err
+                )
+            )
+        );;
+        pure $ fs
+    );
+
+    minilib_uv_fs_write_callback : Ptr -> ();
+    minilib_uv_fs_write_callback = |p_req| (
+        let io: IO () = do {
+            eval log_debug("minilib_uv_fs_write_callback: p_req=" + p_req.to_string);
+            let fs = *UvFs::from_ptr(p_req);
+            let result = *fs.get_result;
+            if result < 0 {
+                // TODO: エラー発生時に非同期にどうエラーを報告するか？
+                eprintln("write failed: result=" + result.to_string)
+            };
+            // 成功時はFixのコールバックを呼ぶ
+            let cb: UvFsWriteCallback = *fs.get_user_callback;
+            let written_size = result;
+            cb(written_size, fs)
+        };
+        let io: IO () = do {
+            io;;
+            // finally: コールバック完了のためリリースする
+            FFI_CALL_IO[() minilib_uv_req_unref(Ptr), p_req]  // release on callback end
+        };
+        io.unsafe_perform
+    );
+    FFI_EXPORT[minilib_uv_fs_write_callback, minilib_uv_fs_write_callback];
+    */
 }
 
 type UvFile = CInt;

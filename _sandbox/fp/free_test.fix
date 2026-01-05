@@ -1,0 +1,82 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.Free;
+import Minilib.Monad.IO;
+import Minilib.Monad.State;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+
+type Op a = box union {
+    op_iof: IOFail a,
+    op_write: (String, () -> a),
+    op_read: ((), String -> a),
+};
+
+impl Op: Functor {
+    map = |f, op| (
+        match op {
+            op_iof(iof) => op_iof(iof.map(f)),
+            op_write((arg, next)) => op_write((arg, next >> f)),
+            op_read((arg, next)) => op_read((arg, next >> f)),
+        }
+    );
+}
+
+impl Op: MonadIOIF {
+    lift_io = |io| lift_iofail(io.lift);
+}
+
+impl Op: MonadIOFailIF {
+    lift_iofail = |iof| op_iof(iof);
+}
+
+type FreeOp a = Free Op a;
+
+freeop1: FreeOp ();
+freeop1 = (
+    let input = *op_read(((), id)).lift_f;
+    op_write(("got " + input, id)).lift_f;;
+    println("print test").lift_io;;
+    let input = *op_read(((), id)).lift_f;
+    op_write(("got " + input, id)).lift_f;;
+    pure()
+);
+
+interpret_state: String -> FreeOp a -> StateT String IOFail a;
+interpret_state = |input, free| (
+    match free {
+        f_pure(a) => pure $ a,
+        f_functor(fa) => match fa {
+            op_iof(iof) => (
+                let next = *iof.lift_iofail; 
+                next.interpret_state(input)
+            ),
+            op_write((str, next)) => (
+                State::mod_state(|s| s + str + "\n");;
+                next().interpret_state(input)
+            ),
+            op_read(((), next)) => (
+                let (line, input) = input.split_first("\n");
+                next(line).interpret_state(input)
+            ),
+        }
+    }
+);
+
+test_freeop1: TestCase;
+test_freeop1 = (
+    make_test("test_freeop1") $ |_|
+    let input = "hello\nworld\n";
+    let sm = freeop1.interpret_state(input);
+    let (output, ()) = *sm.run_state_t("");
+    assert_equal("output", "got hello\ngot world\n", output)
+);
+
+main: IO ();
+main = (
+    [
+        test_freeop1,
+    ]
+    .run_test_driver
+);

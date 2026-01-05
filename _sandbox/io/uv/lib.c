@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #include <uv.h>
 
@@ -29,8 +30,12 @@ typedef struct {
 // Prototype declarations
 // ==================================
 
+// in lib.c
+void minilib_uv_handle_close_callback(uv_handle_t* handle);
+
+// in uv.fix
 void minilib_uv_fs_open_callback(uv_fs_t *req);
-//void minilib_uv_fs_write_callback(uv_fs_t *req);
+void minilib_uv_write_callback(uv_write_t *req, int status);
 
 // ==================================
 // Functions
@@ -60,6 +65,81 @@ void minilib_uv_loop_close(uv_loop_t* loop)
     LOG_DEBUG(("minilib_uv_loop_close loop=%p\n", loop));
     uv_loop_close(loop);
     free(loop);
+}
+
+// ----------------------------------
+// uv_handle_t
+// ----------------------------------
+struct minilib_uv_handledata_s {
+    uv_handle_t* handle;
+    int refcount;
+    void* fix_cb;
+    void* client_data;
+};
+typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
+
+uv_handle_t* minilib_uv_handle_alloc(size_t size)
+{
+    uv_handle_t* handle = calloc(size, 1);
+    if (handle == NULL) return NULL;
+
+    minilib_uv_handledata_t* data = calloc(sizeof(minilib_uv_handledata_t), 1);
+    if (data == NULL) return NULL;
+    handle->data = data;
+
+    data->handle = handle;
+    data->refcount = 0;
+    data->fix_cb = NULL;
+    data->client_data = NULL;
+
+    return handle;
+}
+
+void minilib_uv_handle_retain(uv_handle_t* handle)
+{
+    LOG_DEBUG(("minilib_uv_handle_retain handle=%p\n", handle));
+    if (handle != NULL && handle->data != NULL) {
+        minilib_uv_handledata_t* data = handle->data;
+        data->refcount++;
+    }
+}
+
+void minilib_uv_handle_release(uv_handle_t* handle)
+{
+    LOG_DEBUG(("minilib_uv_handle_release handle=%p\n", handle));
+    if (handle != NULL && handle->data != NULL) {
+        minilib_uv_handledata_t* data = handle->data;
+        data->refcount--;
+        if (data->refcount <= 0) {
+            uv_close(data->handle, minilib_uv_handle_close_callback);
+        }
+    }
+}
+
+void minilib_uv_handle_close_callback(uv_handle_t* handle)
+{
+    LOG_DEBUG(("minilib_uv_handle_close_callback handle=%p\n", handle));
+    if (handle != NULL) {
+        minilib_uv_handledata_t* data = handle->data;
+        handle->data = NULL;
+        free(handle);
+        if (data != NULL) {
+            free(data);
+        }
+    }
+}
+
+void minilib_uv_handle_set_client_data(uv_handle_t* handle, void* client_data)
+{
+    minilib_uv_handledata_t* data = handle->data;
+    data->client_data = client_data;
+    LOG_DEBUG(("minilib_uv_handle_set_data handle=%p client_data=%p\n", handle, client_data));
+}
+
+void* minilib_uv_handle_get_client_data(uv_handle_t* handle)
+{
+    minilib_uv_handledata_t* data = handle->data;
+    return data->client_data;
 }
 
 // ----------------------------------
@@ -122,14 +202,18 @@ void minilib_uv_req_release(uv_req_t* req)
 void minilib_uv_req_set_fix_cb(uv_req_t* req, void* fix_cb)
 {
     minilib_uv_reqdata_t* data = req->data;
+    assert (data->fix_cb == NULL);
     data->fix_cb = fix_cb;
     LOG_DEBUG(("minilib_uv_req_set_fix_cb req=%p fix_cb=%p\n", req, fix_cb));
 }
 
+// can be get only once
 void* minilib_uv_req_get_fix_cb(uv_req_t* req)
 {
     minilib_uv_reqdata_t* data = req->data;
-    return data->fix_cb;
+    void* fix_cb = data->fix_cb;
+    data->fix_cb = NULL;
+    return fix_cb;
 }
 
 void minilib_uv_req_set_client_data(uv_req_t* req, void* client_data)
@@ -212,3 +296,44 @@ int minilib_uv_fs_write(uv_loop_t *loop, uv_fs_t *req, uv_file file, const uint8
     return uv_fs_write(loop, req, file, bufs, nbufs, offset, minilib_uv_fs_write_callback);
 }
 */
+
+// ----------------------------------
+// uv_stream_t
+// ----------------------------------
+
+uv_write_t* minilib_uv_write_init()
+{
+    return (uv_write_t*) minilib_uv_req_init(sizeof(uv_write_t), NULL);
+}
+
+int minilib_uv_write(uv_write_t *req, uv_stream_t *handle, const char* buf, size_t bufsize)
+{
+    uv_buf_t bufs[1] = {0};
+    bufs[0].base = (char*) buf;
+    bufs[0].len = bufsize;
+    unsigned int nbufs = 1;
+    return uv_write(req, handle, bufs, nbufs, minilib_uv_write_callback);
+}
+ 
+
+// ----------------------------------
+// uv_pipe_t
+// ----------------------------------
+
+uv_pipe_t* minilib_uv_pipe_init(uv_loop_t* loop)
+{
+    uv_pipe_t *pipe = (uv_pipe_t*) minilib_uv_handle_alloc(sizeof(uv_pipe_t));
+    LOG_DEBUG(("minilib_uv_pipe_init pipe=%p\n", pipe));
+    int ipc = 0;
+    int err = uv_pipe_init(loop, pipe, ipc);
+    if (err < 0) {
+        minilib_uv_handle_release((uv_handle_t*) pipe);
+        return NULL;
+    }
+    return pipe;
+}
+
+int minilib_uv_pipe_open(uv_pipe_t* pipe, uv_file file)
+{
+    return uv_pipe_open(pipe, file);
+}

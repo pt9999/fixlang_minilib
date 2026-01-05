@@ -138,8 +138,6 @@ type UvFs = unbox struct {
     dtor: Destructor Ptr
 };
 
-type UvFsCallback = UvFs -> IO ();
-
 namespace UvFs {
     init: IOFail UvFs;
     init = (
@@ -159,17 +157,47 @@ namespace UvFs {
         }
     );
 
-    open: UvLoop -> String -> CInt -> CInt -> UvFsCallback -> IOFail UvFs;
+    get_result: UvFs -> IO I64;
+    get_result = |fs| (
+        fs.@dtor.borrow_m(|p_req|
+            FFI_CALL_IO[I64 minilib_uv_fs_get_result(Ptr), p_req]
+        )
+    );
+
+    // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
+    set_user_callback: cb -> UvFs -> IO ();
+    set_user_callback = |cb, fs| (
+        fs.@dtor.borrow_m(|p_req|
+            let box_cb: Box cb = Box::make(cb);
+            let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
+            eval log_debug("set_user_callback: p_cb=" + p_cb.to_string);
+            FFI_CALL_IO[() minilib_uv_req_set_fix_cb(Ptr, Ptr), p_req, p_cb]
+        )
+    );
+
+    // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
+    get_user_callback: UvFs -> IO cb;
+    get_user_callback = |fs| (
+        fs.@dtor.borrow_m(|p_req|
+            let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
+            eval log_debug("get_user_callback: p_cb=" + p_cb.to_string);
+            let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
+            pure $ box_cb.@value
+        )
+    );
+
+    type UvFsOpenCallback = UvFile -> UvFs -> IO ();
+
+    open: UvLoop -> String -> CInt -> CInt -> UvFsOpenCallback -> IOFail UvFs;
     open = |loop, path, flags, mode, cb| (
         let fs = *UvFs::init;
         loop.borrow_loop_m(|p_loop|
             fs.@dtor.borrow_m(|p_req|
                 // リクエスト発生のためリテインする
                 FFI_CALL_IO[() minilib_uv_req_ref(Ptr), p_req].lift;;
-                let box_cb: Box UvFsCallback = Box::make(cb);
-                let p_cb: Ptr = *box_cb.boxed_to_retained_ptr.lift;
-                eval log_debug("UvFs::open: (p_loop, p_req, p_cb)=" + (p_loop, p_req, p_cb).to_string);
-                FFI_CALL_IO[() minilib_uv_req_set_fix_cb(Ptr, Ptr), p_req, p_cb].lift;;
+                eval log_debug("UvFs::open: (p_loop, p_req)=" + (p_loop, p_req).to_string);
+                // ユーザが用意したコールバック関数を設定する
+                fs.set_user_callback(cb).lift;;
                 path.borrow_c_str_m(|p_path|
                     FFI_CALL_IO[CInt minilib_uv_fs_open(Ptr, Ptr, Ptr, CInt, CInt), p_loop, p_req, p_path, flags.to_CInt, mode.to_CInt]
                     ._check_err
@@ -188,13 +216,20 @@ namespace UvFs {
     minilib_uv_fs_open_callback = |p_req| (
         let io: IO () = do {
             eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
-            let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
-            eval log_debug("minilib_uv_fs_open_callback: p_cb=" + p_cb.to_string);
-            let box_cb: Box UvFsCallback = *p_cb.boxed_from_retained_ptr;
-            let cb: UvFsCallback = box_cb.@value;
             let fs = *UvFs::from_ptr(p_req);
-            cb(fs);;
-            // コールバック完了のためリリースする
+            let result = *fs.get_result;
+            if result < 0 {
+                // TODO: エラー発生時に非同期にどうエラーを報告するか？
+                eprintln("open failed: result=" + result.to_string)
+            };
+            // 成功時はFixのコールバックを呼ぶ
+            let cb: UvFsOpenCallback = *fs.get_user_callback;
+            let file: UvFile = result.to_CInt;
+            cb(file, fs)
+        };
+        let io: IO () = do {
+            io;;
+            // finally: コールバック完了のためリリースする
             FFI_CALL_IO[() minilib_uv_req_unref(Ptr), p_req]  // release on callback end
         };
         io.unsafe_perform
@@ -202,12 +237,34 @@ namespace UvFs {
     FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
 }
 
+type UvFile = CInt;
+
 namespace UvFsFlags {
     _find_flag: String -> CInt;
     _find_flag = |name| (
         name.borrow_c_str(|p_name|
             FFI_CALL[CInt minilib_uv_fs_find_flag(Ptr), p_name]
         )
+    );
+
+    from_mode_str: String -> CInt;
+    from_mode_str = |mode| (
+        let has = |str, mode| mode.find(str, 0).is_some;
+        if mode.has("r+") { 
+            UvFsFlags::_O_RDWR
+        } else if mode.has("r") {
+            UvFsFlags::_O_RDONLY
+        } else if mode.has("w+") {
+            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_RDWR).bit_or(UvFsFlags::_O_TRUNC)
+        } else if mode.has("w") {
+            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC)
+        } else if mode.has("a+") {
+            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_RDWR).bit_or(UvFsFlags::_O_APPEND)
+        } else if mode.has("a") {
+            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_APPEND)
+        } else {
+            0.to_CInt
+        }
     );
 
     _O_RDONLY: CInt = _find_flag("O_RDONLY");

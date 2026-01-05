@@ -1,0 +1,115 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.IO.Uv;
+import Minilib.Monad.Free;
+
+// できればこんなふうにしたい
+test1: IOFail () = (
+    let loop = UvLoop::default;
+
+    /*
+    let timer = *UvTimer::make(loop, 5.0, |timer|
+        println("hello").lift;;
+        let loop = *timer.get_loop;
+        pure()
+    );
+    */
+
+    let writer = UvOperation::uv_open_file("tmp.file", "w")
+    .then(|_| uv_write_file("blah"))
+    .then(|_| uv_close_file);
+    
+    writer.attach(loop);;
+
+    loop.run_default;;
+    pure()
+);
+
+main: IO ();
+main = test1.try(eprintln);
+
+type UvOperationF a = unbox union {
+    op_io: IO a,
+    op_open_file: ((String, String), () -> a),
+    op_read_file: (I64, String -> a),
+    op_write_file: (String, () -> a),
+    op_close_file: ((), () -> a),
+};
+
+impl UvOperationF: Functor {
+    map = |f, op| match op {
+        op_io(io) => op_io(io.map(f)),
+        op_open_file((arg, next)) => op_open_file((arg, next >> f)),
+        op_read_file((arg, next)) => op_read_file((arg, next >> f)),
+        op_write_file((arg, next)) => op_write_file((arg, next >> f)),
+        op_close_file((arg, next)) => op_close_file((arg, next >> f)),
+    };
+}
+
+type UvOperation a = Free UvOperationF a;
+
+namespace UvOperation {
+    uv_open_file: String -> String -> UvOperation ();
+    uv_open_file = |path, mode| (
+        op_open_file(((path, mode), id)).lift_f
+    );
+
+    uv_read_file: I64 -> UvOperation String;
+    uv_read_file = |size| (
+        op_read_file((size, id)).lift_f
+    );
+
+    uv_write_file: String -> UvOperation ();
+    uv_write_file = |str| (
+        op_write_file((str, id)).lift_f
+    );
+
+    uv_close_file: UvOperation ();
+    uv_close_file = (
+        op_close_file(((), id)).lift_f
+    );
+
+    then: (a -> UvOperation b) -> UvOperation a -> UvOperation b;
+    then = bind;
+
+    attach: UvLoop -> UvOperation () -> IOFail ();
+    attach = |loop, free| (
+        _interpret(loop, -1.to_CInt, free)
+    );
+
+    _interpret: UvLoop -> UvFile -> UvOperation () -> IOFail ();
+    _interpret = |loop, file, free| (
+        match free {
+            f_pure(a) => pure $ a,
+            f_functor(op) => match op {
+                op_io(io) => (
+                    let next = *io.lift;
+                    _interpret(loop, file, next)
+                ),
+                op_open_file((arg, next)) => (
+                    let (path, mode) = arg;
+                    _interpret_open(loop, path, mode, next)
+                ),
+                op_read_file((arg, next)) => undefined("attach op_read_file not impl"),
+                op_write_file((arg, next)) => undefined("attach op_write_file not impl"),
+                op_close_file((arg, next)) => undefined("attach op_close_file not impl"),
+            }
+        }
+    );
+
+    _interpret_open: UvLoop -> String -> String -> (() -> UvOperation ()) -> IOFail ();
+    _interpret_open = |loop, path, mode, next| (
+        let flags = UvFsFlags::from_mode_str(mode);
+        let mode = 0o666.to_CInt;
+        let fs = *UvFs::open(loop, path, flags, mode, |file, fs|
+            let res = *_interpret(loop, file, next()).to_result;
+            // TODO: コールバック内でエラーが起きたらどのように報告するか？
+            if res.is_err { eprintln("error: _interpret failed: " + res.as_err)};
+            pure()
+        );
+        // TODO: キャンセル方法を検討
+        pure()
+    );
+}
+

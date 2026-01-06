@@ -18,10 +18,77 @@ test_simple = (
     pure()
 );
 
+type Obj = box struct {
+    dtor: Destructor (IORef I64),
+};
+
+namespace Obj {
+    make: IORef I64 -> IO Obj;
+    make = |ior| pure $ Obj { 
+        dtor: *Destructor::make(ior, |ior|
+            let i = *ior.get;
+            if i == 0 { pure $ ior };
+            //eprintln("destructor is called: i=" + i.to_string);; 
+            ior.IORef::set(0);;
+            pure $ ior
+        )
+    };
+
+    get: Obj -> IO I64;
+    get = |obj| obj.@dtor.borrow_io(|ior| ior.get);
+
+    get_ior: Obj -> IO (IORef I64);
+    get_ior = |obj| obj.@dtor.borrow_io(|ior| pure $ ior);
+}
+
+test_dtor: TestCase;
+test_dtor = (
+    make_test("test_dtor") $ |_|
+    let ior_obj = *(
+        let ior: IORef I64 = *IORef::make(42).lift;
+        let obj = *Obj::make(ior).lift;
+        IORef::make(obj).lift
+    );
+    let obj2: Obj = *ior_obj.get.lift;
+    // now ior_obj is dead, but obj2 is alive
+    assert_equal("eq", 42, *obj2.get.lift);;
+    let ior: IORef I64 = *obj2.get_ior.lift;
+    // now obj2 is dead, but ior is alive
+    assert_equal("eq", 0, *ior.get.lift)
+);
+
+copy_ior: IORef a-> IOFail (IORef a);
+copy_ior = |IORef{dtor:dtor}| pure $ IORef{dtor:dtor};   // dtor is a boxed object, so only the reference of dtor is copyed
+
+check_ior: I64 -> I64 -> IORef Obj -> IOFail ();
+check_ior = |expected1, expected2, ior_obj| (
+    let obj: Obj = *ior_obj.get.lift;
+    assert_equal("eq", expected1, *obj.get.lift);;
+    let ior: IORef I64 = *obj.get_ior.lift;
+    assert_equal("eq", expected2, *ior.get.lift)
+);
+
+test_dtor_multi: TestCase;
+test_dtor_multi = (
+    make_test("test_dtor_multi") $ |_|
+    let ior_obj = *(
+        let ior: IORef I64 = *IORef::make(42).lift;
+        let obj = *Obj::make(ior).lift;
+        IORef::make(obj).lift
+    );
+    let ior_obj = *copy_ior(ior_obj);
+    check_ior(42, 42, ior_obj);;
+    let ior_obj = *copy_ior(ior_obj);
+    check_ior(42, 42, ior_obj);;
+    check_ior(42, 0, ior_obj)     // obj is destructed at last
+);
+
 test : IO ();
 test = (
     [
-        test_simple
+        test_simple,
+        test_dtor,
+        test_dtor_multi,
     ]
     .run_test_driver
 );

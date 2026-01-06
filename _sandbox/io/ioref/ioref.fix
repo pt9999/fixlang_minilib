@@ -1,0 +1,54 @@
+module Minilib.Common.IORef;
+
+type IORef a = unbox struct {
+    dtor: Destructor Ptr
+};
+
+namespace IORef {
+    make: a -> IO (IORef a);
+    make = |a| (
+        let box_a: Box a = Box::make(a);
+        let retained_ptr = *box_a.boxed_to_retained_ptr;    // +1
+        let f: Lazy (Box a) = |_| undefined("");
+        let retain = get_funptr_retain(f);
+        let release = get_funptr_release(f);
+        let ior = *FFI_CALL_IO[Ptr minilib_ioref_init(Ptr, Ptr, Ptr), retained_ptr, retain, release];
+        pure $ IORef {
+            dtor: *Destructor::make(ior, |ior|
+                if ior == nullptr { pure $ nullptr };
+                FFI_CALL_IO[() minilib_ioref_cleanup(Ptr), ior];;   // -1
+                pure $ nullptr
+            )
+        }
+    );
+
+    get: IORef a -> IO a;
+    get = |ioref| (
+        ioref.@dtor.borrow_io(|ior|
+            let retained_ptr = *FFI_CALL_IO[Ptr minilib_ioref_get_retained_ptr(Ptr), ior];
+            FFI_CALL_IO[() minilib_ioref_retain(Ptr), ior];;    // +1
+            let box_a: Box a = *retained_ptr.boxed_from_retained_ptr;    // -1
+            pure $ box_a.@value
+        )
+    );
+
+    set: a -> IORef a -> IO ();
+    set = |a, ioref| (
+        ioref.mod(|_| a)
+    );
+
+    put: a -> IORef a -> IO () = IORef::set;
+
+    mod: (a -> a) -> IORef a -> IO ();
+    mod = |f, ioref| (
+        ioref.@dtor.borrow_io(|ior|
+            let retained_ptr = *FFI_CALL_IO[Ptr minilib_ioref_get_retained_ptr(Ptr), ior];
+            let box_a: Box a = *retained_ptr.boxed_from_retained_ptr;    // -1
+            let a = box_a.@value;
+            let a = f(a);
+            let box_a: Box a = Box::make(a);
+            let retained_ptr = *box_a.boxed_to_retained_ptr;    // +1
+            FFI_CALL_IO[() minilib_ioref_set_retained_ptr(Ptr, Ptr), ior, retained_ptr]
+        )
+    );
+}

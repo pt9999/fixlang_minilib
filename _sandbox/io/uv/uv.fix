@@ -386,6 +386,10 @@ namespace UvFsFlags {
     _O_APPEND: CInt = _find_flag("O_APPEND");
 }
 
+//-----------------------------------------------------------------
+// UvStream
+//-----------------------------------------------------------------
+
 type UvStream = unbox struct {
     handle: UvHandle
 };
@@ -399,7 +403,7 @@ impl UvStream: ToUvHandle {
 }
 
 impl UvStream: FromPtr {
-    from_ptr = |p_stream| pure $ UvStream { handle: *UvHandle::from_ptr(p_stream) };
+    from_ptr = |p_stream| pure $ UvStream { handle: *from_ptr(p_stream) };
 }
 
 impl UvStream: BorrowPtrM {
@@ -413,10 +417,10 @@ namespace UvStream {
     // * status: ステータス。0未満ならエラー
     type UvWriteCallback = UvReq -> CInt -> IO ();
 
-    write: [stream: ToUvStream] Array U8 -> UvWriteCallback -> stream -> IOFail ();
+    write: [stream: ToUvStream] Array U8 -> UvWriteCallback -> stream -> IOFail UvReq;
     write = |buf, cb, stream| (
         let p_req = *FFI_CALL_IO[Ptr minilib_uv_write_init()].lift;
-        let req = *UvReq::from_ptr(p_req).lift;
+        let req = *from_ptr(p_req).lift;
         req.retain.lift;;    // リクエスト発生のためリテインする
         req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
         req.borrow_ptr_m(|p_req|
@@ -441,12 +445,28 @@ namespace UvStream {
     FFI_EXPORT[minilib_uv_write_callback, minilib_uv_write_callback];
 }
 
+//-----------------------------------------------------------------
+// UvPipe
+//-----------------------------------------------------------------
+
 type UvPipe = unbox struct {
     stream: UvStream
 };
 
+impl UvPipe: ToUvHandle {
+    to_uv_handle = @stream >> to_uv_handle;
+}
+
+impl UvPipe: ToUvStream {
+    to_uv_stream = @stream;
+}
+
 impl UvPipe: FromPtr {
     from_ptr = |p_pipe| pure $ UvPipe { stream: *from_ptr(p_pipe) };
+}
+
+impl UvPipe: BorrowPtrM {
+    borrow_ptr_m = |f, pipe| pipe.@stream.borrow_ptr_m(f);
 }
 
 namespace UvPipe {
@@ -456,12 +476,9 @@ namespace UvPipe {
         loop.borrow_ptr_m(|p_loop|
             let p_pipe = *FFI_CALL_IO[Ptr minilib_uv_pipe_init(Ptr), p_loop].lift;
             if p_pipe == nullptr { throw $ "minilib_uv_pipe_init failed!" };
-            UvPipe::from_ptr(p_pipe)
+            from_ptr(p_pipe).lift
         )
     );
-
-    borrow_ptr_m: [m: MonadBorrow] (Ptr -> m b) -> UvPipe -> m b;
-    borrow_ptr_m = |f, pipe| pipe.@stream.borrow_ptr_m(f);
 
     // Open an existing file descriptor as a pipe.
     open: UvFile -> UvPipe -> IOFail ();

@@ -43,12 +43,46 @@ test_fs_open = (
     pure()
 );
 
+test_pipe_open: TestCase;
+test_pipe_open = (
+    make_test("test_pipe_open") $ |_|
+    let loop = *UvLoop::make;
+    let pipe = *UvPipe::init(loop);
+    pipe.open(UvFile::stdout);;
+    loop.run_default;;
+    pure()
+);
+
+test_pipe_write: TestCase;
+test_pipe_write = (
+    make_test("test_pipe_write") $ |_|
+    let var = *Var::make("").lift;
+    let loop = *UvLoop::make;
+    let pipe = *UvPipe::init(loop);
+    pipe.open(UvFile::stdout);;
+    let cb = |write: UvReq, status: CInt| (
+        if status >= 0.to_CInt {
+            println("write success");;
+            var.Var::set("write success")
+        } else {
+            var.Var::set("write error: " + Uv::strerror(status))
+        }
+    );
+    let buf = "test_pipe_write: hello world\n".get_bytes.pop_back;
+    pipe.write(buf, cb);;
+    pipe.close.lift;;
+    loop.run_default;;
+    pure()
+);
+
 test: IO ();
 test = (
     [
         test_loop_simple,
         test_loop_default,
         test_fs_open,
+        test_pipe_open,
+        test_pipe_write,
     ]
     .run_test_driver
 );

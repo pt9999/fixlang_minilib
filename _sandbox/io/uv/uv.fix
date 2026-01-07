@@ -3,8 +3,8 @@ module Minilib.IO.Uv;
 import Minilib.Monad.IO;
 
 log_debug: String -> ();
-//log_debug = |str| debug_eprintln("\u001b[035m[Minilib.IO.Uv]\u001b[m " + str);
-log_debug = |str| ();
+log_debug = |str| debug_eprintln("\u001b[035m[Minilib.IO.Uv]\u001b[m " + str);
+//log_debug = |str| ();
 
 //-----------------------------------------------------------------
 // MonadBorrow
@@ -93,6 +93,9 @@ namespace Uv {
         let errmsg: String = buf.push_back(0_U8).from_bytes.as_ok;
         errmsg
     );
+
+    eof: CInt;
+    eof = FFI_CALL[CInt minilib_uv_get_uv_eof()];
 }
 
 _check_err_i: IO CInt -> IOFail CInt;
@@ -183,6 +186,28 @@ namespace UvHandle {
             FFI_CALL_IO[() minilib_uv_handle_close(Ptr), p_handle]
         )
     );
+    
+    // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
+    set_user_callback: cb -> UvHandle t -> IO ();
+    set_user_callback = |cb, handle| (
+        handle.borrow_ptr_m(|p_handle|
+            let box_cb: Box cb = Box::make(cb);
+            let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
+            eval log_debug("UvHandle::set_user_callback: p_cb=" + p_cb.to_string);
+            FFI_CALL_IO[() minilib_uv_handle_set_fix_cb(Ptr, Ptr), p_handle, p_cb]
+        )
+    );
+
+    // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
+    get_user_callback: UvHandle t -> IO cb;
+    get_user_callback = |handle| (
+        handle.borrow_ptr_m(|p_handle|
+            let p_cb = *FFI_CALL_IO[Ptr minilib_uv_handle_get_fix_cb(Ptr), p_handle];
+            eval log_debug("UvHandle::get_user_callback: p_cb=" + p_cb.to_string);
+            let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
+            pure $ box_cb.@value
+        )
+    );
 }
 
 //-----------------------------------------------------------------
@@ -230,7 +255,7 @@ namespace UvReq {
         req.borrow_ptr_m(|p_req|
             let box_cb: Box cb = Box::make(cb);
             let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
-            eval log_debug("set_user_callback: p_cb=" + p_cb.to_string);
+            eval log_debug("UvReq::set_user_callback: p_cb=" + p_cb.to_string);
             FFI_CALL_IO[() minilib_uv_req_set_fix_cb(Ptr, Ptr), p_req, p_cb]
         )
     );
@@ -240,7 +265,7 @@ namespace UvReq {
     get_user_callback = |req| (
         req.borrow_ptr_m(|p_req|
             let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
-            eval log_debug("get_user_callback: p_cb=" + p_cb.to_string);
+            eval log_debug("UvReq::get_user_callback: p_cb=" + p_cb.to_string);
             let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
             pure $ box_cb.@value
         )
@@ -376,6 +401,61 @@ trait tag: IsUvStreamTag {}
 impl UvStreamTag: IsUvStreamTag {}
 
 type UvStream = UvHandle UvStreamTag;
+
+namespace UvStream {
+    // read のコールバック
+    // # Parameters
+    // * stream: ストリーム(uv_stream_t*)
+    // * nread: 読み込んだバイト数。0未満ならエラー。ただし Uv::eof の場合は EOFを表す。
+    // * bytes: 読み込んだデータ
+    type UvReadCallback = UvStream -> I64 -> Array U8 -> IO ();
+
+    read_start: [t: IsUvStreamTag] UvReadCallback -> UvHandle t -> IOFail ();
+    read_start = |cb, stream| (
+        stream.borrow_ptr_m(|p_stream|
+            let ret = *FFI_CALL_IO[CInt minilib_uv_is_read_started(Ptr), p_stream].lift;
+            if ret != 0.to_CInt {
+                throw $ "reading already started"
+            };
+            stream.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する(retain)
+            FFI_CALL_IO[CInt minilib_uv_read_start(Ptr), p_stream]
+            ._check_err
+        )
+    );
+    minilib_uv_read_callback : Ptr -> I64 -> Ptr -> ();
+    minilib_uv_read_callback = |p_stream, nread, p_buf| (
+        eval log_debug("minilib_uv_read_callback: p_stream=" + p_stream.to_string);
+        let stream: UvStream = *from_ptr(p_stream);
+        let cb: UvReadCallback = *stream.get_user_callback;     // ユーザが用意したコールバック関数を取得する(release)
+        stream.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        let bytes = *if nread <= 0 { pure $ [] }
+        else {
+            let bytes = Array::fill(nread, 0_U8);
+            let (bytes, ()) = *bytes.mutate_boxed_io(|p_bytes|
+                FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, p_buf, nread.to_CSizeT]
+            );
+            pure $ bytes
+        };
+        cb(stream, nread, bytes)
+    ).unsafe_perform;
+    FFI_EXPORT[minilib_uv_read_callback, minilib_uv_read_callback];
+
+    read_stop: [t: IsUvStreamTag] UvHandle t -> IOFail ();
+    read_stop = |stream| (
+        let ret = *stream.borrow_ptr_m(|p_stream|
+            FFI_CALL_IO[CInt minilib_uv_is_read_started(Ptr), p_stream]
+        ).lift;
+        if ret == 0.to_CInt {
+            pure()
+        };
+        let err = *stream.borrow_ptr_m(|p_stream|
+            FFI_CALL_IO[CInt minilib_uv_read_stop(Ptr), p_stream]
+        ).lift;
+        let cb: UvReadCallback = *stream.get_user_callback.lift;     // ユーザが用意したコールバック関数を取得する(release)
+        pure(err)._check_err
+    );
+
+}
 
 //-----------------------------------------------------------------
 // UvWrite

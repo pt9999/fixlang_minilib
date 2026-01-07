@@ -5,8 +5,8 @@
 
 #include <uv.h>
 
-//#define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
-#define LOG_DEBUG(X)
+#define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
+//#define LOG_DEBUG(X)
 
 // ==================================
 // Type definitions and constants
@@ -23,10 +23,21 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle);
 // in uv.fix
 void minilib_uv_fs_open_callback(uv_fs_t *req);
 void minilib_uv_write_callback(uv_write_t *req, int status);
+void minilib_uv_read_callback(uv_stream_t *stream, int64_t nread, const char* buf);
+
 
 // ==================================
 // Functions
 // ==================================
+
+// ----------------------------------
+// Error handling
+// ----------------------------------
+
+int minilib_uv_get_uv_eof()
+{
+    return UV_EOF;
+}
 
 // ----------------------------------
 // uv_loop_t
@@ -60,6 +71,7 @@ void minilib_uv_loop_close(uv_loop_t* loop)
 struct minilib_uv_handledata_s {
     int refcount;
     void* fix_cb;
+    int read_started;
     void* client_data;
 };
 typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
@@ -75,6 +87,7 @@ uv_handle_t* minilib_uv_handle_alloc(size_t size)
 
     data->refcount = 0;
     data->fix_cb = NULL;
+    data->read_started = 0;
     data->client_data = NULL;
 
     return handle;
@@ -152,6 +165,23 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle)
             free(data);
         }
     }
+}
+
+void minilib_uv_handle_set_fix_cb(uv_handle_t* handle, void* fix_cb)
+{
+    minilib_uv_handledata_t* data = handle->data;
+    assert (data->fix_cb == NULL);
+    data->fix_cb = fix_cb;
+    LOG_DEBUG(("minilib_uv_handle_set_fix_cb handle=%p fix_cb=%p\n", handle, fix_cb));
+}
+
+// can be get only once
+void* minilib_uv_handle_get_fix_cb(uv_handle_t* handle)
+{
+    minilib_uv_handledata_t* data = handle->data;
+    void* fix_cb = data->fix_cb;
+    data->fix_cb = NULL;
+    return fix_cb;
 }
 
 void minilib_uv_handle_set_client_data(uv_handle_t* handle, void* client_data)
@@ -328,6 +358,49 @@ int minilib_uv_fs_write(uv_loop_t *loop, uv_fs_t *req, uv_file file, const uint8
 // ----------------------------------
 // uv_stream_t
 // ----------------------------------
+
+void minilib_uv_read_alloc_cb(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
+{
+    LOG_DEBUG(("minilib_uv_read_alloc_cb suggested_size=%lu\n", (uint64_t) suggested_size));
+    buf->base = malloc(suggested_size);
+    buf->len = suggested_size;
+}
+
+void minilib_uv_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
+{
+    LOG_DEBUG(("minilib_uv_read_cb nread=%ld\n", (int64_t) nread));
+    minilib_uv_read_callback(stream, (int64_t) nread, buf->base);
+    free(buf->base);
+}
+
+int minilib_uv_is_read_started(uv_stream_t *stream)
+{
+    minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
+    return data->read_started;
+}
+
+int minilib_uv_read_start(uv_stream_t *stream)
+{
+    LOG_DEBUG(("minilib_uv_read_start stream=%p\n", stream));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
+    if (data->read_started) return UV_EALREADY;
+    int err = uv_read_start(stream, minilib_uv_read_alloc_cb, minilib_uv_read_cb);
+    if (err < 0) return err;
+    data->read_started = 1;
+    return err;
+}
+
+int minilib_uv_read_stop(uv_stream_t *stream)
+{
+    LOG_DEBUG(("minilib_uv_read_stop stream=%p\n", stream));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
+    if (!data->read_started) return 0;
+    int err = uv_read_stop(stream);
+    if (err < 0) return err;
+    data->read_started = 0;
+    return err;
+}
+
 
 // ----------------------------------
 // uv_write_t

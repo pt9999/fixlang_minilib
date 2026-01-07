@@ -109,14 +109,78 @@ test_pipe_write = (
     pure()
 );
 
+test_pipe_read: TestCase;
+test_pipe_read = (
+    make_test("test_pipe_read") $ |_|
+    let log_debug: String -> IO () = |str| println("[TEST] " + str);
+    //let log_debug: String -> IO () = |str| pure();
+    let open_file = |loop, path, cb_open| (
+        let flags = UvFsFlags::_O_RDONLY;
+        let mode = 0o666.to_CInt;
+        let fs = *UvFs::open(loop, path, flags, mode, cb_open);
+        pure()
+    ): IOFail ();
+    let read_start = |loop, file, cb_read| (
+        let pipe = *UvPipe::init(loop);
+        pipe.open(file);;
+        pipe.read_start(cb_read)
+    ): IOFail ();
+    let cb_read = |var| |stream: UvStream, nread: I64, bytes: Array U8| (
+        log_debug("cb_read");;
+        if nread >= 0 {
+            let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
+            var.Var::mod(|val| val + str);;
+            log_debug("read continue")
+        } else if nread == Uv::eof.to_I64 {
+            stream.read_stop.try(eprintln);;
+            stream.close;;
+            log_debug("read completed");;
+            pure()
+        } else {
+            let err = nread.to_CInt;
+            var.Var::set("read error: " + Uv::strerror(err));;
+            stream.read_stop.try(eprintln);;
+            stream.close;;
+            log_debug("read error");;
+            pure()
+        }
+    ): IO ();
+    let cb_open = |var, loop, contents| |fs: UvFs| (
+        log_debug("cb_open start").lift;;
+        let result = *fs.get_result.lift;
+        if result < 0 {
+            throw $ "open error: " + Uv::strerror(result.to_CInt)
+        };
+        let file: UvFile = result.to_CInt;
+        log_debug("cb_open: file=" + file.to_string).lift;;
+        read_start(loop, file, cb_read(var))
+    ).try(|errmsg| var.Var::set(errmsg)): IO ();
+    let var = *Var::make("").lift;
+    let loop = *UvLoop::make;
+    let contents = "hello world\n";
+    let path = "tmp.file2.tmp";
+    write_file_string(path, contents);;
+    open_file(loop, path, cb_open(var, loop, contents));;
+    loop.run_default;;
+    log_debug("run_default done").lift;;
+    let actual = *var.get.lift;
+    assert_equal("var", contents, actual);;
+    unlink(path);;
+    pure()
+);
+
+
 test: IO ();
 test = (
     [
+        /*
         test_loop_simple,
         test_loop_default,
         test_fs_open,
         test_pipe_open,
         test_pipe_write,
+        */
+        test_pipe_read,
     ]
     .run_test_driver
 );

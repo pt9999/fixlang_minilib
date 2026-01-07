@@ -1,6 +1,6 @@
 module Minilib.IO.Uv;
 
-//import Minilib.Monad.IO;
+import Minilib.Monad.IO;
 
 log_debug: String -> ();
 log_debug = debug_eprintln;
@@ -43,7 +43,7 @@ impl IOFail: MonadBorrowIF {
 //-----------------------------------------------------------------
 
 trait a: FromPtr {
-    from_ptr: Ptr -> IO a;
+    from_ptr: [m: MonadIO] Ptr -> m a;
 }
 
 trait a: BorrowPtrM {
@@ -156,20 +156,13 @@ impl UvLoop: BorrowPtrM {
 // UvHandle
 //-----------------------------------------------------------------
 
-type UvHandle = unbox struct {
+// t はハンドルの種類を表す任意のタグ。(Phantom type)
+type UvHandle t = unbox struct {
     dtor: Destructor Ptr
 };
 
-trait a: ToUvHandle {
-    to_uv_handle: a -> UvHandle;
-}
-
-impl UvHandle: ToUvHandle {
-    to_uv_handle = |handle| handle;
-}
-
-impl UvHandle: FromPtr {
-    from_ptr = |p_handle| (
+impl UvHandle t: FromPtr {
+    from_ptr = |p_handle| lift_io $ do {
         FFI_CALL_IO[() minilib_uv_handle_retain(Ptr), p_handle];;
         pure $ UvHandle {
             dtor: *Destructor::make(p_handle, |p_handle|
@@ -177,17 +170,17 @@ impl UvHandle: FromPtr {
                 pure $ nullptr
             )
         }
-    );
+    };
 }
 
-impl UvHandle: BorrowPtrM {
+impl UvHandle t: BorrowPtrM {
     borrow_ptr_m = |f, handle| handle.@dtor.borrow_m(f);
 }
 
 namespace UvHandle {
-    close: [handle: ToUvHandle] handle -> IO ();
+    close: UvHandle t -> IO ();
     close = |handle| (
-        handle.to_uv_handle.borrow_ptr_m(|p_handle|
+        handle.borrow_ptr_m(|p_handle|
             FFI_CALL_IO[() minilib_uv_handle_close(Ptr), p_handle]
         )
     );
@@ -198,20 +191,13 @@ namespace UvHandle {
 //-----------------------------------------------------------------
 
 // リクエスト(uv_req_t)を表す型。
-type UvReq = unbox struct {
+// t はリクエストの種類を表す任意のタグ。(Phantom type)
+type UvReq t = unbox struct {
     dtor: Destructor Ptr
 };
 
-trait req: ToUvReq {
-    to_uv_req: req -> UvReq;
-}
-
-impl UvReq: ToUvReq {
-    to_uv_req = |req| req;
-}
-
-impl UvReq: FromPtr {
-    from_ptr = |p_req| (
+impl UvReq t: FromPtr {
+    from_ptr = |p_req| lift_io $ do {
         FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req];;
         pure $ UvReq {
             dtor: *Destructor::make(p_req, |p_req|
@@ -219,30 +205,30 @@ impl UvReq: FromPtr {
                 pure $ nullptr
             )
         }
-    );
+    };
 }
 
-impl UvReq: BorrowPtrM {
+impl UvReq t: BorrowPtrM {
     borrow_ptr_m = |f, req| req.@dtor.borrow_m(f);
 }
 
 namespace UvReq {
     // uv_req_t* の参照カウンタを1増加する。
-    retain: [req: ToUvReq] req -> IO ();
+    retain: UvReq t -> IO ();
     retain = |req| (
-        req.to_uv_req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req])
+        req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req])
     );
 
     // uv_req_t* の参照カウンタを1減少する。参照カウンタが0になったら解放される。
-    release: [req: ToUvReq] req -> IO ();
+    release: UvReq t -> IO ();
     release = |req| (
-        req.to_uv_req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req])
+        req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req])
     );
 
     // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
-    set_user_callback: [req: ToUvReq] cb -> req -> IO ();
+    set_user_callback: cb -> UvReq t -> IO ();
     set_user_callback = |cb, req| (
-        req.to_uv_req.borrow_ptr_m(|p_req|
+        req.borrow_ptr_m(|p_req|
             let box_cb: Box cb = Box::make(cb);
             let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
             eval log_debug("set_user_callback: p_cb=" + p_cb.to_string);
@@ -251,9 +237,9 @@ namespace UvReq {
     );
 
     // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
-    get_user_callback: [req: ToUvReq] req -> IO cb;
+    get_user_callback: UvReq t -> IO cb;
     get_user_callback = |req| (
-        req.to_uv_req.borrow_ptr_m(|p_req|
+        req.borrow_ptr_m(|p_req|
             let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
             eval log_debug("get_user_callback: p_cb=" + p_cb.to_string);
             let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
@@ -267,13 +253,9 @@ namespace UvReq {
 // UvFs
 //-----------------------------------------------------------------
 
-type UvFs = unbox struct {
-    req: UvReq
-};
+type UvFsTag = unbox struct {};
 
-impl UvFs: FromPtr {
-    from_ptr = |p_req| pure $ UvFs { req: *from_ptr(p_req) };
-}
+type UvFs = UvReq UvFsTag;
 
 namespace UvFs {
     // uv_fs_t* を確保して初期化し、UvFsを作成する。
@@ -281,13 +263,13 @@ namespace UvFs {
     init = (
         let p_req = *FFI_CALL_IO[Ptr minilib_uv_fs_init()].lift;
         if p_req == nullptr { throw $ "minilib_uv_fs_init failed!" };
-        from_ptr(p_req).lift
+        from_ptr(p_req)
     );
 
     // uv_fs_t->result を取得する。
     get_result: UvFs -> IO I64;
     get_result = |fs| (
-        fs.@req.borrow_ptr_m(|p_req|
+        fs.borrow_ptr_m(|p_req|
             FFI_CALL_IO[I64 minilib_uv_fs_get_result(Ptr), p_req]
         )
     );
@@ -297,7 +279,7 @@ namespace UvFs {
     open: UvLoop -> String -> CInt -> CInt -> UvFsOpenCallback -> IOFail UvFs;
     open = |loop, path, flags, mode, cb| (
         let fs = *UvFs::init;
-        let req = fs.@req;
+        let req = fs;
         req.retain.lift;;    // リクエスト発生のためリテインする
         req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
         loop.borrow_ptr_m(|p_loop|
@@ -323,7 +305,7 @@ namespace UvFs {
             eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
             let fs: UvFs = *from_ptr(p_req);
             // Fixのコールバックを呼ぶ。コールバックは fs.get_result の値を元にエラー処理する必要がある。
-            let cb: UvFsOpenCallback = *fs.@req.get_user_callback;
+            let cb: UvFsOpenCallback = *fs.get_user_callback;
             cb(fs)
         };
         let io: IO () = do {
@@ -390,41 +372,36 @@ namespace UvFsFlags {
 // UvStream
 //-----------------------------------------------------------------
 
-type UvStream = unbox struct {
-    handle: UvHandle
-};
+type UvStreamTag = unbox struct {};
+trait tag: IsUvStreamTag {}
+impl UvStreamTag: IsUvStreamTag {}
 
-trait stream: ToUvStream {
-    to_uv_stream: stream -> UvStream;
-}
+type UvStream = UvHandle UvStreamTag;
 
-impl UvStream: ToUvHandle {
-    to_uv_handle = @handle;
-}
+//-----------------------------------------------------------------
+// UvWrite
+//-----------------------------------------------------------------
 
-impl UvStream: FromPtr {
-    from_ptr = |p_stream| pure $ UvStream { handle: *from_ptr(p_stream) };
-}
+type UvWriteTag = unbox struct {};
 
-impl UvStream: BorrowPtrM {
-    borrow_ptr_m = |f, stream| stream.@handle.borrow_ptr_m(f);
-}
+type UvWrite = UvReq UvWriteTag;
 
-namespace UvStream {
+namespace UvWrite {
+
     // write のコールバック
     // # Parameters
     // * req: リクエスト(uv_write_t*)
     // * status: ステータス。0未満ならエラー
-    type UvWriteCallback = UvReq -> CInt -> IO ();
+    type UvWriteCallback = UvWrite -> CInt -> IO ();
 
-    write: [stream: ToUvStream] Array U8 -> UvWriteCallback -> stream -> IOFail UvReq;
+    write: [t: IsUvStreamTag] Array U8 -> UvWriteCallback -> UvHandle t -> IOFail UvWrite;
     write = |buf, cb, stream| (
         let p_req = *FFI_CALL_IO[Ptr minilib_uv_write_init()].lift;
         let req = *from_ptr(p_req).lift;
         req.retain.lift;;    // リクエスト発生のためリテインする
         req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
         req.borrow_ptr_m(|p_req|
-            stream.to_uv_stream.@handle.borrow_ptr_m(|p_handle|
+            stream.borrow_ptr_m(|p_handle|
                 let bufsize = buf.get_size.to_CSizeT;
                 buf.borrow_boxed_m(|p_buf|
                     FFI_CALL_IO[CInt minilib_uv_write(Ptr, Ptr, Ptr, CSizeT), p_req, p_handle, p_buf, bufsize]
@@ -437,37 +414,29 @@ namespace UvStream {
     minilib_uv_write_callback : Ptr -> CInt -> ();
     minilib_uv_write_callback = |p_req, status| (
         eval log_debug("minilib_uv_write_callback: p_req=" + p_req.to_string);
-        let req: UvReq = *from_ptr(p_req);
+        let req: UvWrite = *from_ptr(p_req);
         let cb: UvWriteCallback = *req.get_user_callback;
         cb(req, status);;
         req.release  // release on callback end
     ).unsafe_perform;
     FFI_EXPORT[minilib_uv_write_callback, minilib_uv_write_callback];
+
+    get_stream: UvWrite -> IO UvStream;
+    get_stream = |write| (
+        let p_stream = *write.borrow_ptr_m(|p_write_req|
+            FFI_CALL_IO[Ptr minilib_uv_write_get_stream(Ptr), p_write_req]
+        );
+        from_ptr(p_stream)
+    );
 }
 
 //-----------------------------------------------------------------
 // UvPipe
 //-----------------------------------------------------------------
 
-type UvPipe = unbox struct {
-    stream: UvStream
-};
-
-impl UvPipe: ToUvHandle {
-    to_uv_handle = @stream >> to_uv_handle;
-}
-
-impl UvPipe: ToUvStream {
-    to_uv_stream = @stream;
-}
-
-impl UvPipe: FromPtr {
-    from_ptr = |p_pipe| pure $ UvPipe { stream: *from_ptr(p_pipe) };
-}
-
-impl UvPipe: BorrowPtrM {
-    borrow_ptr_m = |f, pipe| pipe.@stream.borrow_ptr_m(f);
-}
+type UvPipeTag = unbox struct {};
+impl UvPipeTag: IsUvStreamTag {}
+type UvPipe = UvHandle UvPipeTag;
 
 namespace UvPipe {
     // uv_pipe_t* を確保して初期化し、UvFsを作成する。

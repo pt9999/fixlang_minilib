@@ -2,6 +2,8 @@ module Test;
 
 import AsyncTask;
 import Minilib.IO.Uv;
+import Minilib.IO.FileSystem;
+import Minilib.Monad.Error;
 import Minilib.Testing.UnitTest;
 
 test_loop_simple: TestCase;
@@ -26,6 +28,7 @@ test_fs_open = (
     let var = *Var::make("").lift;
     let loop = *UvLoop::make;
     let path = "tmp.file.tmp";
+    unlink(path).catch(|errmsg| pure());;
     let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
     let mode = 0o666.to_CInt;
     let cb = |fs: UvFs| (
@@ -40,6 +43,7 @@ test_fs_open = (
     let fs = *UvFs::open(loop, path, flags, mode, cb);
     loop.run_default;;
     assert_equal("eq", "open success", *var.get.lift);;
+    unlink(path);;
     pure()
 );
 
@@ -56,38 +60,62 @@ test_pipe_open = (
 test_pipe_write: TestCase;
 test_pipe_write = (
     make_test("test_pipe_write") $ |_|
+    //let log_debug: String -> IO () = |str| println("[TEST] " + str);
+    let log_debug: String -> IO () = |str| pure();
+    let open_file = |loop, path, cb_open| (
+        let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
+        let mode = 0o666.to_CInt;
+        let fs = *UvFs::open(loop, path, flags, mode, cb_open);
+        pure()
+    ): IOFail ();
+    let write_contents = |loop, file, contents, cb_write| (
+        let pipe = *UvPipe::init(loop);
+        pipe.open(file);;
+        let buf = contents.get_bytes.pop_back;
+        let write = *pipe.write(buf, cb_write);
+        pure()
+    ): IOFail ();
+    let cb_write = |var| |write: UvWrite, status: CInt| (
+        let stream = *write.get_stream;
+        stream.close;;
+        if status < 0.to_CInt {
+            var.Var::set("write error: " + Uv::strerror(status))
+        };
+        var.Var::set("write success");;
+        log_debug("cb_write done");;
+        pure()
+    ): IO ();
+    let cb_open = |var, loop, contents| |fs: UvFs| (
+        let result = *fs.get_result;
+        if result < 0 {
+            throw $ "open error: " + Uv::strerror(result.to_CInt)
+        };
+        let file: UvFile = result.to_CInt;
+        write_contents(loop, file, contents, cb_write(var))
+    ).try(|errmsg| var.Var::set(errmsg)): IO ();
     let var = *Var::make("").lift;
     let loop = *UvLoop::make;
-    let pipe = *UvPipe::init(loop);
-    pipe.open(UvFile::stdout);;
-    let cb = |write: UvWrite, status: CInt| (
-        if status >= 0.to_CInt {
-            println("write success");;
-            var.Var::set("write success")
-        } else {
-            var.Var::set("write error: " + Uv::strerror(status))
-        };;
-        let stream = *write.get_stream;
-        println("closing stream");;
-        stream.close;;
-        println("write callback done")
-    );
-    let buf = "test_pipe_write: hello world\n".get_bytes.pop_back;
-    pipe.write(buf, cb);;
+    let contents = "hello world\n";
+    let path = "tmp.file.tmp";
+    unlink(path).catch(|errmsg| pure());;
+    open_file(loop, path, cb_open(var, loop, contents));;
     loop.run_default;;
-    println("run_default done").lift;;
+    log_debug("run_default done").lift;;
+    let actual = *var.get.lift;
+    assert_equal("var", "write success", actual);;
+    let actual = *read_file_string(path);
+    assert_equal("contents", contents, actual);;
+    unlink(path);;
     pure()
 );
 
 test: IO ();
 test = (
     [
-        /*
         test_loop_simple,
         test_loop_default,
         test_fs_open,
         test_pipe_open,
-        */
         test_pipe_write,
     ]
     .run_test_driver

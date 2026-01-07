@@ -5,8 +5,8 @@
 
 #include <uv.h>
 
-#define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
-//#define LOG_DEBUG(X)
+//#define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
+#define LOG_DEBUG(X)
 
 // ==================================
 // Type definitions and constants

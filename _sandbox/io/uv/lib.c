@@ -385,6 +385,7 @@ int minilib_uv_read_start(uv_stream_t *stream)
     minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
     if (data->read_started) return UV_EALREADY;
     int err = uv_read_start(stream, minilib_uv_read_alloc_cb, minilib_uv_read_cb);
+    LOG_DEBUG(("minilib_uv_read_start err=%d\n", err));
     if (err < 0) return err;
     data->read_started = 1;
     return err;

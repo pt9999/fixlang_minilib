@@ -17,7 +17,8 @@
 // ==================================
 
 // in lib.c
-void minilib_uv_handle_close_callback(uv_handle_t* handle);
+void minilib_uv_handle_close_and_dealloc_callback(uv_handle_t* handle);
+void minilib_uv_handle_dealloc(uv_handle_t* handle);
 
 // in uv.fix
 void minilib_uv_fs_open_callback(uv_fs_t *req);
@@ -90,6 +91,19 @@ void minilib_uv_handle_retain(uv_handle_t* handle)
     }
 }
 
+// ユーザから呼び出される
+void minilib_uv_handle_close(uv_handle_t* handle)
+{
+    LOG_DEBUG(("minilib_uv_handle_close handle=%p\n", handle));
+    if (!uv_is_closing(handle)) {
+        // まだクローズされていなければ、クローズする (コールバックなし)
+        uv_close(handle, NULL);
+    } else {
+        // 既にクローズされている場合は何もしない
+        return;
+    }
+}
+
 void minilib_uv_handle_release(uv_handle_t* handle)
 {
     LOG_DEBUG(("minilib_uv_handle_release handle=%p\n", handle));
@@ -97,16 +111,29 @@ void minilib_uv_handle_release(uv_handle_t* handle)
         minilib_uv_handledata_t* data = handle->data;
         data->refcount--;
         if (data->refcount <= 0) {
-            uv_close(data->handle, minilib_uv_handle_close_callback);
+            if (!uv_is_closing(handle)) {
+                // まだクローズされていなければ、クローズ後に解放する
+                uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
+            } else {
+                // 既にクローズされているため、解放する
+                minilib_uv_handle_dealloc(handle);
+            }
         }
     }
 }
 
-void minilib_uv_handle_close_callback(uv_handle_t* handle)
+void minilib_uv_handle_close_and_dealloc_callback(uv_handle_t* handle)
 {
-    LOG_DEBUG(("minilib_uv_handle_close_callback handle=%p\n", handle));
+    LOG_DEBUG(("minilib_uv_handle_close_and_dealloc_callback handle=%p\n", handle));
+    minilib_uv_handle_dealloc(handle);
+}
+
+void minilib_uv_handle_dealloc(uv_handle_t* handle)
+{
+    LOG_DEBUG(("minilib_uv_handle_dealloc handle=%p\n", handle));
     if (handle != NULL) {
         minilib_uv_handledata_t* data = handle->data;
+        assert (data->refcount <= 0);
         handle->data = NULL;
         free(handle);
         if (data != NULL) {

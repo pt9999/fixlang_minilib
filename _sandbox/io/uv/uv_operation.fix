@@ -16,9 +16,11 @@ test1: IOFail () = (
     );
     */
 
-    let writer = UvOperation::uv_open_file("tmp.file", "w")
-    .then(|_| uv_write_file("blah"))
-    .then(|_| uv_close_file);
+    let writer: UvOperation () = do {
+        uv_open_file("tmp.file", "w");;
+        uv_write_file("blah");;
+        uv_close_file
+    };
     
     writer.attach(loop);;
 
@@ -102,7 +104,13 @@ namespace UvOperation {
     _interpret_open = |loop, path, mode, next| (
         let flags = UvFsFlags::from_mode_str(mode);
         let mode = 0o666.to_CInt;
-        let fs = *UvFs::open(loop, path, flags, mode, |file, fs|
+        let fs = *UvFs::open(loop, path, flags, mode, |fs|
+            let result = *fs.get_result;
+            if result < 0 {
+                // TODO: コールバック内でエラーが起きたらどのように報告するか？
+                eprintln("error: open failed: " + Uv::strerror(result.to_CInt))
+            };
+            let file = result.to_CInt;
             let res = *_interpret(loop, file, next()).to_result;
             // TODO: コールバック内でエラーが起きたらどのように報告するか？
             if res.is_err { eprintln("error: _interpret failed: " + res.as_err)};

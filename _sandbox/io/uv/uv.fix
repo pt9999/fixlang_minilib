@@ -67,19 +67,26 @@ namespace UvWrappedPtr {
 // Error Handling
 //-----------------------------------------------------------------
 
+namespace Uv {
+    strerror: CInt -> String;
+    strerror = |err| (
+        let buflen = 65536;
+        let buf = Array::fill(buflen, 0_U8);
+        let (buf, ()) = buf.mutate_boxed(|buf|
+            FFI_CALL_IO[() uv_strerror_r(CInt, Ptr, CSizeT), err, buf, buflen.to_CSizeT]
+        );
+        let errmsg: String = buf.push_back(0_U8).from_bytes.as_ok;
+        errmsg
+    );
+}
+
 _check_err_i: IO CInt -> IOFail CInt;
 _check_err_i = |io| (
     let err = *io.lift;
     if err >= 0.to_CInt {
         pure $ err
     };
-    let buflen = 65536;
-    let buf = Array::fill(buflen, 0_U8);
-    let (buf, _) = *buf.mutate_boxed_io(|buf|
-        FFI_CALL_IO[() uv_strerror_r(CInt, Ptr, CSizeT), err, buf, buflen.to_CSizeT]
-    ).lift;
-    let errmsg: String = buf.push_back(0_U8).from_bytes.as_ok;
-    throw $ errmsg
+    throw $ Uv::strerror(err)
 );
 
 _check_err: IO CInt -> IOFail ();
@@ -161,11 +168,13 @@ namespace UvHandle {
 // UvReq
 //-----------------------------------------------------------------
 
+// リクエスト(uv_req_t)を表す型。
 type UvReq = unbox struct {
     dtor: Destructor Ptr
 };
 
 namespace UvReq {
+    // uv_req_t* から UvReq を作成する。
     from_ptr: Ptr -> IO UvReq;
     from_ptr = |p_req| (
         FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req];;
@@ -177,16 +186,19 @@ namespace UvReq {
         }
     );
 
+    // uv_req_t* を借用する。
     borrow_ptr_m: [m: MonadBorrow] (Ptr -> m b) -> UvReq -> m b;
     borrow_ptr_m = |f, req| (
         req.@dtor.borrow_m(f)
     );
 
+    // uv_req_t* の参照カウンタを1増加する。
     retain: UvReq -> IO ();
     retain = |req| (
         req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req])
     );
 
+    // uv_req_t* の参照カウンタを1減少する。参照カウンタが0になったら解放される。
     release: UvReq -> IO ();
     release = |req| (
         req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req])
@@ -225,6 +237,7 @@ type UvFs = unbox struct {
 };
 
 namespace UvFs {
+    // uv_fs_t* を確保して初期化し、UvFsを作成する。
     init: IOFail UvFs;
     init = (
         let p_req = *FFI_CALL_IO[Ptr minilib_uv_fs_init()].lift;
@@ -232,6 +245,7 @@ namespace UvFs {
         UvFs::from_ptr(p_req).lift
     );
 
+    // uv_fs_t* から UvFsを作成する。
     from_ptr: Ptr -> IO UvFs;
     from_ptr = |p_req| (
         pure $ UvFs {
@@ -239,6 +253,7 @@ namespace UvFs {
         }
     );
 
+    // uv_fs_t->result を取得する。
     get_result: UvFs -> IO I64;
     get_result = |fs| (
         fs.@req.borrow_ptr_m(|p_req|
@@ -246,7 +261,7 @@ namespace UvFs {
         )
     );
 
-    type UvFsOpenCallback = UvFile -> UvFs -> IO ();
+    type UvFsOpenCallback = UvFs -> IO ();
 
     open: UvLoop -> String -> CInt -> CInt -> UvFsOpenCallback -> IOFail UvFs;
     open = |loop, path, flags, mode, cb| (
@@ -276,15 +291,9 @@ namespace UvFs {
         let io: IO () = do {
             eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
             let fs = *UvFs::from_ptr(p_req);
-            let result = *fs.get_result;
-            if result < 0 {
-                // TODO: エラー発生時に非同期にどうエラーを報告するか？
-                eprintln("open failed: result=" + result.to_string)
-            };
-            // 成功時はFixのコールバックを呼ぶ
+            // Fixのコールバックを呼ぶ。コールバックは fs.get_result の値を元にエラー処理する必要がある。
             let cb: UvFsOpenCallback = *fs.@req.get_user_callback;
-            let file: UvFile = result.to_CInt;
-            cb(file, fs)
+            cb(fs)
         };
         let io: IO () = do {
             io;;
@@ -294,58 +303,21 @@ namespace UvFs {
         io.unsafe_perform
     );
     FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
-
-/*
-    type UvFsWriteCallback = I64 -> UvFs -> IO ();
-
-    write: UvLoop -> UvFile -> Array U8 -> UvFsWriteCallback -> IOFail UvFs;
-    write = |loop, file, buf, cb| (
-        let fs = *UvFs::init;
-        loop.borrow_loop_m(|p_loop|
-            fs.@dtor.borrow_m(|p_req|
-                // リクエスト発生のためリテインする
-                FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req].lift;;
-                eval log_debug("UvFs::write: (p_loop, p_req)=" + (p_loop, p_req).to_string);
-                // ユーザが用意したコールバック関数を設定する
-                fs.set_user_callback(cb).lift;;
-                let bufsize = buf.get_size.to_CSizeT;
-                buf.borrow_boxed_m(|p_buf|
-                    FFI_CALL_IO[CInt minilib_uv_fs_write(Ptr, Ptr, CInt, Ptr, CSizeT), p_loop, p_req, file, p_buf, bufsize]
-                    ._check_err
-                )
-            )
-        );;
-        pure $ fs
-    );
-
-    minilib_uv_fs_write_callback : Ptr -> ();
-    minilib_uv_fs_write_callback = |p_req| (
-        let io: IO () = do {
-            eval log_debug("minilib_uv_fs_write_callback: p_req=" + p_req.to_string);
-            let fs = *UvFs::from_ptr(p_req);
-            let result = *fs.get_result;
-            if result < 0 {
-                // TODO: エラー発生時に非同期にどうエラーを報告するか？
-                eprintln("write failed: result=" + result.to_string)
-            };
-            // 成功時はFixのコールバックを呼ぶ
-            let cb: UvFsWriteCallback = *fs.get_user_callback;
-            let written_size = result;
-            cb(written_size, fs)
-        };
-        let io: IO () = do {
-            io;;
-            // finally: コールバック完了のためリリースする
-            FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req]  // release on callback end
-        };
-        io.unsafe_perform
-    );
-    FFI_EXPORT[minilib_uv_fs_write_callback, minilib_uv_fs_write_callback];
-    */
 }
 
+// ファイルディスクリプタ(uv_file)を表す型。
 type UvFile = CInt;
 
+namespace UvFile {
+    // 標準入力
+    stdin: UvFile = 0.to_CInt;
+    // 標準出力
+    stdout: UvFile = 1.to_CInt;
+    // 標準エラー出力
+    stderr: UvFile = 2.to_CInt;
+}
+
+// open のフラグ関係
 namespace UvFsFlags {
     _find_flag: String -> CInt;
     _find_flag = |name| (
@@ -386,6 +358,10 @@ namespace UvFsFlags {
 
 namespace UvStream {
 
+    // write のコールバック
+    // # Parameters
+    // * req: リクエスト(uv_write_t*)
+    // * status: ステータス。0未満ならエラー
     type UvWriteCallback = UvReq -> CInt -> IO ();
 
     write: UvHandle -> Array U8 -> UvWriteCallback -> IOFail ();

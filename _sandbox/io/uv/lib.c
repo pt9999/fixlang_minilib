@@ -12,20 +12,6 @@
 // Type definitions and constants
 // ==================================
 
-#define MAX_BOXED_VALUES 10
-
-typedef struct {
-    void* retained_ptr;
-    void (*retain) (void*);
-    void (*release) (void*);
-} BoxedValue;
-
-/*
-typedef struct {
-    BoxedValue boxed_values[MAX_BOXED_VALUES];  // manages many boxed values
-} UvGlue;
-*/
-
 // ==================================
 // Prototype declarations
 // ==================================

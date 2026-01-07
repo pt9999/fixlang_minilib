@@ -26,7 +26,7 @@ test-document:
 
 clean:
 	fix clean
-	rm -rf *.out
+	rm -rf *.out *.o
 
 document:
 	fix deps install

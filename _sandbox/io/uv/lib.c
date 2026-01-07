@@ -5,7 +5,7 @@
 
 #include <uv.h>
 
-#define LOG_DEBUG(X) printf X
+#define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
 //#define LOG_DEBUG(X)
 
 // ==================================
@@ -95,8 +95,8 @@ void minilib_uv_handle_close(uv_handle_t* handle)
 {
     LOG_DEBUG(("minilib_uv_handle_close handle=%p\n", handle));
     if (!uv_is_closing(handle)) {
-        // まだクローズされていなければ、クローズする (コールバックなし)
-        uv_close(handle, NULL);
+        // まだクローズされていなければ、クローズ後に解放する
+        uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
     } else {
         // 既にクローズされている場合は何もしない
         return;
@@ -111,14 +111,21 @@ void minilib_uv_handle_release(uv_handle_t* handle)
         LOG_DEBUG(("minilib_uv_handle_release handle=%p type=%d refcount: %d -> %d\n", handle, type, data->refcount, data->refcount-1));
         data->refcount--;
         if (data->refcount <= 0) {
+            // TODO: おそらく、参照カウンタが0になったら解放するとしているのが間違いなのでは？
+            // 参照カウンタが0になっても、ハンドルがアクティブならまだループから参照されている。
+            // ドキュメントによると、ハンドルを解放する前に、必ず uv_close を呼び出す必要がある。
+            // また、ハンドルの解放はクローズのコールバックからでなければならない。
+            
+            // ということで、ハンドルは参照カウンタ管理すべきでないと思われる。
+            /*
             if (!uv_is_closing(handle)) {
                 // まだクローズされていなければ、クローズ後に解放する
-                LOG_DEBUG(("uv_close handle=%p\n", handle));
-                uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
+                //LOG_DEBUG(("uv_close handle=%p\n", handle));
+                //uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
             } else {
-                // 既にクローズされているため、解放する
-                minilib_uv_handle_dealloc(handle);
+                // 既にクローズされている場合、何もしない
             }
+            */
         }
     }
 }
@@ -135,10 +142,11 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle)
     if (handle != NULL) {
         assert(uv_is_closing(handle));
         assert(!uv_is_active(handle));
-        assert(!uv_has_ref(handle));
+        //assert(!uv_has_ref(handle));
         minilib_uv_handledata_t* data = handle->data;
         assert (data->refcount <= 0);
         handle->data = NULL;
+        LOG_DEBUG(("freeing handle=%p\n", handle));
         free(handle);
         if (data != NULL) {
             free(data);
@@ -212,6 +220,7 @@ void minilib_uv_req_release(uv_req_t* req)
             if (cleanup != NULL) {
                 (*cleanup)(req);
             }
+            LOG_DEBUG(("freeing req=%p\n", req));
             free(req);
             free(data);
         }

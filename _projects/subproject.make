@@ -22,6 +22,7 @@ test-fix:
 test-document:
 	fix deps update
 	fix docs -o docs
+	git checkout -- fixdeps.lock
 
 clean:
 	fix clean

@@ -53,12 +53,15 @@ class GitHelper(object):
         run_subprocess(["git", "add", "--verbose", filepath])
         message = "version " + version
         run_subprocess(["git", "commit", "--verbose", "-m", message])
+        tag_latest = "latest"
         if args.tag:
             run_subprocess(["git", "tag", version])
+            run_subprocess(["git", "tag", tag_latest, "-f"])
         if args.push:
             run_subprocess(["git", "push"])
         if args.push and args.tag:
             run_subprocess(["git", "push", "origin", version])
+            run_subprocess(["git", "push", "origin", tag_latest, "-f"])
 
     def is_up_to_date(self, last_version: str) -> bool:
         cmd_args = ["git", "diff", "--quiet", f"{last_version}..main"]

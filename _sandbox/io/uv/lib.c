@@ -22,6 +22,9 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle);
 
 // in uv.fix
 void minilib_uv_fs_open_callback(uv_fs_t *req);
+void minilib_uv_fs_close_callback(uv_fs_t *req);
+void minilib_uv_fs_read_callback(uv_fs_t *req);
+void minilib_uv_fs_write_callback(uv_fs_t *req);
 void minilib_uv_write_callback(uv_write_t *req, int status);
 void minilib_uv_read_callback(uv_stream_t *stream, int64_t nread, const char* buf);
 
@@ -72,7 +75,7 @@ struct minilib_uv_handledata_s {
     int refcount;
     void* fix_cb;
     int read_started;
-    void* client_data;
+    void* extra_data;
 };
 typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
 
@@ -88,7 +91,7 @@ uv_handle_t* minilib_uv_handle_alloc(size_t size)
     data->refcount = 0;
     data->fix_cb = NULL;
     data->read_started = 0;
-    data->client_data = NULL;
+    data->extra_data = NULL;
 
     return handle;
 }
@@ -184,17 +187,17 @@ void* minilib_uv_handle_get_fix_cb(uv_handle_t* handle)
     return fix_cb;
 }
 
-void minilib_uv_handle_set_client_data(uv_handle_t* handle, void* client_data)
+void minilib_uv_handle_set_extra_data(uv_handle_t* handle, void* extra_data)
 {
     minilib_uv_handledata_t* data = handle->data;
-    data->client_data = client_data;
-    LOG_DEBUG(("minilib_uv_handle_set_data handle=%p client_data=%p\n", handle, client_data));
+    data->extra_data = extra_data;
+    LOG_DEBUG(("minilib_uv_handle_set_data handle=%p extra_data=%p\n", handle, extra_data));
 }
 
-void* minilib_uv_handle_get_client_data(uv_handle_t* handle)
+void* minilib_uv_handle_get_extra_data(uv_handle_t* handle)
 {
     minilib_uv_handledata_t* data = handle->data;
-    return data->client_data;
+    return data->extra_data;
 }
 
 // ----------------------------------
@@ -207,7 +210,7 @@ struct minilib_uv_reqdata_s {
     minilib_uv_req_cleanup_func cleanup;
     int refcount;
     void* fix_cb;
-    void* client_data;
+    void* extra_data;
 };
 typedef struct minilib_uv_reqdata_s minilib_uv_reqdata_t;
 
@@ -223,7 +226,7 @@ uv_req_t* minilib_uv_req_init(size_t size, void* cleanup_func)
     data->cleanup = cleanup_func;
     data->refcount = 0;
     data->fix_cb = NULL;
-    data->client_data = NULL;
+    data->extra_data = NULL;
 
     return req;
 }
@@ -274,17 +277,17 @@ void* minilib_uv_req_get_fix_cb(uv_req_t* req)
     return fix_cb;
 }
 
-void minilib_uv_req_set_client_data(uv_req_t* req, void* client_data)
+void minilib_uv_req_set_extra_data(uv_req_t* req, void* extra_data)
 {
     minilib_uv_reqdata_t* data = req->data;
-    data->client_data = client_data;
-    LOG_DEBUG(("minilib_uv_req_set_data req=%p client_data=%p\n", req, client_data));
+    data->extra_data = extra_data;
+    LOG_DEBUG(("minilib_uv_req_set_extra_data req=%p extra_data=%p\n", req, extra_data));
 }
 
-void* minilib_uv_req_get_client_data(uv_req_t* req)
+void* minilib_uv_req_get_extra_data(uv_req_t* req)
 {
     minilib_uv_reqdata_t* data = req->data;
-    return data->client_data;
+    return data->extra_data;
 }
 
 // ----------------------------------
@@ -340,8 +343,22 @@ int minilib_uv_fs_open(uv_loop_t *loop, uv_fs_t *req, const char *path, int flag
     return uv_fs_open(loop, req, path, flags, mode, minilib_uv_fs_open_callback);
 }
 
-/*
-// たぶん uv_fs_write ではなく uv_write を使うほうが良い
+int minilib_uv_fs_close(uv_loop_t *loop, uv_fs_t *req, uv_file file)
+{
+    LOG_DEBUG(("minilib_uv_fs_close loop=%p req=%p\n", loop, req));
+    return uv_fs_close(loop, req, file, minilib_uv_fs_close_callback);
+}
+
+int minilib_uv_fs_read(uv_loop_t *loop, uv_fs_t *req, uv_file file, const uint8_t* buf, size_t buflen)
+{
+    LOG_DEBUG(("minilib_uv_fs_read loop=%p req=%p\n", loop, req));
+    uv_buf_t bufs[1] = {0};
+    bufs[0].base = (char*) buf;
+    bufs[0].len = buflen;
+    unsigned int nbufs = 1;
+    int64_t offset = -1;
+    return uv_fs_read(loop, req, file, bufs, nbufs, offset, minilib_uv_fs_read_callback);
+}
 
 int minilib_uv_fs_write(uv_loop_t *loop, uv_fs_t *req, uv_file file, const uint8_t* buf, size_t buflen)
 {
@@ -353,7 +370,6 @@ int minilib_uv_fs_write(uv_loop_t *loop, uv_fs_t *req, uv_file file, const uint8
     int64_t offset = -1;
     return uv_fs_write(loop, req, file, bufs, nbufs, offset, minilib_uv_fs_write_callback);
 }
-*/
 
 // ----------------------------------
 // uv_stream_t

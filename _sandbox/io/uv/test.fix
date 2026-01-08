@@ -4,8 +4,23 @@ import AsyncTask;
 import Minilib.IO.Uv;
 import Minilib.IO.Uv.UvFs;
 import Minilib.IO.FileSystem;
+import Minilib.Monad.IO;
+import Minilib.Monad.Reader;
 import Minilib.Monad.Error;
 import Minilib.Testing.UnitTest;
+
+log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
+//log_test: [m: MonadIO] String -> m () = |str| pure();
+
+set_var: [m: MonadIO] a -> Var a -> m ();
+set_var = |a, var| (
+    var.Var::set(a).lift_io
+);
+
+catch_to_var: Var String -> IOFail () -> IO ();
+catch_to_var = |var, iof| (
+    iof.try(|errmsg| var.Var::set(errmsg))
+);
 
 test_loop_simple: TestCase;
 test_loop_simple = (
@@ -23,27 +38,219 @@ test_loop_default = (
     pure()
 );
 
+type RIO e = ReaderT e IOFail;
+
+type TestFsEnv = unbox struct {
+    msg: Var String,
+    loop: UvLoop,
+    file: Var UvFile,
+};
+
+namespace TestFsEnv {
+    make: [m: MonadIOFail] m TestFsEnv;
+    make = lift_iofail $ do {
+        pure $ TestFsEnv {
+            msg: *Var::make("").lift,
+            loop: *UvLoop::make,
+            file: *Var::make(-1.to_CInt).lift,
+        }
+    };
+
+    ask_loop: RIO TestFsEnv UvLoop;
+    ask_loop = pure $ (*ask).@loop;
+
+    ask_file: RIO TestFsEnv UvFile;
+    ask_file = (*ask).@file.get.lift_io;
+
+    tell_file: UvFile -> RIO TestFsEnv ();
+    tell_file = |file| (*ask).@file.Var::set(file).lift_io;
+
+    tell_msg: String -> RIO TestFsEnv ();
+    tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
+
+    to_io: RIO TestFsEnv () -> RIO TestFsEnv (IO ());
+    to_io = |rio| (
+        pure $ rio.run(*ask)
+    );
+
+    run: TestFsEnv -> RIO TestFsEnv () -> IO ();
+    run = |env, rio| (
+        rio.run_reader_t(env).try(|errmsg| env.@msg.Var::set(errmsg))
+    );
+
+    open_file_as_write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    open_file_as_write = |path, cb| (
+        let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
+        let mode = 0o666.to_CInt;
+        let cb = on_open(cb);
+        unlink(path).catch(|errmsg| pure()).lift_iofail;;
+        let fs = *UvFs::open(*ask_loop, path, flags, mode, *cb.to_io).lift_iofail;
+        pure()
+    );
+
+    on_open: RIO TestFsEnv () -> RIO TestFsEnv ();
+    on_open = |cb| |req: UvFs, file: UvFile| (
+        log_test("on_open begin");;
+        if file < 0.to_CInt {
+            error $ "open error: " + Uv::strerror(file)
+        };
+        (*ask).@file.set_var(file);;
+        cb;;
+        log_test("on_open end")
+    );
+
+    write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    write = |contents, cb| (
+        let buf = contents.get_bytes.pop_back;
+        let cb = on_write(cb);
+        let fs = *UvFs::write(*ask_loop, *ask_file, buf, *cb.to_io).lift_iofail;
+        pure()
+    );
+
+    on_write: RIO TestFsEnv () -> RIO TestFsEnv ();
+    on_write = |cb| |req: UvFs, nwrite: I64, buf: Array U8| (
+        log_test("on_write begin");;
+        if nwrite < 0 {
+            error $ "write error: " + Uv::strerror(nwrite.to_CInt)
+        };
+        cb;;
+        log_test("on_write end")
+    );
+
+    close: RIO TestFsEnv () -> RIO TestFsEnv ();
+    close = |cb| (
+        let cb = on_close(cb);
+        let fs = *UvFs::close(*ask_loop, *ask_file, *cb.to_io).lift_iofail;
+        pure()
+    );
+
+    on_close: RIO TestFsEnv () -> RIO TestFsEnv ();
+    on_close = |cb| |req: UvFs, result: CInt| (
+        log_test("on_close begin");;
+        if result < 0.to_CInt {
+            error $ "close error: " + Uv::strerror(result.to_CInt)
+        };
+        cb;;
+        log_test("on_close end")
+    );
+}
+
 test_fs_open: TestCase;
 test_fs_open = (
     make_test("test_fs_open") $ |_|
+    let env = *TestFsEnv::make;
+    let path = "tmp.file.tmp";
+    do {
+        open_file_as_write(path) $ do {
+            tell_msg("open success")
+        }
+    }.run_reader_t(env);;
+    env.@loop.run_default;;
+    assert_equal("eq", "open success", *env.@msg.get.lift);;
+    unlink(path);;
+    pure()
+);
+
+test_fs_write: TestCase;
+test_fs_write = (
+    make_test("test_fs_write") $ |_|
+    let cb_close = |var| |req: UvFs, result: CInt| (
+        if result < 0.to_CInt {
+            var.Var::set("close error: " + Uv::strerror(result.to_CInt))
+        };
+        var.set_var("close success");;
+        log_test("cb_close done");;
+        pure()
+    ): IO ();
+    let cb_write = |var, loop, file| |req: UvFs, nwrite: I64, buf: Array U8| (
+        if nwrite < 0 {
+            throw $ "write error: " + Uv::strerror(nwrite.to_CInt)
+        };
+        var.set_var("write success");;
+        UvFs::close(loop, file, cb_close(var));;
+        log_test("cb_write done");;
+        pure()
+    ).catch_to_var(var): IO ();
+    let cb_open = |var, loop, contents| |fs: UvFs, file: UvFile| (
+        if file < 0.to_CInt {
+            throw $ "open error: " + Uv::strerror(file)
+        };
+        let buf = contents.get_bytes.pop_back;
+        let fs = *UvFs::write(loop, file, buf, cb_write(var, loop, file));
+        pure()
+    ).catch_to_var(var): IO ();
     let var = *Var::make("").lift;
     let loop = *UvLoop::make;
+    let contents = "hello world\n";
     let path = "tmp.file.tmp";
     unlink(path).catch(|errmsg| pure());;
-    let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
-    let mode = 0o666.to_CInt;
-    let cb = |fs: UvFs| (
-        let result = *fs.get_result;
-        if result >= 0 {
-            //println("fs open callback called");;
-            var.Var::set("open success")
-        } else {
-            var.Var::set("open error: " + Uv::strerror(result.to_CInt))
-        }
-    );
-    let fs = *UvFs::open(loop, path, flags, mode, cb);
+    open_file(var, loop, path, contents);;
     loop.run_default;;
-    assert_equal("eq", "open success", *var.get.lift);;
+    log_test("run_default done").lift;;
+    let actual = *var.get.lift;
+    assert_equal("var", "close success", actual);;
+    let actual = *read_file_string(path);
+    assert_equal("contents", contents, actual);;
+    unlink(path);;
+    pure()
+);
+
+
+test_fs_read: TestCase;
+test_fs_read = (
+    make_test("test_fs_read") $ |_|
+    let open_file = |loop, path, cb_open| (
+        let flags = UvFsFlags::_O_RDONLY;
+        let mode = 0o666.to_CInt;
+        let fs = *UvFs::open(loop, path, flags, mode, cb_open);
+        pure()
+    ): IOFail ();
+    let read_start = |loop, file, cb_read| (
+        let pipe = *UvPipe::init(loop);
+        pipe.open(file);;
+        pipe.read_start(cb_read);;
+        log_test("read_start").lift
+    ): IOFail ();
+    let cb_read = |var| |stream: UvStream, nread: I64, bytes: Array U8| (
+        log_test("cb_read");;
+        if nread >= 0 {
+            let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
+            var.Var::mod(|val| val + str);;
+            log_test("read continue")
+        } else if nread == Uv::eof.to_I64 {
+            stream.read_stop.try(eprintln);;
+            stream.close;;
+            log_test("read completed");;
+            pure()
+        } else {
+            let err = nread.to_CInt;
+            var.Var::set("read error: " + Uv::strerror(err));;
+            stream.read_stop.try(eprintln);;
+            stream.close;;
+            log_test("read error");;
+            pure()
+        }
+    ): IO ();
+    let cb_open = |var, loop, contents| |fs: UvFs, file: UvFile| (
+        log_test("cb_open start").lift;;
+        let result = *fs.get_result.lift;
+        if result < 0 {
+            throw $ "open error: " + Uv::strerror(result.to_CInt)
+        };
+        let file: UvFile = result.to_CInt;
+        log_test("cb_open: file=" + file.to_string).lift;;
+        read_start(loop, file, cb_read(var))
+    ).catch_to_var(var): IO ();
+    let var = *Var::make("").lift;
+    let loop = *UvLoop::make;
+    let contents = "hello world\n";
+    let path = "tmp.file2.tmp";
+    write_file_string(path, contents);;
+    open_file(loop, path, cb_open(var, loop, contents));;
+    loop.run_default;;
+    log_test("run_default done").lift;;
+    let actual = *var.get.lift;
+    assert_equal("var", contents, actual);;
     unlink(path);;
     pure()
 );
@@ -61,8 +268,6 @@ test_pipe_open = (
 test_pipe_write: TestCase;
 test_pipe_write = (
     make_test("test_pipe_write") $ |_|
-    //let log_debug: String -> IO () = |str| println("[TEST] " + str);
-    let log_debug: String -> IO () = |str| pure();
     let open_file = |loop, path, cb_open| (
         let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
         let mode = 0o666.to_CInt;
@@ -83,17 +288,15 @@ test_pipe_write = (
             var.Var::set("write error: " + Uv::strerror(status))
         };
         var.Var::set("write success");;
-        log_debug("cb_write done");;
+        log_test("cb_write done");;
         pure()
     ): IO ();
-    let cb_open = |var, loop, contents| |fs: UvFs| (
-        let result = *fs.get_result;
-        if result < 0 {
-            throw $ "open error: " + Uv::strerror(result.to_CInt)
+    let cb_open = |var, loop, contents| |fs: UvFs, file: UvFile| (
+        if file < 0.to_CInt {
+            throw $ "open error: " + Uv::strerror(0.to_CInt)
         };
-        let file: UvFile = result.to_CInt;
         write_contents(loop, file, contents, cb_write(var))
-    ).try(|errmsg| var.Var::set(errmsg)): IO ();
+    ).catch_to_var(var): IO ();
     let var = *Var::make("").lift;
     let loop = *UvLoop::make;
     let contents = "hello world\n";
@@ -101,7 +304,7 @@ test_pipe_write = (
     unlink(path).catch(|errmsg| pure());;
     open_file(loop, path, cb_open(var, loop, contents));;
     loop.run_default;;
-    log_debug("run_default done").lift;;
+    log_test("run_default done").lift;;
     let actual = *var.get.lift;
     assert_equal("var", "write success", actual);;
     let actual = *read_file_string(path);
@@ -110,61 +313,9 @@ test_pipe_write = (
     pure()
 );
 
-test_pipe_read1: TestCase;
-test_pipe_read1 = (
-    make_test("test_pipe_read1") $ |_|
-    let log_debug: String -> IO () = |str| println("[TEST] " + str);
-    //let log_debug: String -> IO () = |str| pure();
-    let read_start = |loop, file, cb_read| (
-        let pipe = *UvPipe::init(loop);
-        pipe.open(file);;
-        pipe.read_start(cb_read);;
-        log_debug("read_start").lift
-    ): IOFail ();
-    let cb_read = |var| |stream: UvStream, nread: I64, bytes: Array U8| (
-        log_debug("cb_read");;
-        if nread >= 0 {
-            let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
-            var.Var::mod(|val| val + str);;
-            log_debug("read continue")
-        } else if nread == Uv::eof.to_I64 {
-            stream.read_stop.try(eprintln);;
-            stream.close;;
-            log_debug("read completed");;
-            pure()
-        } else {
-            let err = nread.to_CInt;
-            var.Var::set("read error: " + Uv::strerror(err));;
-            stream.read_stop.try(eprintln);;
-            stream.close;;
-            log_debug("read error");;
-            pure()
-        }
-    ): IO ();
-    let contents = "hello world\n";
-    let path = "tmp.file2.tmp";
-    write_file_string(path, contents);;
-
-    let var = *Var::make("").lift;
-    let loop = *UvLoop::make;
-
-    let fh = *IO::open_file(path, "r");
-    let file_ptr = *fh.get_file_ptr.lift;
-    let fileno: I32 = *(
-        FFI_CALL_IO[I32 fileno(Ptr), file_ptr]
-    ).lift;
-//    let fileno = 0.to_CInt;
-    read_start(loop, fileno, cb_read(var));;
-    loop.run_default;;
-    log_debug("run_default done").lift;;
-    pure()
-);
-
 test_pipe_read: TestCase;
 test_pipe_read = (
     make_test("test_pipe_read") $ |_|
-    let log_debug: String -> IO () = |str| println("[TEST] " + str);
-    //let log_debug: String -> IO () = |str| pure();
     let open_file = |loop, path, cb_open| (
         let flags = UvFsFlags::_O_RDONLY;
         let mode = 0o666.to_CInt;
@@ -175,38 +326,38 @@ test_pipe_read = (
         let pipe = *UvPipe::init(loop);
         pipe.open(file);;
         pipe.read_start(cb_read);;
-        log_debug("read_start").lift
+        log_test("read_start").lift
     ): IOFail ();
     let cb_read = |var| |stream: UvStream, nread: I64, bytes: Array U8| (
-        log_debug("cb_read");;
+        log_test("cb_read");;
         if nread >= 0 {
             let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
             var.Var::mod(|val| val + str);;
-            log_debug("read continue")
+            log_test("read continue")
         } else if nread == Uv::eof.to_I64 {
             stream.read_stop.try(eprintln);;
             stream.close;;
-            log_debug("read completed");;
+            log_test("read completed");;
             pure()
         } else {
             let err = nread.to_CInt;
             var.Var::set("read error: " + Uv::strerror(err));;
             stream.read_stop.try(eprintln);;
             stream.close;;
-            log_debug("read error");;
+            log_test("read error");;
             pure()
         }
     ): IO ();
     let cb_open = |var, loop, contents| |fs: UvFs| (
-        log_debug("cb_open start").lift;;
+        log_test("cb_open start").lift;;
         let result = *fs.get_result.lift;
         if result < 0 {
             throw $ "open error: " + Uv::strerror(result.to_CInt)
         };
         let file: UvFile = result.to_CInt;
-        log_debug("cb_open: file=" + file.to_string).lift;;
+        log_test("cb_open: file=" + file.to_string).lift;;
         read_start(loop, file, cb_read(var))
-    ).try(|errmsg| var.Var::set(errmsg)): IO ();
+    ).catch_to_var(var): IO ();
     let var = *Var::make("").lift;
     let loop = *UvLoop::make;
     let contents = "hello world\n";
@@ -214,7 +365,7 @@ test_pipe_read = (
     write_file_string(path, contents);;
     open_file(loop, path, cb_open(var, loop, contents));;
     loop.run_default;;
-    log_debug("run_default done").lift;;
+    log_test("run_default done").lift;;
     let actual = *var.get.lift;
     assert_equal("var", contents, actual);;
     unlink(path);;
@@ -225,12 +376,16 @@ test_pipe_read = (
 test: IO ();
 test = (
     [
+/*
         test_loop_simple,
         test_loop_default,
         test_fs_open,
         test_pipe_open,
         test_pipe_write,
         //test_pipe_read1,
+        test_fs_write,
+*/
+        test_fs_open,
     ]
     .run_test_driver
 );

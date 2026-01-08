@@ -22,18 +22,30 @@ namespace UvFs {
 
     // uv_fs_t->result を取得する。
     get_result: UvFs -> IO I64;
-    get_result = |fs| (
-        fs.borrow_ptr_m(|p_req|
+    get_result = |req| (
+        req.borrow_ptr_m(|p_req|
             FFI_CALL_IO[I64 minilib_uv_fs_get_result(Ptr), p_req]
         )
     );
 
-    type UvFsOpenCallback = UvFs -> IO ();
+    // UvFs::open のコールバック。
+    // # Parameters
+    // * `req`: fsリクエスト。
+    // * `file`: ファイルデスクリプタ。0未満の場合はエラー。
+    type UvFsOpenCallback = UvFs -> UvFile -> IO ();
 
-    open: UvLoop -> String -> CInt -> CInt -> UvFsOpenCallback -> IOFail UvFs;
+    // ファイルをオープンする。
+    // # Parameters
+    // - `loop`: ループ
+    // - `path`: ファイルパス
+    // - `flags`: オープンフラグ。(例: UvFsFlags::_O_RDONLY)
+    // - `mode`: ファイルを新規作成したときのファイルモード。(例: 0o0644)
+    // - `cb`: コールバック
+    // # Returns
+    // - リクエスト(UvFs)。リクエストをキャンセルしない場合は無視してもよい。
+    open: UvLoop -> String -> UvFsFlags -> CInt -> UvFsOpenCallback -> IOFail UvFs;
     open = |loop, path, flags, mode, cb| (
-        let fs = *UvFs::init;
-        let req = fs;
+        let req = *UvFs::init;
         req.retain.lift;;    // リクエスト発生のためリテインする
         req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
         loop.borrow_ptr_m(|p_loop|
@@ -45,43 +57,175 @@ namespace UvFs {
                 )
             )
         );;
-        pure $ fs
+        pure $ req
     );
-
-    // fs はあくまでもリクエストで、ファイルディスクリプタは fs->result に返ってくる
-    // リクエストの生存期間は、リクエスト発生からコールバックの呼び出しが完了するまでにするべき。
-    // コールバック内でリクエストのクリーンアップ処理を呼ぶべき。
-    // リクエストをキャンセルしないのなら、すぐに忘れてもいい。
 
     minilib_uv_fs_open_callback : Ptr -> ();
     minilib_uv_fs_open_callback = |p_req| (
+        // UvFsはあくまでもリクエスト。ファイルディスクリプタは req.get_result に返ってくる。
+        // リクエストの生存期間は、原則としてリクエスト発生からコールバックの呼び出しが完了するまで。
         let io: IO () = do {
             eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
-            let fs: UvFs = *from_ptr(p_req);
-            // Fixのコールバックを呼ぶ。コールバックは fs.get_result の値を元にエラー処理する必要がある。
-            let cb: UvFsOpenCallback = *fs.get_user_callback;
-            cb(fs)
-        };
-        let io: IO () = do {
-            io;;
-            // finally: コールバック完了のためリリースする
+            let req: UvFs = *from_ptr(p_req);
+            let file: UvFile = (*req.get_result).to_CInt;
+            // Fixのコールバックを呼ぶ。
+            let cb: UvFsOpenCallback = *req.get_user_callback;
+            cb(req, file);;
+            // finally: コールバック完了のためリクエストをリリースする
             FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req]  // release on callback end
         };
         io.unsafe_perform
     );
     FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
+
+    // UvFs::close のコールバック
+    // # Parameters
+    // * req: fsリクエスト。
+    // * result: クローズ結果。0未満の場合はエラー。
+    type UvFsCloseCallback = UvFs -> CInt -> IO ();
+
+    close: UvLoop -> UvFile -> UvFsCloseCallback -> IOFail UvFs;
+    close = |loop, file, cb| (
+        let req = *UvFs::init;
+        req.retain.lift;;    // リクエスト発生のためリテインする
+        req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
+        loop.borrow_ptr_m(|p_loop|
+            req.borrow_ptr_m(|p_req|
+                eval log_debug("UvFs::close: (p_loop, p_req)=" + (p_loop, p_req).to_string);
+                FFI_CALL_IO[CInt minilib_uv_fs_close(Ptr, Ptr, CInt), p_loop, p_req, file]
+                ._check_err
+            )
+        );;
+        pure $ req
+    );
+    minilib_uv_fs_close_callback : Ptr -> ();
+    minilib_uv_fs_close_callback = |p_req| (
+        let io: IO () = do {
+            eval log_debug("minilib_uv_fs_close_callback: p_req=" + p_req.to_string);
+            let req: UvFs = *from_ptr(p_req);
+            let result: CInt = (*req.get_result).to_CInt;
+            // Fixのコールバックを呼ぶ。コールバックは req.get_result の値を元にエラー処理する必要がある。
+            let cb: UvFsCloseCallback = *req.get_user_callback;
+            cb(req, result);;
+            FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req] // finally: コールバック完了のためリリースする
+        };
+        io.unsafe_perform
+    );
+    FFI_EXPORT[minilib_uv_fs_close_callback, minilib_uv_fs_close_callback];
+
+    // UvFs::read のコールバック
+    // # Parameters
+    // * req: fsリクエスト(uv_fs_t*)
+    // * nread: 読み込んだバイト数。0未満ならエラー。ただし Uv::eof の場合は EOFを表す。
+    // * bytes: 読み込んだデータ
+    type UvFsReadCallback = UvFs -> I64 -> Array U8 -> IO ();
+
+    read: UvLoop -> UvFile -> CSizeT -> UvFsReadCallback -> IOFail UvFs;
+    read = |loop, file, bufsize, cb| (
+        let req = *UvFs::init;
+        req.retain.lift;;    // リクエスト発生のためリテインする
+        req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
+        let p_buf: Ptr = *FFI_CALL_IO[Ptr malloc(CSizeT), bufsize];
+        req.set_extra_data(p_buf);;  // バッファを追加データとして設定する。コールバック関数の末尾で解放する。
+        loop.borrow_ptr_m(|p_loop|
+            req.borrow_ptr_m(|p_req|
+                eval log_debug("UvFs::read: (p_loop, p_req)=" + (p_loop, p_req).to_string);
+                FFI_CALL_IO[CInt minilib_uv_fs_read(Ptr, Ptr, CInt, Ptr, CSizeT), p_loop, p_req, file, p_buf, bufsize]
+                ._check_err
+            )
+        );;
+        pure $ req
+    );
+    minilib_uv_fs_read_callback : Ptr -> ();
+    minilib_uv_fs_read_callback = |p_req| (
+        let io: IO () = do {
+            eval log_debug("minilib_uv_fs_read_callback: p_req=" + p_req.to_string);
+            let req: UvFs = *from_ptr(p_req);
+            let p_buf = *req.get_extra_data;
+            req.set_extra_data(nullptr);;
+            let nread = *req.get_result;
+            let bytes = *if nread <= 0 { pure $ [] }
+            else {
+                let bytes = Array::fill(nread, 0_U8);
+                let (bytes, ()) = *bytes.mutate_boxed_io(|p_bytes|
+                    FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, p_buf, nread.to_CSizeT]
+                );
+                pure $ bytes
+            }; 
+            // Fixのコールバックを呼ぶ。コールバックは nread の値を元にエラー処理する必要がある。
+            let cb: UvFsReadCallback = *req.get_user_callback;
+            cb(req, nread, bytes);;
+            // finally: バッファを解放する
+            FFI_CALL_IO[() free(Ptr), p_buf];;
+            // finally: コールバック完了のためリリースする
+            FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req]  // release on callback end
+        };
+        io.unsafe_perform
+    );
+    FFI_EXPORT[minilib_uv_fs_read_callback, minilib_uv_fs_read_callback];
+
+    // UvFs::write のコールバック
+    // # Parameters
+    // * req: fsリクエスト(uv_fs_t*)
+    // * nwrite: 書き込んだバイト数。0未満ならエラー。
+    // * buf: 書き込みバッファ
+    type UvFsWriteCallback = UvFs -> I64 -> Array U8 -> IO ();
+
+    write: UvLoop -> UvFile -> Array U8 -> UvFsWriteCallback -> IOFail UvFs;
+    write = |loop, file, buf, cb| (
+        let req = *UvFs::init;
+        let req = req;
+        req.retain.lift;;    // リクエスト発生のためリテインする
+        req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
+        // バッファを retained_ptr に変換し、追加データとして設定する。コールバック関数の先頭で復元する。 
+        let buf_retained_ptr: Ptr = *buf.boxed_to_retained_ptr.lift;
+        req.set_extra_data(buf_retained_ptr);;
+        let bufsize = buf.get_size.to_CSizeT;
+        loop.borrow_ptr_m(|p_loop|
+            req.borrow_ptr_m(|p_req|
+                buf.borrow_boxed_m(|p_buf|
+                    eval log_debug("UvFs::write: (p_loop, p_req)=" + (p_loop, p_req).to_string);
+                    FFI_CALL_IO[CInt minilib_uv_fs_write(Ptr, Ptr, CInt, Ptr, CSizeT), p_loop, p_req, file, p_buf, bufsize]
+                    ._check_err
+                )
+            )
+        );;
+        pure $ req
+    );
+    minilib_uv_fs_write_callback : Ptr -> ();
+    minilib_uv_fs_write_callback = |p_req| (
+        let io: IO () = do {
+            eval log_debug("minilib_uv_fs_write_callback: p_req=" + p_req.to_string);
+            let req: UvFs = *from_ptr(p_req);
+            let req = req;
+            let nwrite = *req.get_result;
+            // 追加データから retained_ptr を取り出し、バッファを復元する 
+            let buf_retained_ptr = *req.get_extra_data;
+            req.set_extra_data(nullptr);;
+            let buf: Array U8 = *buf_retained_ptr.boxed_from_retained_ptr;
+            // Fixのコールバックを呼ぶ。コールバックは nwrite の値を元にエラー処理する必要がある。
+            let cb: UvFsWriteCallback = *req.get_user_callback;
+            cb(req, nwrite, buf);;
+            // finally: コールバック完了のためリリースする
+            FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req]  // release on callback end
+        };
+        io.unsafe_perform
+    );
+    FFI_EXPORT[minilib_uv_fs_write_callback, minilib_uv_fs_write_callback];
 }
 
 // open のフラグ関係
+type UvFsFlags = CInt;
+
 namespace UvFsFlags {
-    _find_flag: String -> CInt;
+    _find_flag: String -> UvFsFlags;
     _find_flag = |name| (
         name.borrow_c_str(|p_name|
             FFI_CALL[CInt minilib_uv_fs_find_flag(Ptr), p_name]
         )
     );
 
-    from_mode_str: String -> CInt;
+    from_mode_str: String -> UvFsFlags;
     from_mode_str = |mode| (
         let has = |str, mode| mode.find(str, 0).is_some;
         if mode.has("r+") { 

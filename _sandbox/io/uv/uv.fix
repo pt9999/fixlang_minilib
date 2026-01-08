@@ -180,34 +180,34 @@ impl UvHandle t: BorrowPtrM {
 }
 
 namespace UvHandle {
-    close: UvHandle t -> IO ();
-    close = |handle| (
+    close: [m: MonadIO] UvHandle t -> m ();
+    close = |handle| lift_io $ do {
         handle.borrow_ptr_m(|p_handle|
             FFI_CALL_IO[() minilib_uv_handle_close(Ptr), p_handle]
         )
-    );
+    };
     
     // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
-    set_user_callback: cb -> UvHandle t -> IO ();
-    set_user_callback = |cb, handle| (
+    set_user_callback: [m: MonadIO] cb -> UvHandle t -> m ();
+    set_user_callback = |cb, handle| lift_io $ do {
         handle.borrow_ptr_m(|p_handle|
             let box_cb: Box cb = Box::make(cb);
             let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
             eval log_debug("UvHandle::set_user_callback: p_cb=" + p_cb.to_string);
             FFI_CALL_IO[() minilib_uv_handle_set_fix_cb(Ptr, Ptr), p_handle, p_cb]
         )
-    );
+    };
 
     // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
-    get_user_callback: UvHandle t -> IO cb;
-    get_user_callback = |handle| (
+    get_user_callback: [m: MonadIO] UvHandle t -> m cb;
+    get_user_callback = |handle| lift_io $ do {
         handle.borrow_ptr_m(|p_handle|
             let p_cb = *FFI_CALL_IO[Ptr minilib_uv_handle_get_fix_cb(Ptr), p_handle];
             eval log_debug("UvHandle::get_user_callback: p_cb=" + p_cb.to_string);
             let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
             pure $ box_cb.@value
         )
-    );
+    };
 }
 
 //-----------------------------------------------------------------
@@ -238,38 +238,54 @@ impl UvReq t: BorrowPtrM {
 
 namespace UvReq {
     // uv_req_t* の参照カウンタを1増加する。
-    retain: UvReq t -> IO ();
-    retain = |req| (
+    retain: [m: MonadIO] UvReq t -> m ();
+    retain = |req| lift_io $ do {
         req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_retain(Ptr), p_req])
-    );
+    };
 
     // uv_req_t* の参照カウンタを1減少する。参照カウンタが0になったら解放される。
-    release: UvReq t -> IO ();
-    release = |req| (
+    release: [m: MonadIO] UvReq t -> m ();
+    release = |req| lift_io $ do {
         req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req])
-    );
+    };
 
     // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
-    set_user_callback: cb -> UvReq t -> IO ();
-    set_user_callback = |cb, req| (
+    set_user_callback: [m: MonadIO] cb -> UvReq t -> m ();
+    set_user_callback = |cb, req| lift_io $ do {
         req.borrow_ptr_m(|p_req|
             let box_cb: Box cb = Box::make(cb);
             let p_cb: Ptr = *box_cb.boxed_to_retained_ptr;
             eval log_debug("UvReq::set_user_callback: p_cb=" + p_cb.to_string);
             FFI_CALL_IO[() minilib_uv_req_set_fix_cb(Ptr, Ptr), p_req, p_cb]
         )
-    );
+    };
 
     // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
-    get_user_callback: UvReq t -> IO cb;
-    get_user_callback = |req| (
+    get_user_callback: [m: MonadIO] UvReq t -> m cb;
+    get_user_callback = |req| lift_io $ do {
         req.borrow_ptr_m(|p_req|
             let p_cb = *FFI_CALL_IO[Ptr minilib_uv_req_get_fix_cb(Ptr), p_req];
             eval log_debug("UvReq::get_user_callback: p_cb=" + p_cb.to_string);
             let box_cb: Box cb = *p_cb.boxed_from_retained_ptr;
             pure $ box_cb.@value
         )
-    );
+    };
+
+    // 追加データを設定する。
+    set_extra_data: [m: MonadIO] Ptr -> UvReq t -> m ();
+    set_extra_data = |extra_data, req| lift_io $ do {
+        req.borrow_ptr_m(|p_req|
+            FFI_CALL_IO[() minilib_uv_req_set_extra_data(Ptr, Ptr), p_req, extra_data]
+        )
+    };
+
+    // 追加データを取得する。
+    get_extra_data: [m: MonadIO] UvReq t -> m Ptr;
+    get_extra_data = |req| lift_io $ do {
+        req.borrow_ptr_m(|p_req|
+            FFI_CALL_IO[Ptr minilib_uv_req_get_extra_data(Ptr), p_req]
+        )
+    };
 }
 
 //-----------------------------------------------------------------

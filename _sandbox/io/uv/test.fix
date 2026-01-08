@@ -68,10 +68,12 @@ namespace TestFsEnv {
     tell_msg: String -> RIO TestFsEnv ();
     tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
 
+    /*
     to_io: RIO TestFsEnv () -> RIO TestFsEnv (IO ());
     to_io = |rio| (
         pure $ rio.run(*ask)
     );
+    */
 
     run: TestFsEnv -> RIO TestFsEnv () -> IO ();
     run = |env, rio| (
@@ -84,31 +86,30 @@ namespace TestFsEnv {
         let mode = 0o666.to_CInt;
         let cb = make_open_cb(*ask, cb);
         unlink(path).catch(|errmsg| pure()).lift_iofail;;
-        let env = *ask;
-        let fs = *UvFs::open(env.@loop, path, flags, mode, cb).lift_iofail;
+        let fs = *UvFs::open(*ask_loop, path, flags, mode, cb).lift_iofail;
         pure()
     );
 
-    make_open_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> UvFile -> IO ();
+    make_open_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsOpenCallback;
     make_open_cb = |env, cb| |req: UvFs, file: UvFile| (
         log_test("on_open begin");;
         if file < 0.to_CInt {
             error $ "open error: " + Uv::strerror(file)
         };
-        (*ask).@file.set_var(file);;
+        tell_file(file);;
         cb;;
         log_test("on_open end")
     ).run(env);
 
-    write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
-    write = |contents, cb| (
+    write_to_file: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    write_to_file = |contents, cb| (
         let buf = contents.get_bytes.pop_back;
         let cb = make_write_cb(*ask, cb);
-        let fs = *UvFs::write(*ask_loop, *ask_file, buf, *cb.to_io).lift_iofail;
+        let fs = *UvFs::write(*ask_loop, *ask_file, buf, cb).lift_iofail;
         pure()
     );
 
-    make_write_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> I64 -> Array U8 -> IO ();
+    make_write_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsWriteCallback;
     make_write_cb = |env, cb| |req: UvFs, nwrite: I64, buf: Array U8| (
         log_test("on_write begin");;
         if nwrite < 0 {
@@ -118,14 +119,14 @@ namespace TestFsEnv {
         log_test("on_write end")
     ).run(env);
 
-    close: RIO TestFsEnv () -> RIO TestFsEnv ();
-    close = |cb| (
-        let cb = on_close(cb);
-        let fs = *UvFs::close(*ask_loop, *ask_file, *cb.to_io).lift_iofail;
+    close_file: RIO TestFsEnv () -> RIO TestFsEnv ();
+    close_file = |cb| (
+        let cb = make_close_cb(*ask, cb);
+        let fs = *UvFs::close(*ask_loop, *ask_file, cb).lift_iofail;
         pure()
     );
 
-    make_close_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> CInt -> RIO TestFsEnv ();
+    make_close_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsCloseCallback;
     make_close_cb = |env, cb| |req: UvFs, result: CInt| (
         log_test("on_close begin");;
         if result < 0.to_CInt {
@@ -155,41 +156,29 @@ test_fs_open = (
 test_fs_write: TestCase;
 test_fs_write = (
     make_test("test_fs_write") $ |_|
-    let cb_close = |var| |req: UvFs, result: CInt| (
-        if result < 0.to_CInt {
-            var.Var::set("close error: " + Uv::strerror(result.to_CInt))
-        };
-        var.set_var("close success");;
+    let on_close = do {
+        tell_msg("close success");;
         log_test("cb_close done");;
         pure()
-    ): IO ();
-    let cb_write = |var, loop, file| |req: UvFs, nwrite: I64, buf: Array U8| (
-        if nwrite < 0 {
-            throw $ "write error: " + Uv::strerror(nwrite.to_CInt)
-        };
-        var.set_var("write success");;
-        UvFs::close(loop, file, cb_close(var));;
-        log_test("cb_write done");;
-        pure()
-    ).catch_to_var(var): IO ();
-    let cb_open = |var, loop, contents| |fs: UvFs, file: UvFile| (
-        if file < 0.to_CInt {
-            throw $ "open error: " + Uv::strerror(file)
-        };
-        let buf = contents.get_bytes.pop_back;
-        let fs = *UvFs::write(loop, file, buf, cb_write(var, loop, file));
-        pure()
-    ).catch_to_var(var): IO ();
-    let var = *Var::make("").lift;
-    let loop = *UvLoop::make;
+    };
+    let on_write = do {
+        tell_msg("write success");;
+        close_file(on_close)
+    };
     let contents = "hello world\n";
+    let on_open = do {
+        tell_msg("open success");;
+        write_to_file(contents, on_write)
+    };
+    let env = *TestFsEnv::make;
     let path = "tmp.file.tmp";
-    unlink(path).catch(|errmsg| pure());;
-    open_file(var, loop, path, contents);;
-    loop.run_default;;
+    do {
+        open_file_as_write(path, on_open)
+    }.run_reader_t(env);;
+    env.@loop.run_default;;
     log_test("run_default done").lift;;
-    let actual = *var.get.lift;
-    assert_equal("var", "close success", actual);;
+    let actual = *env.@msg.get.lift;
+    assert_equal("msg", "close success", actual);;
     let actual = *read_file_string(path);
     assert_equal("contents", contents, actual);;
     unlink(path);;
@@ -377,16 +366,15 @@ test_pipe_read = (
 test: IO ();
 test = (
     [
-/*
         test_loop_simple,
         test_loop_default,
         test_fs_open,
+        test_fs_write,
         test_pipe_open,
+/*
         test_pipe_write,
         //test_pipe_read1,
-        test_fs_write,
 */
-        test_fs_open,
     ]
     .run_test_driver
 );

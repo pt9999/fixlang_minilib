@@ -82,14 +82,15 @@ namespace TestFsEnv {
     open_file_as_write = |path, cb| (
         let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
         let mode = 0o666.to_CInt;
-        let cb = on_open(cb);
+        let cb = make_open_cb(*ask, cb);
         unlink(path).catch(|errmsg| pure()).lift_iofail;;
-        let fs = *UvFs::open(*ask_loop, path, flags, mode, *cb.to_io).lift_iofail;
+        let env = *ask;
+        let fs = *UvFs::open(env.@loop, path, flags, mode, cb).lift_iofail;
         pure()
     );
 
-    on_open: RIO TestFsEnv () -> RIO TestFsEnv ();
-    on_open = |cb| |req: UvFs, file: UvFile| (
+    make_open_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> UvFile -> IO ();
+    make_open_cb = |env, cb| |req: UvFs, file: UvFile| (
         log_test("on_open begin");;
         if file < 0.to_CInt {
             error $ "open error: " + Uv::strerror(file)
@@ -97,25 +98,25 @@ namespace TestFsEnv {
         (*ask).@file.set_var(file);;
         cb;;
         log_test("on_open end")
-    );
+    ).run(env);
 
     write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
     write = |contents, cb| (
         let buf = contents.get_bytes.pop_back;
-        let cb = on_write(cb);
+        let cb = make_write_cb(*ask, cb);
         let fs = *UvFs::write(*ask_loop, *ask_file, buf, *cb.to_io).lift_iofail;
         pure()
     );
 
-    on_write: RIO TestFsEnv () -> RIO TestFsEnv ();
-    on_write = |cb| |req: UvFs, nwrite: I64, buf: Array U8| (
+    make_write_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> I64 -> Array U8 -> IO ();
+    make_write_cb = |env, cb| |req: UvFs, nwrite: I64, buf: Array U8| (
         log_test("on_write begin");;
         if nwrite < 0 {
             error $ "write error: " + Uv::strerror(nwrite.to_CInt)
         };
         cb;;
         log_test("on_write end")
-    );
+    ).run(env);
 
     close: RIO TestFsEnv () -> RIO TestFsEnv ();
     close = |cb| (
@@ -124,15 +125,15 @@ namespace TestFsEnv {
         pure()
     );
 
-    on_close: RIO TestFsEnv () -> RIO TestFsEnv ();
-    on_close = |cb| |req: UvFs, result: CInt| (
+    make_close_cb: TestFsEnv -> RIO TestFsEnv () -> UvFs -> CInt -> RIO TestFsEnv ();
+    make_close_cb = |env, cb| |req: UvFs, result: CInt| (
         log_test("on_close begin");;
         if result < 0.to_CInt {
             error $ "close error: " + Uv::strerror(result.to_CInt)
         };
         cb;;
         log_test("on_close end")
-    );
+    ).run(env);
 }
 
 test_fs_open: TestCase;

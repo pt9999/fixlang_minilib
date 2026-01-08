@@ -272,75 +272,9 @@ namespace UvReq {
     );
 }
 
-
 //-----------------------------------------------------------------
-// UvFs
+// UvFile
 //-----------------------------------------------------------------
-
-type UvFsTag = unbox struct {};
-
-type UvFs = UvReq UvFsTag;
-
-namespace UvFs {
-    // uv_fs_t* を確保して初期化し、UvFsを作成する。
-    init: IOFail UvFs;
-    init = (
-        let p_req = *FFI_CALL_IO[Ptr minilib_uv_fs_init()].lift;
-        if p_req == nullptr { throw $ "minilib_uv_fs_init failed!" };
-        from_ptr(p_req)
-    );
-
-    // uv_fs_t->result を取得する。
-    get_result: UvFs -> IO I64;
-    get_result = |fs| (
-        fs.borrow_ptr_m(|p_req|
-            FFI_CALL_IO[I64 minilib_uv_fs_get_result(Ptr), p_req]
-        )
-    );
-
-    type UvFsOpenCallback = UvFs -> IO ();
-
-    open: UvLoop -> String -> CInt -> CInt -> UvFsOpenCallback -> IOFail UvFs;
-    open = |loop, path, flags, mode, cb| (
-        let fs = *UvFs::init;
-        let req = fs;
-        req.retain.lift;;    // リクエスト発生のためリテインする
-        req.set_user_callback(cb).lift;;     // ユーザが用意したコールバック関数を設定する
-        loop.borrow_ptr_m(|p_loop|
-            req.borrow_ptr_m(|p_req|
-                eval log_debug("UvFs::open: (p_loop, p_req)=" + (p_loop, p_req).to_string);
-                path.borrow_c_str_m(|p_path|
-                    FFI_CALL_IO[CInt minilib_uv_fs_open(Ptr, Ptr, Ptr, CInt, CInt), p_loop, p_req, p_path, flags.to_CInt, mode.to_CInt]
-                    ._check_err
-                )
-            )
-        );;
-        pure $ fs
-    );
-
-    // fs はあくまでもリクエストで、ファイルディスクリプタは fs->result に返ってくる
-    // リクエストの生存期間は、リクエスト発生からコールバックの呼び出しが完了するまでにするべき。
-    // コールバック内でリクエストのクリーンアップ処理を呼ぶべき。
-    // リクエストをキャンセルしないのなら、すぐに忘れてもいい。
-
-    minilib_uv_fs_open_callback : Ptr -> ();
-    minilib_uv_fs_open_callback = |p_req| (
-        let io: IO () = do {
-            eval log_debug("minilib_uv_fs_open_callback: p_req=" + p_req.to_string);
-            let fs: UvFs = *from_ptr(p_req);
-            // Fixのコールバックを呼ぶ。コールバックは fs.get_result の値を元にエラー処理する必要がある。
-            let cb: UvFsOpenCallback = *fs.get_user_callback;
-            cb(fs)
-        };
-        let io: IO () = do {
-            io;;
-            // finally: コールバック完了のためリリースする
-            FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req]  // release on callback end
-        };
-        io.unsafe_perform
-    );
-    FFI_EXPORT[minilib_uv_fs_open_callback, minilib_uv_fs_open_callback];
-}
 
 // ファイルディスクリプタ(uv_file)を表す型。
 type UvFile = CInt;
@@ -352,44 +286,6 @@ namespace UvFile {
     stdout: UvFile = 1.to_CInt;
     // 標準エラー出力
     stderr: UvFile = 2.to_CInt;
-}
-
-// open のフラグ関係
-namespace UvFsFlags {
-    _find_flag: String -> CInt;
-    _find_flag = |name| (
-        name.borrow_c_str(|p_name|
-            FFI_CALL[CInt minilib_uv_fs_find_flag(Ptr), p_name]
-        )
-    );
-
-    from_mode_str: String -> CInt;
-    from_mode_str = |mode| (
-        let has = |str, mode| mode.find(str, 0).is_some;
-        if mode.has("r+") { 
-            UvFsFlags::_O_RDWR
-        } else if mode.has("r") {
-            UvFsFlags::_O_RDONLY
-        } else if mode.has("w+") {
-            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_RDWR).bit_or(UvFsFlags::_O_TRUNC)
-        } else if mode.has("w") {
-            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC)
-        } else if mode.has("a+") {
-            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_RDWR).bit_or(UvFsFlags::_O_APPEND)
-        } else if mode.has("a") {
-            UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_APPEND)
-        } else {
-            0.to_CInt
-        }
-    );
-
-    _O_RDONLY: CInt = _find_flag("O_RDONLY");
-    _O_WRONLY: CInt = _find_flag("O_WRONLY");
-    _O_RDWR: CInt = _find_flag("O_RDWR");
-    _O_CREAT: CInt = _find_flag("O_CREAT");
-    _O_EXCL: CInt = _find_flag("O_EXCL");
-    _O_TRUNC: CInt = _find_flag("O_TRUNC");
-    _O_APPEND: CInt = _find_flag("O_APPEND");
 }
 
 //-----------------------------------------------------------------

@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #include <uv.h>
+#include <dmalloc.h>
 
 #define LOG_DEBUG(X) printf("\x1b[033m[lib.c]\x1b[m "); printf X
 //#define LOG_DEBUG(X)
@@ -17,7 +18,7 @@
 // ==================================
 
 // in lib.c
-void minilib_uv_handle_close_and_dealloc_callback(uv_handle_t* handle);
+void minilib_uv_handle_close_callback(uv_handle_t* handle);
 void minilib_uv_handle_dealloc(uv_handle_t* handle);
 
 // in uv.fix
@@ -86,7 +87,6 @@ void minilib_uv_loop_close(uv_loop_t* loop)
 // uv_handle_t
 // ----------------------------------
 struct minilib_uv_handledata_s {
-    int refcount;
     void* fix_cb;
     int read_started;
     void* extra_data;
@@ -95,29 +95,18 @@ typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
 
 uv_handle_t* minilib_uv_handle_alloc(size_t size)
 {
-    uv_handle_t* handle = calloc(size, 1);
+    uv_handle_t* handle = malloc(size);
     if (handle == NULL) return NULL;
 
-    minilib_uv_handledata_t* data = calloc(sizeof(minilib_uv_handledata_t), 1);
+    minilib_uv_handledata_t* data = malloc(sizeof(minilib_uv_handledata_t));
     if (data == NULL) return NULL;
     handle->data = data;
 
-    data->refcount = 0;
     data->fix_cb = NULL;
     data->read_started = 0;
     data->extra_data = NULL;
 
     return handle;
-}
-
-void minilib_uv_handle_retain(uv_handle_t* handle)
-{
-    if (handle != NULL && handle->data != NULL) {
-        minilib_uv_handledata_t* data = handle->data;
-        uv_handle_type type = handle->type;
-        LOG_DEBUG(("minilib_uv_handle_retain handle=%p type=%d refcount: %d -> %d\n", handle, type, data->refcount, data->refcount+1));
-        data->refcount++;
-    }
 }
 
 // ユーザから呼び出される
@@ -126,43 +115,17 @@ void minilib_uv_handle_close(uv_handle_t* handle)
     LOG_DEBUG(("minilib_uv_handle_close handle=%p\n", handle));
     if (!uv_is_closing(handle)) {
         // まだクローズされていなければ、クローズ後に解放する
-        uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
+        uv_close(handle, minilib_uv_handle_close_callback);
     } else {
         // 既にクローズされている場合は何もしない
         return;
     }
 }
 
-void minilib_uv_handle_release(uv_handle_t* handle)
-{
-    if (handle != NULL && handle->data != NULL) {
-        minilib_uv_handledata_t* data = handle->data;
-        uv_handle_type type = handle->type;
-        LOG_DEBUG(("minilib_uv_handle_release handle=%p type=%d refcount: %d -> %d\n", handle, type, data->refcount, data->refcount-1));
-        data->refcount--;
-        if (data->refcount <= 0) {
-            // TODO: おそらく、参照カウンタが0になったら解放するとしているのが間違いなのでは？
-            // 参照カウンタが0になっても、ハンドルがアクティブならまだループから参照されている。
-            // ドキュメントによると、ハンドルを解放する前に、必ず uv_close を呼び出す必要がある。
-            // また、ハンドルの解放はクローズのコールバックからでなければならない。
-            
-            // ということで、ハンドルは参照カウンタ管理すべきでないと思われる。
-            /*
-            if (!uv_is_closing(handle)) {
-                // まだクローズされていなければ、クローズ後に解放する
-                //LOG_DEBUG(("uv_close handle=%p\n", handle));
-                //uv_close(handle, minilib_uv_handle_close_and_dealloc_callback);
-            } else {
-                // 既にクローズされている場合、何もしない
-            }
-            */
-        }
-    }
-}
 
-void minilib_uv_handle_close_and_dealloc_callback(uv_handle_t* handle)
+void minilib_uv_handle_close_callback(uv_handle_t* handle)
 {
-    LOG_DEBUG(("minilib_uv_handle_close_and_dealloc_callback handle=%p\n", handle));
+    LOG_DEBUG(("minilib_uv_handle_close_callback handle=%p\n", handle));
     minilib_uv_handle_dealloc(handle);
 }
 
@@ -174,7 +137,6 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle)
         assert(!uv_is_active(handle));
         //assert(!uv_has_ref(handle));
         minilib_uv_handledata_t* data = handle->data;
-        assert (data->refcount <= 0);
         handle->data = NULL;
         LOG_DEBUG(("freeing handle=%p\n", handle));
         free(handle);
@@ -230,10 +192,10 @@ typedef struct minilib_uv_reqdata_s minilib_uv_reqdata_t;
 
 uv_req_t* minilib_uv_req_init(size_t size, void* cleanup_func)
 {
-    uv_req_t* req = calloc(size, 1);
+    uv_req_t* req = malloc(size);
     if (req == NULL) return NULL;
 
-    minilib_uv_reqdata_t* data = calloc(sizeof(minilib_uv_reqdata_t), 1);
+    minilib_uv_reqdata_t* data = malloc(sizeof(minilib_uv_reqdata_t));
     if (data == NULL) return NULL;
     req->data = data;
 
@@ -467,7 +429,7 @@ uv_pipe_t* minilib_uv_pipe_init(uv_loop_t* loop)
     int ipc = 0;
     int err = uv_pipe_init(loop, pipe, ipc);
     if (err < 0) {
-        minilib_uv_handle_release((uv_handle_t*) pipe);
+        minilib_uv_handle_dealloc((uv_handle_t*) pipe);
         return NULL;
     }
     return pipe;
@@ -476,4 +438,9 @@ uv_pipe_t* minilib_uv_pipe_init(uv_loop_t* loop)
 int minilib_uv_pipe_open(uv_pipe_t* pipe, uv_file file)
 {
     return uv_pipe_open(pipe, file);
+}
+
+int minilib_uv_make_pipe_pair(uv_file fds[2])
+{
+    return uv_pipe(fds, UV_NONBLOCK_PIPE, UV_NONBLOCK_PIPE);
 }

@@ -16,26 +16,25 @@ trait [m: * -> *] m: MonadBorrowIF {
     borrow_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m b;
     borrow_m: (a -> m b) -> Destructor a -> m b;
     borrow_c_str_m: (Ptr -> m b) -> String -> m b;
+    mutate_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m (a, b);
 }
-
-/*
-impl Iden: MonadBorrowIF {
-    borrow_boxed_m = |f| borrow_boxed(f >> Iden::get) >> Iden::make;
-    borrow_m = |f| borrow(f >> Iden::get) >> Iden::make;
-    borrow_c_str_m = |f| borrow_c_str(f >> Iden::get) >> Iden::make;
-}
-*/
 
 impl IO: MonadBorrowIF {
     borrow_boxed_m = borrow_boxed_io;
     borrow_m = borrow_io;
     borrow_c_str_m = borrow_c_str_io;
+    mutate_boxed_m = mutate_boxed_io;
 }
 
 impl IOFail: MonadBorrowIF {
     borrow_boxed_m = |f| borrow_boxed_io(f >> to_result) >> from_io_result;
     borrow_m = |f| borrow_io(f >> to_result) >> from_io_result;
     borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
+    mutate_boxed_m = |f, a| (
+        let (a, res_b) = *a.mutate_boxed_io(f >> to_result).lift;
+        let b = *res_b.from_result; // may throw
+        pure $ (a, b)
+    );
 }
 
 //-----------------------------------------------------------------
@@ -165,10 +164,9 @@ type UvHandle t = unbox struct {
 
 impl UvHandle t: FromPtr {
     from_ptr = |p_handle| lift_io $ do {
-        FFI_CALL_IO[() minilib_uv_handle_retain(Ptr), p_handle];;
         pure $ UvHandle {
             dtor: *Destructor::make(p_handle, |p_handle|
-                FFI_CALL_IO[() minilib_uv_handle_release(Ptr), p_handle];;
+                // ハンドルはループで管理されるため、破棄しない
                 pure $ nullptr
             )
         }
@@ -180,6 +178,7 @@ impl UvHandle t: BorrowPtrM {
 }
 
 namespace UvHandle {
+    // ハンドルをクローズする。ハンドルはループの実行前あるいは実行中に必ずクローズする必要がある。
     close: [m: MonadIO] UvHandle t -> m ();
     close = |handle| lift_io $ do {
         handle.borrow_ptr_m(|p_handle|
@@ -447,5 +446,19 @@ namespace UvPipe {
             FFI_CALL_IO[CInt minilib_uv_pipe_open(Ptr, CInt), p_pipe, fd]
             ._check_err
         )
+    );
+
+    make_pipe_pair: UvLoop -> IOFail (UvPipe, UvPipe);
+    make_pipe_pair = |loop| (
+        let fds: Array UvFile = Array::fill(2, 0.to_CInt);
+        let (fds, ()) = *fds.mutate_boxed_m(|p_fds|
+            FFI_CALL_IO[CInt minilib_uv_make_pipe_pair(Ptr), p_fds]
+            ._check_err
+        );
+        let read_pipe = *UvPipe::init(loop);
+        let write_pipe = *UvPipe::init(loop);
+        read_pipe.open(fds.@(0));;
+        write_pipe.open(fds.@(1));;
+        pure $ (read_pipe, write_pipe)
     );
 }

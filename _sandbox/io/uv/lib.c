@@ -43,6 +43,20 @@ int minilib_uv_get_uv_eof()
 }
 
 // ----------------------------------
+// Memory Management
+// ----------------------------------
+
+void* minilib_uv_malloc(size_t size)
+{
+    return malloc(size);
+}
+
+void minilib_uv_free(void* ptr)
+{
+    free(ptr);
+}
+
+// ----------------------------------
 // uv_loop_t
 // ----------------------------------
 

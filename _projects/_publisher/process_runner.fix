@@ -1,0 +1,46 @@
+module Publisher.ProcessRunner;
+
+import AsyncTask;
+import Subprocess;
+
+exit_status_to_string: ExitStatus -> String;
+exit_status_to_string = |ex| (
+    match ex {
+        exit(u8) => "exit(" + u8.to_string + ")",
+        signaled(u8) => "signaled(" + u8.to_string + ")",
+        wait_failed() => "wait_failed()"
+    }
+);
+
+worker: (IOHandle, IOHandle, IOHandle) -> IOFail (String, String);
+worker = |(proc_stdin, proc_stdout, proc_stderr)| (
+    proc_stdin.close_file.lift;;
+    let drain_output: IOHandle -> IOHandle -> IO (Result ErrMsg String) = |proc_out, out| (
+        loop_lines_io(proc_out, "", |lines, line|
+            if line.is_empty { break_m $ lines };
+            write_string(out, line);;
+            flush(out).lift;;
+            let lines = lines + line;
+            continue_m $ lines
+        ).to_result
+    );
+    let tasks = [
+        *AsyncIOTask::make(drain_output(proc_stdout, IO::stdout)).lift,
+        *AsyncIOTask::make(drain_output(proc_stderr, IO::stderr)).lift,
+    ];
+    let texts = *tasks.to_iter.map(|task| task.get.from_io_result).collect_m;
+    pure $ (texts.@(0), texts.@(1))
+);
+
+run_process: Array String -> IOFail (String, String);
+run_process = |args| (
+    eprintln("+ " + args.to_iter.join(" ")).lift;;
+    let com = args.@(0);
+    let input = "";
+    let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
+    if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+        pure $ (stdout, stderr)
+    } else {
+        throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+    }
+);

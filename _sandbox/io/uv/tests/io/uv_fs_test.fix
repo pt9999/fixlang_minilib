@@ -1,0 +1,251 @@
+module UvFsTest;
+
+import AsyncTask;
+import Minilib.IO.Uv;
+import Minilib.IO.Uv.UvFs;
+import Minilib.IO.FileSystem;
+import Minilib.Monad.IO;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Error;
+import Minilib.Testing.UnitTest;
+
+log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
+//log_test: [m: MonadIO] String -> m () = |str| pure();
+
+set_var: [m: MonadIO] a -> Var a -> m ();
+set_var = |a, var| (
+    var.Var::set(a).lift_io
+);
+
+catch_to_var: Var String -> IOFail () -> IO ();
+catch_to_var = |var, iof| (
+    iof.try(|errmsg| var.Var::set(errmsg))
+);
+
+
+type RIO e = ReaderT e IOFail;
+
+type TestFsEnv = unbox struct {
+    msg: Var String,
+    loop: UvLoop,
+    file: Var UvFile,
+    read_contents: Var String,
+};
+
+namespace TestFsEnv {
+    make: [m: MonadIOFail] m TestFsEnv;
+    make = lift_iofail $ do {
+        pure $ TestFsEnv {
+            msg: *Var::make("").lift,
+            loop: *UvLoop::make,
+            file: *Var::make(-1.to_CInt).lift,
+            read_contents: *Var::make("").lift,
+        }
+    };
+
+    ask_loop: RIO TestFsEnv UvLoop;
+    ask_loop = pure $ (*ask).@loop;
+
+    ask_file: RIO TestFsEnv UvFile;
+    ask_file = (*ask).@file.get.lift_io;
+
+    tell_file: UvFile -> RIO TestFsEnv ();
+    tell_file = |file| (*ask).@file.Var::set(file).lift_io;
+
+    tell_msg: String -> RIO TestFsEnv ();
+    tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
+
+    append_read_contents: String -> RIO TestFsEnv ();
+    append_read_contents = |str| (*ask).@read_contents.mod(concat(str)).lift_io;
+
+    /*
+    to_io: RIO TestFsEnv () -> RIO TestFsEnv (IO ());
+    to_io = |rio| (
+        pure $ rio.run(*ask)
+    );
+    */
+
+    run: TestFsEnv -> RIO TestFsEnv () -> IO ();
+    run = |env, rio| (
+        rio.run_reader_t(env).try(|errmsg| env.@msg.Var::set(errmsg))
+    );
+
+    open_file_as_read: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    open_file_as_read = |path, cb| (
+        let flags = UvFsFlags::_O_RDONLY;
+        let mode = 0o666.to_CInt;
+        let cb = make_open_cb(*ask, cb);
+        let fs = *UvFs::open(*ask_loop, path, flags, mode, cb).lift_iofail;
+        pure()
+    );
+
+    open_file_as_write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    open_file_as_write = |path, cb| (
+        let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
+        let mode = 0o666.to_CInt;
+        let cb = make_open_cb(*ask, cb);
+        unlink(path).catch(|errmsg| pure()).lift_iofail;;
+        let fs = *UvFs::open(*ask_loop, path, flags, mode, cb).lift_iofail;
+        pure()
+    );
+
+    make_open_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsOpenCallback;
+    make_open_cb = |env, cb| |req: UvFs, file: UvFile| (
+        log_test("on_open begin: file=" + file.to_string);;
+        if file < 0.to_CInt {
+            error $ "open error: " + Uv::strerror(file)
+        };
+        tell_file(file);;
+        cb;;
+        log_test("on_open end")
+    ).run(env);
+
+    read_from_file: I64 -> (I64 -> Array U8 -> RIO TestFsEnv ()) -> RIO TestFsEnv ();
+    read_from_file = |bufsize, cb| (
+        let cb = make_read_cb(*ask, cb);
+        let fs = *UvFs::read(*ask_loop, *ask_file, bufsize.to_CSizeT, cb).lift_iofail;
+        pure()
+    );
+
+    make_read_cb: TestFsEnv -> (I64 -> Array U8 -> RIO TestFsEnv ()) -> UvFsReadCallback;
+    make_read_cb = |env, cb| |req: UvFs, nread: I64, bytes: Array U8| (
+        log_test("on_read begin: nread=" + nread.to_string);;
+        if nread < 0 {
+            error $ "read error: " + Uv::strerror(nread.to_CInt)
+        };
+        cb(nread, bytes);;
+        log_test("on_read end")
+    ).run(env);
+
+    write_to_file: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
+    write_to_file = |contents, cb| (
+        let buf = contents.get_bytes.pop_back;
+        let cb = make_write_cb(*ask, cb);
+        let fs = *UvFs::write(*ask_loop, *ask_file, buf, cb).lift_iofail;
+        pure()
+    );
+
+    make_write_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsWriteCallback;
+    make_write_cb = |env, cb| |req: UvFs, nwrite: I64, buf: Array U8| (
+        log_test("on_write begin");;
+        if nwrite < 0 {
+            error $ "write error: " + Uv::strerror(nwrite.to_CInt)
+        };
+        cb;;
+        log_test("on_write end")
+    ).run(env);
+
+    close_file: RIO TestFsEnv () -> RIO TestFsEnv ();
+    close_file = |cb| (
+        let cb = make_close_cb(*ask, cb);
+        let fs = *UvFs::close(*ask_loop, *ask_file, cb).lift_iofail;
+        pure()
+    );
+
+    make_close_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsCloseCallback;
+    make_close_cb = |env, cb| |req: UvFs, result: CInt| (
+        log_test("on_close begin");;
+        if result < 0.to_CInt {
+            error $ "close error: " + Uv::strerror(result.to_CInt)
+        };
+        cb;;
+        log_test("on_close end")
+    ).run(env);
+}
+
+test_fs_open: TestCase;
+test_fs_open = (
+    make_test("test_fs_open") $ |_|
+    let env = *TestFsEnv::make;
+    let path = "tmp.file.tmp";
+    do {
+        open_file_as_write(path) $ do {
+            tell_msg("open success")
+        }
+    }.run_reader_t(env);;
+    env.@loop.run_default;;
+    assert_equal("eq", "open success", *env.@msg.get.lift);;
+    unlink(path);;
+    pure()
+);
+
+test_fs_write: TestCase;
+test_fs_write = (
+    make_test("test_fs_write") $ |_|
+    let on_close = do {
+        tell_msg("close success");;
+        log_test("cb_close done");;
+        pure()
+    };
+    let on_write = do {
+        tell_msg("write success");;
+        close_file(on_close)
+    };
+    let contents = "hello world\n";
+    let on_open = do {
+        tell_msg("open success");;
+        write_to_file(contents, on_write)
+    };
+    let env = *TestFsEnv::make;
+    let path = "tmp.file.tmp";
+    do {
+        open_file_as_write(path, on_open)
+    }.run_reader_t(env);;
+    env.@loop.run_default;;
+    log_test("run_default done").lift;;
+    let actual = *env.@msg.get.lift;
+    assert_equal("msg", "close success", actual);;
+    let actual = *read_file_string(path);
+    assert_equal("contents", contents, actual);;
+    unlink(path);;
+    pure()
+);
+
+test_fs_read: TestCase;
+test_fs_read = (
+    make_test("test_fs_read") $ |_|
+    let on_close = do {
+        tell_msg("close success");;
+        log_test("cb_close done");;
+        pure()
+    };
+    let on_read = fix $ |on_read, nread, bytes| do {
+        tell_msg("read success");;
+        let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
+        append_read_contents(str);;
+        if nread > 0 {
+            read_from_file(65536, on_read)
+        } else {
+            close_file(on_close)
+        }
+    };
+    let on_open = do {
+        tell_msg("open success");;
+        read_from_file(65536, on_read)
+    };
+    let env = *TestFsEnv::make;
+    let path = "tmp.file.tmp";
+    let contents = "hello world\n";
+    write_file_string(path, contents);;
+    do {
+        open_file_as_read(path, on_open)
+    }.run_reader_t(env);;
+    env.@loop.run_default;;
+    log_test("run_default done").lift;;
+    let actual = *env.@msg.get.lift;
+    assert_equal("msg", "close success", actual);;
+    let actual = *env.@read_contents.get.lift;
+    assert_equal("contents", contents, actual);;
+    unlink(path);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_fs_open,
+        test_fs_write,
+        test_fs_read,
+    ]
+    .run_test_driver
+);

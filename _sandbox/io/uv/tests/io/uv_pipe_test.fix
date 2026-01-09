@@ -1,0 +1,186 @@
+module UvPipeTest;
+
+import AsyncTask;
+import Minilib.IO.Uv;
+import Minilib.IO.Uv.UvFs;
+import Minilib.IO.FileSystem;
+import Minilib.Monad.IO;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Error;
+import Minilib.Testing.UnitTest;
+
+log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
+//log_test: [m: MonadIO] String -> m () = |str| pure();
+
+catch_to_var: Var String -> IOFail () -> IO ();
+catch_to_var = |var, iof| (
+    iof.try(|errmsg| var.Var::set(errmsg))
+);
+
+test_pipe_open: TestCase;
+test_pipe_open = (
+    make_test("test_pipe_open") $ |_|
+    let loop = *UvLoop::make;
+    let pipe = *UvPipe::init(loop);
+    pipe.open(UvFile::stdout);;
+    pipe.close;;
+    loop.run_default;;
+    pure()
+);
+
+test_pipe_make_pipe_pair: TestCase;
+test_pipe_make_pipe_pair = (
+    make_test("test_pipe_make_pipe_pair") $ |_|
+    let loop = *UvLoop::make;
+    let (read_pipe, write_pipe) = *UvPipe::make_pipe_pair(loop);
+    read_pipe.close;;
+    write_pipe.close;;
+    loop.run_default;;
+    pure()
+);
+
+type RIO e = ReaderT e IOFail;
+
+type TestPipeEnv = unbox struct {
+    msg: Var String,
+    loop: UvLoop,
+    pipe: UvPipe,
+    read_contents: Var String,
+};
+
+namespace TestPipeEnv {
+    make: [m: MonadIOFail] UvLoop -> UvPipe -> m TestPipeEnv;
+    make = |loop, pipe| lift_iofail $ do {
+        pure $ TestPipeEnv {
+            msg: *Var::make("").lift,
+            loop: loop,
+            pipe: pipe,
+            read_contents: *Var::make("").lift,
+        }
+    };
+
+    ask_loop: RIO TestPipeEnv UvLoop;
+    ask_loop = pure $ (*ask).@loop;
+
+    ask_pipe: RIO TestPipeEnv UvPipe;
+    ask_pipe = pure $ (*ask).@pipe;
+
+    tell_msg: String -> RIO TestPipeEnv ();
+    tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
+
+    append_read_contents: String -> RIO TestPipeEnv ();
+    append_read_contents = |str| (*ask).@read_contents.mod(concat(str)).lift_io;
+
+    run: TestPipeEnv -> RIO TestPipeEnv () -> IO ();
+    run = |env, rio| (
+        rio.run_reader_t(env).try(|errmsg| env.@msg.Var::set(errmsg))
+    );
+
+    read_from_pipe: (I64 -> Array U8 -> RIO TestPipeEnv ()) -> RIO TestPipeEnv ();
+    read_from_pipe = |cb| (
+        let pipe = *ask_pipe;
+        let cb = make_read_cb(*ask, cb);
+        pipe.read_start(cb);;
+        pure()
+    );
+
+/*
+    read_stop: (I64 -> Array U8 -> RIO TestPipeEnv ()) -> RIO TestPipeEnv ();
+    read_stop = |cb| (
+        let pipe = *ask_pipe;
+        let cb = make_read_cb(*ask, cb);
+        pipe.read_start(cb);;
+        pure()
+    );
+*/
+    make_read_cb: TestPipeEnv -> (I64 -> Array U8 -> RIO TestPipeEnv ()) -> UvReadCallback;
+    make_read_cb = |env, cb| |stream: UvStream, nread: I64, bytes: Array U8| (
+        log_test("on_read begin: nread=" + nread.to_string);;
+        if nread >= 0 {
+            cb(nread, bytes);;
+            log_test("read continue")
+        } else if nread == Uv::eof.to_I64 {
+            stream.read_stop;;
+            log_test("read completed");;
+            close_pipe
+        } else {
+            let err = nread.to_CInt;
+            stream.read_stop;;
+            stream.close;;
+            error $ "read error: " + Uv::strerror(err)
+        };;
+        log_test("on_read end")
+    ).run(env);
+
+    write_to_pipe: String -> RIO TestPipeEnv () -> RIO TestPipeEnv ();
+    write_to_pipe = |contents, cb| (
+        let buf = contents.get_bytes.pop_back;
+        let pipe = *ask_pipe;
+        let cb = make_write_cb(*ask, cb);
+        let write = *pipe.write(buf, cb).lift_iofail;
+        pure()
+    );
+
+    make_write_cb: TestPipeEnv -> RIO TestPipeEnv () -> UvWriteCallback;
+    make_write_cb = |env, cb| |write: UvWrite, status: CInt| (
+        log_test("on_write begin");;
+        let stream = *write.get_stream;
+        if status < 0.to_CInt {
+            error $ "write error: " + Uv::strerror(status)
+        };
+        cb;;
+        log_test("on_write end")
+    ).run(env);
+
+    close_pipe: RIO TestPipeEnv ();
+    close_pipe = (
+        log_test("close_pipe");;
+        let pipe = *ask_pipe;
+        pipe.close;;
+        tell_msg("close done")
+    );
+}
+
+test_pipe_read_write: TestCase;
+test_pipe_read_write = (
+    make_test("test_pipe_read_write") $ |_|
+    let loop = *UvLoop::make;
+    let (read_pipe, write_pipe) = *UvPipe::make_pipe_pair(loop);
+    let contents = "hello world\n";
+    let env_read = *TestPipeEnv::make(loop, read_pipe);
+    do {
+        let on_read = |nread, bytes| do {
+            tell_msg("read success");;
+            let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
+            append_read_contents(str)
+        };
+        read_from_pipe(on_read)
+    }.run_reader_t(env_read);;
+    let env_write = *TestPipeEnv::make(loop, write_pipe);
+    do {
+        let on_write = do {
+            tell_msg("write success");;
+            close_pipe
+        };
+        write_to_pipe(contents, on_write)
+    }.run_reader_t(env_write);;
+    loop.run_default;;
+    let actual = *env_write.@msg.get.lift;
+    assert_equal("msg", "close done", actual);;
+    let actual = *env_read.@msg.get.lift;
+    assert_equal("msg", "close done", actual);;
+    let actual = *env_read.@read_contents.get.lift;
+    assert_equal("read_contents", contents, actual);;
+    pure()
+);
+
+
+main: IO ();
+main = (
+    [
+        test_pipe_open,
+        test_pipe_make_pipe_pair,
+        test_pipe_read_write,
+    ]
+    .run_test_driver
+);

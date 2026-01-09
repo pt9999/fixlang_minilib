@@ -1,0 +1,36 @@
+module Main;
+
+import AsyncTask;
+
+mod_with_scapegoat: a -> (a -> a) -> Var a -> IO ();
+mod_with_scapegoat = |scapegoat, f, var| (
+    var.lock(|a|
+        var.Var::set(scapegoat);;
+        var.Var::set(f(a))
+    )
+);
+
+test_var_mod: Bool -> IO ();
+test_var_mod = |use_scapegoat| (
+    let ((), time) = *consumed_time_while_io(do {
+        pure();;
+        let n = 1000000;
+        let var: Var (Array U8) = *Var::make([]);
+        range(0,n).fold_m(
+            (), |i, _|
+            if use_scapegoat {
+                var.mod_with_scapegoat([], push_back(0_U8))
+            } else {
+                var.mod(push_back(0_U8))
+            }
+        )
+    });
+    println("use_scapegoat=" + use_scapegoat.to_string + 
+            " consumed time=" + time.to_string_precision(3_U8) + " sec")
+);
+
+main: IO ();
+main = (
+    test_var_mod(true);;
+    test_var_mod(false)
+);

@@ -1,6 +1,7 @@
 module UvPipeTest;
 
-import AsyncTask;
+//import AsyncTask;
+import Minilib.Common.IORef;
 import Minilib.IO.Uv;
 import Minilib.IO.Uv.UvFs;
 import Minilib.IO.FileSystem;
@@ -9,13 +10,8 @@ import Minilib.Monad.Reader;
 import Minilib.Monad.Error;
 import Minilib.Testing.UnitTest;
 
-log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
-//log_test: [m: MonadIO] String -> m () = |str| pure();
-
-catch_to_var: Var String -> IOFail () -> IO ();
-catch_to_var = |var, iof| (
-    iof.try(|errmsg| var.Var::set(errmsg))
-);
+//log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
+log_test: [m: MonadIO] String -> m () = |str| pure();
 
 test_pipe_open: TestCase;
 test_pipe_open = (
@@ -42,20 +38,20 @@ test_pipe_make_pipe_pair = (
 type RIO e = ReaderT e IOFail;
 
 type TestPipeEnv = unbox struct {
-    msg: Var String,
+    msg: IORef String,
     loop: UvLoop,
     pipe: UvPipe,
-    recv_bytes: Var (Array U8),
+    recv_bytes: IORef (Array U8),
 };
 
 namespace TestPipeEnv {
     make: [m: MonadIOFail] UvLoop -> UvPipe -> m TestPipeEnv;
     make = |loop, pipe| lift_iofail $ do {
         pure $ TestPipeEnv {
-            msg: *Var::make("").lift,
+            msg: *IORef::make("").lift,
             loop: loop,
             pipe: pipe,
-            recv_bytes: *Var::make([]).lift,
+            recv_bytes: *IORef::make([]).lift,
         }
     };
 
@@ -66,21 +62,14 @@ namespace TestPipeEnv {
     ask_pipe = pure $ (*ask).@pipe;
 
     tell_msg: String -> RIO TestPipeEnv ();
-    tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
+    tell_msg = |msg| (*ask).@msg.put(msg).lift_io;
 
     append_recv_bytes: Array U8 -> RIO TestPipeEnv ();
-    //append_recv_bytes = |bytes| (*ask).@recv_bytes.mod(append(bytes)).lift_io;
-    append_recv_bytes = |bytes| (
-        let var = (*ask).@recv_bytes;
-        var.lock(|recv_bytes|
-            var.Var::set([]);;   // scapegoat
-            var.Var::set(recv_bytes.append(bytes))
-        ).lift_io
-    );
+    append_recv_bytes = |bytes| (*ask).@recv_bytes.mod(append(bytes)).lift_io;
 
     run: TestPipeEnv -> RIO TestPipeEnv () -> IO ();
     run = |env, rio| (
-        rio.run_reader_t(env).try(|errmsg| env.@msg.Var::set(errmsg))
+        rio.run_reader_t(env).try(|errmsg| env.@msg.put(errmsg))
     );
 
     read_from_pipe: (I64 -> Array U8 -> RIO TestPipeEnv ()) -> RIO TestPipeEnv ();
@@ -91,15 +80,6 @@ namespace TestPipeEnv {
         pure()
     );
 
-/*
-    read_stop: (I64 -> Array U8 -> RIO TestPipeEnv ()) -> RIO TestPipeEnv ();
-    read_stop = |cb| (
-        let pipe = *ask_pipe;
-        let cb = make_read_cb(*ask, cb);
-        pipe.read_start(cb);;
-        pure()
-    );
-*/
     make_read_cb: TestPipeEnv -> (I64 -> Array U8 -> RIO TestPipeEnv ()) -> UvReadCallback;
     make_read_cb = |env, cb| |stream: UvStream, nread: I64, bytes: Array U8| (
         log_test("on_read begin: nread=" + nread.to_string);;
@@ -153,8 +133,7 @@ test_pipe_read_write = (
     make_test("test_pipe_read_write") $ |_|
     let loop = *UvLoop::make;
     let (read_pipe, write_pipe) = *UvPipe::make_pipe_pair(loop);
-    //let send_bytes = "hello world\n".get_bytes.pop_back;
-    //let send_bytes = Array::from_map(65536*1000, |i| i.to_U8);
+    //let send_bytes = Array::from_map(65536*100, |i| i.to_U8);
     let send_bytes = Array::from_map(65536*3, |i| i.to_U8);
     let env_read = *TestPipeEnv::make(loop, read_pipe);
     do {

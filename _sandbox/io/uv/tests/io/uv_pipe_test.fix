@@ -45,7 +45,7 @@ type TestPipeEnv = unbox struct {
     msg: Var String,
     loop: UvLoop,
     pipe: UvPipe,
-    read_contents: Var String,
+    recv_bytes: Var (Array U8),
 };
 
 namespace TestPipeEnv {
@@ -55,7 +55,7 @@ namespace TestPipeEnv {
             msg: *Var::make("").lift,
             loop: loop,
             pipe: pipe,
-            read_contents: *Var::make("").lift,
+            recv_bytes: *Var::make([]).lift,
         }
     };
 
@@ -68,8 +68,15 @@ namespace TestPipeEnv {
     tell_msg: String -> RIO TestPipeEnv ();
     tell_msg = |msg| (*ask).@msg.Var::set(msg).lift_io;
 
-    append_read_contents: String -> RIO TestPipeEnv ();
-    append_read_contents = |str| (*ask).@read_contents.mod(concat(str)).lift_io;
+    append_recv_bytes: Array U8 -> RIO TestPipeEnv ();
+    //append_recv_bytes = |bytes| (*ask).@recv_bytes.mod(append(bytes)).lift_io;
+    append_recv_bytes = |bytes| (
+        let var = (*ask).@recv_bytes;
+        var.lock(|recv_bytes|
+            var.Var::set([]);;   // scapegoat
+            var.Var::set(recv_bytes.append(bytes))
+        ).lift_io
+    );
 
     run: TestPipeEnv -> RIO TestPipeEnv () -> IO ();
     run = |env, rio| (
@@ -112,9 +119,9 @@ namespace TestPipeEnv {
         log_test("on_read end")
     ).run(env);
 
-    write_to_pipe: String -> RIO TestPipeEnv () -> RIO TestPipeEnv ();
-    write_to_pipe = |contents, cb| (
-        let buf = contents.get_bytes.pop_back;
+    write_to_pipe: Array U8 -> RIO TestPipeEnv () -> RIO TestPipeEnv ();
+    write_to_pipe = |send_bytes, cb| (
+        let buf = send_bytes;
         let pipe = *ask_pipe;
         let cb = make_write_cb(*ask, cb);
         let write = *pipe.write(buf, cb).lift_iofail;
@@ -146,13 +153,14 @@ test_pipe_read_write = (
     make_test("test_pipe_read_write") $ |_|
     let loop = *UvLoop::make;
     let (read_pipe, write_pipe) = *UvPipe::make_pipe_pair(loop);
-    let contents = "hello world\n";
+    //let send_bytes = "hello world\n".get_bytes.pop_back;
+    //let send_bytes = Array::from_map(65536*1000, |i| i.to_U8);
+    let send_bytes = Array::from_map(65536*3, |i| i.to_U8);
     let env_read = *TestPipeEnv::make(loop, read_pipe);
     do {
         let on_read = |nread, bytes| do {
             tell_msg("read success");;
-            let str: String = bytes.push_back(0_U8).from_bytes.as_ok;
-            append_read_contents(str)
+            append_recv_bytes(bytes)
         };
         read_from_pipe(on_read)
     }.run_reader_t(env_read);;
@@ -162,15 +170,16 @@ test_pipe_read_write = (
             tell_msg("write success");;
             close_pipe
         };
-        write_to_pipe(contents, on_write)
+        write_to_pipe(send_bytes, on_write)
     }.run_reader_t(env_write);;
     loop.run_default;;
     let actual = *env_write.@msg.get.lift;
     assert_equal("msg", "close done", actual);;
     let actual = *env_read.@msg.get.lift;
     assert_equal("msg", "close done", actual);;
-    let actual = *env_read.@read_contents.get.lift;
-    assert_equal("read_contents", contents, actual);;
+    let actual_recv_bytes = *env_read.@recv_bytes.get.lift;
+    //assert_equal("recv_bytes", send_bytes, actual_recv_bytes);;
+    assert_true("recv_bytes", send_bytes == actual_recv_bytes);;
     pure()
 );
 

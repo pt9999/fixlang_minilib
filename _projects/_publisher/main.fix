@@ -4,6 +4,7 @@ import Minilib.App.Clap;
 import Minilib.IO.Errno;
 import Minilib.IO.FileSystem;
 import Minilib.IO.Path;
+import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Publisher.ProcessRunner;
@@ -69,6 +70,35 @@ is_there_any_commit_since_latest = (
     pure $ true
 );
 
+is_test_passed_with_deps_update: IOFail Bool;
+is_test_passed_with_deps_update = (
+    log_message("### Checking if `fix test` and `fix doc` success with deps update");;
+    let ret = *do {
+        let (stdout, stderr) = *run_process(["fix", "clean"]);
+        let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
+        let (stdout, stderr) = *run_process(["fix", "test"]);
+        let (stdout, stderr) = *run_process(["fix", "doc", "-o", "docs"]);
+        pure $ true
+    }
+    .catch(|errmsg|
+        log_message("### caught error: " + errmsg);;
+        pure $ false
+    );
+    let (stdout, stderr) = *run_process(["git", "checkout", "--", "fixdeps.lock", "docs"]);
+    pure $ ret
+);
+
+need_to_publish: IOFail Bool;
+need_to_publish = (
+    if *is_there_any_commit_since_latest {
+        pure $ true
+    };
+    if ! *is_test_passed_with_deps_update {
+        pure $ true
+    };
+    pure $ false
+);
+
 run_command_release: ArgMatches -> IOFail ();
 run_command_release = |submatches| (
     let topdir = submatches.get_one("topdir").as_some;
@@ -90,11 +120,12 @@ run_command_release = |submatches| (
 
     check_branch_name("main");;
     check_uncommitted_files;;
-    if ! *is_there_any_commit_since_latest {
+    if ! *need_to_publish {
         log_message("### No need to publish");;
         pure()
     };
-
+    log_message("### publish");;
+    // TODO: publish
     pure()
 );
 
@@ -129,8 +160,14 @@ run_command_main = |matches| (
 );
 
 main: IO ();
-main = do {
-    let args = *IO::get_args.lift;
-    let matches = *command_main.get_matches_from(args).from_result;
-    run_command_main(matches)
-}.try(|errmsg| eprintln("\nError: " + errmsg));
+main = (
+    do {
+        let args = *IO::get_args.lift;
+        let matches = *command_main.get_matches_from(args).from_result;
+        run_command_main(matches);;
+        IO::exit(0).lift
+    }.try(|errmsg| 
+        eprintln("\nError: " + errmsg);;
+        IO::exit(1)
+    )
+);

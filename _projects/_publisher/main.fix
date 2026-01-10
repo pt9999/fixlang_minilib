@@ -12,16 +12,19 @@ import Publisher.ProcessRunner;
 log_message: [m: MonadIO] String -> m ();
 log_message = |str| println(str).lift_io;
 
-chdir: Path -> IOFail ();
-chdir = |dir| (
-    let res = *dir.borrow_c_str_io(|p_dir|
-        FFI_CALL_IO[CInt chdir(Ptr), p_dir]
-    ).lift;
-    if res < 0.to_CInt {
-        throw $ "chdir failed: " + *get_last_error.lift
-    };
-    pure()
-);
+// Constants
+namespace C {
+    // ファイル名: "fixproj.toml"
+    fixproj_toml: String = "fixproj.toml";
+    // ファイル名: "fixdeps.lock"
+    fixdeps_lock: String = "fixdeps.lock";
+    // ディレクトリ名: "docs"
+    docs_dir: String = "docs";
+    // Gitブランチ名: "main"
+    main_branch: String = "main";
+    // Gitタグ名: "latest"
+    latest_tag: String = "latest";
+}
 
 check_if_file_exists: Path -> IOFail ();
 check_if_file_exists = |filepath| (
@@ -42,7 +45,7 @@ check_if_directory_exists = |dirpath| (
 check_branch_name: String -> IOFail ();
 check_branch_name = |expected| (
     log_message((expected,).format("### Checking if the current branch name is `{}`"));;
-    let (stdout, stderr) = *run_process(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+    let (stdout, stderr) = *run_process_quietly(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
     let actual = stdout.strip_spaces;
     if actual != expected {
         throw $ (expected, actual).format("The current branch name is not `{}`: actual = `{}`")
@@ -60,47 +63,48 @@ check_uncommitted_files = (
     pure()
 );
 
-is_there_any_commit_since_latest: IOFail Bool;
-is_there_any_commit_since_latest = (
+no_commit_since_latest: IOFail Bool;
+no_commit_since_latest = (
     log_message("### Checking if there is any commit from the latest release");;
-    let (stdout, stderr) = *run_process(["git", "diff", "--name-only", "latest"]);
+    let (stdout, stderr) = *run_process(["git", "diff", "--name-only", C::latest_tag]);
     if stdout == "" {
-        pure $ false
-    };
-    pure $ true
-);
-
-is_test_passed_with_deps_update: IOFail Bool;
-is_test_passed_with_deps_update = (
-    log_message("### Checking if `fix test` and `fix doc` success with deps update");;
-    let ret = *do {
-        let (stdout, stderr) = *run_process(["fix", "clean"]);
-        let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
-        let (stdout, stderr) = *run_process(["fix", "test"]);
-        let (stdout, stderr) = *run_process(["fix", "doc", "-o", "docs"]);
-        pure $ true
-    }
-    .catch(|errmsg|
-        log_message("### caught error: " + errmsg);;
-        pure $ false
-    );
-    let (stdout, stderr) = *run_process(["git", "checkout", "--", "fixdeps.lock", "docs"]);
-    pure $ ret
-);
-
-need_to_publish: IOFail Bool;
-need_to_publish = (
-    if *is_there_any_commit_since_latest {
-        pure $ true
-    };
-    if ! *is_test_passed_with_deps_update {
         pure $ true
     };
     pure $ false
 );
 
+reset_fixdeps_lock: IOFail ();
+reset_fixdeps_lock = (
+    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::fixdeps_lock]);
+    pure()
+);
+
+commit_fixdeps_lock: IOFail ();
+commit_fixdeps_lock = (
+    let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::fixdeps_lock]);
+    if stdout == "" { pure() };
+    let (stdout, stderr) = *run_process(["git", "add", "--", C::fixdeps_lock]);
+    let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]);
+    pure()
+);
+
+reset_docs: IOFail ();
+reset_docs = (
+    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::docs_dir]);
+    pure()
+);
+
+run_python_verup: String -> Bool -> IOFail ();
+run_python_verup = |verup_py, confirm| (
+    let confirm = if confirm { "--confirm" } else { "--no-confirm" };
+    let args = ["python3", verup_py, "--update-document", "--commit", "--tag", "--push", confirm];
+    let (stdout, stderr) = *run_process_with_options(args, ["verbose", "has_input"]);
+    pure()
+);
+
 run_command_release: ArgMatches -> IOFail ();
 run_command_release = |submatches| (
+    let confirm = submatches.get_one("confirm").as_some == "true";
     let topdir = submatches.get_one("topdir").as_some;
     let topdir = *realpath(topdir);
 
@@ -115,17 +119,40 @@ run_command_release = |submatches| (
     let git_dir = join_paths([subproject_dir, ".git"]);
     check_if_directory_exists(git_dir);;
 
-    let fixproj_toml = join_paths([subproject_dir, "fixproj.toml"]);
-    check_if_file_exists(fixproj_toml);;
+    let fixproj_toml_path = join_paths([subproject_dir, C::fixproj_toml]);
+    check_if_file_exists(fixproj_toml_path);;
 
-    check_branch_name("main");;
+    check_branch_name(C::main_branch);;
     check_uncommitted_files;;
-    if ! *need_to_publish {
+
+    log_message("### Clean");;
+    let (stdout, stderr) = *run_process(["fix", "clean"]);
+    log_message("### Update deps");;
+    let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
+    do {
+        log_message("### Run tests");;
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "basic"]);
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "max"]);
+        log_message("### Make documents for testing");;
+        let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::docs_dir]);
+        pure()
+    }
+    .catch(|errmsg|
+        log_message("### Caught error: " + errmsg);;
+        reset_fixdeps_lock;;
+        reset_docs;;
+        throw $ errmsg
+    );;
+    if *no_commit_since_latest {
         log_message("### No need to publish");;
+        reset_fixdeps_lock;;
+        reset_docs;;
         pure()
     };
-    log_message("### publish");;
-    // TODO: publish
+    reset_docs;;
+    commit_fixdeps_lock;;
+
+    run_python_verup(verup_py, confirm);;
     pure()
 );
 
@@ -136,6 +163,7 @@ command_release = (
     .about("Make a release")
     .arg(Arg::new("dir").short('d').long("dir").help("subproject directory").takes_value.required)
     .arg(Arg::new("topdir").long("topdir").help("_projects directory").takes_value.default_value(".."))
+    .arg(Arg::new("confirm").long("confirm").help("confirm when version up").default_value("true"))
 );
 
 command_main: Command;

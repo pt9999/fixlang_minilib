@@ -12,14 +12,40 @@ exit_status_to_string = |ex| (
     }
 );
 
-worker: (IOHandle, IOHandle, IOHandle) -> IOFail (String, String);
-worker = |(proc_stdin, proc_stdout, proc_stderr)| (
-    proc_stdin.close_file.lift;;
+contains: [a: Eq] a -> Array a -> Bool;
+contains = |a, arr| arr.find_by(eq(a)).is_some;
+
+fileno: IOHandle -> IO CInt;
+fileno = |handle| (
+    FFI_CALL_IO[CInt fileno(Ptr), *handle.get_file_ptr]
+);
+
+dup2_file: IOHandle -> IOHandle -> IO ();
+dup2_file = |old_handle, new_handle| (
+    let old_fd = *old_handle.fileno;
+    let new_fd = *new_handle.fileno;
+    FFI_CALL_IO[CInt dup2(CInt, CInt), old_fd, new_fd];;    // TODO error check
+    pure()
+);
+
+type Worker = (IOHandle, IOHandle, IOHandle) -> IOFail (String, String);
+_make_worker: Array String -> Worker;
+_make_worker = |options|
+    let verbose = options.contains("verbose");
+    let has_input = options.contains("has_input");
+    |(proc_stdin, proc_stdout, proc_stderr)| (
+    if has_input {
+        dup2_file(IO::stdin, proc_stdin)    // TODO: doesn't work
+    } else {
+        proc_stdin.close_file
+    }.lift;;
     let drain_output: IOHandle -> IOHandle -> IO (Result ErrMsg String) = |proc_out, out| (
         loop_lines_io(proc_out, "", |lines, line|
             if line.is_empty { break_m $ lines };
-            write_string(out, line);;
-            flush(out).lift;;
+            when(verbose,
+                write_string(out, line);;
+                flush(out).forget.lift
+            );;
             let lines = lines + line;
             continue_m $ lines
         ).to_result
@@ -32,11 +58,14 @@ worker = |(proc_stdin, proc_stdout, proc_stderr)| (
     pure $ (texts.@(0), texts.@(1))
 );
 
-run_process: Array String -> IOFail (String, String);
-run_process = |args| (
-    eprintln("+ " + args.to_iter.join(" ")).lift;;
+run_process_with_options: Array String -> Array String -> IOFail (String, String);
+run_process_with_options = |args, options| (
+    pure();;
+    let verbose = options.contains("verbose");
+    when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
     let com = args.@(0);
     let input = "";
+    let worker = _make_worker(options);
     let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
     if exit_status.is_exit && exit_status.as_exit == 0_U8 {
         pure $ (stdout, stderr)
@@ -44,3 +73,14 @@ run_process = |args| (
         throw $ "subprocess failed with " + exit_status_to_string(exit_status)
     }
 );
+
+run_process_quietly: Array String -> IOFail (String, String);
+run_process_quietly = |args| (
+    run_process_with_options(args, [])
+);
+
+run_process: Array String -> IOFail (String, String);
+run_process = |args| (
+    run_process_with_options(args, ["verbose"])
+);
+

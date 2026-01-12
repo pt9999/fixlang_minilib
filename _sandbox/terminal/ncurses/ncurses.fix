@@ -17,11 +17,11 @@ namespace Ncurses {
     run = |runner| (
         FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
         let ncurses = Ncurses {
-            dtor: Destructor::make((), |_|
+            dtor: *Destructor::make((), |_|
                 FFI_CALL_IO[() minilib_ncurses_finialize()];;
                 println("finalize done");;
                 pure()
-            )
+            ).lift
         };
         let win = *ncurses._get_standard_window;
         runner(win);;
@@ -34,7 +34,7 @@ namespace Ncurses {
     _get_standard_window = |ncurses| lift_iofail $ do {
         let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_standard_window()].lift;
         pure $ Window {
-            dtor: Destructor::make(p_win, |p_win| pure $ nullptr)
+            dtor: *Destructor::make(p_win, |p_win| pure $ nullptr).lift
         }
     };
 
@@ -72,12 +72,12 @@ namespace Window {
             FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt]
         ).lift;
         let win = Window {
-            dtor: Destructor::make(p_win, |p_win|
+            dtor: *Destructor::make(p_win, |p_win|
                 FFI_CALL_IO[() delwin(Ptr), p_win].when(p_win != nullptr);;
                 pure $ nullptr
-            )
+            ).lift
         };
-        lift_iofail $ do {
+        do {
             win._check_err("keypad") $ |p_win|
             FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt]
         };;

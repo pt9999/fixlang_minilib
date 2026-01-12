@@ -7,6 +7,7 @@ import Minilib.Monad.IO;
 import Minilib.Terminal.Ncurses;
 import Minilib.Trait.Traversable;
 import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
 
 type SIO s = StateT s IOFail;
 
@@ -77,13 +78,17 @@ namespace App {
                 let cp = color_pairs.@(xt % color_pairs.get_size);
                 window.set_attr(make_attr(cp, bold));;
                 let sample = loadavg.@(x);
-                let scale = 1.0;
-                let bar_size = (sample * scale * max_bar_size.to_F64).to_I64;
-                let bar_size = bar_size.max(0).min(max_bar_size);
+                let blocks = "▁▂▃▄▅▆▇█".to_utf32_string;
+                let scale = 0.4;
+                let bar_size_f = sample * scale * (max_bar_size * 8).to_F64;
+                let bar_size = bar_size_f.to_I64.max(0).min(max_bar_size*8-1);
+                let bar_top = bar_size % 8;
+                let bar_size = (bar_size - bar_top) / 8;
                 range(0, bar_size).fold_m(
                     (), |y, _|
                     window.move_add_wstr(x, h - 2 - y, "█")     // U+2588	█	FULL BLOCK
-                )
+                );;
+                window.move_add_str(x, h - 2 - bar_size, blocks.get_sub(bar_top, bar_top+1).to_string)
             );;
             window.set_attr(color_pair(cp_white));;
             let num = loadavg.get_last.as_some_or(0.0).to_string_precision(2_U8);

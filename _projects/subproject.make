@@ -22,6 +22,8 @@ test-fix:
 test-document:
 	fix deps update
 	fix docs -o docs
+
+reset-document:
 	git checkout -- fixdeps.lock
 
 clean:

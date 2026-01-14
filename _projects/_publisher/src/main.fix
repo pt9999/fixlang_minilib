@@ -1,0 +1,79 @@
+module Publisher.Main;
+
+import Minilib.App.Clap;
+/*
+import Minilib.IO.Errno;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+*/
+import Publisher.Publish;
+
+
+run_command_publish: ArgMatches -> IOFail ();
+run_command_publish = |submatches| (
+    let args = (
+        PublishArgs::empty
+        .set_topdir(submatches.get_one("topdir").as_some)
+        .set_subproject_dir(submatches.get_one("dir").as_some)
+        .set_version(submatches.get_one("version").as_some)
+        .set_confirm(submatches.get_one("confirm").as_some == "true")
+        .set_commit(submatches.get_one("commit").as_some == "true")
+        .set_push(submatches.get_one("push").as_some == "true")
+        .set_tag(submatches.get_one("tag").as_some == "true")
+        .set_update_documents(submatches.get_one("update_document").as_some == "true")
+    );
+    do_publish(args)
+);
+
+command_publish: Command;
+command_publish = (
+    Command::new("publish")
+    .display_name("publisher.out publish")
+    .about("Make a release")
+    .arg(Arg::new("dir").short('d').long("dir").help("subproject directory").takes_value.required)
+    .arg(Arg::new("topdir").long("topdir").help("_projects directory").takes_value.default_value(".."))
+    .arg(Arg::new("version").long("version").help("the new version").takes_value.default_value(""))
+    // TODO: clap: support "--no-xxxx" options
+    .arg(Arg::new("confirm").long("confirm").help("confirm when version up").default_value("true"))
+    .arg(Arg::new("commit").long("commit").help("commit fixproj.toml").default_value("true"))
+    .arg(Arg::new("push").long("push").help("push to origin").default_value("true"))
+    .arg(Arg::new("tag").long("tag").help("make the version tag and the latest tag").default_value("true"))
+    .arg(Arg::new("update_document").long("update-document").help("update documents").default_value("true"))
+);
+
+command_main: Command;
+command_main = (
+    Command::new("publisher.out")
+    .version("0.1.0")
+    .about("Publish tool for subprojects")
+    .subcommand(command_publish)
+);
+
+run_command_main: ArgMatches -> IOFail ();
+run_command_main = |matches| (
+    if matches.subcommand.is_none {
+        throw $ "no subcommand is specified"
+    };
+    let (name, submatches) = matches.subcommand.as_some;
+    if name == "publish" {
+        run_command_publish(submatches)
+    } else {
+        throw $ "invalid subcommand: " + name
+    }
+);
+
+main: IO ();
+main = (
+    do {
+        let args = *IO::get_args.lift;
+        let matches = *command_main.get_matches_from(args).from_result;
+        run_command_main(matches);;
+        IO::exit(0).lift
+    }.try(|errmsg| 
+        eprintln("\nError: " + errmsg);;
+        IO::exit(1)
+    )
+);

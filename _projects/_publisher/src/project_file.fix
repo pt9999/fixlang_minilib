@@ -1,0 +1,96 @@
+module Publisher.ProjectFile;
+
+import RegExp;
+import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
+
+type ProjectFileField = unbox struct {
+    key: String,
+    value: String,
+    line_index: I64,
+};
+
+namespace ProjectFileField {
+    make: String -> String -> I64 -> ProjectFileField;
+    make = |key, value, line_index| ProjectFileField {
+        key: key,
+        value: value,
+        line_index: line_index
+    };
+
+    unquote: ProjectFileField -> String;
+    unquote = |field| field.@value.replace_all("\"", "");
+}
+
+type ProjectFile = unbox struct {
+    filepath: Path,
+    lines: Array String,
+};
+
+namespace ProjectFile {
+    make: Path -> Array String -> ProjectFile;
+    make = |path, lines| ProjectFile {
+        filepath: path,
+        lines: lines
+    };
+
+    from_file: Path -> IOFail ProjectFile;
+    from_file = |path| (
+        let contents = *read_file_string(path);
+        let lines = contents.split("\n").to_array;
+        pure $ ProjectFile::make(path, lines)
+    );
+
+    save: ProjectFile -> IOFail ();
+    save = |project_file| (
+        let contents = project_file.@lines.to_iter.join("\n");
+        write_file_string(project_file.@filepath, contents);;
+        eprintln("Wrote " + project_file.@filepath)
+    );
+
+    find_field: [m: MonadError] String -> String -> ProjectFile -> m ProjectFileField;
+    find_field = 
+        |section_to_find, key_to_find, project_file| (
+        let regexp_section = *RegExp::compile("^\\[(.*)\\]$", "").lift_result;
+        let section = "";
+        let lines = project_file.@lines;
+        loop_m(
+            (section, 0), |(section, line_index)|
+            if line_index >= lines.get_size {
+                error $ "field not found: " + section_to_find + "." + key_to_find
+            };
+            let line = lines.@(line_index);
+            let res = regexp_section.match_one(line);
+            if res.is_ok {
+                let groups = res.as_ok;
+                let section = groups.@(1);
+                continue_m $ (section, line_index + 1)
+            };
+            let (key, value) = line.split_first("=");
+            let key = key.strip_spaces;
+            let value = value.strip_spaces;
+            if section == section_to_find && key == key_to_find {
+                break_m $ ProjectFileField::make(key, value, line_index)
+            };
+            continue_m $ (section, line_index + 1)
+        )
+    );
+
+    get_project_name: [m: MonadError, m: Functor] ProjectFile -> m String;
+    get_project_name = |project_file| (
+        project_file.find_field("general", "name").map(unquote)
+    );
+
+    get_project_version: [m: MonadError, m: Functor] ProjectFile -> m String;
+    get_project_version = |project_file| (
+        project_file.find_field("general", "version").map(unquote)
+    );
+
+    set_project_version: [m: MonadError, m: Functor] String -> ProjectFile -> m ProjectFile;
+    set_project_version = |version, project_file| (
+        let field = *project_file.find_field("general", "version");
+        let line = field.@key + " = \"" + version + "\"";
+        pure $ project_file[^lines][field.@line_index].iset(line)
+    );
+}
+

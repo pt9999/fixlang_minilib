@@ -1,0 +1,261 @@
+module Publisher.Publish;
+
+import Minilib.IO.Errno;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+import Publisher.ProcessRunner;
+
+log_message: [m: MonadIO] String -> m ();
+log_message = |str| println(str).lift_io;
+
+// Constants
+namespace C {
+    // ファイル名: "fixproj.toml"
+    fixproj_toml: String = "fixproj.toml";
+    // ファイル名: "fixdeps.lock"
+    fixdeps_lock: String = "fixdeps.lock";
+    // ディレクトリ名: "docs"
+    docs_dir: String = "docs";
+    // Gitブランチ名: "main"
+    branch_main: String = "main";
+    // Gitタグ名: "latest"
+    tag_latest: String = "latest";
+    // Gitリモート名: "origin"
+    remote_origin: String = "origin";
+}
+
+check_if_file_exists: Path -> IOFail ();
+check_if_file_exists = |filepath| (
+    if ! *file_exists(filepath).lift {
+        throw $ "File not found: " + filepath
+    };
+    pure()
+);
+
+check_if_directory_exists: Path -> IOFail ();
+check_if_directory_exists = |dirpath| (
+    if ! *directory_exists(dirpath).lift {
+        throw $ "Directory not found: " + dirpath
+    };
+    pure()
+);
+
+check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
+check_branch_name = |expected| (
+    log_message((expected,).format("### Checking if the current branch name is `{}`"));;
+    let (stdout, stderr) = *run_process_quietly(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+    let actual = stdout.strip_spaces;
+    if actual != expected {
+        error $ (expected, actual).format("The current branch name is not `{}`: actual = `{}`")
+    };
+    pure()
+);
+
+check_uncommitted_files: [m: MonadRunProcess, m: MonadError] m ();
+check_uncommitted_files = (
+    log_message("### Checking for uncommitted files");;
+    let (stdout, stderr) = *run_process(["git", "diff", "--name-only"]);
+    if stdout != "" {
+        error $ "Uncommitted file exists"
+    };
+    pure()
+);
+
+no_commit_since_latest:  [m: MonadRunProcess] m Bool;
+no_commit_since_latest = (
+    log_message("### Checking if there is any commit from the latest release");;
+    let (stdout, stderr) = *run_process(["git", "diff", "--name-only", C::tag_latest]);
+    if stdout == "" {
+        pure $ true
+    };
+    pure $ false
+);
+
+reset_fixdeps_lock:  [m: MonadRunProcess] m ();
+reset_fixdeps_lock = (
+    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::fixdeps_lock]);
+    pure()
+);
+
+commit_fixdeps_lock: [m: MonadRunProcess] m ();
+commit_fixdeps_lock = (
+    let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::fixdeps_lock]);
+    if stdout == "" { pure() };
+    let (stdout, stderr) = *run_process(["git", "add", "--", C::fixdeps_lock]);
+    let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]);
+    pure()
+);
+
+update_documents: [m: MonadRunProcess] m ();
+update_documents = (
+    let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::docs_dir]);
+    pure()
+);
+
+reset_documents: [m: MonadRunProcess] m ();
+reset_documents = (
+    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::docs_dir]);
+    pure()
+);
+
+commit_fixproj_toml: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
+commit_fixproj_toml = |args, filepath, version| (
+    let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
+    let message = "version " + version;
+    let (stdout, stderr) = *run_process(["git", "commit", "--verbose", "-m", message]);
+    when(args.@tag, do {
+        let (stdout, stderr) = *run_process(["git", "tag", version]);
+        let (stdout, stderr) = *run_process(["git", "tag", C::tag_latest, "-f"]);
+        pure()
+    });;
+    when(args.@push, do {
+        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin]);
+        pure()
+    });;
+    when(args.@push && args.@tag, do {
+        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, version]);
+        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, C::tag_latest, "-f"]);
+        pure()
+    });;
+    pure()
+);
+
+type PublishArgs = unbox struct {
+    topdir: Path,
+    subproject_dir: Path,
+    version: String,
+    confirm: Bool,
+    commit: Bool,
+    push: Bool,
+    tag: Bool,
+    update_documents: Bool,
+};
+
+namespace PublishArgs {
+    empty: PublishArgs;
+    empty = PublishArgs {
+        topdir: "",
+        subproject_dir: "",
+        version: "",
+        confirm: false,
+        commit: false,
+        push: false,
+        tag: false,
+        update_documents: false,
+    };
+
+    update_realpath: PublishArgs -> IOFail PublishArgs;
+    update_realpath = |args| (
+        let args = *args.act_topdir(realpath);
+        let args = *args.act_subproject_dir(realpath);
+        pure $ args
+    );
+}
+
+do_publish: PublishArgs -> IOFail ();
+do_publish = |args| (
+    let args = *args.update_realpath;
+    let topdir = args.@topdir;
+    
+    //let verup_py = join_paths([topdir, "_verup.py"]);
+    //check_if_file_exists(verup_py);;
+
+    let subproject_dir = args.@subproject_dir;
+    log_message("=== " + subproject_dir + " ===");;
+    chdir(subproject_dir);;
+
+    let git_dir = join_paths([subproject_dir, ".git"]);
+    check_if_directory_exists(git_dir);;
+
+    let fixproj_toml_path = join_paths([subproject_dir, C::fixproj_toml]);
+    check_if_file_exists(fixproj_toml_path);;
+
+    check_branch_name(C::branch_main);;
+    check_uncommitted_files;;
+
+    log_message("### Clean");;
+    let (stdout, stderr) = *run_process(["fix", "clean"]);
+    log_message("### Update deps");;
+    let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
+    do {
+        log_message("### Run tests");;
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "basic"]);
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "max"]);
+        log_message("### Make documents for testing");;
+        let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::docs_dir]);
+        pure()
+    }
+    .catch(|errmsg|
+        log_message("### Caught error: " + errmsg);;
+        reset_fixdeps_lock;;
+        reset_documents;;
+        throw $ errmsg
+    );;
+    if *no_commit_since_latest {
+        log_message("### No need to publish");;
+        reset_fixdeps_lock;;
+        reset_documents;;
+        pure()
+    };
+    reset_documents;;
+    commit_fixdeps_lock;;
+
+    //run_python_verup(verup_py, confirm);;
+    pure()
+);
+
+ask_new_version: String -> String -> IOFail String;
+ask_new_version = |project_name, new_version| (
+    eprintln $ (project_name,).format("Project name: {}");;
+    eprint $ (new_version,).format("Input new version (default: {}): ");;
+    flush(IO::stderr);;
+    let answer = *input_line.map(strip_spaces);
+    pure $ if answer != "" { answer } else { new_version }
+).lift;
+
+confirm_upgrade: String -> String -> IOFail ();
+confirm_upgrade = |old_version, new_version| (
+    do {
+        eprintln $ "Going to upgrade the project version";;
+        eprintln $ (old_version,).format("  Old version: {}");;
+        eprintln $ (new_version,).format("  New version: {}");;
+        eprint $ "Do you want to actually upgrade the project version? (yes/no): ";;
+        flush(IO::stderr)
+    }.lift;;
+    let answer = *input_line.map(strip_spaces);
+    if answer != "yes" {
+        error $ "Confirmation canceled"
+    };
+    pure()
+);
+
+upgrade_project_version: PublishArgs -> IOFail ();
+upgrade_project_version = |args| (
+    let project_file_path = join_paths([args.@subproject_dir, C::fixproj_toml]);
+    let project_file = *ProjectFile::from_file(project_file_path);
+    let project_name = *project_file.get_project_name;
+    let old_version = *project_file.get_project_version;
+    let new_version = *if args.@version != "" { 
+        pure $ args.@version 
+    } else {
+        increment_version(old_version).lift_result
+    };
+    let new_version = *if args.@confirm {
+        ask_new_version(project_name, new_version)
+    } else {
+        pure $ new_version
+    };
+    when(args.@confirm,
+        confirm_upgrade(old_version, new_version)
+    );;
+    let project_file = *project_file.set_project_version(new_version);
+    project_file.save();;
+    when(args.@update_documents,
+        update_documents);;
+    when(args.@commit && new_version != "",
+        commit_fixproj_toml(args, project_file_path, new_version));;
+    pure()
+);

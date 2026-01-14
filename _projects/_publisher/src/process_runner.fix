@@ -2,6 +2,8 @@ module Publisher.ProcessRunner;
 
 import AsyncTask;
 import Subprocess;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
 
 exit_status_to_string: ExitStatus -> String;
 exit_status_to_string = |ex| (
@@ -58,29 +60,46 @@ _make_worker = |options|
     pure $ (texts.@(0), texts.@(1))
 );
 
-run_process_with_options: Array String -> Array String -> IOFail (String, String);
-run_process_with_options = |args, options| (
-    pure();;
-    let verbose = options.contains("verbose");
-    when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
-    let com = args.@(0);
-    let input = "";
-    let worker = _make_worker(options);
-    let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
-    if exit_status.is_exit && exit_status.as_exit == 0_U8 {
-        pure $ (stdout, stderr)
-    } else {
-        throw $ "subprocess failed with " + exit_status_to_string(exit_status)
-    }
-);
+trait MonadRunProcess = MonadIOFail + MonadRunProcessIF;
 
-run_process_quietly: Array String -> IOFail (String, String);
+trait [m: *->*] m: MonadRunProcessIF {
+    run_process_with_options: Array String -> Array String -> m (String, String);
+}
+
+impl IOFail: MonadRunProcessIF {
+    run_process_with_options = |args, options| (
+        pure();;
+        let verbose = options.contains("verbose");
+        when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
+        let com = args.@(0);
+        let input = "";
+        let worker = _make_worker(options);
+        let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
+        if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+            pure $ (stdout, stderr)
+        } else {
+            throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+        }
+    );
+}
+
+trait e: HasProcessRunner {
+    get_process_runner: [m: Monad] e -> Array String -> Array String -> StateT e m (String, String);
+}
+
+impl [m: Monad, e: HasProcessRunner] StateT e m: MonadRunProcessIF {
+    run_process_with_options = |args, options| (
+        let runner = (*get_state).get_process_runner;
+        runner(args, options)
+    );
+}
+
+run_process_quietly: [m: MonadRunProcessIF] Array String -> m (String, String);
 run_process_quietly = |args| (
     run_process_with_options(args, [])
 );
 
-run_process: Array String -> IOFail (String, String);
+run_process: [m: MonadRunProcessIF] Array String -> m (String, String);
 run_process = |args| (
     run_process_with_options(args, ["verbose"])
 );
-

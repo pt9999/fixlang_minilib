@@ -1,107 +1,11 @@
 module Publisher.Tests.PublishTest;
 
-import Minilib.Monad.State;
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
 
 import Publisher.Publish;
-import Publisher.ProcessRunner;
-
-type MockProcess = unbox struct {
-    args: Array String,
-    options: Array String,
-};
-
-impl MockProcess: Eq {
-    eq = |a, b| (
-        a.@args == b.@args &&
-        a.@options == b.@options
-    );
-}
-
-impl MockProcess: ToString {
-    to_string = |process| (
-        "MockProcess {"
-        + " args=" + process.@args.to_string
-        + " options=" + process.@options.to_string
-        + " }"
-    );
-}
-
-namespace MockProcess {
-    empty: MockProcess;
-    empty = MockProcess {
-        args: [],
-        options: [],
-    };
-
-    make: Array String -> MockProcess;
-    make = |args| MockProcess::empty.set_args(args);
-
-    verbose: MockProcess -> MockProcess;
-    verbose = mod_options(push_back("verbose"));
-}
-
-type MockProcessRunner = unbox struct {
-    processes: Array MockProcess,
-    outputs: Array (String, String),
-};
-
-impl MockProcessRunner: Eq {
-    eq = |a, b| (
-        a.@processes == b.@processes &&
-        a.@outputs == b.@outputs
-    );
-}
-
-impl MockProcessRunner: ToString {
-    to_string = |runner| (
-        "MockProcessRunner {"
-        + " processes=" + runner.@processes.to_string
-        + " outputs=" + runner.@outputs.to_string
-        + " }"
-    );
-}
-
-impl MockProcessRunner: HasProcessRunner {
-    get_process_runner: [m: Monad] MockProcessRunner -> Array String -> Array String -> StateT MockProcessRunner m (String, String)
-    = |runner, args, options| (
-        let process = MockProcess::empty.set_args(args).set_options(options);
-        let index = runner.@processes.get_size;
-        let outputs = runner.@outputs;
-        let runner = runner.mod_processes(push_back(process));
-        put_state(runner);;
-        let (stdout, stderr) = if index < outputs.get_size { outputs.@(index) } else { ("", "") };
-        pure $ (stdout, stderr)
-    );
-}
-
-type SIO a = StateT MockProcessRunner IOFail a;
-
-namespace MockProcessRunner {
-    empty: MockProcessRunner;
-    empty = MockProcessRunner {
-        processes: [],
-        outputs: [],
-    };
-
-    next_stdout: String -> MockProcessRunner -> MockProcessRunner;
-    next_stdout = |stdout| mod_outputs(push_back((stdout, "")));
-
-    setup: (MockProcessRunner -> MockProcessRunner) -> MockProcessRunner;
-    setup = |setup_func| (
-        MockProcessRunner::empty.setup_func
-    );
-
-    run: SIO a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
-    run = |sio, runner| (
-        sio.run_state_t(runner)
-    );
-
-    run_catch: SIO a -> MockProcessRunner -> IOFail (Result ErrMsg (MockProcessRunner, a));
-    run_catch = |sio, runner| (
-        runner.run(sio).to_result.lift
-    );
-}
+import Publisher.Tests.MockProcessRunner;
 
 test_check_branch_name_ok: TestCase;
 test_check_branch_name_ok = (

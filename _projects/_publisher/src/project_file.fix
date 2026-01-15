@@ -1,8 +1,14 @@
 module Publisher.ProjectFile;
 
 import RegExp;
+
 import Minilib.Monad.Error;
+import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
+
+import Publisher.Fs;
+import Publisher.ConsoleUi;
+import Publisher.Verup;
 
 type ProjectFileField = unbox struct {
     key: String,
@@ -34,18 +40,18 @@ namespace ProjectFile {
         lines: lines
     };
 
-    from_file: Path -> IOFail ProjectFile;
+    from_file: [m: MonadFs] Path -> m ProjectFile;
     from_file = |path| (
-        let contents = *read_file_string(path);
+        let contents = *fs_read_file_string(path);
         let lines = contents.split("\n").to_array;
         pure $ ProjectFile::make(path, lines)
     );
 
-    save: ProjectFile -> IOFail ();
+    save: [m: MonadFs, m: MonadConsoleUi] ProjectFile -> m ();
     save = |project_file| (
         let contents = project_file.@lines.to_iter.join("\n");
-        write_file_string(project_file.@filepath, contents);;
-        eprintln("Wrote " + project_file.@filepath)
+        fs_write_file_string(project_file.@filepath, contents);;
+        ui_println("Wrote " + project_file.@filepath)
     );
 
     find_field: [m: MonadError] String -> String -> ProjectFile -> m ProjectFileField;
@@ -92,5 +98,27 @@ namespace ProjectFile {
         let line = field.@key + " = \"" + version + "\"";
         pure $ project_file[^lines][field.@line_index].iset(line)
     );
-}
 
+    upgrade_project_version: [m: MonadConsoleUi, m: MonadFs] Path -> String -> Bool -> m ();
+    upgrade_project_version = |project_file_path, new_version, confirm| (
+        let project_file = *ProjectFile::from_file(project_file_path);
+        let project_name = *project_file.get_project_name;
+        let old_version = *project_file.get_project_version;
+        let new_version = *if new_version != "" { 
+            pure $ new_version
+        } else {
+            increment_version(old_version).lift_result
+        };
+        let new_version = *if confirm {
+            ask_new_version(project_name, new_version)
+        } else {
+            pure $ new_version
+        };
+        when(confirm,
+            confirm_upgrade(old_version, new_version)
+        );;
+        let project_file = *project_file.set_project_version(new_version);
+        project_file.save;;
+        pure()
+    );
+}

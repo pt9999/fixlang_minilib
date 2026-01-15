@@ -1,0 +1,69 @@
+module Publisher.Tests.MockFs;
+
+import HashMap;
+
+import Minilib.Common.IORef;
+import Minilib.Monad.Error;
+import Minilib.Monad.IO;
+
+import Publisher.Common;
+import Publisher.Fs;
+
+type MockFs = unbox struct {
+    cwd: Path,
+    files: HashMap Path String,
+    directories: HashMap Path String,
+};
+
+namespace MockFs {
+    empty: MockFs;
+    empty = MockFs {
+        cwd: "/work",
+        files: HashMap::empty(10),
+        directories: HashMap::empty(10),
+    };
+
+    add_file: Path -> String -> MockFs -> MockFs;
+    add_file = |path, contents, fs| (
+        fs.mod_files(insert(path, contents))
+    );
+
+    get_file: Path -> MockFs -> Option String;
+    get_file = |path, fs| (
+        fs.@files.find(path)
+    );
+
+    add_directory: Path -> MockFs -> MockFs;
+    add_directory = |path, fs| (
+        fs.mod_directories(insert(path, ""))
+    );
+}
+
+impl MockFs: FileSystemApi {
+    fsapi_file_exists = |ioref_api, path| (
+        let fs =  *ioref_api.get.lift_io;
+        pure $ fs.@files.find(path).is_some
+    );
+    fsapi_directory_exists = |ioref_api, path| (
+        let fs =  *ioref_api.get.lift_io;
+        pure $ fs.@directories.find(path).is_some
+    );
+    fsapi_chdir = |ioref_api, path| (
+        let fs =  *ioref_api.get.lift_io;
+        let fs =  fs.set_cwd(path);
+        ioref_api.IORef::set(fs).lift_io
+    );
+    fsapi_realpath = |ioref_api, path| pure $ path;
+    fsapi_read_file_string = |ioref_api, path| (
+        let fs =  *ioref_api.get.lift_io;
+        match fs.@files.find(path) {
+            none() => error $ "File not found: " + path,
+            some(contents) => pure $ contents
+        }
+    );
+    fsapi_write_file_string = |ioref_api, path, contents| (
+        let fs =  *ioref_api.get.lift_io;
+        let fs =  fs.add_file(path, contents);
+        ioref_api.IORef::set(fs).lift_io
+    );
+}

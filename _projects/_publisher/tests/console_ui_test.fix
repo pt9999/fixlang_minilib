@@ -1,0 +1,78 @@
+module Publisher.Tests.ConsoleUiTest;
+
+import Minilib.Common.IORef;
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Testing.UnitTest;
+
+import Publisher.Common;
+import Publisher.ConsoleUi;
+import Publisher.Tests.MockEnv;
+import Publisher.Tests.MockConsoleUi;
+
+test_ask_new_version_empty_input: TestCase;
+test_ask_new_version_empty_input = (
+    make_env_test("test_ask_new_version_empty_input") $ |env|
+    let project_name = "project1";
+    let new_version = "0.1.1";
+    env.setup_console_ui(set_input(""));;
+    let new_version = *env.run(ask_new_version(project_name, new_version));
+    let expected = "Project name: project1\nInput new version (default: 0.1.1): ";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    let expected = "0.1.1";
+    assert_equal("new_version", expected, new_version);;
+    pure()
+);
+
+test_ask_new_version_has_input: TestCase;
+test_ask_new_version_has_input = (
+    make_env_test("test_ask_new_version_has_input") $ |env|
+    let project_name = "project2";
+    let new_version = "0.1.3";
+    env.setup_console_ui(set_input("  0.2.0  "));;
+    let new_version = *env.run(ask_new_version(project_name, new_version));
+    let expected = "Project name: project2\nInput new version (default: 0.1.3): ";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    let expected = "0.2.0";
+    assert_equal("new_version", expected, new_version);;
+    pure()
+);
+
+test_confirm_upgrade_ok: TestCase;
+test_confirm_upgrade_ok = (
+    make_env_test("test_confirm_upgrade_ok") $ |env|
+    let old_version = "0.1.0";
+    let new_version = "0.1.1";
+    env.setup_console_ui(set_input("  yes  "));;
+    let res = *env.run_catch(confirm_upgrade(old_version, new_version));
+    let expected = "Going to upgrade the project version\n  Old version: 0.1.0\n  New version: 0.1.1\n"
+        + "Do you want to actually upgrade the project version? (yes/no): ";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    assert_equal("res", ok(), res);;
+    pure()
+);
+
+test_confirm_upgrade_ng: TestCase;
+test_confirm_upgrade_ng = (
+    make_env_test("test_confirm_upgrade_ng") $ |env|
+    let old_version = "0.1.0";
+    let new_version = "0.1.1";
+    env.setup_console_ui(set_input(""));;
+    let res = *env.run_catch(confirm_upgrade(old_version, new_version));
+    let expected = "Going to upgrade the project version\n  Old version: 0.1.0\n  New version: 0.1.1\n"
+        + "Do you want to actually upgrade the project version? (yes/no): ";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    assert_equal("res", err("Confirmation canceled"), res);;
+    pure()
+);
+
+testsuite: TestCase;
+testsuite = (
+    [
+        test_ask_new_version_empty_input,
+        test_ask_new_version_has_input,
+        test_confirm_upgrade_ok,
+        test_confirm_upgrade_ng,
+    ]
+    .run_tests
+);

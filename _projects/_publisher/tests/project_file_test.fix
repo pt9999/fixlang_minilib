@@ -1,0 +1,145 @@
+module Publisher.Tests.ProjectFileTest;
+
+import Minilib.Common.IORef;
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Testing.UnitTest;
+
+import Publisher.Common;
+import Publisher.ConsoleUi;
+import Publisher.Fs;
+import Publisher.Verup;
+import Publisher.ProjectFile;
+import Publisher.Tests.MockEnv;
+import Publisher.Tests.MockConsoleUi;
+import Publisher.Tests.MockFs;
+
+
+test_increment_prerelease: TestCase;
+test_increment_prerelease = (
+    make_table_test("test_increment_prerelease", 
+        [
+            ("", ok $ "2"),
+            ("-", ok $ "-2"),
+            ("-alpha", ok $ "-alpha2"),
+            ("-alpha2", ok $ "-alpha3"),
+            ("-beta", ok $ "-beta2"),
+            ("-beta.100", ok $ "-beta.101"),
+        ],
+        |(prerelease, expected)|
+        let actual = increment_prerelease(prerelease);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_increment_version: TestCase;
+test_increment_version = (
+    make_table_test("test_increment_version", 
+        [
+            ("", err $ "invalid version format: "),
+            ("1.0", err $ "invalid version format: 1.0"),
+            ("0.0.0", ok $ "0.0.1"),
+            ("1.0.0", ok $ "1.0.1"),
+            ("123.456.789", ok $ "123.456.790"),
+            ("1.0.0-alpha", ok $ "1.0.0-alpha2"),
+            ("1.0.0-alpha5", ok $ "1.0.0-alpha6"),
+            ("1.0.0-alpha9+patch1", ok $ "1.0.0-alpha10+patch1"),
+            ("1.0.0-alpha9+", err $ "invalid version format: 1.0.0-alpha9+"),
+            ("1.0.0-+", err $ "invalid version format: 1.0.0-+"),
+        ],
+        |(version, expected)|
+        let actual = increment_version(version);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_project_file: TestCase;
+test_project_file = (
+    make_test("test_project_file") $ |_|
+    let project_file = ProjectFile::make("path", [
+        "# a comment",
+        "[[dependencies]]", "name = \"dep\"", "version = \"*\"",
+        "# another comment",
+        "[general]", "name = \"test\"", "version = \"1.0.0\"",
+    ]);
+    let actual: Result ErrMsg String = project_file.get_project_name;
+    assert_equal("get_project_name", ok $ "test", actual);;
+    let actual: Result ErrMsg String = project_file.get_project_version;
+    assert_equal("get_project_version", ok $ "1.0.0", actual);;
+    let project_file = *project_file.set_project_version("1.0.1");
+    let actual: Result ErrMsg String = project_file.get_project_version;
+    assert_equal("get_project_version", ok $ "1.0.1", actual);;
+    pure()
+);
+
+test_upgrade_project_version_no_confirm: TestCase;
+test_upgrade_project_version_no_confirm = (
+    make_env_test("test_upgrade_project_version_no_confirm") $ |env|
+    let project_file_path = "project1/fixproj.toml";
+    let project_file_contents = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
+    let new_version = "";
+    let confirm = false;
+    env.setup_fs(add_file(project_file_path, project_file_contents));;
+    env.setup_console_ui(set_input(""));;
+    let res = *env.run_catch(upgrade_project_version(project_file_path, new_version, confirm));
+    assert_equal("res", ok(), res);;
+    let expected = "Wrote project1/fixproj.toml\n";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    let expected = "[general]\nname = \"project1\"\nversion = \"0.1.1\"\n";
+    assert_equal("project_file", some $ expected, *env.gets(@fs, get_file(project_file_path)));;
+    pure()
+);
+
+test_upgrade_project_version_confirm_no: TestCase;
+test_upgrade_project_version_confirm_no = (
+    make_env_test("test_upgrade_project_version_confirm_no") $ |env|
+    let project_file_path = "project1/fixproj.toml";
+    let project_file_contents = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
+    let new_version = "0.1.3";
+    let confirm = true;
+    env.setup_fs(add_file(project_file_path, project_file_contents));;
+    env.setup_console_ui(set_input("\nno\n"));;
+    let res = *env.run_catch(upgrade_project_version(project_file_path, new_version, confirm));
+    assert_equal("res", err("Confirmation canceled"), res);;
+    let expected = "Project name: project1\nInput new version (default: 0.1.3): "
+        + "Going to upgrade the project version\n  Old version: 0.1.0\n  New version: 0.1.3\n"
+        + "Do you want to actually upgrade the project version? (yes/no): ";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    let expected = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
+    assert_equal("project_file", some $ expected, *env.gets(@fs, get_file(project_file_path)));;
+    pure()
+);
+
+test_upgrade_project_version_confirm_yes: TestCase;
+test_upgrade_project_version_confirm_yes = (
+    make_env_test("test_upgrade_project_version_confirm_yes") $ |env|
+    let project_file_path = "project1/fixproj.toml";
+    let project_file_contents = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
+    let new_version = "";
+    let confirm = true;
+    env.setup_fs(add_file(project_file_path, project_file_contents));;
+    env.setup_console_ui(set_input("0.3.0\nyes\n"));;
+    let res = *env.run_catch(upgrade_project_version(project_file_path, new_version, confirm));
+    assert_equal("res", ok(), res);;
+    let expected = "Project name: project1\nInput new version (default: 0.1.1): "
+        + "Going to upgrade the project version\n  Old version: 0.1.0\n  New version: 0.3.0\n"
+        + "Do you want to actually upgrade the project version? (yes/no): "
+        + "Wrote project1/fixproj.toml\n";
+    assert_equal("output", expected, *env.gets(@console_ui, @output));;
+    let expected = "[general]\nname = \"project1\"\nversion = \"0.3.0\"\n";
+    assert_equal("project_file", some $ expected, *env.gets(@fs, get_file(project_file_path)));;
+    pure()
+);
+
+testsuite: TestCase;
+testsuite = (
+    [
+        test_increment_prerelease,
+        test_increment_version,
+        test_project_file,
+        test_upgrade_project_version_no_confirm,
+        test_upgrade_project_version_confirm_no,
+        test_upgrade_project_version_confirm_yes,
+    ]
+    .run_tests
+);

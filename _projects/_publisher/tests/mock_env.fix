@@ -1,0 +1,124 @@
+module Publisher.Tests.MockEnv;
+
+import Minilib.Common.IORef;
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Testing.UnitTest;
+
+import Publisher.Common;
+import Publisher.Publish;
+import Publisher.ProcessRunner;
+import Publisher.Fs;
+import Publisher.ConsoleUi;
+import Publisher.Tests.MockProcessRunner;
+import Publisher.Tests.MockFs;
+import Publisher.Tests.MockConsoleUi;
+
+type MockEnv = unbox struct {
+    runner: IORef MockProcessRunner,
+    fs: IORef MockFs,
+    console_ui: IORef MockConsoleUi,
+};
+
+namespace MockEnv {
+    empty: [m: MonadIO] m MockEnv;
+    empty = (
+        pure $ MockEnv {
+            runner: *IORef::make(MockProcessRunner::empty).lift_io,
+            fs: *IORef::make(MockFs::empty).lift_io,
+            console_ui: *IORef::make(MockConsoleUi::empty).lift_io,
+        }
+    );
+
+    get: [m: MonadIO] (MockEnv -> IORef a) -> MockEnv -> m a;
+    get = |ioref, env| env.ioref.get.lift_io;
+
+    gets: [m: MonadIO, m: Functor] (MockEnv -> IORef a) -> (a -> b) -> MockEnv -> m b;
+    gets = |ioref, f, env| env.get(ioref).map(f);
+
+    set: [m: MonadIO] (MockEnv -> IORef a) -> a -> MockEnv -> m ();
+    set = |ioref, a, env| env.ioref.IORef::set(a).lift_io;
+
+    mod: [m: MonadIO] (MockEnv -> IORef a) -> (a -> a) -> MockEnv -> m ();
+    mod = |ioref, f, env| env.ioref.mod(f).lift_io;
+
+    make: [m: MonadIO] MockProcessRunner -> m MockEnv;
+    make = |runner| (
+        let env = *MockEnv::empty;
+        env.set(@runner, runner);;
+        pure $ env
+    );
+
+    make_env_test: String -> (MockEnv -> IOFail ()) -> TestCase;
+    make_env_test = |testname, body| (
+        make_test(testname) $ |_|
+        let env = *MockEnv::empty;
+        body(env)
+    );
+
+    setup_runner: [m: MonadIO] (MockProcessRunner -> MockProcessRunner) -> MockEnv -> m ();
+    setup_runner = |f, env| (
+        env.mod(@runner, f)
+    );
+
+    setup_fs: [m: MonadIO] (MockFs -> MockFs) -> MockEnv -> m ();
+    setup_fs = |f, env| (
+        env.mod(@fs, f)
+    );
+
+    setup_console_ui: [m: MonadIO] (MockConsoleUi -> MockConsoleUi) -> MockEnv -> m ();
+    setup_console_ui = |f, env| (
+        env.mod(@console_ui, f)
+    );
+
+    run: RIO MockEnv a -> MockEnv -> IOFail a;
+    run = |rio, env| (
+        rio.run_reader_t(env)
+    );
+
+    run_catch: RIO MockEnv a -> MockEnv -> IOFail (Result ErrMsg a);
+    run_catch = |rio, env| (
+        env.run(rio).to_result.lift
+    );
+
+    namespace Runner {
+        run: RIO MockEnv a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
+        run = |rio, runner| (
+            let env = *MockEnv::make(runner);
+            let a = *rio.run_reader_t(env);
+            let runner = *env.get(@runner);
+            pure $ (runner, a)
+        );
+
+        run_catch: RIO MockEnv a -> MockProcessRunner -> IOFail (Result ErrMsg (MockProcessRunner, a));
+        run_catch = |rio, runner| (
+            runner.run(rio).to_result.lift
+        );
+    }
+}
+
+impl MockEnv: HasProcessRunner {
+    get_process_runner = |args, options| (
+        let env = *ask;
+        let runner = *env.get(@runner);
+        let (runner, (stdout, stderr)) = runner.run(args, options);
+        env.set(@runner, runner);;
+        pure $ (stdout, stderr)
+    );
+}
+
+impl MockEnv: HasFileSystemApi {
+    type ApiType MockEnv = MockFs;
+    get_file_system_api = @fs;
+}
+
+impl MockEnv: HasConsoleUi {
+    get_ui_print = |str| (
+        let env = *ask;
+        uiapi_print(env.@console_ui, str)
+    );
+    get_ui_input_line = (
+        let env = *ask;
+        uiapi_input_line(env.@console_ui)
+    );
+}

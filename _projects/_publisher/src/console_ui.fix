@@ -3,6 +3,7 @@ module Publisher.ConsoleUi;
 import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
 
 import Publisher.Common;
 
@@ -28,11 +29,36 @@ impl IOFail: MonadConsoleUiIF {
 }
 
 trait e: HasConsoleUi {
-    get_ui_print: [m: MonadIOFail] e -> String -> ReaderT e m ();
-    get_ui_input_line: [m: MonadIOFail] e -> ReaderT e m String;
+    get_ui_print: String -> ReaderT e IOFail ();
+    get_ui_input_line: ReaderT e IOFail String;
 }
 
 impl [e: HasConsoleUi] ReaderT e IOFail: MonadConsoleUiIF {
-    ui_print = |str| ((*ask).get_ui_print)(str);
-    ui_input_line = (*ask).get_ui_input;
+    ui_print = get_ui_print;
+    ui_input_line = get_ui_input_line;
 }
+
+ask_new_version: [m: MonadConsoleUi] String -> String -> m String;
+ask_new_version = |project_name, new_version| (
+    ui_println $ (project_name,).format("Project name: {}");;
+    ui_print $ (new_version,).format("Input new version (default: {}): ");;
+    let answer = *ui_input_line;
+    let answer = answer.strip_spaces;
+    pure $ if answer != "" { answer } else { new_version }
+);
+
+confirm_upgrade: [m: MonadConsoleUi] String -> String -> m ();
+confirm_upgrade = |old_version, new_version| (
+    do {
+        ui_println $ "Going to upgrade the project version";;
+        ui_println $ (old_version,).format("  Old version: {}");;
+        ui_println $ (new_version,).format("  New version: {}");;
+        ui_print $ "Do you want to actually upgrade the project version? (yes/no): "
+    };;
+    let answer = *ui_input_line;
+    let answer = answer.strip_spaces;
+    if answer != "yes" {
+        error $ "Confirmation canceled"
+    };
+    pure()
+);

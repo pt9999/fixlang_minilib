@@ -1,22 +1,37 @@
 module Publisher.Tests.MockConsoleUi;
 
 import Minilib.Common.IORef;
-import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
 
-type MockConsole {
+type MockConsoleUi = unbox struct {
     output: String,
     input: String,
 };
 
-impl e: HasMockConsole {
-    get_mock_console: e -> IORef MockConsole;
+trait e: HasMockConsoleUi {
+    get_mock_console_ui: e -> IORef MockConsoleUi;
 }
 
-namespace MockConsole {
-    empty: MockConsole;
-    empty = MockConsole {
+namespace MockConsoleUi {
+    empty: MockConsoleUi;
+    empty = MockConsoleUi {
         output: "",
         input: "",
+    };
+
+    uiapi_print: [m: MonadIO] IORef MockConsoleUi -> String -> m ();
+    uiapi_print = |ioref, str| (
+        ioref.mod(mod_output(concat(str))).lift_io
+    );
+
+    uiapi_input_line: [m: MonadIO] IORef MockConsoleUi -> m String;
+    uiapi_input_line = |ioref| lift_io $ do {
+        let ui: MockConsoleUi = *ioref.get;
+        let (line, input) = ui.@input.split_first("\n");
+        let ui = ui.set_input(input);
+        ioref.IORef::set(ui);;
+        pure $ line
     };
 }
 

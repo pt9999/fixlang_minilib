@@ -6,8 +6,10 @@ import Minilib.IO.Path;
 import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
+
 import Publisher.ProcessRunner;
 import Publisher.ConsoleUi;
+import Publisher.Fs;
 
 log_message: [m: MonadIO] String -> m ();
 log_message = |str| println(str).lift_io;
@@ -28,18 +30,18 @@ namespace C {
     remote_origin: String = "origin";
 }
 
-check_if_file_exists: Path -> IOFail ();
+check_if_file_exists: [m: MonadFs] Path -> m ();
 check_if_file_exists = |filepath| (
-    if ! *file_exists(filepath).lift {
-        throw $ "File not found: " + filepath
+    if ! *fs_file_exists(filepath) {
+        error $ "File not found: " + filepath
     };
     pure()
 );
 
-check_if_directory_exists: Path -> IOFail ();
+check_if_directory_exists: [m: MonadFs] Path -> m ();
 check_if_directory_exists = |dirpath| (
-    if ! *directory_exists(dirpath).lift {
-        throw $ "Directory not found: " + dirpath
+    if ! *fs_directory_exists(dirpath) {
+        error $ "Directory not found: " + dirpath
     };
     pure()
 );
@@ -148,28 +150,28 @@ namespace PublishArgs {
         update_documents: false,
     };
 
-    update_realpath: PublishArgs -> IOFail PublishArgs;
+    update_realpath: [m: MonadFs] PublishArgs -> m PublishArgs;
     update_realpath = |args| (
-        let args = *args.act_topdir(realpath);
-        let args = *args.act_subproject_dir(realpath);
+        let args = *args.act_topdir(fs_realpath);
+        let args = *args.act_subproject_dir(fs_realpath);
         pure $ args
     );
 }
 
-do_publish: PublishArgs -> IOFail ();
+do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess] PublishArgs -> m ();
 do_publish = |args| (
     let args = *args.update_realpath;
     let topdir = args.@topdir;
     
     let subproject_dir = args.@subproject_dir;
     log_message("=== " + subproject_dir + " ===");;
-    chdir(subproject_dir);;
+    fs_chdir(subproject_dir);;
 
     let git_dir = join_paths([subproject_dir, ".git"]);
     check_if_directory_exists(git_dir);;
 
-    let fixproj_toml_path = join_paths([subproject_dir, C::fixproj_toml]);
-    check_if_file_exists(fixproj_toml_path);;
+    let project_file_path = join_paths([subproject_dir, C::fixproj_toml]);
+    check_if_file_exists(project_file_path);;
 
     check_branch_name(C::branch_main);;
     check_uncommitted_files;;
@@ -201,59 +203,12 @@ do_publish = |args| (
     reset_documents;;
     commit_fixdeps_lock;;
 
-    upgrade_project_version(arg);;
-    pure()
-);
+    upgrade_project_version(project_file_path, args.@version, args.@confirm);;
 
-ask_new_version: [m: MonadConsoleUi] String -> String -> m String;
-ask_new_version = |project_name, new_version| (
-    ui_println $ (project_name,).format("Project name: {}");;
-    ui_print $ (new_version,).format("Input new version (default: {}): ");;
-    let answer = *ui_input_line;
-    let answer = answer.strip_spaces;
-    pure $ if answer != "" { answer } else { new_version }
-);
-
-confirm_upgrade: [m: MonadConsoleUi] String -> String -> m ();
-confirm_upgrade = |old_version, new_version| (
-    do {
-        ui_println $ "Going to upgrade the project version";;
-        ui_println $ (old_version,).format("  Old version: {}");;
-        ui_println $ (new_version,).format("  New version: {}");;
-        ui_print $ "Do you want to actually upgrade the project version? (yes/no): "
-    };;
-    let answer = *input_line;
-    let answer = answer.strip_spaces;
-    if answer != "yes" {
-        error $ "Confirmation canceled"
-    };
-    pure()
-);
-
-upgrade_project_version: [m: MonadConsoleUi] PublishArgs -> m ();
-upgrade_project_version = |args| (
-    let project_file_path = join_paths([args.@subproject_dir, C::fixproj_toml]);
-    let project_file = *ProjectFile::from_file(project_file_path).lift_iofail;
-    let project_name = *project_file.get_project_name;
-    let old_version = *project_file.get_project_version;
-    let new_version = *if args.@version != "" { 
-        pure $ args.@version 
-    } else {
-        increment_version(old_version).lift_result
-    };
-    let new_version = *if args.@confirm {
-        ask_new_version(project_name, new_version)
-    } else {
-        pure $ new_version
-    };
-    when(args.@confirm,
-        confirm_upgrade(old_version, new_version)
-    );;
-    let project_file = *project_file.set_project_version(new_version);
-    project_file.save();;
     when(args.@update_documents,
         update_documents);;
     when(args.@commit && new_version != "",
         commit_fixproj_toml(args, project_file_path, new_version));;
     pure()
 );
+

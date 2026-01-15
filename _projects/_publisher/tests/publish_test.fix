@@ -8,140 +8,138 @@ import Minilib.Testing.UnitTest;
 import Publisher.Common;
 import Publisher.Publish;
 import Publisher.ProcessRunner;
+import Publisher.Fs;
+import Publisher.ConsoleUi;
 import Publisher.Tests.MockProcessRunner;
-
-type Env = unbox struct {
-    runner: IORef MockProcessRunner,
-};
-
-namespace Env {
-    make: [m: MonadIO] MockProcessRunner -> m Env;
-    make = |runner| (
-        pure $ Env {
-            runner: *IORef::make(runner).lift_io
-        }
-    );
-
-    run: RIO Env a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
-    run = |rio, runner| (
-        let env = *Env::make(runner);
-        let a = *rio.run_reader_t(env);
-        let runner = *env.@runner.get.lift_io;
-        pure $ (runner, a)
-    );
-
-    run_catch: RIO Env a -> MockProcessRunner -> IOFail (Result ErrMsg (MockProcessRunner, a));
-    run_catch = |rio, runner| (
-        runner.run(rio).to_result.lift
-    );
-}
-
-impl Env: HasProcessRunner {
-    get_process_runner = |args, options| (
-        let env = *ask;
-        let runner = *env.@runner.get.lift_io;
-        let (runner, (stdout, stderr)) = runner.run(args, options);
-        env.@runner.put(runner).lift_io;;
-        pure $ (stdout, stderr)
-    );
-}
+import Publisher.Tests.MockFs;
+import Publisher.Tests.MockConsoleUi;
+import Publisher.Tests.MockEnv;
 
 test_check_branch_name_ok: TestCase;
 test_check_branch_name_ok = (
-    make_test("test_check_branch_name_ok") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("  main  "));
-    let (runner, ()) = *runner.run(check_branch_name("main"));
+    make_env_test("test_check_branch_name_ok") $ |env|
+    env.setup_runner(next_stdout("  main  "));;
+    env.run(check_branch_name("main"));;
     let expected = [
         MockProcess::make(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     ];
-    assert_equal("processes", expected, runner.@processes)
+    assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
 
 test_check_branch_name_ng: TestCase;
 test_check_branch_name_ng = (
-    make_test("test_check_branch_name_ng") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("  develop  "));
-    let res = *runner.run_catch(check_branch_name("main"));
+    make_env_test("test_check_branch_name_ng") $ |env|
+    env.setup_runner(next_stdout("  develop  "));;
+    let res = *env.run_catch(check_branch_name("main"));
     assert_equal("res", err $ "The current branch name is not `main`: actual = `develop`", res)
 );
 
 test_check_uncommitted_files_ok: TestCase;
 test_check_uncommitted_files_ok = (
-    make_test("test_check_uncommitted_files_ok") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout(""));
-    let (runner, ()) = *runner.run(check_uncommitted_files);
+    make_env_test("test_check_uncommitted_files_ok") $ |env|
+    env.setup_runner(next_stdout(""));;
+    env.run(check_uncommitted_files);;
     let expected = [
         MockProcess::make(["git", "diff", "--name-only"]).verbose
     ];
-    assert_equal("processes", expected, runner.@processes)
+    assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
 
 test_check_uncommitted_files_ng: TestCase;
 test_check_uncommitted_files_ng = (
-    make_test("test_check_uncommitted_files_ng") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("some_file"));
-    let res = *runner.run_catch(check_uncommitted_files);
+    make_env_test("test_check_uncommitted_files_ng") $ |env|
+    env.setup_runner(next_stdout("some_file"));;
+    let res = *env.run_catch(check_uncommitted_files);
     assert_equal("res", err $ "Uncommitted file exists", res)
 );
 
-
 test_no_commit_since_latest_ok: TestCase;
 test_no_commit_since_latest_ok = (
-    make_test("test_no_commit_since_latest_ok") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout(""));
-    let (runner, result) = *runner.run(no_commit_since_latest);
+    make_env_test("test_no_commit_since_latest_ok") $ |env|
+    env.setup_runner(next_stdout(""));;
+    let result = *env.run(no_commit_since_latest);
     let expected = [
         MockProcess::make(["git", "diff", "--name-only", C::tag_latest]).verbose
     ];
-    assert_equal("processes", expected, runner.@processes);;
+    assert_equal("processes", expected, *env.gets(@runner, @processes));;
     assert_equal("result", true, result)
 );
 
 test_no_commit_since_latest_ng: TestCase;
 test_no_commit_since_latest_ng = (
-    make_test("test_no_commit_since_latest_ng") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("some_commit"));
-    let (runner, result) = *runner.run(no_commit_since_latest);
+    make_env_test("test_no_commit_since_latest_ok") $ |env|
+    env.setup_runner(next_stdout("some_commit"));;
+    let result = *env.run(no_commit_since_latest);
     let expected = [
         MockProcess::make(["git", "diff", "--name-only", C::tag_latest]).verbose
     ];
-    assert_equal("processes", expected, runner.@processes);;
+    assert_equal("processes", expected, *env.gets(@runner, @processes));;
     assert_equal("result", false, result)
 );
 
 test_reset_fixdeps_lock_ok: TestCase;
 test_reset_fixdeps_lock_ok = (
-    make_test("test_reset_fixdeps_lock_ok") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("some_commit"));
-    let (runner, ()) = *runner.run(reset_fixdeps_lock);
+    make_env_test("test_reset_fixdeps_lock_ok") $ |env|
+    env.setup_runner(next_stdout("some_commit"));;
+    env.run(reset_fixdeps_lock);;
     let expected = [
         MockProcess::make(["git", "checkout", "--", C::fixdeps_lock]).verbose
     ];
-    assert_equal("processes", expected, runner.@processes)
+    assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
 
 test_commit_fixdeps_lock_ok: TestCase;
 test_commit_fixdeps_lock_ok = (
-    make_test("test_commit_fixdeps_lock_ok") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout("fixdeps.lock"));
-    let (runner, ()) = *runner.run(commit_fixdeps_lock);
+    make_env_test("test_commit_fixdeps_lock_ok") $ |env|
+    env.setup_runner(next_stdout("fixdeps.lock"));;
+    env.run(commit_fixdeps_lock);;
     let expected = [
         MockProcess::make(["git", "diff", "--name-only", "--", C::fixdeps_lock]),
         MockProcess::make(["git", "add", "--", C::fixdeps_lock]).verbose,
         MockProcess::make(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]).verbose,
     ];
-    assert_equal("processes", expected, runner.@processes)
+    assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
 
 test_commit_fixdeps_lock_ng: TestCase;
 test_commit_fixdeps_lock_ng = (
-    make_test("test_commit_fixdeps_lock_ng") $ |_|
-    let runner = MockProcessRunner::setup(next_stdout(""));
-    let (runner, ()) = *runner.run(commit_fixdeps_lock);
+    make_env_test("test_commit_fixdeps_lock_ng") $ |env|
+    env.setup_runner(next_stdout(""));;
+    env.run(commit_fixdeps_lock);;
     let expected = [
         MockProcess::make(["git", "diff", "--name-only", "--", C::fixdeps_lock]),
     ];
-    assert_equal("processes", expected, runner.@processes)
+    assert_equal("processes", expected, *env.gets(@runner, @processes))
+);
+
+test_check_if_file_exists_ok: TestCase;
+test_check_if_file_exists_ok = (
+    make_env_test("test_check_if_file_exists_ok") $ |env|
+    env.setup_fs(add_file("some_file", "some_contents"));;
+    env.run(check_if_file_exists("some_file"))
+);
+
+test_check_if_file_exists_ng: TestCase;
+test_check_if_file_exists_ng = (
+    make_env_test("test_check_if_file_exists_ng") $ |env|
+    env.setup_fs(add_file("some_file", "some_contents"));;
+    let res = *env.run_catch(check_if_file_exists("some_file2"));
+    assert_equal("res", err $ "File not found: some_file2", res)
+);
+
+test_check_if_directory_exists_ok: TestCase;
+test_check_if_directory_exists_ok = (
+    make_env_test("test_check_if_directory_exists_ok") $ |env|
+    env.setup_fs(add_directory("some_directory"));;
+    env.run(check_if_directory_exists("some_directory"))
+);
+
+test_check_if_directory_exists_ng: TestCase;
+test_check_if_directory_exists_ng = (
+    make_env_test("test_check_if_directory_exists_ng") $ |env|
+    env.setup_fs(add_directory("some_directory"));;
+    let res = *env.run_catch(check_if_directory_exists("some_directory2"));
+    assert_equal("res", err $ "Directory not found: some_directory2", res)
 );
 
 testsuite: TestCase;
@@ -156,6 +154,10 @@ testsuite = (
         test_reset_fixdeps_lock_ok,
         test_commit_fixdeps_lock_ok,
         test_commit_fixdeps_lock_ng,
+        test_check_if_file_exists_ok,
+        test_check_if_file_exists_ng,
+        test_check_if_directory_exists_ok,
+        test_check_if_directory_exists_ng,
     ]
     .run_tests
 );

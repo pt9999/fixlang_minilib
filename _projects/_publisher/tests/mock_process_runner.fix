@@ -5,6 +5,7 @@ import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
 
+import Publisher.Common;
 import Publisher.ProcessRunner;
 
 type MockProcess = unbox struct {
@@ -78,46 +79,13 @@ namespace MockProcessRunner {
         MockProcessRunner::empty.setup_func
     );
 
-    run: RIO a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
-    run = |rio, runner| (
-        let env = *Env::make(runner);
-        let a = *rio.run_reader_t(env);
-        let runner = *env.@runner.get.lift_io;
-        pure $ (runner, a)
-    );
-
-    run_catch: RIO a -> MockProcessRunner -> IOFail (Result ErrMsg (MockProcessRunner, a));
-    run_catch = |rio, runner| (
-        runner.run(rio).to_result.lift
-    );
-}
-
-type Env = unbox struct {
-    runner: IORef MockProcessRunner,
-};
-
-namespace Env {
-    make: [m: MonadIO] MockProcessRunner -> m Env;
-    make = |runner| (
-        pure $ Env {
-            runner: *IORef::make(runner).lift_io
-        }
-    );
-}
-
-impl Env: HasProcessRunner {
-    get_process_runner: [m: MonadIOFail] Env -> Array String -> Array String -> ReaderT Env m (String, String)
-    = |env, args, options| (
-        let runner = *env.@runner.get.lift_io;
+    run: Array String -> Array String -> MockProcessRunner -> (MockProcessRunner, (String, String));
+    run = |args, options, runner| (
         let process = MockProcess::empty.set_args(args).set_options(options);
         let index = runner.@processes.get_size;
         let outputs = runner.@outputs;
         let runner = runner.mod_processes(push_back(process));
-        env.@runner.put(runner).lift_io;;
         let (stdout, stderr) = if index < outputs.get_size { outputs.@(index) } else { ("", "") };
-        pure $ (stdout, stderr)
+        (runner, (stdout, stderr))
     );
 }
-
-type RIO a = ReaderT Env IOFail a;
-

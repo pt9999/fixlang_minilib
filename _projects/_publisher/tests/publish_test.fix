@@ -1,11 +1,50 @@
 module Publisher.Tests.PublishTest;
 
+import Minilib.Common.IORef;
 import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
 
+import Publisher.Common;
 import Publisher.Publish;
+import Publisher.ProcessRunner;
 import Publisher.Tests.MockProcessRunner;
+
+type Env = unbox struct {
+    runner: IORef MockProcessRunner,
+};
+
+namespace Env {
+    make: [m: MonadIO] MockProcessRunner -> m Env;
+    make = |runner| (
+        pure $ Env {
+            runner: *IORef::make(runner).lift_io
+        }
+    );
+
+    run: RIO Env a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
+    run = |rio, runner| (
+        let env = *Env::make(runner);
+        let a = *rio.run_reader_t(env);
+        let runner = *env.@runner.get.lift_io;
+        pure $ (runner, a)
+    );
+
+    run_catch: RIO Env a -> MockProcessRunner -> IOFail (Result ErrMsg (MockProcessRunner, a));
+    run_catch = |rio, runner| (
+        runner.run(rio).to_result.lift
+    );
+}
+
+impl Env: HasProcessRunner {
+    get_process_runner = |args, options| (
+        let env = *ask;
+        let runner = *env.@runner.get.lift_io;
+        let (runner, (stdout, stderr)) = runner.run(args, options);
+        env.@runner.put(runner).lift_io;;
+        pure $ (stdout, stderr)
+    );
+}
 
 test_check_branch_name_ok: TestCase;
 test_check_branch_name_ok = (

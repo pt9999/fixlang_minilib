@@ -7,6 +7,7 @@ import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 import Publisher.ProcessRunner;
+import Publisher.ConsoleUi;
 
 log_message: [m: MonadIO] String -> m ();
 log_message = |str| println(str).lift_io;
@@ -160,9 +161,6 @@ do_publish = |args| (
     let args = *args.update_realpath;
     let topdir = args.@topdir;
     
-    //let verup_py = join_paths([topdir, "_verup.py"]);
-    //check_if_file_exists(verup_py);;
-
     let subproject_dir = args.@subproject_dir;
     log_message("=== " + subproject_dir + " ===");;
     chdir(subproject_dir);;
@@ -203,39 +201,39 @@ do_publish = |args| (
     reset_documents;;
     commit_fixdeps_lock;;
 
-    //run_python_verup(verup_py, confirm);;
+    upgrade_project_version(arg);;
     pure()
 );
 
-ask_new_version: String -> String -> IOFail String;
+ask_new_version: [m: MonadConsoleUi] String -> String -> m String;
 ask_new_version = |project_name, new_version| (
-    eprintln $ (project_name,).format("Project name: {}");;
-    eprint $ (new_version,).format("Input new version (default: {}): ");;
-    flush(IO::stderr);;
-    let answer = *input_line.map(strip_spaces);
+    ui_println $ (project_name,).format("Project name: {}");;
+    ui_print $ (new_version,).format("Input new version (default: {}): ");;
+    let answer = *ui_input_line;
+    let answer = answer.strip_spaces;
     pure $ if answer != "" { answer } else { new_version }
-).lift;
+);
 
-confirm_upgrade: String -> String -> IOFail ();
+confirm_upgrade: [m: MonadConsoleUi] String -> String -> m ();
 confirm_upgrade = |old_version, new_version| (
     do {
-        eprintln $ "Going to upgrade the project version";;
-        eprintln $ (old_version,).format("  Old version: {}");;
-        eprintln $ (new_version,).format("  New version: {}");;
-        eprint $ "Do you want to actually upgrade the project version? (yes/no): ";;
-        flush(IO::stderr)
-    }.lift;;
-    let answer = *input_line.map(strip_spaces);
+        ui_println $ "Going to upgrade the project version";;
+        ui_println $ (old_version,).format("  Old version: {}");;
+        ui_println $ (new_version,).format("  New version: {}");;
+        ui_print $ "Do you want to actually upgrade the project version? (yes/no): "
+    };;
+    let answer = *input_line;
+    let answer = answer.strip_spaces;
     if answer != "yes" {
         error $ "Confirmation canceled"
     };
     pure()
 );
 
-upgrade_project_version: PublishArgs -> IOFail ();
+upgrade_project_version: [m: MonadConsoleUi] PublishArgs -> m ();
 upgrade_project_version = |args| (
     let project_file_path = join_paths([args.@subproject_dir, C::fixproj_toml]);
-    let project_file = *ProjectFile::from_file(project_file_path);
+    let project_file = *ProjectFile::from_file(project_file_path).lift_iofail;
     let project_name = *project_file.get_project_name;
     let old_version = *project_file.get_project_version;
     let new_version = *if args.@version != "" { 

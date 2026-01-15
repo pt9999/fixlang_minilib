@@ -1,0 +1,38 @@
+module Publisher.ConsoleUi;
+
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+
+import Publisher.Common;
+
+trait MonadConsoleUi = MonadIOFail + MonadErrorIF + MonadConsoleUiIF;
+
+trait [m: *->*] m: MonadConsoleUiIF {
+    ui_print: String -> m ();
+    ui_input_line: m String;
+}
+
+ui_println: [m: MonadConsoleUi] String -> m ();
+ui_println = |str| ui_print(str + "\n");
+
+impl IOFail: MonadConsoleUiIF {
+    ui_print = |str| (
+        eprint(str).lift;;
+        flush(IO::stderr).forget.lift
+    );
+
+    ui_input_line = (
+        input_line_s.lift
+    );
+}
+
+trait e: HasConsoleUi {
+    get_ui_print: [m: MonadIOFail] e -> String -> ReaderT e m ();
+    get_ui_input_line: [m: MonadIOFail] e -> ReaderT e m String;
+}
+
+impl [e: HasConsoleUi] ReaderT e IOFail: MonadConsoleUiIF {
+    ui_print = |str| ((*ask).get_ui_print)(str);
+    ui_input_line = (*ask).get_ui_input;
+}

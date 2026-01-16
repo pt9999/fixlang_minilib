@@ -39,19 +39,50 @@ namespace MockProcess {
     make: Array String -> MockProcess;
     make = |args| MockProcess::empty.set_args(args);
 
+    get_cmdline: MockProcess -> String;
+    get_cmdline = |process| process.@args.to_iter.join(" ");
+
     verbose: MockProcess -> MockProcess;
     verbose = mod_options(push_back("verbose"));
 }
 
+type MockProcessMatcher = (I64, MockProcess) -> Bool; 
+
+namespace MockProcessMatcher {
+    match_nth: I64 -> MockProcessMatcher;
+    match_nth = |n| (
+        |(index, process)| index == n
+    );
+    match_cmdline: String -> MockProcessMatcher;
+    match_cmdline = |cmdline| (
+        |(index, process)| process.get_cmdline == cmdline
+    );
+}
+
+// ok(stdout, stderr) or err(errmsg)
+type MockProcessResult = Result ErrMsg (String, String);
+
+// process matcher and process result
+type MockProcessAction = (MockProcessMatcher, MockProcessResult);
+
+namespace MockProcessAction {
+    then_print: String -> MockProcessMatcher -> MockProcessAction;
+    then_print = |stdout, matcher| (matcher, ok $ (stdout, ""));
+
+    then_err: ErrMsg -> MockProcessMatcher -> MockProcessAction;
+    then_err = |errmsg, matcher| (matcher, err $ errmsg);
+}
+
 type MockProcessRunner = unbox struct {
+    // Executed processes
     processes: Array MockProcess,
-    outputs: Array (String, String),
+
+    actions: Array MockProcessAction,
 };
 
 impl MockProcessRunner: Eq {
     eq = |a, b| (
-        a.@processes == b.@processes &&
-        a.@outputs == b.@outputs
+        a.@processes == b.@processes
     );
 }
 
@@ -59,7 +90,6 @@ impl MockProcessRunner: ToString {
     to_string = |runner| (
         "MockProcessRunner {"
         + " processes=" + runner.@processes.to_string
-        + " outputs=" + runner.@outputs.to_string
         + " }"
     );
 }
@@ -68,24 +98,42 @@ namespace MockProcessRunner {
     empty: MockProcessRunner;
     empty = MockProcessRunner {
         processes: [],
-        outputs: [],
+        actions: [],
     };
 
+    add_action: MockProcessAction -> MockProcessRunner -> MockProcessRunner;
+    add_action = |action| mod_actions(push_back(action));
+
+    find_action: I64 -> MockProcess -> MockProcessRunner -> Option (Result ErrMsg (String, String));
+    find_action = |index, process, runner| (
+        runner.@actions.to_iter.loop_iter(
+            none(), |action, opt|
+            let (matcher, res) = action;
+            if matcher((index, process)) {
+                break $ some $ res
+            };
+            continue $ none()
+        )
+    );
+
     next_stdout: String -> MockProcessRunner -> MockProcessRunner;
-    next_stdout = |stdout| mod_outputs(push_back((stdout, "")));
+    next_stdout = |stdout| (
+        let action = match_nth(0).then_print(stdout);
+        add_action(action)
+    );
 
     setup: (MockProcessRunner -> MockProcessRunner) -> MockProcessRunner;
     setup = |setup_func| (
         MockProcessRunner::empty.setup_func
     );
 
-    run: Array String -> Array String -> MockProcessRunner -> (MockProcessRunner, (String, String));
+    run: Array String -> Array String -> MockProcessRunner -> (MockProcessRunner, MockProcessResult);
     run = |args, options, runner| (
+        // Record the process
         let process = MockProcess::empty.set_args(args).set_options(options);
         let index = runner.@processes.get_size;
-        let outputs = runner.@outputs;
         let runner = runner.mod_processes(push_back(process));
-        let (stdout, stderr) = if index < outputs.get_size { outputs.@(index) } else { ("", "") };
-        (runner, (stdout, stderr))
+        let res = runner.find_action(index, process).as_some_or(ok $ ("", ""));
+        (runner, res)
     );
 }

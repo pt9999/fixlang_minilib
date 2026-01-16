@@ -3,6 +3,7 @@ module Publisher.Tests.MockEnv;
 import Minilib.Common.IORef;
 import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
+import Minilib.Monad.Error;
 import Minilib.Testing.UnitTest;
 
 import Publisher.Common;
@@ -81,6 +82,7 @@ namespace MockEnv {
         env.run(rio).to_result.lift
     );
 
+/*
     namespace Runner {
         run: RIO MockEnv a -> MockProcessRunner -> IOFail (MockProcessRunner, a);
         run = |rio, runner| (
@@ -95,15 +97,19 @@ namespace MockEnv {
             runner.run(rio).to_result.lift
         );
     }
+*/
 }
 
 impl MockEnv: HasProcessRunner {
     get_process_runner = |args, options| (
         let env = *ask;
         let runner = *env.get(@runner);
-        let (runner, (stdout, stderr)) = runner.run(args, options);
+        let (runner, res) = runner.run(args, options);
         env.set(@runner, runner);;
-        pure $ (stdout, stderr)
+        match res {
+            ok((stdout, stderr)) => pure $ (stdout, stderr),
+            err(errmsg) => error $ errmsg
+        }
     );
 }
 

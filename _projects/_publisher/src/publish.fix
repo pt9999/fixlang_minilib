@@ -7,124 +7,144 @@ import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Text.StringEx;
 
+import Publisher.Common;
 import Publisher.ProcessRunner;
 import Publisher.ConsoleUi;
 import Publisher.Fs;
+import Publisher.ProjectFile;
 
 log_message: [m: MonadIO] String -> m ();
 log_message = |str| println(str).lift_io;
 
-// Constants
-namespace C {
-    // ファイル名: "fixproj.toml"
-    fixproj_toml: String = "fixproj.toml";
-    // ファイル名: "fixdeps.lock"
-    fixdeps_lock: String = "fixdeps.lock";
-    // ディレクトリ名: "docs"
-    docs_dir: String = "docs";
-    // Gitブランチ名: "main"
-    branch_main: String = "main";
-    // Gitタグ名: "latest"
-    tag_latest: String = "latest";
-    // Gitリモート名: "origin"
-    remote_origin: String = "origin";
+namespace GitTask {
+
+    check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
+    check_branch_name = |expected| (
+        log_message((expected,).format("### Checking if the current branch name is `{}`"));;
+        let (stdout, stderr) = *run_process_quietly(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
+        let actual = stdout.strip_spaces;
+        if actual != expected {
+            error $ (expected, actual).format("The current branch name is not `{}`: actual = `{}`")
+        };
+        pure()
+    );
+
+    check_uncommitted_files: [m: MonadRunProcess, m: MonadError] m ();
+    check_uncommitted_files = (
+        log_message("### Checking for uncommitted files");;
+        let (stdout, stderr) = *run_process(["git", "diff", "--name-only"]);
+        if stdout != "" {
+            error $ "Uncommitted file exists"
+        };
+        pure()
+    );
+
+    no_commit_since_latest:  [m: MonadRunProcess] m Bool;
+    no_commit_since_latest = (
+        log_message("### Checking if there is any commit from the latest release");;
+        let (stdout, stderr) = *run_process(["git", "diff", "--name-only", C::tag_latest]);
+        if stdout == "" {
+            pure $ true
+        };
+        pure $ false
+    );
+
+    reset_fixdeps_lock:  [m: MonadRunProcess] m ();
+    reset_fixdeps_lock = (
+        let (stdout, stderr) = *run_process(["git", "checkout", "--", C::fixdeps_lock]);
+        pure()
+    );
+
+    commit_fixdeps_lock: [m: MonadRunProcess] m ();
+    commit_fixdeps_lock = (
+        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::fixdeps_lock]);
+        if stdout == "" { pure() };
+        log_message("### Commit fixdeps.lock");;
+        let (stdout, stderr) = *run_process(["git", "add", "--", C::fixdeps_lock]);
+        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]);
+        pure()
+    );
+
+    reset_documents: [m: MonadRunProcess] m ();
+    reset_documents = (
+        let (stdout, stderr) = *run_process(["git", "checkout", "--", C::dir_docs]);
+        pure()
+    );
+
+    commit_fixproj_toml: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
+    commit_fixproj_toml = |args, filepath, version| (
+        log_message("### Commit the project file");;
+        let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
+        let message = "version " + version;
+        let (stdout, stderr) = *run_process(["git", "commit", "--verbose", "-m", message]);
+        when(args.@tag, do {
+            log_message("### Make a version tag");;
+            let (stdout, stderr) = *run_process(["git", "tag", version]);
+            let (stdout, stderr) = *run_process(["git", "tag", C::tag_latest, "-f"]);
+            pure()
+        });;
+        when(args.@push, do {
+            log_message("### Push to the remote repository");;
+            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin]);
+            pure()
+        });;
+        when(args.@push && args.@tag, do {
+            log_message("### Push tags to the remote repository");;
+            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, version]);
+            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, C::tag_latest, "-f"]);
+            pure()
+        });;
+        pure()
+    );
 }
 
-check_if_file_exists: [m: MonadFs] Path -> m ();
-check_if_file_exists = |filepath| (
-    if ! *fs_file_exists(filepath) {
-        error $ "File not found: " + filepath
-    };
-    pure()
-);
-
-check_if_directory_exists: [m: MonadFs] Path -> m ();
-check_if_directory_exists = |dirpath| (
-    if ! *fs_directory_exists(dirpath) {
-        error $ "Directory not found: " + dirpath
-    };
-    pure()
-);
-
-check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
-check_branch_name = |expected| (
-    log_message((expected,).format("### Checking if the current branch name is `{}`"));;
-    let (stdout, stderr) = *run_process_quietly(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
-    let actual = stdout.strip_spaces;
-    if actual != expected {
-        error $ (expected, actual).format("The current branch name is not `{}`: actual = `{}`")
-    };
-    pure()
-);
-
-check_uncommitted_files: [m: MonadRunProcess, m: MonadError] m ();
-check_uncommitted_files = (
-    log_message("### Checking for uncommitted files");;
-    let (stdout, stderr) = *run_process(["git", "diff", "--name-only"]);
-    if stdout != "" {
-        error $ "Uncommitted file exists"
-    };
-    pure()
-);
-
-no_commit_since_latest:  [m: MonadRunProcess] m Bool;
-no_commit_since_latest = (
-    log_message("### Checking if there is any commit from the latest release");;
-    let (stdout, stderr) = *run_process(["git", "diff", "--name-only", C::tag_latest]);
-    if stdout == "" {
-        pure $ true
-    };
-    pure $ false
-);
-
-reset_fixdeps_lock:  [m: MonadRunProcess] m ();
-reset_fixdeps_lock = (
-    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::fixdeps_lock]);
-    pure()
-);
-
-commit_fixdeps_lock: [m: MonadRunProcess] m ();
-commit_fixdeps_lock = (
-    let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::fixdeps_lock]);
-    if stdout == "" { pure() };
-    let (stdout, stderr) = *run_process(["git", "add", "--", C::fixdeps_lock]);
-    let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]);
-    pure()
-);
-
-update_documents: [m: MonadRunProcess] m ();
-update_documents = (
-    let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::docs_dir]);
-    pure()
-);
-
-reset_documents: [m: MonadRunProcess] m ();
-reset_documents = (
-    let (stdout, stderr) = *run_process(["git", "checkout", "--", C::docs_dir]);
-    pure()
-);
-
-commit_fixproj_toml: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
-commit_fixproj_toml = |args, filepath, version| (
-    let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
-    let message = "version " + version;
-    let (stdout, stderr) = *run_process(["git", "commit", "--verbose", "-m", message]);
-    when(args.@tag, do {
-        let (stdout, stderr) = *run_process(["git", "tag", version]);
-        let (stdout, stderr) = *run_process(["git", "tag", C::tag_latest, "-f"]);
+namespace ProjectTask {
+    check_if_file_exists: [m: MonadFs] Path -> m ();
+    check_if_file_exists = |filepath| (
+        if ! *fs_file_exists(filepath) {
+            error $ "File not found: " + filepath
+        };
         pure()
-    });;
-    when(args.@push, do {
-        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin]);
+    );
+
+    check_if_directory_exists: [m: MonadFs] Path -> m ();
+    check_if_directory_exists = |dirpath| (
+        if ! *fs_directory_exists(dirpath) {
+            error $ "Directory not found: " + dirpath
+        };
         pure()
-    });;
-    when(args.@push && args.@tag, do {
-        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, version]);
-        let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, C::tag_latest, "-f"]);
+    );
+
+    run_fix_clean: [m: MonadRunProcess] m ();
+    run_fix_clean = (
+        log_message("### Clean");;
+        let (stdout, stderr) = *run_process(["fix", "clean"]);
         pure()
-    });;
-    pure()
-);
+    );
+
+    run_fix_deps_update: [m: MonadRunProcess] m ();
+    run_fix_deps_update = (
+        log_message("### Update deps");;
+        let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
+        pure()
+    );
+
+    run_fix_test: [m: MonadRunProcess] m ();
+    run_fix_test = (
+        log_message("### Run tests");;
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "basic"]);
+        let (stdout, stderr) = *run_process(["fix", "test", "-O", "max"]);
+        pure()
+    );
+
+    run_fix_docs: [m: MonadRunProcess] m ();
+    run_fix_docs = (
+        log_message("### Generate documents");;
+        let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::dir_docs]);
+        pure()
+    );
+}
+
 
 type PublishArgs = unbox struct {
     topdir: Path,
@@ -158,41 +178,36 @@ namespace PublishArgs {
     );
 }
 
-do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess] PublishArgs -> m ();
+do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] PublishArgs -> m ();
 do_publish = |args| (
     let args = *args.update_realpath;
     let topdir = args.@topdir;
     
     let subproject_dir = args.@subproject_dir;
-    log_message("=== " + subproject_dir + " ===");;
+    log_message("### Chdir to `" + subproject_dir + "`");;
     fs_chdir(subproject_dir);;
 
-    let git_dir = join_paths([subproject_dir, ".git"]);
+    let git_dir = ".git";
     check_if_directory_exists(git_dir);;
 
-    let project_file_path = join_paths([subproject_dir, C::fixproj_toml]);
+    let project_file_path = C::fixproj_toml;
     check_if_file_exists(project_file_path);;
 
     check_branch_name(C::branch_main);;
     check_uncommitted_files;;
 
-    log_message("### Clean");;
-    let (stdout, stderr) = *run_process(["fix", "clean"]);
-    log_message("### Update deps");;
-    let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
+    run_fix_clean;;
+    run_fix_deps_update;;
     do {
-        log_message("### Run tests");;
-        let (stdout, stderr) = *run_process(["fix", "test", "-O", "basic"]);
-        let (stdout, stderr) = *run_process(["fix", "test", "-O", "max"]);
-        log_message("### Make documents for testing");;
-        let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::docs_dir]);
+        run_fix_test;;
+        run_fix_docs;;
         pure()
     }
     .catch(|errmsg|
         log_message("### Caught error: " + errmsg);;
         reset_fixdeps_lock;;
         reset_documents;;
-        throw $ errmsg
+        error $ errmsg
     );;
     if *no_commit_since_latest {
         log_message("### No need to publish");;
@@ -203,10 +218,11 @@ do_publish = |args| (
     reset_documents;;
     commit_fixdeps_lock;;
 
-    upgrade_project_version(project_file_path, args.@version, args.@confirm);;
+    log_message("### Update the project file");;
+    let new_version = *upgrade_project_version(project_file_path, args.@version, args.@confirm);
 
     when(args.@update_documents,
-        update_documents);;
+        run_fix_docs);;
     when(args.@commit && new_version != "",
         commit_fixproj_toml(args, project_file_path, new_version));;
     pure()

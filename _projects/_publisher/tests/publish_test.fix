@@ -4,6 +4,7 @@ import Minilib.Common.IORef;
 import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
 
 import Publisher.Common;
 import Publisher.Publish;
@@ -142,6 +143,42 @@ test_check_if_directory_exists_ng = (
     assert_equal("res", err $ "Directory not found: some_directory2", res)
 );
 
+make_publish_fixture: PublishArgs -> MockEnv -> IOFail MockEnv;
+make_publish_fixture = |args, env| (
+    env.setup_fs(|fs| fs.add_directory(".git"));;
+    let project_file_path = "fixproj.toml";
+    let project_file_contents = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
+    env.setup_fs(|fs| fs.add_file(project_file_path, project_file_contents));;
+
+    // current branch is main
+    env.setup_runner(match_cmdline("git rev-parse --abbrev-ref HEAD").then_print("main").add_action);;
+    // some commit exists since latest
+    env.setup_runner(match_cmdline("git diff --name-only latest").then_print("some_commit").add_action);;
+
+    //env.setup_console_ui(set_input("0.2.0\nyes\n"));;
+    pure $ env
+);
+
+test_do_publish: TestCase;
+test_do_publish = (
+    make_env_test("test_do_publish") $ |env|
+    let args = PublishArgs::empty.set_subproject_dir("proj1").set_confirm(false).set_commit(true).set_push(true).set_tag(true).set_update_documents(true);
+    let env = *env.make_publish_fixture(args);
+    env.run(do_publish(args));;
+    let expected = args.@subproject_dir;
+    assert_equal("cwd", expected, *env.gets(@fs, @cwd));;
+    let processes = *env.gets(@runner, @processes);
+    let cmdlines = processes.to_iter.map(get_cmdline).to_array;
+    //cmdlines.to_iter.foreach_m(eprintln).lift;;
+    assert_true("push origin vertag", cmdlines.contains("git push origin 0.1.1"));;
+    assert_true("push origin latest", cmdlines.contains("git push origin latest -f"));;
+    let project_file = *env.gets(@fs, get_file("fixproj.toml"));
+    assert_true("project_file", project_file.map(find("version = \"0.1.1\"",0)).is_some);;
+    pure()
+);
+
+// TODO: add tests for do_publish
+
 testsuite: TestCase;
 testsuite = (
     [
@@ -158,6 +195,7 @@ testsuite = (
         test_check_if_file_exists_ng,
         test_check_if_directory_exists_ok,
         test_check_if_directory_exists_ng,
+        test_do_publish,
     ]
     .run_tests
 );

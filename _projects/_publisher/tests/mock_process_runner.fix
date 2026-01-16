@@ -8,8 +8,11 @@ import Minilib.Testing.UnitTest;
 import Publisher.Common;
 import Publisher.ProcessRunner;
 
+//  プロセス
 type MockProcess = unbox struct {
+    // コマンドライン引数
     args: Array String,
+    // オプション("verbose", "has_input"等)
     options: Array String,
 };
 
@@ -36,48 +39,58 @@ namespace MockProcess {
         options: [],
     };
 
+    // コマンドライン引数をもとにプロセスを作成する
     make: Array String -> MockProcess;
     make = |args| MockProcess::empty.set_args(args);
 
-    get_cmdline: MockProcess -> String;
-    get_cmdline = |process| process.@args.to_iter.join(" ");
-
+    // verboseオプションを設定する
     verbose: MockProcess -> MockProcess;
     verbose = mod_options(push_back("verbose"));
+
+    // コマンドラインを取得する
+    get_cmdline: MockProcess -> String;
+    get_cmdline = |process| process.@args.to_iter.join(" ");
 }
 
+// プロセスの判定条件
+// (何番目に実行されたか, プロセス) -> 判定条件を満たすなら true
 type MockProcessMatcher = (I64, MockProcess) -> Bool; 
 
 namespace MockProcessMatcher {
+    // n番目に実行されたかどうか
     match_nth: I64 -> MockProcessMatcher;
     match_nth = |n| (
         |(index, process)| index == n
     );
+    // コマンドラインが指定文字列に等しいかどうか
     match_cmdline: String -> MockProcessMatcher;
     match_cmdline = |cmdline| (
         |(index, process)| process.get_cmdline == cmdline
     );
 }
 
-// ok(stdout, stderr) or err(errmsg)
+// プロセスの実行結果。ok(stdout, stderr) または err(errmsg)
 type MockProcessResult = Result ErrMsg (String, String);
 
-// process matcher and process result
+// プロセスに対するアクション。プロセスの判定条件と実行結果。
 type MockProcessAction = (MockProcessMatcher, MockProcessResult);
 
 namespace MockProcessAction {
+    // 判定条件を満たしたら標準出力に出力する
     then_print: String -> MockProcessMatcher -> MockProcessAction;
     then_print = |stdout, matcher| (matcher, ok $ (stdout, ""));
 
+    // 判定条件を満たしたらエラーを通知する
     then_err: ErrMsg -> MockProcessMatcher -> MockProcessAction;
     then_err = |errmsg, matcher| (matcher, err $ errmsg);
 }
 
+//  モックのプロセス実行器
 type MockProcessRunner = unbox struct {
-    // Executed processes
-    processes: Array MockProcess,
-
+    // プロセスが実行されたときにどのような結果を返すべきかを決めるリスト
     actions: Array MockProcessAction,
+    // 実際に実行されたプロセスのリスト
+    processes: Array MockProcess,
 };
 
 impl MockProcessRunner: Eq {
@@ -97,8 +110,8 @@ impl MockProcessRunner: ToString {
 namespace MockProcessRunner {
     empty: MockProcessRunner;
     empty = MockProcessRunner {
-        processes: [],
         actions: [],
+        processes: [],
     };
 
     add_action: MockProcessAction -> MockProcessRunner -> MockProcessRunner;
@@ -120,11 +133,6 @@ namespace MockProcessRunner {
     next_stdout = |stdout| (
         let action = match_nth(0).then_print(stdout);
         add_action(action)
-    );
-
-    setup: (MockProcessRunner -> MockProcessRunner) -> MockProcessRunner;
-    setup = |setup_func| (
-        MockProcessRunner::empty.setup_func
     );
 
     run: Array String -> Array String -> MockProcessRunner -> (MockProcessRunner, MockProcessResult);

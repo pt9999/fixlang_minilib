@@ -78,6 +78,8 @@ push-submodules:
 	git diff-index --quiet --cached HEAD || git commit -m 'update submodules'
 	git push origin
 
+switch-main-submodules:
+	git submodule foreach 'git checkout main && git pull'
 
 %.test:
 	$(MAKE) -C $* -f $(SUBPROJECT_MAKEFILE) clean test

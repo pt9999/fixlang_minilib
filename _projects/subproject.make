@@ -52,6 +52,10 @@ update-deps:
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
+	../_publisher/publisher.out . --confirm --commit --push --tag --update-document
+
+
+publish_old:
 	git diff --exit-code HEAD											# Check if uncommit files exist
 	/usr/bin/test "$$(git rev-parse --abbrev-ref HEAD)" == "main"		# Check if current branch is main
 	fix clean

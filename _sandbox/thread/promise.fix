@@ -1,0 +1,225 @@
+module Main;
+
+import AsyncTask;
+
+import Minilib.Common.TimeEx;
+import Minilib.Trait.Traversable;
+
+namespace VarEx {
+    act: (a -> IO (b, a)) -> Var a -> IO b;
+    act = |f, var| (
+        var.lock(|a|
+            let (b, a) = *f(a);
+            var.Var::set(a);;
+            pure $ b
+        )
+    );
+}
+
+namespace Background {
+    run: IO () -> IO ();
+    run = |io| (
+        let task: IOTask () = *AsyncIOTask::make(pure();; io);
+        pure()
+    );
+}
+
+type PromiseListener a = unbox struct {
+    data: Result ErrMsg a -> IO ()
+};
+
+namespace PromiseListener {
+    make: (Result ErrMsg a -> IO ()) -> PromiseListener a;
+    make = |f| PromiseListener { data: f };
+
+    run: Result ErrMsg a -> PromiseListener a -> IO ();
+    run = |res, listener| (
+        Background::run $ (listener.@data)(res)
+    );
+
+    run_listeners: Result ErrMsg a -> Array (PromiseListener a) -> IO ();
+    run_listeners = |res_a, listeners| (
+        listeners.to_iter.foreach_m(run(res_a))
+    );
+}
+
+type PromiseState a = unbox union {
+    unsettled: Array (PromiseListener a),
+    settled: Result ErrMsg a,
+};
+
+type Promise a = unbox struct {
+    vstate: Var (PromiseState a),
+};
+
+namespace Promise {
+    _unsettled: IO (Promise a);
+    _unsettled = (
+        pure();;
+        let vstate = *Var::make(unsettled $ []);
+        pure $ Promise { vstate: vstate }
+    );
+
+    resolve: a -> IO (Promise a);
+    resolve = |a| (
+        let vstate = *Var::make(settled $ ok $ a);
+        pure $ Promise { vstate: vstate }
+    );
+
+    reject: ErrMsg -> IO (Promise a);
+    reject = |errmsg| (
+        let vstate = *Var::make(settled $ err $ errmsg);
+        pure $ Promise { vstate: vstate }
+    );
+    
+    _add_listener: PromiseListener a -> Promise a -> IO ();
+    _add_listener = |listener, promise_a| (
+        let vstate_a = promise_a.@vstate;
+        vstate_a.lock(|state_a|
+            match state_a {
+                settled(res_a) => (
+                    listener.run(res_a);;
+                    pure()
+                ),
+                unsettled(listeners) => (
+                    let state_a = unsettled $ listeners.push_back(listener);
+                    vstate_a.Var::set(state_a);;
+                    pure()
+                )
+            }
+        )
+    );
+
+    _settle: Result ErrMsg a -> Promise a -> IO ();
+    _settle = |res_a, promise_a| (
+        let vstate_a = promise_a.@vstate;
+        let listeners = *vstate_a.lock(|state_a|
+            if state_a.is_settled {
+                // no-op
+                pure $ []
+            };
+            let listeners = state_a.as_unsettled;
+            vstate_a.Var::set(settled(res_a));;
+            pure $ listeners
+        );
+        listeners.run_listeners(res_a)
+    );
+
+    _then_settle: Promise a -> Promise a -> IO ();
+    _then_settle = |receiver, sender| (
+        let listener: PromiseListener a = PromiseListener::make $ |res_a| (
+            receiver._settle(res_a)
+        );
+        sender._add_listener(listener)
+    );
+
+    _then: (Result ErrMsg a -> IO (Promise b)) -> Promise a -> IO (Promise b);
+    _then = |f, promise_a| (
+        let promise_b: Promise b = *_unsettled;
+        let listener: PromiseListener a = PromiseListener::make $ |res_a| (
+            let promise_b_2 = *f(res_a);
+            promise_b_2._then_settle(promise_b)
+        );
+        promise_a._add_listener(listener);;
+        pure $ promise_b
+    );
+
+    then: (a -> IO (Promise b)) -> Promise a -> IO (Promise b);
+    then = |f, promise_a| (
+        promise_a._then(|res_a|
+            match res_a {
+                ok(a) => f(a),
+                err(errmsg) => Promise::reject(errmsg)
+            }
+        )
+    );
+
+    catch: (ErrMsg -> IO (Promise a)) -> Promise a -> IO (Promise a);
+    catch = |handler, promise_a| (
+        promise_a._then(|res_a|
+            match res_a {
+                ok(a) => Promise::resolve(a),
+                err(errmsg) => handler(errmsg)
+            }
+        )
+    );
+
+    make: ((a -> IO ()) -> (ErrMsg -> IO ()) -> IO ()) -> IO (Promise a);
+    make = |body| (
+        let promise_a: Promise a = *_unsettled;
+        let resolve: a -> IO () = |a| promise_a._settle(ok(a));
+        let reject: ErrMsg -> IO () = |errmsg| promise_a._settle(err(errmsg));
+        Background::run $ do {
+            body(resolve, reject)
+        };;
+        pure $ promise_a
+    );
+
+}
+
+//--------------------------------------------------------
+
+safe_sleep: F64 -> IO ();
+safe_sleep = |second| sleep(second).try(eprintln);
+
+make_timer: a -> F64 -> IO (Promise a);
+make_timer = |a, second| (
+    Promise::make(|resolve, reject|
+        safe_sleep(second);;
+        resolve(a)
+    )
+);
+
+test1: IO ();
+test1 = (
+    let vfinish: Var Bool = *Var::make(false);
+
+    let promise1: Promise I64 = *Promise::make(|resolve, reject|
+        println("started");;
+        safe_sleep(0.5);;
+        resolve(42)
+    );
+    let promise2a: Promise String = *promise1.then(|i64|
+        println("2a: got " + i64.to_string);;
+        safe_sleep(0.3);;
+        Promise::resolve("2a " + i64.to_string)
+    );
+    let promise2b: Promise String = *promise1.then(|i64|
+        println("2b: got " + i64.to_string);;
+        safe_sleep(0.5);;
+        Promise::resolve("2b " + i64.to_string)
+    );
+    let promise3a: Promise String = *promise2a.then(|str|
+        println("3a: got " + str);;
+        safe_sleep(0.5);;
+        Promise::reject("3a error ")
+    );
+    let promise3b: Promise String = *promise2b.then(|str|
+        println("3b: got " + str);;
+        safe_sleep(0.4);;
+        Promise::reject("3b error ")
+    );
+    let promise4a: Promise String = *promise3a.catch(|errmsg|
+        println("caught " + errmsg);;
+        safe_sleep(1.0);;
+        vfinish.Var::set(true);;
+        Promise::resolve("ok")
+    );
+    let promise4b: Promise String = *promise3b.then(|str|
+        println("4b: got " + str);;
+        safe_sleep(0.5);;
+        vfinish.Var::set(true);;
+        Promise::resolve("ok 4b")
+    );
+    // AsyncIOTask はメインスレッドが終了すると終了するため、待つ必要がある
+    vfinish.wait(|b| b);;
+    /*
+    println("sleeping a while");;
+    safe_sleep(3.0);;
+    println("sleeping done");;
+    */
+    println("done");;
+    pure()
+);
+
+main: IO () = test1;

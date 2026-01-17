@@ -2,6 +2,7 @@ module Main;
 
 import Minilib.Common.Common;
 import Minilib.IO.Uv;
+import Minilib.IO.Uv.UvFs;
 import Minilib.Monad.Free;
 
 // できればこんなふうにしたい
@@ -21,7 +22,7 @@ test1: IOFail () = (
         uv_write_file("blah");;
         uv_close_file
     };
-    
+
     writer.attach(loop);;
 
     loop.run_default;;
@@ -104,13 +105,12 @@ namespace UvOperation {
     _interpret_open = |loop, path, mode, next| (
         let flags = UvFsFlags::from_mode_str(mode);
         let mode = 0o666.to_CInt;
-        let fs = *UvFs::open(loop, path, flags, mode, |fs|
+        let fs = *UvFs::open(loop, path, flags, mode, |fs, file|
             let result = *fs.get_result;
             if result < 0 {
                 // TODO: コールバック内でエラーが起きたらどのように報告するか？
                 eprintln("error: open failed: " + Uv::strerror(result.to_CInt))
             };
-            let file = result.to_CInt;
             let res = *_interpret(loop, file, next()).to_result;
             // TODO: コールバック内でエラーが起きたらどのように報告するか？
             if res.is_err { eprintln("error: _interpret failed: " + res.as_err)};
@@ -119,5 +119,22 @@ namespace UvOperation {
         // TODO: キャンセル方法を検討
         pure()
     );
+
+    // TODO impl
+    _interpret_close: UvLoop -> UvFile -> (() -> UvOperation ()) -> IOFail ();
+    _interpret_close = |loop, file, next| (
+        let fs = *UvFs::close(loop, file, |fs, result|
+            if result < 0 {
+                // TODO: コールバック内でエラーが起きたらどのように報告するか？
+                eprintln("error: open failed: " + Uv::strerror(result.to_CInt))
+            };
+            let res = *_interpret(loop, file, next()).to_result;
+            // TODO: コールバック内でエラーが起きたらどのように報告するか？
+            if res.is_err { eprintln("error: _interpret failed: " + res.as_err)};
+            pure()
+        );
+        pure()
+    );
+
 }
 

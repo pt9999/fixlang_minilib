@@ -39,6 +39,36 @@ count_leading_zeros_U64 = |u64| (
     32 + count_leading_zeros_U32(u64.to_U32)
 );
 
+//----------------------------------------------------------------
+// https://graphics.stanford.edu/~seander/bithacks.html
+
+_multiply_de_bruijn_bit_position: Array I64 = [
+  0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30,
+  8, 12, 20, 28, 15, 17, 24, 7, 19, 27, 23, 6, 26, 5, 4, 31
+];
+
+alt_count_leading_zeros_U32: U32 -> I64;
+alt_count_leading_zeros_U32 = |u32| (
+    if u32 == 0_U32 { 32 };
+    let v = u32;
+    let v = v.shift_right(1_U32).bit_or(v);
+    let v = v.shift_right(2_U32).bit_or(v);
+    let v = v.shift_right(4_U32).bit_or(v);
+    let v = v.shift_right(8_U32).bit_or(v);
+    let v = v.shift_right(16_U32).bit_or(v);
+    let r = _multiply_de_bruijn_bit_position.@((v * 0x07C4ACDD_U32).shift_right(27_U32).to_I64);
+    31 - r
+);
+
+alt_count_leading_zeros_U64: U64 -> I64;
+alt_count_leading_zeros_U64 = |u64| (
+    if u64.bit_and(0xffffffff00000000_U64) != 0_U64 {
+        alt_count_leading_zeros_U32 $ u64.shift_right(32_U64).to_U32
+    };
+    32 + alt_count_leading_zeros_U32(u64.to_U32)
+);
+//----------------------------------------------------------------
+
 test_clz: U64 -> IO ();
 test_clz = |base| (
     loop_m(
@@ -46,8 +76,10 @@ test_clz = |base| (
         if i > 64 { break_m $ () };
         let u64 = if i < 64 { base.shift_right(i.to_U64) } else { 0_U64 };
         let n = count_leading_zeros_U64(u64);
-        eval debug_eprintln("(u64,i,n)="+(u64,i,n).to_string);
+        let n2 = alt_count_leading_zeros_U64(u64);
+        eval debug_eprintln("(u64,i,n,n2)="+(u64,i,n,n2).to_string);
         assert_eq(|_| "clz:(u64,i,n)="+(u64,i,n).to_string, i, n);;
+        assert_eq(|_| "clz:(u64,i,n2)="+(u64,i,n2).to_string, i, n2);;
         continue_m $ i + 1
     )
 );

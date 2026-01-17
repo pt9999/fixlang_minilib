@@ -29,47 +29,37 @@ impl IOFail: MonadFsIF {
     fs_write_file_string = |path, contents| write_file_string(path, contents);
 }
 
-trait api: FileSystemApi {
-    fsapi_file_exists: IORef api -> Path -> IOFail Bool;
-    fsapi_directory_exists: IORef api -> Path -> IOFail Bool;
-    fsapi_chdir: IORef api -> Path -> IOFail ();
-    fsapi_realpath: IORef api -> Path -> IOFail Path;
-    fsapi_read_file_string: IORef api -> Path -> IOFail String;
-    fsapi_write_file_string: IORef api -> Path -> String -> IOFail ();
-}
-
-namespace FileSystemApi {
-    run_fsapi: [e: HasFileSystemApi, HasFileSystemApi::ApiType e = api, api: FileSystemApi] (IORef api -> func) -> ReaderT e IOFail func;
-    run_fsapi = |get_func| (
-        let env = *ask;
-        let ioref_api = env.get_file_system_api;
-        pure $ ioref_api.get_func
-    );
-}
+type FileSystemApi = unbox struct {
+    file_exists: Path -> IOFail Bool,
+    directory_exists: Path -> IOFail Bool,
+    chdir: Path -> IOFail (),
+    realpath: Path -> IOFail Path,
+    read_file_string: Path -> IOFail String,
+    write_file_string: Path -> String -> IOFail (),
+};
 
 trait e: HasFileSystemApi {
-    type ApiType e;
-    get_file_system_api: e -> IORef (ApiType e);
+    get_file_system_api: e -> IOFail FileSystemApi;
 }
 
-impl [e: HasFileSystemApi, HasFileSystemApi::ApiType e = api, api: FileSystemApi] ReaderT e IOFail: MonadFsIF {
+impl [e: HasFileSystemApi] ReaderT e IOFail: MonadFsIF {
     fs_file_exists = |path| (
-        (*fsapi_file_exists.run_fsapi)(path).lift_iofail
+        call_api(get_file_system_api, @file_exists, |func| func(path))
     );
     fs_directory_exists = |path| (
-        (*fsapi_directory_exists.run_fsapi)(path).lift_iofail
+        call_api(get_file_system_api, @directory_exists, |func| func(path))
     );
     fs_chdir = |path| (
-        (*fsapi_chdir.run_fsapi)(path).lift_iofail
+        call_api(get_file_system_api, @chdir, |func| func(path))
     );
     fs_realpath = |path| (
-        (*fsapi_realpath.run_fsapi)(path).lift_iofail
+        call_api(get_file_system_api, @realpath, |func| func(path))
     );
     fs_read_file_string = |path| (
-        (*fsapi_read_file_string.run_fsapi)(path).lift_iofail
+        call_api(get_file_system_api, @read_file_string, |func| func(path))
     );
     fs_write_file_string = |path, contents| (
-        (*fsapi_write_file_string.run_fsapi)(path, contents).lift_iofail
+        call_api(get_file_system_api, @write_file_string, |func| func(path, contents))
     );
 }
 

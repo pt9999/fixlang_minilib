@@ -82,12 +82,18 @@ impl IOFail: MonadRunProcessIF {
     );
 }
 
-trait e: HasProcessRunner {
-    get_process_runner: Array String -> Array String -> ReaderT e IOFail (String, String);
+type ProcessRunnerApi = unbox struct {
+    run_process_with_options: Array String -> Array String -> IOFail (String, String),
+};
+
+trait e: HasProcessRunnerApi {
+    get_process_runner_api: e -> IOFail ProcessRunnerApi;
 }
 
-impl [e: HasProcessRunner] ReaderT e IOFail: MonadRunProcessIF {
-    run_process_with_options = get_process_runner;
+impl [e: HasProcessRunnerApi] ReaderT e IOFail: MonadRunProcessIF {
+    run_process_with_options = |args, options| (
+        call_api(get_process_runner_api, @run_process_with_options, |func| func(args, options))
+    );
 }
 
 run_process_quietly: [m: MonadRunProcessIF] Array String -> m (String, String);

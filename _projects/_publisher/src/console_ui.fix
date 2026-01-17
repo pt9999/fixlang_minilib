@@ -28,14 +28,22 @@ impl IOFail: MonadConsoleUiIF {
     );
 }
 
-trait e: HasConsoleUi {
-    get_ui_print: String -> ReaderT e IOFail ();
-    get_ui_input_line: ReaderT e IOFail String;
+type ConsoleUiApi = unbox struct {
+    ui_print: String -> IOFail (),
+    ui_input_line: IOFail String,
+};
+
+trait e: HasConsoleUiApi {
+    get_console_ui_api: e -> IOFail ConsoleUiApi;
 }
 
-impl [e: HasConsoleUi] ReaderT e IOFail: MonadConsoleUiIF {
-    ui_print = get_ui_print;
-    ui_input_line = get_ui_input_line;
+impl [e: HasConsoleUiApi] ReaderT e IOFail: MonadConsoleUiIF {
+    ui_print = |str| (
+        call_api(get_console_ui_api, @ui_print, |func| func(str))
+    );
+    ui_input_line = (
+        call_api(get_console_ui_api, @ui_input_line, |func| func)
+    );
 }
 
 ask_new_version: [m: MonadConsoleUi] String -> String -> m String;

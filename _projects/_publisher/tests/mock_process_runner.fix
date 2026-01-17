@@ -1,9 +1,10 @@
 module Publisher.Tests.MockProcessRunner;
 
 import Minilib.Common.IORef;
-import Minilib.Monad.Reader;
+//import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
-import Minilib.Testing.UnitTest;
+import Minilib.Monad.Error;
+//import Minilib.Testing.UnitTest;
 
 import Publisher.Common;
 import Publisher.ProcessRunner;
@@ -143,5 +144,20 @@ namespace MockProcessRunner {
         let runner = runner.mod_processes(push_back(process));
         let res = runner.find_action(index, process).as_some_or(ok $ ("", ""));
         (runner, res)
+    );
+
+    to_api: [m: MonadIO] IORef MockProcessRunner -> m ProcessRunnerApi;
+    to_api = |ioref| (
+        pure $ ProcessRunnerApi {
+            run_process_with_options: |args, options| (
+                let runner = *ioref.get.lift_io;
+                let (runner, res) = runner.run(args, options);
+                ioref.IORef::set(runner).lift_io;;
+                match res {
+                    ok((stdout, stderr)) => pure $ (stdout, stderr),
+                    err(errmsg) => error $ errmsg
+                }
+            ),
+        }
     );
 }

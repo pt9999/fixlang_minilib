@@ -1,9 +1,7 @@
 all:
 
-build: publisher.out
-
-publisher.out:
-	fix build -o $<
+build: 
+	fix build
 
 clean:
 	fix clean

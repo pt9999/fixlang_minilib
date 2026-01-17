@@ -65,6 +65,16 @@ namespace GitTask {
         pure()
     );
 
+    commit_documents: [m: MonadRunProcess] m ();
+    commit_documents = (
+        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::dir_docs]);
+        if stdout == "" { pure() };
+        log_message("### Commit documents");;
+        let (stdout, stderr) = *run_process(["git", "add", "--", C::dir_docs]);
+        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update documents", "--", C::dir_docs]);
+        pure()
+    );
+
     reset_documents: [m: MonadRunProcess] m ();
     reset_documents = (
         let (stdout, stderr) = *run_process(["git", "checkout", "--", C::dir_docs]);
@@ -147,9 +157,8 @@ namespace ProjectTask {
 
 
 type PublishArgs = unbox struct {
-    topdir: Path,
     subproject_dir: Path,
-    version: String,
+    new_version: Option String,
     confirm: Bool,
     commit: Bool,
     push: Bool,
@@ -160,9 +169,8 @@ type PublishArgs = unbox struct {
 namespace PublishArgs {
     empty: PublishArgs;
     empty = PublishArgs {
-        topdir: "",
         subproject_dir: "",
-        version: "",
+        new_version: none(),
         confirm: false,
         commit: false,
         push: false,
@@ -172,7 +180,6 @@ namespace PublishArgs {
 
     update_realpath: [m: MonadFs] PublishArgs -> m PublishArgs;
     update_realpath = |args| (
-        let args = *args.act_topdir(fs_realpath);
         let args = *args.act_subproject_dir(fs_realpath);
         pure $ args
     );
@@ -181,14 +188,17 @@ namespace PublishArgs {
 do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] PublishArgs -> m ();
 do_publish = |args| (
     let args = *args.update_realpath;
-    let topdir = args.@topdir;
     
     let subproject_dir = args.@subproject_dir;
     log_message("### Chdir to `" + subproject_dir + "`");;
     fs_chdir(subproject_dir);;
 
-    let git_dir = ".git";
-    check_if_directory_exists(git_dir);;
+    // `.git` is a directory in a standalone Git repository.
+    // `.git` is a file in a submodule of a Git repository.
+    let git_dir = C::dir_git;
+    check_if_directory_exists(git_dir).catch(|errmsg|
+        check_if_file_exists(git_dir)
+    );;
 
     let project_file_path = C::fixproj_toml;
     check_if_file_exists(project_file_path);;
@@ -216,13 +226,16 @@ do_publish = |args| (
         pure()
     };
     reset_documents;;
-    commit_fixdeps_lock;;
 
     log_message("### Update the project file");;
-    let new_version = *upgrade_project_version(project_file_path, args.@version, args.@confirm);
+    let new_version = *upgrade_project_version(project_file_path, args.@new_version, args.@confirm);
 
-    when(args.@update_documents,
-        run_fix_docs);;
+    commit_fixdeps_lock;;
+
+    when(args.@update_documents, do {
+        run_fix_docs;;
+        commit_documents
+    });;
     when(args.@commit && new_version != "",
         commit_fixproj_toml(args, project_file_path, new_version));;
     pure()

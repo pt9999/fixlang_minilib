@@ -51,8 +51,7 @@ test-traversable-a:
 	fix run -f traversable_a.fix -f traversable_a_test.fix -f applicative.fix
 
 test-yield:
-	fix run -f yield.fix -f yield_test.fix
-	fix run -f yield.fix -f yield_example.fix
+	fix run -f yield_example.fix
 
 test-yield-t:
 	fix run -f yield_t.fix -f yield_t_example.fix

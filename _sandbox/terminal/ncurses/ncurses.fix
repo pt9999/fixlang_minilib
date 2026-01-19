@@ -1,35 +1,57 @@
+// A fix module which supports the ncurses library.
+//
+// To use this module, you must first install the ncurses library with wide character support (libncursesw).
+// 
+// On Debian Linux or Ubuntu, you can install libncurses-dev package with the following command:
+// ```
+// $ sudo apt install libncurses-dev
+// ```
+//
 module Minilib.Terminal.Ncurses;
 
 import Minilib.Monad.IO;
 import Minilib.Text.Unicode;
 
-// Ncurses アプリケーション全体を表すオブジェクト。(ライブラリ内部で利用)
+// Initializes the screen, executes the application's main routine, and returns the screen to its original state.
+//
+// Example:
+// ```
+// main: IO ();
+// main = do {
+//    Ncurses::run $ |win| (
+//        win.clear;;
+//        win.move_add_str(10, 10, "Hello world");;
+//        let key = *win.get_key;
+//        pure()
+//    )
+// }.try(eprintln);
+// ```
+//
+// # Parameters
+// * `runner`: A function that takes a standard window as an argument and executes the application's main routine.
+run: (Window -> IOFail ()) -> IOFail ();
+run = |runner| (
+    FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
+    let ncurses = Ncurses {
+        dtor: *Destructor::make((), |_|
+            FFI_CALL_IO[() minilib_ncurses_finialize()];;
+            //println("finalize done");;
+            pure()
+        ).lift
+    };
+    let win = *ncurses._get_standard_window;
+    runner(win);;
+    eval ncurses;
+    pure()
+);
+
+// The type of the object that represents the entire ncurses application (used internally by the library).
 type Ncurses = unbox struct {
     dtor: Destructor ()
 };
 
 namespace Ncurses {
-    // スクリーンを初期化してアプリケーションのメインルーチンを実行し、スクリーンを元の状態に戻す。
-    //
-    // # Parameters
-    // * `runner`: 標準ウィンドウを引数に取り、アプリケーションのメインルーチンを実行する関数
-    run: (Window -> IOFail ()) -> IOFail ();
-    run = |runner| (
-        FFI_CALL_IO[() minilib_ncurses_initialize()].lift;;
-        let ncurses = Ncurses {
-            dtor: *Destructor::make((), |_|
-                FFI_CALL_IO[() minilib_ncurses_finialize()];;
-                println("finalize done");;
-                pure()
-            ).lift
-        };
-        let win = *ncurses._get_standard_window;
-        runner(win);;
-        eval ncurses;
-        pure()
-    );
-
-    // スクリーン全体を表す標準ウィンドウを取得する。
+    // Gets a standard window that represents the entire screen.
     _get_standard_window: [m: MonadIOFail] Ncurses -> m Window;
     _get_standard_window = |ncurses| lift_iofail $ do {
         let p_win = *FFI_CALL_IO[Ptr minilib_ncurses_get_standard_window()].lift;
@@ -39,19 +61,24 @@ namespace Ncurses {
     };
 
     // An error value.
-    error: CInt;
-    error = FFI_CALL[CInt minilib_ncurses_err()];
-
+    _error: CInt;
+    _error = FFI_CALL[CInt minilib_ncurses_err()];
 }
 
+// The type of ncurses windows
 type Window = unbox struct {
     dtor: Destructor Ptr
 };
 
 namespace Window {
-    // Refreshes curses windows and lines.
+    // Refreshes the window and lines.
+    //
     // This function must be called to get actual output to the terminal, as other routines merely manipulate data structures.
+    //
     // For details, see [wrefresh(3) - Linux man page](https://linux.die.net/man/3/wrefresh).
+    //
+    // # Parameters
+    // - `win`: a window
     refresh: [m: MonadIOFail] Window -> m ();
     refresh = |win| lift_iofail $ do {
         win._check_err("refresh") $ |p_win|
@@ -84,6 +111,10 @@ namespace Window {
         pure $ win
     };
 
+    // Gets the size (width, height) of a window.
+    //
+    // # Parameters
+    // - `win`: a window
     get_window_size: [m: MonadIOFail] Window -> m (I64, I64);
     get_window_size = |win| lift_iofail $ do {
         let ret = *win.@dtor.borrow_io(|p_win|
@@ -97,7 +128,7 @@ namespace Window {
     _check_err_i: [m: MonadIOFail] String -> Window -> (Ptr -> IO CInt) -> m CInt;
     _check_err_i = |name, win, ffi_call_io| lift_iofail $ do {
         let ret = *win.@dtor.borrow_io(|p_win| ffi_call_io(p_win)).lift;
-        if ret == Ncurses::error { throw $ name + " failed!" };
+        if ret == Ncurses::_error { throw $ name + " failed!" };
         pure $ ret
     };
 
@@ -107,36 +138,71 @@ namespace Window {
         pure() // ignore ret
     );
 
+    // Clears a window.
+    //
+    // # Parameters
+    // - `win`: a window
     clear: [m: MonadIOFail] Window -> m ();
     clear = |win| (
         win._check_err("clear") $ |p_win|
         FFI_CALL_IO[CInt erase(Ptr), p_win]
     );
 
+    // Draws a border of a window.
+    //
+    // # Parameters
+    // - `win`: a window
     draw_border: [m: MonadIOFail] Window -> m ();
     draw_border = |win| (
         win._check_err("draw_border") $ |p_win|
         FFI_CALL_IO[CInt minilib_ncurses_draw_border(Ptr), p_win]
     );
 
+    // Manipulates the current attributes of a window, which then apply to 
+    // all characters that are written to the window with `add_str`, `move_add_str` etc.
+    //
+    // NOTE: Because `chtype` cannot contain the color-pair value greater than 255, 
+    // it is better to use `set_color_pair` instead.
+    //
+    // # Parameters
+    // - `chtype`: the combined color-pair value and attributes value. the color-pair value must be less than 256.
+    // - `win`: a window
     set_attr: [m: MonadIOFail] ChType -> Window -> m ();
     set_attr = |chtype, win| (
         win._check_err("set_attr") $ |p_win|
         FFI_CALL_IO[CInt wattrset(Ptr, U32), p_win, chtype]
     );
 
+    // Manipulates the current attributes of a window, which then apply to 
+    // all characters that are written to the window with `add_str`, `move_add_str` etc.
+    //
+    // # Parameters
+    // - `color_pair`: a color-pair value
+    // - `attr`: attributes value
+    // - `win`: a window
     set_color_pair: [m: MonadIOFail] ColorPair -> Attr -> Window -> m ();
     set_color_pair = |color_pair, attr, win| (
         win._check_err("set_color_pair") $ |p_win|
         FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.to_U16, nullptr]
     );
 
+    // Moves the cursor to `(x,y)`.
+    //
+    // # Parameters
+    // - `x`: the x coordinate
+    // - `y`: the y coordinate
+    // - `win`: a window
     move_to: [m: MonadIOFail] I64 -> I64 -> Window -> m ();
     move_to = |x, y, win| (
         win._check_err("move_to") $ |p_win|
         FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.to_CInt, x.to_CInt]
     );
 
+    // Writes an ASCII string.
+    //
+    // # Parameters
+    // - `str`: the string to write
+    // - `win`: a window
     add_str: [m: MonadIOFail] String -> Window -> m ();
     add_str = |str, win| (
         win._check_err("add_str") $ |p_win|
@@ -145,7 +211,13 @@ namespace Window {
         )
     );
 
-    // Moves the cursor to `(x,y)`, then write the ASCII string.
+    // Moves the cursor to `(x,y)`, then writes an ASCII string.
+    //
+    // # Parameters
+    // - `x`: the x coordinate
+    // - `y`: the y coordinate
+    // - `str`: the string to write
+    // - `win`: a window
     move_add_str: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
     move_add_str = |x, y, str, win| (
         win._check_err("move_add_str") $ |p_win|
@@ -154,24 +226,33 @@ namespace Window {
         )
     );
 
-    // Moves the cursor to `(x,y)`, then write the Unicode string.
-    move_add_wstr: [m: MonadIOFail] I64 -> I64 -> String -> Window -> m ();
+    // Moves the cursor to `(x,y)`, then converts a string to UTF32String and writes it.
+    //
+    // # Parameters
+    // - `x`: the x coordinate
+    // - `y`: the y coordinate
+    // - `str`: the string to write, which can be converted to UTF32String
+    // - `win`: a window
+    move_add_wstr: [m: MonadIOFail, s: ToUTF32String] I64 -> I64 -> s -> Window -> m ();
     move_add_wstr = |x, y, str, win| (
         win._check_err("move_add_wstr") $ |p_win|
-        let wchars = utf8_to_utf32(str.get_bytes.pop_back, []).push_back(0_U32);
+        let wstr = str.to_utf32_string;
+        let wchars = wstr.@data.push_back(0_U32);
         wchars.borrow_boxed_io(|p_wstr|
             FFI_CALL_IO[CInt mvwaddwstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_wstr]
         )
     );
 
     // Reads a character from the window.
-    // If any error occurs, this function returns `Ncurses::error.to_I64`.
+    // If any error occurs, this function returns `none()`.
     // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch).
-    getch: [m: MonadIO] Window -> m I64;
+    getch: [m: MonadIO] Window -> m (Option Key);
     getch = |win| lift_io $ do {
-        win.@dtor.borrow_io(|p_win|
+        let ch = *win.@dtor.borrow_io(|p_win|
             FFI_CALL_IO[CInt wgetch(Ptr), p_win]
-        ).map(to_I64)
+        );
+        if ch == Ncurses::_error { pure $ none() };
+        pure $ some $ ch.to_I64
     };
 
     // Reads a character from the window, then convert it to a keyname.
@@ -179,9 +260,9 @@ namespace Window {
     // [keyname(3) - Linux man page](https://linux.die.net/man/3/keyname).
     get_key: [m: MonadIOFail] Window -> m String;
     get_key = |win| (
-        let ch = *win.getch;
-        if ch == Ncurses::error.to_I64 { pure $ "" };
-        pure $ *keyname(ch)
+        let opt_ch = *win.getch;
+        if opt_ch.is_none { pure $ "" };
+        pure $ *keyname(opt_ch.as_some)
     );
 
     // Sets timeout for `getch` and `get_key`.
@@ -193,24 +274,63 @@ namespace Window {
     // * `win`: A Window.
     timeout: [m: MonadIOFail] I64 -> Window -> m ();
     timeout = |delay, win| (
-        win._check_err("getch") $ |p_win|
+        win._check_err("timeout") $ |p_win|
         FFI_CALL_IO[CInt wtimeout(Ptr, CInt), p_win, delay.to_CInt]
     );
 }
 
+// The type of a color value.
 type Color = I16;
 
+// Standard color definitions
 namespace Color {
+    // Black
+    black: Color;
+    black = 0_I16;
+
+    // Red
+    red: Color;
+    red = 1_I16;
+
+    // Green
+    green: Color;
+    green = 2_I16;
+
+    // Yellow
+    yellow: Color;
+    yellow = 3_I16;
+
+    // Blue
+    blue: Color;
+    blue = 4_I16;
+
+    // Magenta
+    magenta: Color;
+    magenta = 5_I16;
+
+    // Cyan
+    cyan: Color;
+    cyan = 6_I16;
+
+    // White
+    white: Color;
+    white = 7_I16;
+}
+
+namespace ColorFuncs {
+    // Returns whether the terminal has color capabilities.
     has_colors: [m: MonadIO] m Bool;
     has_colors = lift_io $ do {
         FFI_CALL_IO[CChar has_colors()]
     }.map(|c| c.to_I64 != 0);
 
+    // Returns whether the programmer can change the colors.
     can_change_color: [m: MonadIO] m Bool;
     can_change_color = lift_io $ do {
         FFI_CALL_IO[CChar can_change_color()]
     }.map(|c| c.to_I64 != 0);
 
+    // Returns the maximum number of colors which the terminal supports.
     get_max_colors: [m: MonadIO] m I64;
     get_max_colors = lift_io $ do {
         FFI_CALL_IO[CInt minilib_ncurses_get_max_colors()]
@@ -219,7 +339,7 @@ namespace Color {
     // Changes the definition of a color.
     //
     // # Parameters
-    // * `color`: a legal color value.
+    // * `color`: a color value (in range 0 through `*get_max_colors - 1`)
     // * `r`: red components (in range 0 through 1000).
     // * `g`: green components (in range 0 through 1000).
     // * `b`: blue components (in range 0 through 1000).
@@ -229,49 +349,14 @@ namespace Color {
         if err != 0.to_CInt { throw $ "init_color failed! " + (color, r, g, b, *has_colors, *can_change_color, *get_max_colors).to_string};
         pure()
     };
-
-    black: Color;
-    black = 0_I16;
-
-    red: Color;
-    red = 1_I16;
-
-    green: Color;
-    green = 2_I16;
-
-    yellow: Color;
-    yellow = 3_I16;
-
-    blue: Color;
-    blue = 4_I16;
-
-    magenta: Color;
-    magenta = 5_I16;
-
-    cyan: Color;
-    cyan = 6_I16;
-
-    white: Color;
-    white = 7_I16;
 }
 
+// The type of a color-pair value.
 type ColorPair = I64;
 
 namespace ColorPair {
-    get_max_color_pairs: [m: MonadIO] m I64;
-    get_max_color_pairs = lift_io $ do {
-        FFI_CALL_IO[CInt minilib_ncurses_get_max_color_pairs()]
-    }.map(to_I64);
-
-    init_color_pair: [m: MonadIOFail] ColorPair -> Color -> Color -> m ();
-    init_color_pair = |color_pair, fore_color, back_color| lift_iofail $ do {
-        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
-        if err != 0.to_CInt { throw $ "init_color_pair failed! " + (color_pair, fore_color, back_color, *get_max_color_pairs).to_string };
-        pure()
-    };
-
-    color_pair: ColorPair -> ChType;
-    color_pair = |i| (i.bit_and(255)).to_U32.shift_left(8_U32);
+    cp_black: ColorPair;
+    cp_black = 0;
 
     cp_red: ColorPair;
     cp_red = 1;
@@ -295,43 +380,109 @@ namespace ColorPair {
     cp_white = 7;
 }
 
+namespace ColorPairFuncs {
+    // Returns the maximum number of color-pairs which the terminal supports.
+    get_max_color_pairs: [m: MonadIO] m I64;
+    get_max_color_pairs = lift_io $ do {
+        FFI_CALL_IO[CInt minilib_ncurses_get_max_color_pairs()]
+    }.map(to_I64);
+
+    // Changes the definition of a color-pair.
+    //
+    // # Parameters
+    // - `color_pair`: a color-pair value (in range 1 through `*get_max_color_pairs - 1`)
+    // - `fore_color`: a foreground color
+    // - `back_color`: a background color
+    init_color_pair: [m: MonadIOFail] ColorPair -> Color -> Color -> m ();
+    init_color_pair = |color_pair, fore_color, back_color| lift_iofail $ do {
+        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
+        if err != 0.to_CInt { throw $ "init_color_pair failed! " + (color_pair, fore_color, back_color, *get_max_color_pairs).to_string };
+        pure()
+    };
+
+    // Convert a color-pair to a ChType.
+    //
+    // # Parameters
+    // - `color_pair`: A color-pair number. It should be in the range: `0 <= color_pair && color_pair <= 255`.
+    color_pair: ColorPair -> ChType;
+    color_pair = |pair| (pair.bit_and(255)).to_U32.shift_left(8_U32);
+}
+
+// Character text & color pair & attributes.
+// - bit 0..7: character text
+// - bit 8..15: color pair
+// - bit 16..31: attributes
 type ChType = U32;
 
-_ncurses_bits: ChType -> ChType -> ChType;
-_ncurses_bits = |shift, mask| mask.shift_left(shift + 8_U32);
+namespace ChTypeFuncs {
+    // Combines a color-pair and attributes to a ChType.
+    // The color-pair must be less than 256.
+    // 
+    // # Parameters
+    // - `pair`: a color-pair (must be less than 256)
+    // - `attr`: attributes
+    make_attr: ColorPair -> Attr -> ChType;
+    make_attr = |pair, attr| (
+        color_pair(pair).bit_or(attr)
+    );
+}
 
+// Character attributes
 type Attr = ChType;
 
-make_attr: ColorPair -> Attr -> ChType;
-make_attr = |pair, attr| (
-    color_pair(pair).bit_or(attr)
-);
-
 namespace Attr {
+    _ncurses_bits: ChType -> ChType -> ChType;
+    _ncurses_bits = |shift, mask| mask.shift_left(shift + 8_U32);
 
+    // Normal display (no highlight)
     normal: Attr;
     normal = 0_U32;
 
+    // Best hilighting mode of the terminal
+    standout: Attr;
+    standout = 1_U32._ncurses_bits(8_U32);
+
+    // Underlining
     underline: Attr;
     underline = 1_U32._ncurses_bits(9_U32);
 
+    // Reverse video
     reverse: Attr;
     reverse = 1_U32._ncurses_bits(10_U32);
 
+    // Blinking
     blink: Attr;
     blink = 1_U32._ncurses_bits(11_U32);
 
+    // Half bright
     dim: Attr;
     dim = 1_U32._ncurses_bits(12_U32);
 
+    // Extra bright or bold
     bold: Attr;
     bold = 1_U32._ncurses_bits(13_U32);
+
+    // Alternate character set
+    alt_charset: Attr;
+    alt_charset = 1_U32._ncurses_bits(14_U32);
+
+    // Invisible or blank mode
+    invis: Attr;
+    invis = 1_U32._ncurses_bits(15_U32);
+
+    // Protected mode
+    protect: Attr;
+    protect = 1_U32._ncurses_bits(16_U32);
 }
 
+// The type of keys (For example: `'q'`, `'.'`, `'\t'`)
 type Key = I64;
+
+// The type of key names (For example: `"q"`, `"."`, `"^I"`)
 type KeyName = String;
 
-namespace Key {
+namespace KeyFuncs {
+    // Gets the name of a key.
     keyname: [m: MonadIOFail] Key -> m KeyName;
     keyname = |key| lift_iofail $ do {
         let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.to_CInt].lift;

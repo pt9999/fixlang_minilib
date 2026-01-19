@@ -1,8 +1,57 @@
 module Main;
 
-import Subprocess;
-
+import Minilib.Common.IteratorEx;
 import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
+import Minilib.Text.WideChar;
+
+get_width: [s: ToUTF32String] s -> I64;
+get_width = |str| (
+    let wstr = str.to_utf32_string;
+    let wchars = wstr.@data;
+    wcswidth(wchars)
+);
+
+show_background_message: [s: ToUTF32String] s -> (ColorPair, Attr) -> (ColorPair, Attr) -> Window -> IOFail ();
+show_background_message = |message, even_color, odd_color, win| (
+    let (win_w, win_h) = *win.get_window_size;
+    let wchars = message.to_utf32_string.@data;
+    let stream: DynIterator (U32, I64) = (repeat $ wchars.to_iter.map(|wc| (wc, wcwidth(wc)))).flatten.to_dyn;
+    range(0, win_h).fold_m(
+        stream, |y, stream|
+        let (color_pair, attr) = if y % 2 == 0 { even_color } else { odd_color };
+        win.set_color_pair(color_pair, attr);;
+        let (wcs, i) = stream.loop_iter(
+            ([], 0), |(wc, width), (wcs, i)|
+            if i >= win_w - 2 { break $ (wcs, i) };
+            let wcs = wcs.push_back(wc);
+            let i = i + width;
+            continue $ (wcs, i)
+        );
+        let wstr: UTF32String = UTFString::make(wcs);
+        win.move_add_wstr(0, y, wstr);;
+        pure $ stream.get_tail.as_some.to_dyn
+    ).forget
+);
+
+clear_rect: I64 -> I64 -> I64 -> I64 -> Window -> IOFail ();
+clear_rect = |x0, y0, x1, y1, win| (
+    let (w, h) = *win.get_window_size;
+    let x0 = max(0, min(w, x0));
+    let y0 = max(0, min(h, y0));
+    let x1 = max(0, min(w, x1));
+    let y1 = max(0, min(h, y1));
+    let w = x1 - x0;
+    let h = y1 - y0;
+    if w <= 0 || h <= 0 { pure() };
+    let str = Array::fill(w, ' ')._unsafe_to_string;
+    win.set_color_pair(cp_white, normal);;
+    range(y0, y1).foreach_m(|y|
+        win.move_add_str(x0, y, str)
+    )
+);
 
 test1: IO ();
 test1 = do {
@@ -10,15 +59,18 @@ test1 = do {
         let cp_selected = 10;
         init_color_pair(cp_selected, white, blue);;
         win.clear;;
+        let (w, h) = *win.get_window_size;
+        let message = "こんにちは、世界！";
+        win.show_background_message(message, (cp_green, normal), (cp_white, reverse));;
+        win.clear_rect(6,5,w-6,h-5);;
         win.set_color_pair(cp_selected, normal);;
         win.move_add_str(10, 10, "Hello world");;
         win.set_color_pair(cp_green, bold);;
-        win.move_add_str(10, 11, "Hello world");;
+        win.move_add_wstr(10, 11, "こんにちは、世界！　何かキーを押してください");;
         let attr = make_attr(cp_white, reverse);
         win.set_attr(attr);;
-        let (w, h) = *win.get_window_size;
-        win.move_add_str(10, 12, "Hello world " + (w, h).to_string);;
-        let c = *win.getch;
+        win.move_add_wstr(10, 12, "ウィンドウサイズは " + (w, h).to_string + " です");;
+        let key = *win.get_key;
         pure()
     )
 }.try(eprintln);

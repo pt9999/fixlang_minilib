@@ -5,6 +5,7 @@ import Minilib.Monad.Iden;
 import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
+//import Minilib.Monad.Trans;
 import Minilib.Testing.UnitTest;
 
 /*
@@ -51,11 +52,10 @@ impl IOFail: MonadBorrowIF {
     borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
 }
 
-// TODO: requires m: MonadUnliftIO
-impl [m: MonadIO] ReaderT e m: MonadBorrowIF {
-    borrow_boxed_m = |f, a| reader_t $ |e| a.borrow_boxed_io(f >> run_reader_t(e)) >> lift_io;
-    borrow_m = |f, a| reader_t $ |e| a.borrow_io(f >> run_reader_t(e)) >> lift_io;
-    borrow_c_str_m = |f, a| reader_t $ |e| a.borrow_c_str_io(f >> run_reader_t(e)) >> lift_io;
+impl [m: Monad, m: MonadBorrowIF] ReaderT e m: MonadBorrowIF {
+    borrow_boxed_m = |f, a| reader_t $ |e| a.borrow_boxed_m(f >> run_reader_t(e));
+    borrow_m = |f, a| reader_t $ |e| a.borrow_m(f >> run_reader_t(e));
+    borrow_c_str_m = |f, a| reader_t $ |e| a.borrow_c_str_m(f >> run_reader_t(e));
 }
 
 /*
@@ -94,17 +94,17 @@ impl IOFail: MonadMutateIF {
     mutate_unique_m = |ctor, action| mutate_unique_io(ctor, action >> to_result) >> from_io_result;
 }
 
-impl [m: MonadIO] ReaderT e m: MonadMutateIF {
+impl [m: Monad, m: MonadMutateIF] ReaderT e m: MonadMutateIF {
     mutate_boxed_m = |f, boxed| (
-        reader_t $ |e| boxed.mutate_boxed_io(f >> run_reader_t(e)).lift_io
+        reader_t $ |e| boxed.mutate_boxed_m(f >> run_reader_t(e))
     );
     mutate_unique_m = |ctor, action, dtor| (
-        reader_t $ |e| dtor.mutate_unique_io(ctor, action >> run_reader_t(e)).lift_io
+        reader_t $ |e| dtor.mutate_unique_m(ctor, action >> run_reader_t(e))
     );
 }
 
 /*
-//TODO
+// StateT cannot implement MonadMutateIF, since StateT cannot implement UnliftIO
 impl [m: MonadMutateIF] StateT s m: MonadMutateIF {
 
 }

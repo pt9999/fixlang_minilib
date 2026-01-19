@@ -28,15 +28,119 @@ make_wctype_test = |testname, is_type, true_chars, false_chars| (
 test_is_alpha: TestCase;
 test_is_alpha = make_wctype_test(
     "test_is_alpha", WideChar::is_alpha,
-    "aAωΩあ漢０９",             // L'０', L'９' は is_alpha が true になる
+    "AZazωΩＡＺａｚあ漢０９",             // "０９" are alphabets
     "09!#～！？。、"
 );
 
 test_is_alnum: TestCase;
 test_is_alnum = make_wctype_test(
     "test_is_alnum", WideChar::is_alnum,
-    "09aAωΩあ漢０９",
+    "09AZazωΩＡＺａｚあ漢０９",
     "!#～！？。、"
+);
+
+test_is_blank: TestCase;
+test_is_blank = make_wctype_test(
+    "test_is_blank", WideChar::is_blank,
+    " \t　",
+    "\u000c\n\r\u000b!#～！？。、09aAωΩあ漢０９"
+);
+
+test_is_cntrl: TestCase;
+test_is_cntrl = make_wctype_test(
+    "test_is_cntrl", WideChar::is_cntrl,
+    "\t\u000c\n\r\u000b",
+    " 　!#～！？。、09aAωΩあ漢０９"
+);
+
+test_is_digit: TestCase;
+test_is_digit = make_wctype_test(
+    "test_is_digit", WideChar::is_digit,
+    "09",
+    " \t\u000c\n\r\u000b　!#～！？。、aAωΩあ漢０９①❾"      // "０９" are not digits
+);
+
+test_is_graph: TestCase;
+test_is_graph = make_wctype_test(
+    "test_is_graph", WideChar::is_graph,
+    "09!#～！？。、aAωΩあ漢０９①❾",
+    " \t\u000c\n\r\u000b　"
+);
+
+test_is_lower: TestCase;
+test_is_lower = make_wctype_test(
+    "test_is_lower", WideChar::is_lower,
+    "aωａｚ",
+    " \t\u000c\n\r\u000b　09!#～！？。、AΩあ漢０９ＡＺ①❾"
+);
+
+test_is_print: TestCase;
+test_is_print = make_wctype_test(
+    "test_is_print", WideChar::is_print,
+    " !#～！？。、　09aAωΩあ漢０９①❾",
+    "\t\u000c\n\r\u000b"
+);
+
+test_is_punct: TestCase;
+test_is_punct = make_wctype_test(
+    "test_is_punct", WideChar::is_punct,
+    "!#～！？。、①❾",      // "①❾" are punctuations
+    " \t\u000c\n\r\u000b　09aAωΩあ漢０９"
+);
+
+test_is_space: TestCase;
+test_is_space = make_wctype_test(
+    "test_is_space", WideChar::is_space,
+    " \t\u000c\n\r\u000b　",
+    "!#～！？。、09aAωΩあ漢０９"
+);
+
+test_is_upper: TestCase;
+test_is_upper = make_wctype_test(
+    "test_is_upper", WideChar::is_upper,
+    "AΩＡＺ",
+    " \t\u000c\n\r\u000b　09!#～！？。、aωあ漢０９ａｚ①❾"
+);
+
+test_is_xdigit: TestCase;
+test_is_xdigit = make_wctype_test(
+    "test_is_xdigit", WideChar::is_xdigit,
+    "09Aa",
+    " \t\u000c\n\r\u000b　!#～！？。、ωΩあ漢０９ＡＦＺ①❾"    // "０９ＡＦ" are not xdigits
+);
+
+test_wcwidth: TestCase;
+test_wcwidth = make_table_test("test_wcwidth",
+    [
+        (" ", 1),
+        ("\t", -1),     // '\t' is nonprintable
+        ("0", 1),
+        ("A", 1),
+        ("あ", 2),
+        ("漢", 2),
+        ("０", 2),
+        ("Ａ", 2),
+    ],
+    |(str, expected)|
+    let wstr = str.to_utf32_string;
+    let wc = wstr.@(0);
+    let actual = wcwidth(wc);
+    assert_equal("wcwidth(" + str + ")", expected, actual)
+);
+
+test_wcswidth: TestCase;
+test_wcswidth = make_table_test("test_wcswidth",
+    [
+        ("", 0),
+        (" \t09AZaz!#", -1),        // '\t' is nonprintable
+        ("  09AZaz!#", 10),
+        ("あ漢０Ａ😊😀", 12),
+        ("  09AZaz!#あ漢０Ａ😊😀", 22),
+    ],
+    |(str, expected)|
+    let wstr = str.to_utf32_string;
+    let actual = wcswidth(wstr.@data);
+    assert_equal("wcswidth(" + str + ")", expected, actual)
 );
 
 main: IO ();
@@ -45,6 +149,17 @@ main = (
     [
         test_is_alpha,
         test_is_alnum,
-
+        test_is_blank,
+        test_is_cntrl,
+        test_is_digit,
+        test_is_graph,
+        test_is_lower,
+        test_is_print,
+        test_is_punct,
+        test_is_space,
+        test_is_upper,
+        test_is_xdigit,
+        test_wcwidth,
+        test_wcswidth,
     ].run_test_driver
 );

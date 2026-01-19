@@ -1,7 +1,6 @@
 module Main;
 
 type ScanIterator i s a = unbox struct {
-    front : Option s,
     state : s,
     op : a -> s -> s,
     iter : i,
@@ -9,20 +8,13 @@ type ScanIterator i s a = unbox struct {
 
 impl [i : Iterator, Item i = a] ScanIterator i s a : Iterator {
     type Item (ScanIterator i s a) = s;
-    advance = |self| (
-        match self.@front {
-            some(s) => (
-                let self = self.set_front(none());
-                some $ (self, s)
-            ),
-            none() => match self.@iter.advance {
-                none() => none(),
-                some((iter, a)) => (
-                    let s = (self.@op)(a, self.@state);
-                    let self = self.set_state(s).set_iter(iter);
-                    some $ (self, s)
-                )
-            }
+    advance = |ScanIterator { state: state, op: op, iter: iter }| (
+        match iter.advance {
+            none() => none(),
+            some((iter, a)) => (
+                let state = op(a, state);
+                some $ (ScanIterator { state: state, op: op, iter: iter }, state)
+            )
         }
     );
 }
@@ -34,11 +26,11 @@ impl [i : Iterator, Item i = a] ScanIterator i s a : Iterator {
 //
 // # Parameters
 //
-// * `s` - The initial state.
+// * `state` - The initial state.
 // * `op` - The function to be called on the pair of an element and the current state.
 // * `iter` - The iterator to be scaned.
 scan : [i : Iterator, Item i = a] s -> (a -> s -> s) -> i -> ScanIterator i s a;
-scan = |s, op, iter| ScanIterator { front: none(), state: s, op: op, iter: iter };
+scan = |state, op, iter| ScanIterator { state: state, op: op, iter: iter };
 
 // Create an iterator that generates the exclusive scan of an iterator.
 //
@@ -47,11 +39,11 @@ scan = |s, op, iter| ScanIterator { front: none(), state: s, op: op, iter: iter 
 //
 // # Parameters
 //
-// * `s` - The initial state.
+// * `state` - The initial state.
 // * `op` - The function to be called on the pair of an element and the current state.
 // * `iter` - The iterator to be scaned.
-ex_scan : [i : Iterator, Item i = a] s -> (a -> s -> s) -> i -> ScanIterator i s a;
-ex_scan = |s, op, iter| ScanIterator { front: some(s), state: s, op: op, iter: iter };
+ex_scan : [i : Iterator, Item i = a] s -> (a -> s -> s) -> i -> ConsIterator (ScanIterator i s a) s;
+ex_scan = |state, op, iter| iter.scan(state, op).push_front(state);
 
 main: IO ();
 main = (

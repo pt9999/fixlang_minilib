@@ -1,0 +1,50 @@
+module WideCharTest;
+
+import Minilib.Text.Locale;
+import Minilib.Text.WideChar;
+import Minilib.Text.Unicode;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+make_wctype_test: String -> (WideChar -> Bool) -> String -> String -> TestCase;
+make_wctype_test = |testname, is_type, true_chars, false_chars| (
+    make_test(testname, |_|
+        let test = |chars, expected| (
+            let wchars = chars.to_utf32_string;
+            range(0, wchars.get_size).foreach_m(|i|
+                let wc = wchars.@(i);
+                let s = wchars.get_sub(i, i+1).to_string;
+                let actual = is_type(wc);
+                //println((testname, s, actual).format("{}: {} -> {}")).lift;;
+                assert_equal(testname + ":`" + s + "`", expected, actual)
+            )
+        );
+        test(true_chars, true);;
+        test(false_chars, false)
+    )
+);
+
+test_is_alpha: TestCase;
+test_is_alpha = make_wctype_test(
+    "test_is_alpha", WideChar::is_alpha,
+    "aAωΩあ漢０９",             // L'０', L'９' は is_alpha が true になる
+    "09!#～！？。、"
+);
+
+test_is_alnum: TestCase;
+test_is_alnum = make_wctype_test(
+    "test_is_alnum", WideChar::is_alnum,
+    "09aAωΩあ漢０９",
+    "!#～！？。、"
+);
+
+main: IO ();
+main = (
+    init_locale;;
+    [
+        test_is_alpha,
+        test_is_alnum,
+
+    ].run_test_driver
+);

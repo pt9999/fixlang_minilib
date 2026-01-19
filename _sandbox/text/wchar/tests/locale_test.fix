@@ -1,0 +1,83 @@
+module LocaleTest;
+
+import Minilib.Text.Locale;
+import Minilib.Testing.UnitTest;
+
+test_init_locale: TestCase;
+test_init_locale = (
+    make_test("test_init_locale") $ |_|
+
+    // At the very first, LC_ALL="C" in most cases, but this is platform dependent
+    let ret_get_initial = *get_locale("LC_ALL");
+
+    //  equal to `set_local("LC_ALL", "")`
+    init_locale.lift;;
+    let ret_get = *get_locale("LC_ALL");            // maybe the value of ${LANG}, platform dependent
+    let ret_set = *set_locale("LC_ALL", "");
+    assert_equal("eq", ret_set, ret_get);;          // init_locale is equal to set_locale(LC_ALL, "")
+    pure()
+);
+
+test_set_locale: TestCase;
+test_set_locale = (
+    make_test("test_set_locale") $ |_|
+    let ret = *set_locale("LC_ALL", "");
+    //assert_equal("eq", "ja_JP.UTF-8", ret);;    // platform dependent
+    assert_true("LC_ALL,default", ret != "");;
+    let ret = *set_locale("LC_ALL", "C");
+    assert_equal("LC_ALL,C", "C", ret);;
+    let ret = *set_locale("LC_ALL", "en_US.UTF-8");
+    assert_equal("LC_ALL,en_US.UTF-8", "en_US.UTF-8", ret);;
+
+    let res = *set_locale("LC_ALL", "invalid_value").to_result.lift; // ENOENT
+    assert_true("LC_ALL,invalid_value", res.is_err);;
+
+    let res = *set_locale("LC_INVALID_CATEGORY", "C").to_result.lift; // EINVAL
+    assert_true("LC_INVALID_CATEGORY,C", res.is_err);;
+    pure()
+);
+
+test_get_locale: TestCase;
+test_get_locale = (
+    make_test("test_get_locale") $ |_|
+
+    // set all categories to default value (platform dependent)
+    let ret_set = *set_locale("LC_ALL", "");
+    let ret_get = *get_locale("LC_ALL");
+    assert_equal("setlocale(LC_ALL,\"\")", ret_set, ret_get);;
+
+    // set all categories to "C"
+    let ret_set = *set_locale("LC_ALL", "C");
+    assert_equal("setlocale(LC_ALL,C)", "C", ret_set);;
+    let ret_get = *get_locale("LC_ALL");
+    assert_equal("getlocale(LC_ALL) after setlocale(LC_ALL,C)", "C", ret_get);;
+
+    // set LC_TIME=C
+    set_locale("LC_TIME", "C");;
+    let ret_get = *get_locale("LC_TIME");
+    assert_equal("getlocale(LC_TIME) after setlocale(LC_TIME,C)", "C", ret_get);;
+    let ret_get = *get_locale("LC_ALL");
+    assert_equal("getlocale(LC_ALL) after setlocale(LC_TIME,C)", "C", ret_get);;
+
+    // set LC_TIME=en_US.UTF-8
+    set_locale("LC_TIME", "en_US.UTF-8");;
+    let ret_get = *get_locale("LC_TIME");
+    assert_equal("getlocale(LC_TIME) after setlocale(LC_TIME,en_US.UTF-8)", "en_US.UTF-8", ret_get);;
+    let ret_get = *get_locale("LC_ALL");
+    assert_true("getlocale(LC_ALL) after setlocale(LC_TIME,en_US.UTF-8)", "C" != ret_get);;
+    assert_true("getlocale(LC_ALL) after setlocale(LC_TIME,en_US.UTF-8)", "en_US.UTF-8" != ret_get);;
+
+    pure()
+);
+
+
+main: IO ();
+main = (
+    [
+        test_init_locale,
+        test_set_locale,
+        test_get_locale,
+    ].run_test_driver;;
+
+    init_locale     // restore the locale
+);

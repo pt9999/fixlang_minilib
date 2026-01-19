@@ -2,7 +2,10 @@
 module Main;
 
 import Minilib.Monad.Iden;
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
 import Minilib.Monad.State;
+import Minilib.Testing.UnitTest;
 
 /*
 ### `borrow_boxed : [a : Std::Boxed] (Std::Ptr -> b) -> a -> b`
@@ -48,8 +51,15 @@ impl IOFail: MonadBorrowIF {
     borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
 }
 
+// TODO: requires m: MonadUnliftIO
+impl [m: MonadIO] ReaderT e m: MonadBorrowIF {
+    borrow_boxed_m = |f, a| reader_t $ |e| a.borrow_boxed_io(f >> run_reader_t(e)) >> lift_io;
+    borrow_m = |f, a| reader_t $ |e| a.borrow_io(f >> run_reader_t(e)) >> lift_io;
+    borrow_c_str_m = |f, a| reader_t $ |e| a.borrow_c_str_io(f >> run_reader_t(e)) >> lift_io;
+}
+
 /*
-//TODO
+// StateT cannot implement MonadBorrowIF, since StateT cannot implement UnliftIO
 impl [m: MonadBorrowIF] StateT s m: MonadBorrowIF {
 
 }
@@ -84,12 +94,40 @@ impl IOFail: MonadMutateIF {
     mutate_unique_m = |ctor, action| mutate_unique_io(ctor, action >> to_result) >> from_io_result;
 }
 
+impl [m: MonadIO] ReaderT e m: MonadMutateIF {
+    mutate_boxed_m = |f, boxed| (
+        reader_t $ |e| boxed.mutate_boxed_io(f >> run_reader_t(e)).lift_io
+    );
+    mutate_unique_m = |ctor, action, dtor| (
+        reader_t $ |e| dtor.mutate_unique_io(ctor, action >> run_reader_t(e)).lift_io
+    );
+}
+
 /*
 //TODO
 impl [m: MonadMutateIF] StateT s m: MonadMutateIF {
 
 }
 */
+
+test_mutate_boxed_m_reader: TestCase;
+test_mutate_boxed_m_reader = (
+    make_test("test_mutate_boxed_m_reader") $ |_|
+    let r: ReaderT String IOFail () = do {
+        let src: Array I64 = [ 1, 2, 3 ];
+        let n = src.get_size;
+        let dest: Array I64 = Array::fill(n, 0);
+        let (dest, ret) = *dest.mutate_boxed_m(|p_dest|
+            src.borrow_boxed_m(|p_src|
+                let env = *ask;
+                eval debug_eprintln("env="+env);
+                FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, (n * 8).to_CSizeT].lift_io
+            )
+        );
+        assert_equal("eq", src, dest).lift_iofail
+    };
+    r.run_reader_t("env")
+);
 
 test1: IO ();
 test1 = (
@@ -134,6 +172,9 @@ main = (
     test1;;
     test2;;
     test3;;
+    [
+        test_mutate_boxed_m_reader,
+    ].run_test_driver;;
     pure()
 );
 

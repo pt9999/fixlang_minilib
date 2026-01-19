@@ -6,7 +6,7 @@
 
 void minilib_init_locale()
 {
-    setlocale(LC_ALL, "");  // enable unicode
+    setlocale(LC_ALL, "");
 }
 
 struct locale_category_def {
@@ -32,7 +32,6 @@ int _find_category(const char* name) {
     return -1;
 }
 
-
 const char* minilib_set_locale(const char* category_name, const char* value)
 {
     errno = 0;
@@ -43,10 +42,10 @@ const char* minilib_set_locale(const char* category_name, const char* value)
         return NULL;
     }
 
-    char* previous = setlocale(category, value);
-    if (previous == NULL) {
+    char* ret = setlocale(category, value);
+    if (ret == NULL) {
         //errno = EINVAL;
         return NULL;
     }
-    return previous;
+    return ret;
 }

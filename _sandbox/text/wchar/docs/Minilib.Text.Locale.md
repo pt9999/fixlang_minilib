@@ -26,7 +26,7 @@ Type: `Std::IO ()`
 
 Initialize the program's current locale.
 
-This function is equal to `setlocale("LC_ALL", "")`.
+This function is equivalent to `setlocale(LC_ALL, "")` in C language.
 
 #### set_locale
 

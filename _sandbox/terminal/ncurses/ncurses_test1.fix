@@ -14,6 +14,16 @@ get_width = |str| (
     wcswidth(wchars)
 );
 
+namespace IteratorEx {
+    get_last: [iter : Std::Iterator] iter -> Std::Option (Std::Iterator::Item iter);
+    get_last = |iter| (
+        iter.loop_iter(
+            none(), |x, opt|
+            continue $ some(x)
+        )
+    );
+}
+
 show_background_message: [s: ToUTF32String] s -> (ColorPair, Attr) -> (ColorPair, Attr) -> Window -> IOFail ();
 show_background_message = |message, even_color, odd_color, win| (
     let (win_w, win_h) = *win.get_window_size;
@@ -23,6 +33,7 @@ show_background_message = |message, even_color, odd_color, win| (
         stream, |y, stream|
         let (color_pair, attr) = if y % 2 == 0 { even_color } else { odd_color };
         win.set_color_pair(color_pair, attr);;
+        /*
         let (wcs, i) = stream.loop_iter(
             ([], 0), |(wc, width), (wcs, i)|
             if i >= win_w - 2 { break $ (wcs, i) };
@@ -30,6 +41,14 @@ show_background_message = |message, even_color, odd_color, win| (
             let i = i + width;
             continue $ (wcs, i)
         );
+        */
+        let iter = stream.scan(
+            ([], 0), |(wc, width), (wcs, i)|
+            let wcs = wcs.push_back(wc);
+            let i = i + width;
+            (wcs, i)
+        ).take_while(|(wcs, i)| i <= win_w - 2);
+        let (wcs, i) = iter.get_last.as_some_or(([], 0));
         let wstr: UTF32String = UTFString::make(wcs);
         win.move_add_wstr(0, y, wstr);;
         pure $ stream.get_tail.as_some.to_dyn

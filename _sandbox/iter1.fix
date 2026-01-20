@@ -1,6 +1,7 @@
 module Main;
 
 import Minilib.Common.IteratorEx;
+import Minilib.Testing.UnitTest;
 
 // same as `arr.to_iter.zip(arr.to_iter.pop_first)`
 type AdjacentIterator a = unbox struct { arr : Array a, idx : I64 };
@@ -18,27 +19,51 @@ impl AdjacentIterator a : Iterator {
 adjacent: Array a -> AdjacentIterator a;
 adjacent = |arr| AdjacentIterator { arr: arr, idx: 0 };
 
-test_adjacent: IO ();
+test_adjacent: TestCase;
 test_adjacent = (
-    println("=== test_adjacent ===");;
-    [
-        ([1, 2, 3, 4, 5], [(1, 2), (2, 3), (3, 4), (4, 5)]),
-        ([1], []),
-        ([], []),
-    ]
-    .to_iter.fold_m(
-        (), |(arr, expected), _|
+    make_table_test("test_adjacent",
+        [
+            ([1, 2, 3, 4, 5], [(1, 2), (2, 3), (3, 4), (4, 5)]),
+            ([1], []),
+            ([], []),
+        ],
+        |(arr, expected)|
         let actual = arr.adjacent.to_array;
         let actual2 = arr.to_iter.zip(arr.to_iter.pop_first).to_array;
-        println("arr=" + arr.to_string);;
-        println("adjacent=" + actual.to_string);;
-        println("actual2=" + actual2.to_string);;
-        assert_eq(|_| "eq", expected, actual);;
-        assert_eq(|_| "eq", expected, actual2)
+        println("arr=" + arr.to_string).lift;;
+        println("adjacent=" + actual.to_string).lift;;
+        println("actual2=" + actual2.to_string).lift;;
+        assert_equal("eq", expected, actual);;
+        assert_equal("eq", expected, actual2)
+    )
+);
+
+get_last: [iter : Std::Iterator] iter -> Std::Option (Std::Iterator::Item iter);
+get_last = |iter| (
+    iter.loop_iter(
+        none(), |x, opt|
+        continue $ some(x)
+    )
+);
+
+test_get_last: TestCase;
+test_get_last = (
+    make_table_test("test_get_last",
+        [
+            ([1, 2, 3, 4, 5], some $ 5),
+            ([1], some $ 1),
+            ([], none()),
+        ],
+        |(arr, expected)|
+        let actual = arr.to_iter.get_last;
+        assert_equal("eq", expected, actual)
     )
 );
 
 main: IO () = (
-    test_adjacent;;
-    pure()
+    [
+        test_adjacent,
+        test_get_last,
+    ]
+    .run_test_driver
 );

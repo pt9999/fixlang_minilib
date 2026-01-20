@@ -3,7 +3,7 @@ all:
 test: test-alternative test-applicative test-array-t test-compose test-const \
 		test-effect test-either-t test-eq1 \
 		test-free test-free-t test-iterator-t test-pipe test-pipe-t \
-		test-traversable-a test-yield test-yield-t test-misc
+		test-svar test-traversable-a test-yield test-yield-t test-misc
 
 test-alternative:
 	fix run -f alternative.fix -f alternative_test.fix
@@ -46,6 +46,9 @@ test-pipe:
 test-pipe-t:
 	fix run -f pipe_t.fix -f pipe_t_test.fix -f iterator_t.fix
 	fix run -f pipe_t.fix -f pipe_t_example.fix -f iterator_t.fix
+
+test-svar:
+	fix run -f svar_example.fix
 
 test-traversable-a:
 	fix run -f traversable_a.fix -f traversable_a_test.fix -f applicative.fix

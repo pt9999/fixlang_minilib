@@ -4,103 +4,6 @@ import Minilib.Monad.State;
 import Minilib.Monad.IO;
 import Minilib.Trait.Traversable;
 
-// A variable bound to a substate of the State monad. 
-// You can get, set, and modify the bound substate.
-// This is similar to `AsyncTask::Var`, but the operation results are State monad, not IO monad.
-//
-// # Examples
-// ```
-// type S = unbox struct { a: I64 };
-//
-// main: IO ();
-// main = (
-//    eval_state_t(S{ a: 123 }) $ do {
-//      let v = SVar::make(|s| s[^a]);
-//      let a = *v.get;
-//      println("a=" + a.to_string).lift_io;;
-//      v.SVar::set(456);;
-//      println("a=" + (*v.get).to_string).lift_io;;
-//      v.mod(|a| a + 78);;
-//      println("a=" + (*v.get).to_string).lift_io
-//    }
-// );
-// ```
-type SVar s a = unbox struct {
-    data: s -> (a -> Result a a) -> Result a s
-};
-
-namespace SVar {
-    // A variable bound to the whole state.
-    whole_state: SVar s s;
-    whole_state = SVar::make(|s, f| f(s));
-
-    // Create a variable bound to a substate.
-    //
-    // # Examples
-    // ```
-    // let svar = SVar::make(|s| s[^a]); 
-    // ```
-    // # Parameters
-    // - `f` - A function from a state to the store of a substate.
-    make: (s -> (a -> Result a a) -> Result a s) -> SVar s a;
-    make = |f| SVar { data: f };
-
-    // Get the substate from a variable.
-    //
-    // # Examples
-    // ```
-    // let a = *svar.get;
-    // ```
-    // # Parameters
-    // - `svar` - A variable
-    get: [m: MonadState, StateType m = s] SVar s a -> m a;
-    get = |svar| (
-        let s = *get_state;
-        let store = (svar.@data)(s);
-        // uses `err` as a const functor
-        let sfa = store(|a| err(a));
-        pure $ sfa.as_err
-    );
-
-    // Set the substate to a variable.
-    //
-    // # Examples
-    // ```
-    // svar.SVar::set(123);;
-    // ```
-    // # Parameters
-    // - `val` - A value to set
-    // - `svar` - A variable
-    set: [m: MonadState, StateType m = s] a -> SVar s a -> m ();
-    set = |val, svar| (
-        mod_state_(|s|
-            let store = (svar.@data)(s);
-            // uses `ok` as an identity functor
-            let sfs = store(|a0| ok(val));
-            sfs.as_ok
-        )
-    );
-
-    // Modify the substate using a variable.
-    //
-    // # Examples
-    // ```
-    // svar.mod(|val| val + 123);;
-    // ```
-    // # Parameters
-    // - `f` - A function to modify the substate
-    // - `svar` - A variable
-    mod: [m: MonadState, StateType m = s] (a -> a) -> SVar s a -> m ();
-    mod = |f, svar| (
-        mod_state_(|s|
-            let store = (svar.@data)(s);
-            // uses `ok` as an identity functor
-            let sfs = store(|a| ok(f(a)));
-            sfs.as_ok
-        )
-    );
-}
-
 //--------------------------
 type Z = unbox struct {
     d: Array I64,
@@ -145,6 +48,7 @@ test_svar = (
     }
 );
 
+/*
 //------------------------------------------------------
 // インデックス構文を使うためのhack. あまり綺麗じゃない
 
@@ -174,22 +78,20 @@ impl [c: Indexable] SVar s c : Indexable {
 
 namespace SStore {
 
-/*
-    sget: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
-        SStore (SVar s c) (SAct s c a) -> m a;
-    sget = |store_sa| (
-        let s = *get_state;
-        let sa: SAct s c a = store_sa(|sa| err(sa)).as_err;
-        let SAct { svar_c: svar_c, act_a: act_a } = sa;
-        let act_c: s -> SStore s c = svar_c.@data;
-        let store_c = act_c(s);
-        let a = store_c(|c:c|
-            let a = act_a(c, |a:a| err(a): Result a a).as_err;
-            err(a): Result c c  // ここでは Result c c を返す必要があるが、Result a c しか返せない
-        ).as_err;
-        pure $ a
-    );
-*/
+//     sget: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
+//         SStore (SVar s c) (SAct s c a) -> m a;
+//     sget = |store_sa| (
+//         let s = *get_state;
+//         let sa: SAct s c a = store_sa(|sa| err(sa)).as_err;
+//         let SAct { svar_c: svar_c, act_a: act_a } = sa;
+//         let act_c: s -> SStore s c = svar_c.@data;
+//         let store_c = act_c(s);
+//         let a = store_c(|c:c|
+//             let a = act_a(c, |a:a| err(a): Result a a).as_err;
+//             err(a): Result c c  // ここでは Result c c を返す必要があるが、Result a c しか返せない
+//         ).as_err;
+//         pure $ a
+//     );
 
     smod: [c:Indexable, Elem c = a, m: MonadState, StateType m = s]
         (a -> a) -> SStore (SVar s c) (SAct s c a) -> m ();
@@ -248,10 +150,12 @@ test_sidx = (
         pure()
     }
 );
+*/
 
 main: IO () = (
     test_svar;;
-    test_sidx;;
+    //test_sidx;;
+    //main2;;
     pure()
 );
 

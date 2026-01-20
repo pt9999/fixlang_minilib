@@ -2,46 +2,6 @@ module Main;
 
 import Minilib.Common.IteratorEx;
 
-// Transposes an iterator of iterators.
-//
-// For example, `[[0, 1, 2], [3, 4, 5], [6, 7, 8]]` becomes `[[0, 3, 6], [1, 4, 7], [2, 5, 8]]`.
-//
-// # Parameters
-//
-// * `iter_iter` - An iterator of iterators. It must be a finite iterator.
-
-transpose : [i2 : Iterator, i : Iterator, Item i2 = i] i2 -> TransposeIterator i;
-transpose = |iter_iter| TransposeIterator { iters: iter_iter.to_array };
-
-type TransposeIterator i = unbox struct { iters : Array i };
-impl [i : Iterator] TransposeIterator i : Iterator {
-    type Item (TransposeIterator i) = ArrayIterator (Item i);
-    advance = |TransposeIterator { iters : iters }| (
-        let advanced = iters.map(advance);
-        if advanced.to_iter.check_any(is_none) { none() };
-        let iters = advanced.map(as_some >> Tuple2::@0);
-        let arr = advanced.map(as_some >> Tuple2::@1);
-        some $ (TransposeIterator { iters : iters }, arr.to_iter)
-    );
-}
-
-test_transpose: IO ();
-test_transpose = (
-    println("=== test_transpose ===");;
-    let arr = [
-        [0, 1, 2],
-        [3, 4, 5],
-        [6, 7, 8],
-    ];
-    let iter_iter = arr.to_iter.map(to_iter);
-    let trans = iter_iter.transpose;
-    let actual = trans.map(to_array).to_array;
-    println("arr=" + arr.to_string);;
-    println("transpose=" + actual.to_string)
-);
-
-//-------------------------------------------------------------------------
-
 // same as `arr.to_iter.zip(arr.to_iter.pop_first)`
 type AdjacentIterator a = unbox struct { arr : Array a, idx : I64 };
 
@@ -78,93 +38,7 @@ test_adjacent = (
     )
 );
 
-//-------------------------------------------------------------------------
-
-type TailsIterator i = unbox struct { oi: Option i };
-
-impl [i: Iterator] TailsIterator i : Iterator {
-    type Item (TailsIterator i) = i;
-    advance = |TailsIterator { oi: oi }| (
-        match oi {
-            none() => none(),
-            some(i) => match i.advance {
-                none() => some((TailsIterator {oi: none()}, i)),
-                some((next, a)) => some((TailsIterator {oi: some(next)}, i))
-            }
-        }
-    );
-}
-
-// Creates an iterator that yields a tail starting from each element.
-//
-// Conceptually, `[a1, a2, ..., an].to_iter.tails = [t1, t2, ..., tn, nil].to_iter` such that
-// `t1 = [a1, a2, ..., an].to_iter, t2 = [a2, a3, ..., an].to_iter, ..., tn = [an].to_iter, nil = [].to_iter`.
-//
-// # Parameters
-//
-// * `iter` - An iterator.
-tails: [i: Iterator] i -> TailsIterator i;
-tails = |i| TailsIterator { oi: some(i) };
-
-test_tails: IO ();
-test_tails = (
-    println("=== test_tails ===");;
-    [
-        ([1, 2, 3, 4, 5], [[1, 2, 3, 4, 5], [2, 3, 4, 5], [3, 4, 5], [4, 5], [5], []]),
-        ([1], [[1], []]),
-        ([], [[]]),
-    ]
-    .to_iter.fold_m(
-        (), |(arr, expected), _|
-        let actual = arr.to_iter.tails.map(to_array).to_array;
-        println("arr=" + arr.to_string);;
-        println("tails=" + actual.to_string);;
-        assert_eq(|_| "eq", expected, actual)
-    )
-);
-
-test_tails2: IO ();
-test_tails2 = (
-    println("=== test_tails2 ===");;
-    let n = 10;
-    let iter = range(0, n);
-    let iter = iter.repeat.flatten.tails;
-    let arr = iter.map(take(n) >> to_array).take(n).to_array;
-    arr.to_string.println
-);
-
-
-// Drop elements from an iterator while a predicate holds.
-//
-// # Parameters
-//
-// * `predicate` - The predicate function to be applied to each element of the iterator.
-// * `iter` - The iterator to be taken from.
-drop_while : [i : Iterator, Item i = a] (a -> Bool) -> i -> i;
-drop_while = |pred, iter| (
-    match iter.advance {
-        none() => iter,
-        some((next, a)) => (
-            if !pred(a) { iter };
-            next.drop_while(pred)
-        )
-    }
-);
-
-test_drop_while: IO ();
-test_drop_while = (
-    println("=== test_drop_while ===");;
-    let iter = range(0, 100);
-    let arr = iter.drop_while(|x| x < 97).to_array;
-    println("arr=" + arr.to_string);;
-    assert_eq(|_| "eq", [97, 98, 99], arr)
-);
-
 main: IO () = (
-    test_transpose;;
     test_adjacent;;
-    test_tails;;
-    test_tails2;;
-    test_drop_while;;
     pure()
 );

@@ -4,28 +4,14 @@ import Minilib.Common.Common;
 import Minilib.Monad.Free;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Iden;
-//import Minilib.Text.Hex;
-
-/*
-type Wrap a = unbox struct {
-    data: a
-};
-
-namespace Wrap {
-    wrap: a -> Wrap a;
-    wrap = |a| Wrap { data: a };
-
-    unwrap: Wrap a -> a;
-    unwrap = @data;
-}
-*/
+import Minilib.Trait.Traversable;
 
 //-------------------------------------------
 
 type Toy next = box union {
     t_output: (String, next),
     t_bell: next,
-    t_done: () 
+    t_done: ()
 };
 
 impl Toy: Functor {
@@ -33,14 +19,14 @@ impl Toy: Functor {
         match toy {
             t_output((x, next)) => t_output((x, f(next))),
             t_bell(next) => t_bell(f(next)),
-            t_done() => t_done(),   // t_done()にはnextがないため、fは呼び出されない。
+            t_done() => t_done(),   // `t_done()` has no `next`, so `f` is not called.
         }
     );
 }
 
-// orphan rule のため、Free f a : ToString は Free モジュールの外部では定義できない。
-// また、[f a: ToString] という条件も書けない。
-// このため、to_string_ として定義する。
+// Due to the orphan rule, `Free f a : ToString` cannot be defined outside the `Free` module.
+// Also, the current grammar does not allow constraints like `[f a: ToString]`.
+// Therefore, we define it as a function called `to_string_`.
 to_string_: [a: ToString] Free Toy a -> String;
 to_string_ = |wma| (
     match wma {
@@ -76,7 +62,7 @@ test_toy_f_free = (
     let toy : Free Toy I64 = do {
         output("A");;
         bell;;
-        //done;;  // doneがあるとそれ以降は何をbindしても捨てられる。実行されない
+        //done;;  // Any `bind` after `done` will not be executed
         bell;;
         output("B");;
         pure $ 123
@@ -106,8 +92,8 @@ type StrParser = Free (Reader String);
 
 parse_text123: StrParser (Array String);
 parse_text123 = (
-    // Readerモナドでは MonadReaderIF::ask の結果は毎回同じだが、Free Reader にすることでaskの結果を毎回変えられる
-    let line1 = *ask.lift_f;    
+    // In the `Reader` monad, the result of `MonadReaderIF::ask` is always the same, but by using `Free Reader`, the result of `ask` can be changed each time.
+    let line1 = *ask.lift_f;
     let line2 = *ask.lift_f;
     let line3 = *ask.lift_f;
     pure $ [line1, line2, line3]
@@ -125,7 +111,7 @@ test_str_parser = (
                 break_m $ ()
             ),
             f_functor(reader) => (
-                // ここで1ステップごとに ask の中身を変える
+                // Now change the result of `ask` at each step
                 let parser = reader.run_reader("Line " + i.to_string);
                 continue_m $ (parser, i + 1)
             ),
@@ -136,14 +122,19 @@ test_str_parser = (
 //-------------------------------------------
 // Free monad as a effect
 
+// Communication interface
 trait [m: * -> *] m: MonadCommIF {
+    // send bytes to peer
     send_bytes: Array U8 -> m ();
+    // receive bytes from peer
     recv_bytes: I64 -> m (Array U8);
+    // generate secure random bytes
     gen_bytes: I64 -> m (Array U8);
 }
 
 trait MonadComm = Monad + MonadCommIF;
 
+// Commands for communication operation
 type Comm next = box union {
     comm_send_bytes: (Array U8, () -> next),
     comm_recv_bytes: (I64, Array U8 -> next),
@@ -160,6 +151,7 @@ impl Comm: Functor {
     );
 }
 
+// Implement the communication interface using Free monad
 impl Free Comm: MonadCommIF {
     send_bytes = |bytes| f_functor $ comm_send_bytes $ (bytes, pure);
     recv_bytes = |length| f_functor $ comm_recv_bytes $ (length, pure);
@@ -167,6 +159,7 @@ impl Free Comm: MonadCommIF {
 }
 
 namespace FreeComm {
+    // Interpret a data structure in the real world
     interpret: [m: MonadComm] Free Comm a -> m a;
     interpret = |free| (
         match free {
@@ -180,6 +173,7 @@ namespace FreeComm {
     );
 }
 
+// Communication in the real world
 impl IO: MonadCommIF {
     send_bytes = |bytes| (
         println("send_bytes: " + bytes.to_string);;
@@ -197,22 +191,25 @@ impl IO: MonadCommIF {
     );
 }
 
+// Sample sequence of communication operations
 monad_comm_1: [m: MonadComm] m ();
 monad_comm_1 = (
-    let size = 20;
-    let bytes = *gen_bytes(size);
-    send_bytes(bytes);;
-    let bytes = *recv_bytes(size);
-    send_bytes(bytes);;
-    pure()
+    range(0, 5).foreach_m(|i|
+        let size = 20;
+        let bytes = *gen_bytes(size);
+        send_bytes(bytes);;
+        let bytes = *recv_bytes(size);
+        send_bytes(bytes);;
+        pure()
+    )
 );
 
 test_monad_comm: IO ();
 test_monad_comm = (
     println("=== test_monad_comm ===");;
-    // Record a computation as a free monad
+    // Record a computation as a data structure
     let ma: Free Comm () = monad_comm_1;
-    // Interpret the free monad as an IO monad
+    // Interpret the data structure in the real world
     ma.interpret
 );
 

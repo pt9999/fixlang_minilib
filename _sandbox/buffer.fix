@@ -1,0 +1,109 @@
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Monad.State;
+import Minilib.Testing.UnitTest;
+
+type Buffer a = unbox struct {
+    array: Array a,
+    position: I64
+};
+
+namespace Buffer {
+    make: Array a -> Buffer a;
+    make = |array| Buffer {
+            array: array,
+            position: 0
+    };
+
+    read: Buffer a -> Option (a, Buffer a);
+    read = |buffer| (
+        let position = buffer.@position;
+        let array = buffer.@array;
+        if position >= array.@size { none() };
+        let data = array.@(position);
+        let buffer = buffer.set_position(position + 1);
+        some $ (data, buffer)
+    );
+
+    write: a -> Buffer a -> Buffer a;
+    write = |data, buffer| (
+        let position = buffer.@position;
+        let array = buffer.@array;
+        if position < array.@size {
+            let array = array.set(position, data);
+            Buffer{ array: array, position: position + 1 }
+        };
+        let array = array.push_back(data);
+        Buffer{ array: array, position: array.get_size }
+    );
+}
+
+trait s: HasBuffer {
+    type BufferItem s;
+    act_buffer: [f: Functor] (Buffer (BufferItem s) -> f (Buffer (BufferItem s))) -> s -> f s;
+}
+
+impl Buffer a: HasBuffer {
+    type BufferItem (Buffer a) = a;
+    act_buffer = id;
+}
+
+namespace State {
+    act_state: [m: Monad] (s -> (a, s)) -> StateT s m a;
+    act_state = |f| make_state_t_monad $ f >> swap >> pure;
+}
+
+trait MonadReadStream = Monad + MonadReadStreamIF;
+
+trait [m:*->*] m: MonadReadStreamIF {
+    type ReadStreamItem m;
+    read_stream: m (Option (ReadStreamItem m));
+}
+
+trait MonadWriteStream = Monad + MonadWriteStreamIF;
+
+trait [m:*->*] m: MonadWriteStreamIF {
+    type WriteStreamItem m;
+    write_stream: WriteStreamItem m -> m ();
+}
+
+impl [m: Monad, m: Functor, s: HasBuffer] StateT s m: MonadReadStreamIF {
+    type ReadStreamItem (StateT s m) = BufferItem s;
+    read_stream = lens_state_t(HasBuffer::act_buffer) $ State::act_state(|buffer|
+        match buffer.read {
+            none() => (none(), buffer),
+            some((data, buffer)) => (some(data), buffer)
+        }
+    );
+}
+
+impl [m: Monad, m: Functor, s: HasBuffer] StateT s m: MonadWriteStreamIF {
+    type WriteStreamItem (StateT s m) = BufferItem s;
+    write_stream = |data| lens_state_t(HasBuffer::act_buffer) $
+        State::mod_state(write(data));
+}
+
+test1: TestCase;
+test1 = (
+    make_test("test1") $ |_|
+    let buf = Buffer::make $ [1, 2, 3];
+    let sm: StateT (Buffer I64) IOFail () = do {
+        assert_equal("read1", some $ 1, *read_stream);;
+        assert_equal("read2", some $ 2, *read_stream);;
+        write_stream(42);;
+        write_stream(43);;
+        assert_equal("pos", 4, *gets(@position));;
+        assert_equal("array", [1, 2, 42, 43], *gets(@array));;
+        pure()
+    };
+    sm.eval_state_t(buf)
+);
+
+main: IO ();
+main = (
+    [
+        test1,
+    ]
+    .run_test_driver
+);

@@ -309,6 +309,47 @@ namespace Conversion {
         spec.apply_padding(str)
     );
 
+    convert_double: F64 -> ConversionSpec -> Result ErrMsg String;
+    convert_double = |val, spec| (
+        let cs = spec.@conversion_specifier;
+        let precision = spec.@precision.as_some_or(6);
+        let str = *if cs == 's' {
+            ok $ val.to_string
+        } else if cs == 'e' || cs == 'E' {
+            let str = val.to_string_exp_precision(precision.to_U8);
+            let str = if cs == 'E' { str.to_upper } else { str.to_lower };
+            ok $ str
+        } else if cs == 'f' || cs == 'F' {
+            let str = val.to_string_precision(precision.to_U8);
+            let str = if cs == 'F' { str.to_upper } else { str.to_lower };
+            ok $ str
+        } else if cs == 'g' || cs == 'G' {
+            let precision = max(1, precision);
+            let prec_pow10 = range(0, precision).fold(1.0, |i| mul(10.0));
+            let str = if val != 0.0 && (val.abs < 1.0e-4 || val.abs >= prec_pow10) {
+                val.to_string_exp_precision(precision.to_U8).to_lower
+            } else {
+                val.to_string_precision(precision.to_U8)
+            };
+            let split_at = |c, str| match str.find_byte(c) {
+                none() => (str, ""),
+                some(pos) => (str.get_sub(0, pos), str.get_sub(pos, str.get_size))
+            };
+            let (num, exp) = str.split_at('e');
+            let (int_part, frac_part) = num.split_at('.');
+            let frac_part = frac_part.strip_last_bytes(|c| c == '0');
+            let frac_part = frac_part.strip_last_bytes(|c| c == '.');
+            let str = int_part + frac_part + exp;
+            let str = if cs == 'G' { str.to_upper } else { str.to_lower };
+            ok $ str
+        } else {
+            err $ "invalid conversion specifier for unsigned integer: " + cs.from_U8
+        };
+        let str = *spec.apply_precision(str);   // for cs == 's'
+        let str = *spec.apply_sign(str, false);
+        spec.apply_padding(str)
+    );
+
     apply_precision: String -> ConversionSpec -> Result ErrMsg String;
     apply_precision = |str, spec| (
         if spec.@precision.is_none { ok $ str };
@@ -394,6 +435,14 @@ impl U16: Convertible {
 
 impl U8: Convertible {
     convert = U8::to_U64 >> convert_unsigned;
+}
+
+impl F32: Convertible {
+    convert = F32::to_F64 >> convert_double;
+}
+
+impl F64: Convertible {
+    convert = convert_double;
 }
 
 impl String: Convertible {

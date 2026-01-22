@@ -1,0 +1,411 @@
+// This is an internal module for Sprintf.
+module Minilib.Text.Sprintf.SprintfInternal;
+
+import Character;
+import Minilib.Text.SimpleParser;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+
+type Flags = U64;
+
+namespace Flags {
+    flag_alternate_form: Flags = 1_U64;   // '#'
+    flag_zero_padding: Flags = 2_U64;     // '0'
+    flag_left_adjust: Flags = 4_U64;      // '-'
+    flag_space: Flags = 8_U64;            // ' '
+    flag_sign: Flags = 16_U64;            // '+'
+    flag_thousands: Flags = 32_U64;       // '\''
+
+    contains_flag: U64 -> Flags -> Bool;
+    contains_flag = |f, flags| (
+        flags.bit_and(f) == f
+    );
+
+    parse_flags: Parser Flags;
+    parse_flags = (
+        let flags = *repeat(do {
+            let c = *match_any_char.filter(|c| "#0- +'".find_byte(c).is_some);
+            if c == '#' { pure $ flag_alternate_form };
+            if c == '0' { pure $ flag_zero_padding };
+            if c == '-' { pure $ flag_left_adjust };
+            if c == ' ' { pure $ flag_space };
+            if c == '+' { pure $ flag_sign };
+            if c == '\'' { pure $ flag_thousands };
+            undefined("parse_flag: c not found")
+        });
+        pure $ flags.to_iter.fold(0_U64, bit_or)
+    );
+}
+
+parse_field_width: Parser (Option I64);
+parse_field_width = do {
+    match_integer
+}.if_exists;
+
+parse_signed_integer: Parser I64;
+parse_signed_integer = do {
+    let minus = *match_char('-').if_exists;
+    let intval = *match_integer;
+    if minus.is_some { pure $ -intval };
+    pure $ intval
+};
+
+parse_precision: Parser (Option I64);
+parse_precision = do {
+    let period = *match_char('.').if_exists;
+    if period.is_none { pure $ none() };
+    let intval = *parse_signed_integer.or_else(pure $ 0);
+    if intval < 0 { pure $ none() };
+    pure $ some $ intval
+};
+
+parse_length_modifier: Parser (Option String);
+parse_length_modifier = do {
+    let c = *match_any_char.filter(|c|
+        "hlqLjzZt".find_byte(c).is_some
+    );
+    let c2 = *if c == 'h' || c == 'l' {
+        match_char(c).if_exists
+    } else { pure $ none() };
+    if c2.is_some {
+        pure $ from_U8(c) + from_U8(c)
+    } else {
+        pure $ from_U8(c)
+    }
+}.if_exists;
+
+parse_conversion_specifier: Parser U8;
+parse_conversion_specifier = do {
+    match_any_char.filter(|c| "diouxXeEfFgGaAcsCSpnm".find_byte(c).is_some)
+};
+
+type ConversionSpec = unbox struct {
+    flags: Flags,
+    field_width: Option I64,
+    precision: Option I64,
+    conversion_specifier: U8,
+};
+
+namespace ConversionSpec {
+    make: Flags -> Option I64 -> Option I64 -> U8 -> ConversionSpec;
+    make = |flags, field_width, precision, conversion_specifier| (
+        ConversionSpec {
+            flags: flags,
+            field_width: field_width,
+            precision: precision,
+            conversion_specifier: conversion_specifier,
+        }
+    );
+
+    from_U8: U8 -> ConversionSpec;
+    from_U8 = |conversion_specifier| (
+        ConversionSpec::make(0_U64, none(), none(), conversion_specifier)
+    );
+
+    parse_conversion_spec: Parser ConversionSpec;
+    parse_conversion_spec = do {
+        match_char('%');;
+        let flags = *parse_flags;
+        let field_width = *parse_field_width;
+        let precision = *parse_precision;
+        let length_modifier = *parse_length_modifier;   // ignored
+        let conversion_specifier = *parse_conversion_specifier;
+        pure $ ConversionSpec {
+            flags: flags,
+            field_width: field_width,
+            precision: precision,
+            conversion_specifier: conversion_specifier,
+        }
+    };
+}
+
+impl ConversionSpec: ToString {
+    to_string = |c| (
+        "ConversionSpec {"
+        + " flags=" + c.@flags.to_string
+        + " field_width=" + c.@field_width.to_string
+        + " precision=" + c.@precision.to_string
+        + " conversion_specifier=" + c.@conversion_specifier.to_string
+        + " }"
+    );
+}
+
+impl ConversionSpec: Eq {
+    eq = |a, b| (
+        a.@flags == b.@flags &&
+        a.@field_width == b.@field_width &&
+        a.@precision == b.@precision &&
+        a.@conversion_specifier == b.@conversion_specifier
+    );
+}
+
+parse_ordinary_char: Parser U8;
+parse_ordinary_char = match_any_char.filter(|c| c != '%');
+
+parse_percent: Parser U8;
+parse_percent = do {
+    match_char('%');;
+    match_char('%');;
+    pure $ '%'
+};
+
+parse_literal: Parser String;
+parse_literal = do {
+    let chars = *zero_or_more(
+        parse_ordinary_char
+        .or_else(parse_percent)
+    );
+    pure $ chars._unsafe_to_string
+};
+
+// format = literal (conversion_spec literal)*
+parse_format: Parser (String, Array (ConversionSpec, String));
+parse_format = do {
+    let prefix = *parse_literal;
+    let fields = *repeat(do {
+        let spec = *parse_conversion_spec;
+        let literal = *parse_literal;
+        pure $ (spec, literal)
+    });
+    match_end_of_stream;;
+    pure $ (prefix, fields)
+};
+
+type Formatter = unbox struct {
+    fields: Array (ConversionSpec, String),
+    position: I64,
+    output: String
+};
+
+namespace Formatter {
+    make: String -> Result ErrMsg Formatter;
+    make = |format| (
+        let ((prefix, fields), stream) = *parse_format.run_parser_str(format);
+        let output = prefix;
+        pure $ Formatter {
+            fields: fields,
+            position: 0,
+            output: output
+        }
+    );
+
+    convert_value: [a: Convertible] a -> Formatter -> Result ErrMsg Formatter;
+    convert_value = |value, formatter| (
+        let Formatter {
+            fields: fields,
+            position: position,
+            output: output
+        } = formatter;
+        if position >= fields.get_size { err $ "Too many arguments" };
+        let (spec, literal) = fields.@(position);
+        let output = output + *spec.convert(value);
+        let output = output + literal;
+        let position = position + 1;
+        pure $ Formatter {
+            fields: fields,
+            position: position,
+            output: output
+        }
+    );
+
+    get_output: Formatter -> Result ErrMsg String;
+    get_output = |formatter| (
+        let Formatter {
+            fields: fields,
+            position: position,
+            output: output
+        } = formatter;
+        if position < fields.get_size { err $ "Too few arguments" };
+        pure $ output
+    );
+}
+
+trait a: Convertible {
+    convert: a -> ConversionSpec -> Result ErrMsg String;
+}
+
+namespace Conversion {
+    _to_string_hex: U64 -> String;
+    _to_string_hex = (
+        let hex_chars = "0123456789abcdef".get_bytes.pop_back;
+        |u| loop(
+            ([], u), |(a, u)|
+            if u == 0_U64 {
+                if a.is_empty { break $ "0" };
+                break $ a.reverse._unsafe_to_string
+            };
+            let a = a.push_back(hex_chars.@((u % 16_U64).to_I64));
+            continue $ (a, u / 16_U64)
+        )
+    );
+
+    _to_string_oct: U64 -> String;
+    _to_string_oct = |u| (
+        loop(
+            ([], u), |(a, u)|
+            if u == 0_U64 {
+                if a.is_empty { break $ "0" };
+                break $ a.reverse._unsafe_to_string
+            };
+            let a = a.push_back('0' + (u % 8_U64).to_U8);
+            continue $ (a, u / 8_U64)
+        )
+    );
+
+    _mask: I64 -> U64 -> U64;
+    _mask = |bitlength, value| (
+        if bitlength >= 64 { value };
+        let mask = 1_U64.shift_left(bitlength.to_U64) - 1_U64;
+        value.bit_and(mask)
+    );
+
+    convert_signed: I64 -> I64 -> ConversionSpec -> Result ErrMsg String;
+    convert_signed = |bitlength, val, spec| (
+        let cs = spec.@conversion_specifier;
+        let str = *if cs == 's' {
+            ok $ val.to_string
+        } else if cs == 'd' || cs == 'i' {   // signed decimal
+            ok $ val.to_string
+        } else if cs == 'u' {   // unsigned decimal
+            ok $ val.to_U64._mask(bitlength).to_string
+        } else if cs == 'o' {
+            ok $ val.to_U64._mask(bitlength)._to_string_oct
+        } else if cs == 'x' {
+            ok $ val.to_U64._mask(bitlength)._to_string_hex
+        } else if cs == 'X' {
+            ok $ val.to_U64._mask(bitlength)._to_string_hex.to_upper
+        } else if cs == 'c' {
+            ok $ val.to_U8.from_U8
+        } else {
+            err $ "invalid conversion specifier for signed integer: " + cs.from_U8
+        };
+        let str = *spec.apply_precision(str);
+        let str = *spec.apply_sign(str, val < 0);
+        spec.apply_padding(str)
+    );
+
+    convert_unsigned: U64 -> ConversionSpec -> Result ErrMsg String;
+    convert_unsigned = |val, spec| (
+        let cs = spec.@conversion_specifier;
+        let str = *if cs == 's' {
+            ok $ val.to_string
+        } else if cs == 'd' || cs == 'i' {   // signed decimal
+            ok $ val.to_I64.to_string
+        } else if cs == 'u' {   // unsigned decimal
+            ok $ val.to_string
+        } else if cs == 'o' {
+            ok $ val.to_U64._to_string_oct
+        } else if cs == 'x' {
+            ok $ val.to_U64._to_string_hex
+        } else if cs == 'X' {
+            ok $ val.to_U64._to_string_hex.to_upper
+        } else if cs == 'c' {
+            ok $ val.to_U8.from_U8
+        } else {
+            err $ "invalid conversion specifier for unsigned integer: " + cs.from_U8
+        };
+        let str = *spec.apply_precision(str);
+        let str = *spec.apply_sign(str, false);
+        spec.apply_padding(str)
+    );
+
+    apply_precision: String -> ConversionSpec -> Result ErrMsg String;
+    apply_precision = |str, spec| (
+        if spec.@precision.is_none { ok $ str };
+        let precision = spec.@precision.as_some;
+        let precision = max(0, precision);
+        let cs = spec.@conversion_specifier;
+        if "diouxX".find_byte(cs).is_some {
+            if precision == 0 && str == "0" { ok $ "" };
+            let n = precision - str.get_size;
+            if n <= 0 { ok $ str };
+            let zeros = Array::fill(n, '0')._unsafe_to_string;
+            ok $ zeros + str
+        } else if cs == 's' {
+            ok $ str.get_sub(0, min(precision, str.get_size))
+        } else {
+            // for aAeEfFgG, apply precision when converting to string
+            ok $ str
+        }
+    );
+
+    apply_sign: String -> Bool -> ConversionSpec -> Result ErrMsg String;
+    apply_sign = |str, is_negative, spec| (
+        if is_negative { ok $ str };
+        let flags = spec.@flags;
+        let space = flags.contains_flag(flag_space);
+        let sign = flags.contains_flag(flag_sign);
+        if sign {
+            ok $ "+" + str
+        } else if space {
+            ok $ " " + str
+        } else {
+            ok $ str
+        }
+    );
+
+    apply_padding: String -> ConversionSpec -> Result ErrMsg String;
+    apply_padding = |str, spec| (
+        if spec.@field_width.is_none { ok $ str };
+        let field_width = spec.@field_width.as_some;
+        let padlen = field_width - str.get_size;
+        if padlen <= 0 { ok $ str };
+        let flags = spec.@flags;
+        let cs = spec.@conversion_specifier;
+        let numeric = "diouxXaAeEfFgG".find_byte(cs).is_some;
+        let zero_padding = flags.contains_flag(flag_zero_padding);
+        let left_adjust = flags.contains_flag(flag_left_adjust);
+        let padchar = if numeric && zero_padding && ! left_adjust { '0' } else { ' ' };
+        let pad = Array::fill(padlen, padchar)._unsafe_to_string;
+        if left_adjust { ok $ str + pad }
+        else { ok $ pad + str }
+    );
+
+    // TODO: support flag_thousands, flag_alternate_form
+}
+
+impl I64: Convertible {
+    convert = convert_signed(64);
+}
+
+impl I32: Convertible {
+    convert = I32::to_I64 >> convert_signed(32);
+}
+
+impl I16: Convertible {
+    convert = I16::to_I64 >> convert_signed(16);
+}
+
+impl I8: Convertible {
+    convert = I8::to_I64 >> convert_signed(8);
+}
+
+impl U64: Convertible {
+    convert = convert_unsigned;
+}
+
+impl U32: Convertible {
+    convert = U32::to_U64 >> convert_unsigned;
+}
+
+impl U16: Convertible {
+    convert = U16::to_U64 >> convert_unsigned;
+}
+
+impl U8: Convertible {
+    convert = U8::to_U64 >> convert_unsigned;
+}
+
+impl String: Convertible {
+    convert = |val, spec| (
+        let cs = spec.@conversion_specifier;
+        let str = *if cs == 's' {
+            ok $ val.to_string
+        } else {
+            err $ "invalid conversion specifier for String: " + cs.from_U8
+        };
+        let flags = spec.@flags;
+        // TODO: support flags
+        ok $ str
+    );
+}

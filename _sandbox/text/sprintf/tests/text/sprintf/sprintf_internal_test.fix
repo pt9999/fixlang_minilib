@@ -1,6 +1,6 @@
-module Main;
+module SprintfInternalTest;
 
-import Minilib.Text.Sprintf;
+import Minilib.Text.Sprintf.SprintfInternal;
 import Minilib.Text.SimpleParser;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
@@ -67,12 +67,33 @@ test_parse_precision = (
     make_table_test("test_parse_precision",
         [
             ("f", (none(), "f")),
+            (".f", (some(0), "f")),
             (".8f", (some(8), "f")),
             (".08f", (some(8), "f")),    // currently we accept strings that starts with "0"
-            (".-1f", (none(), ".-1f")),
+            (".-0f", (some(0), "f")),    // -0 is not negative
+            (".-1f", (none(), "f")),     // a negative precision is taken as if the precision were omitted
         ],
         |(str, expected)|
         let parser = parse_precision.and_trailing;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_parse_length_modifier: TestCase;
+test_parse_length_modifier = (
+    make_table_test("test_parse_length_modifier",
+        [
+            ("d", (none(), "d")),
+            ("hd", (some("h"), "d")),
+            ("hhd", (some("hh"), "d")),
+            ("hhhd", (some("hh"), "hd")),
+            ("ld", (some("l"), "d")),
+            ("lld", (some("ll"), "d")),
+            ("qd", (some("q"), "d")),
+        ],
+        |(str, expected)|
+        let parser = parse_length_modifier.and_trailing;
         let (actual, stream) = *parser.run_parser_str(str).from_result;
         assert_equal("eq", expected, actual)
     )
@@ -109,6 +130,82 @@ test_parse_conversion_spec = (
     )
 );
 
+test_parse_format: TestCase;
+test_parse_format = (
+    make_table_test("test_parse_format",
+        [
+            ("zabc", ("zabc", [])),
+            ("%dabc", ("", [(ConversionSpec::from_U8('d'), "abc")])),
+            ("abc%08d", ("abc", [(ConversionSpec::make(Flags::flag_zero_padding, some(8), none(), 'd'), "")])),
+            ("abc%ddef%sghi", ("abc", [(ConversionSpec::from_U8('d'), "def"), (ConversionSpec::from_U8('s'), "ghi")])),
+        ],
+        |(str, expected)|
+        let parser = parse_format;
+        let (actual, stream) = *parser.run_parser_str(str).from_result;
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_apply_precision: TestCase;
+test_apply_precision = (
+    make_table_test("test_apply_precision",
+        [
+            ("0", "%d", "0"),
+            ("0", "%.0d", ""),
+            ("1", "%d", "1"),
+            ("1", "%.3d", "001"),
+            ("12345", "%.3d", "12345"),
+        ],
+        |(str, format, expected)|
+        let (spec, _) = *parse_conversion_spec.run_parser_str(format).from_result;
+        let actual = spec.apply_precision(str);
+        assert_equal("eq", ok $ expected, actual)
+    )
+);
+
+test_apply_sign: TestCase;
+test_apply_sign = (
+    make_table_test("test_apply_sign",
+        [
+            ("0", false, "%d", "0"),
+            ("0", false, "%+d", "+0"),
+            ("0", false, "% d", " 0"),
+            ("0", false, "% +d", "+0"),
+            ("123", false, "%d", "123"),
+            ("123", false, "%+d", "+123"),
+            ("123", false, "% d", " 123"),
+            ("123", false, "% +d", "+123"),
+            ("-123", true, "%d", "-123"),
+            ("-123", true, "%+d", "-123"),
+            ("-123", true, "% d", "-123"),
+            ("-123", true, "% +d", "-123"),
+        ],
+        |(str, is_negative, format, expected)|
+        let (spec, _) = *parse_conversion_spec.run_parser_str(format).from_result;
+        let actual = spec.apply_sign(str, is_negative);
+        assert_equal("eq", ok $ expected, actual)
+    )
+);
+
+test_apply_padding: TestCase;
+test_apply_padding = (
+    make_table_test("test_apply_padding",
+        [
+            ("123", "%d", "123"),
+            ("123", "%8d",  "     123"),
+            ("123", "%08d", "00000123"),
+            ("123", "%-8d", "123     "),
+            ("123", "%-08d", "123     "),
+            ("12345678", "%0d",  "12345678"),
+            ("12345678", "%4d",  "12345678"),
+            ("12345678", "%8d",  "12345678"),
+        ],
+        |(str, format, expected)|
+        let (spec, _) = *parse_conversion_spec.run_parser_str(format).from_result;
+        let actual = spec.apply_padding(str);
+        assert_equal("eq", ok $ expected, actual)
+    )
+);
 
 main: IO ();
 main = (
@@ -117,8 +214,13 @@ main = (
         test_contains_flag,
         test_parse_field_width,
         test_parse_precision,
+        test_parse_length_modifier,
         test_parse_conversion_specifier,
         test_parse_conversion_spec,
+        test_parse_format,
+        test_apply_precision,
+        test_apply_sign,
+        test_apply_padding,
     ]
     .run_test_driver
 );

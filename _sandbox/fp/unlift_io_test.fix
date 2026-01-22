@@ -1,0 +1,48 @@
+module Main;
+
+import Minilib.Monad.IO;
+import Minilib.Monad.Iden;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Result;
+import Minilib.Monad.UnliftIO;
+import Minilib.Testing.UnitTest;
+
+type MockIOHandle = I64;
+
+mock_with_file: Path -> (MockIOHandle -> IO a) -> IO a;
+mock_with_file = |filepath, f| (
+    println("mock_with_file: filepath="+filepath);;
+    let handle = 123;
+    let a = *f(handle);
+    pure $ a
+);
+
+mock_read_line: MockIOHandle -> IO String;
+mock_read_line = |handle| pure $ "line";
+
+test_unlift_reader: TestCase;
+test_unlift_reader = (
+    make_test("test_unlift_reader") $ |_|
+    let get_env: ReaderT String IO String = ask;
+    let rm: ReaderT String IO String = do {
+        with_run_in_io $ |run|
+        mock_with_file("filepath", |handle|
+            let line = *mock_read_line(handle);
+            let env = (*get_env.run).get;
+            pure $ Iden::make $ "line="+line+ " env="+env
+        ).lift_io
+    };
+    let expected = "line=line env=env";
+    let actual = *rm.run_reader_t("env").lift;
+    assert_equal("eq", expected, actual)
+);
+
+main: IO ();
+main = (
+    [
+        test_unlift_reader,
+    ]
+    .run_test_driver
+);
+
+

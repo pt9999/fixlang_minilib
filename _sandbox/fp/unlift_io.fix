@@ -1,13 +1,29 @@
 module Minilib.Monad.UnliftIO;
 
 import Minilib.Monad.IO;
+import Minilib.Monad.Iden;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Result;
 
 trait MonadUnliftIO = Monad + MonadUnliftIOIF;
 
 trait [m: *->*] m: MonadUnliftIOIF {
-    with_run_in_io: ((m a -> IO a) -> IO b) -> m b;
+    type FunctorType m a;
+    with_run_in_io: ((m a -> IO (FunctorType m a)) -> IO (FunctorType m b)) -> m b;
+}
+
+impl ReaderT e IO: MonadUnliftIOIF {
+    type FunctorType (ReaderT e IO) a = Iden a;
+    with_run_in_io: ((ReaderT e IO a -> IO (FunctorType (ReaderT e IO) a)) -> IO (FunctorType (ReaderT e IO) b)) -> ReaderT e IO b
+         = |f| (
+        reader_t $ |e|
+        let run: ReaderT e IO a -> IO (Iden a) = |rma| (
+            let io_a: IO a = rma.run_reader_t(e);
+            io_a.map(Iden::make)
+        );
+        let io_iden_b: IO (Iden b) = f(run);
+        io_iden_b.map(get)
+    );
 }
 
 /*

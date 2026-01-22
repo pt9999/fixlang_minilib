@@ -1,6 +1,8 @@
 module Main;
 
 import Minilib.Common.Common;
+import Minilib.Common.IORef;
+import Minilib.Common.TimeEx;
 import Minilib.Monad.Free;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
@@ -9,16 +11,16 @@ import Minilib.Testing.UnitTest;
 
 type Op a = box union {
     op_iof: IOFail a,
+    op_read: ((), Option String -> a),
     op_write: (String, () -> a),
-    op_read: ((), String -> a),
 };
 
 impl Op: Functor {
     map = |f, op| (
         match op {
             op_iof(iof) => op_iof(iof.map(f)),
-            op_write((arg, next)) => op_write((arg, next >> f)),
             op_read((arg, next)) => op_read((arg, next >> f)),
+            op_write((arg, next)) => op_write((arg, next >> f)),
         }
     );
 }
@@ -33,50 +35,119 @@ impl Op: MonadIOFailIF {
 
 type FreeOp a = Free Op a;
 
-freeop1: FreeOp ();
-freeop1 = (
-    let input = *op_read(((), id)).lift_f;
-    op_write(("got " + input, id)).lift_f;;
-    println("print test").lift_io;;
-    let input = *op_read(((), id)).lift_f;
-    op_write(("got " + input, id)).lift_f;;
+namespace FreeOp {
+    fop_read: FreeOp (Option String);
+    fop_read = op_read(((), id)).lift_f;
+
+    fop_write: String -> FreeOp ();
+    fop_write = |str| op_write((str, id)).lift_f;
+}
+
+type MockState = unbox struct {
+    inputs: Array String,
+    outputs: Array String,
+};
+
+namespace State {
+    act_state_t: [m: Monad] (s -> (a, s)) -> StateT s m a;
+    act_state_t = |f| make_state_t_monad $ f >> swap >> pure;
+}
+
+namespace MockState {
+    make: Array String -> MockState;
+    make = |inputs| MockState {
+        inputs: inputs.reverse,
+        outputs: []
+    };
+
+    get_outputs: MockState -> Array String;
+    get_outputs = @outputs;
+
+    interpret: FreeOp a -> StateT MockState IOFail a;
+    interpret = |free| (
+        match free {
+            f_pure(a) => pure $ a,
+            f_functor(fa) => match fa {
+                op_iof(iof) => (
+                    let next = *iof.lift_iofail; 
+                    next.interpret
+                ),
+                op_read(((), next)) => (
+                    let input = *act_state_t(act_inputs(|inputs|
+                        match inputs.get_last {
+                            none() => (none(), inputs),
+                            some(input) => (some(input), inputs.pop_back)
+                        }
+                    ));
+                    next(input).interpret
+                ),
+                op_write((str, next)) => (
+                    State::mod_state(mod_outputs(push_back(str)));;
+                    next().interpret
+                ),
+            }
+        }
+    );
+}
+
+test_freeop: TestCase;
+test_freeop = (
+    make_test("test_freeop") $ |_|
+    let ioref: IORef (Array I64) = *IORef::make([]);
+    let freeop1: FreeOp () = do {
+        loop_m(
+            0, |i|
+            match *fop_read {
+                none() => break_m $ (),
+                some(input) => (
+                    fop_write("got " + input);;
+                    ioref.mod(push_back(i));;
+                    continue_m $ i + 1
+                )
+            }
+        )
+    };
+    let state = MockState::make(["hello", "world"]);
+    let state = *freeop1.interpret.exec_state_t(state);
+    assert_equal("outputs", ["got hello", "got world"], state.get_outputs);;
+    assert_equal("ioref", [0, 1], *ioref.get);;
     pure()
 );
 
-interpret_state: String -> FreeOp a -> StateT String IOFail a;
-interpret_state = |input, free| (
-    match free {
-        f_pure(a) => pure $ a,
-        f_functor(fa) => match fa {
-            op_iof(iof) => (
-                let next = *iof.lift_iofail; 
-                next.interpret_state(input)
-            ),
-            op_write((str, next)) => (
-                State::mod_state(|s| s + str + "\n");;
-                next().interpret_state(input)
-            ),
-            op_read(((), next)) => (
-                let (line, input) = input.split_first("\n");
-                next(line).interpret_state(input)
-            ),
-        }
-    }
-);
-
-test_freeop1: TestCase;
-test_freeop1 = (
-    make_test("test_freeop1") $ |_|
-    let input = "hello\nworld\n";
-    let sm = freeop1.interpret_state(input);
-    let (output, ()) = *sm.run_state_t("");
-    assert_equal("output", "got hello\ngot world\n", output)
+test_freeop_perf: TestCase;
+test_freeop_perf = (
+    make_test("test_freeop_perf") $ |_|
+    let ioref: IORef (Array String) = *IORef::make([]);
+    let freeop: FreeOp () = do {
+        loop_m(
+            (), |_|
+            match *fop_read {
+                none() => break_m $ (),
+                some(input) => (
+                    fop_write(input);;
+                    ioref.mod(push_back(input));;
+                    continue_m $ ()
+                )
+            }
+        )
+    };
+    let n = 100000;
+    let state = MockState::make(Array::fill(n, ""));
+    let (res, time) = *consumed_realtime_while_io(
+        freeop.interpret.exec_state_t(state).to_result
+    );
+    let state = *res.from_result;
+    emprintln((n, time).format("test_freeop_perf: n={} time={} seconds"));;
+    assert_equal("outputs", n, state.get_outputs.get_size);;
+    assert_equal("ioref", n, (*ioref.get).get_size);;
+    pure()
 );
 
 main: IO ();
 main = (
     [
-        test_freeop1,
+        test_freeop,
+        test_freeop_perf,
     ]
     .run_test_driver
 );

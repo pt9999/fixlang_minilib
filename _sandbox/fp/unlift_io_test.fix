@@ -1,6 +1,7 @@
 module Main;
 
 import Minilib.Common.IORef;
+import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Monad.Reader;
 import Minilib.Monad.State;
@@ -8,6 +9,8 @@ import Minilib.Monad.Result;
 import Minilib.Monad.Writer;
 import Minilib.Monad.UnliftIO;
 import Minilib.Testing.UnitTest;
+
+//----------------------------------------------------------------------------
 
 // Std::IO:with_file : Path -> String -> (IOHandle -> IOFail a) -> IOFail a;
 
@@ -17,6 +20,30 @@ with_file_m = |path, mode, body| (
         with_file(path, mode, body >> run)
     )
 );
+
+//borrow_boxed_io : [a : Boxed] (Ptr -> IO b) -> a -> IO b;
+
+borrow_boxed_m: [m: MonadUnliftIO, a: Boxed] (Ptr -> m b) -> a -> m b;
+borrow_boxed_m = |body, a| (
+    with_run_in_io(|run|
+        a.borrow_boxed_io(body >> run)
+    )
+);
+
+//mutate_boxed_io : [a : Boxed] (Ptr -> IO b) -> a -> IO (a, b);
+
+// 関連型の型パラメータを部分適用した型が Functor であるという制約を書きたいが、現状ではできない
+//mutate_boxed_m : [m: MonadUnliftIO, UnliftedIO m = f, f: Functor, a : Boxed] (Ptr -> m b) -> a -> m (a, b);
+mutate_boxed_m : [m: MonadUnliftIO, a : Boxed] (Ptr -> m b) -> a -> m (a, b);
+mutate_boxed_m = |body, a| (
+    with_run_in_io(|run|
+        let (a: a, fb: UnliftedIO m b) = *a.mutate_boxed_io(body >> run);
+        let fab: UnliftedIO m (a, b) = fb.Functor::map(|b:b| (a, b));
+        pure $ fab
+    )
+);
+
+//----------------------------------------------------------------------------
 
 type MockIOHandle = I64;
 
@@ -97,6 +124,30 @@ test_unlift_io_writer = (
     assert_equal("logger", expected, actual);;
     pure()
 );
+
+test_unlift_io_writer2: TestCase;
+test_unlift_io_writer2 = (
+    make_test("test_unlift_io_writer2") $ |_|
+    let wm: WriterT String IOFail String = do {
+        let src = "abcde".get_bytes.pop_back;
+        let dest = "-----".get_bytes.pop_back;
+        let size = 5;
+        let (dest, ret) = *dest.mutate_boxed_m(|p_dest|
+            src.borrow_boxed_m(|p_src|
+                let res = *FFI_CALL_IO[Ptr memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, size.to_CSizeT].lift_io;
+                if res == nullptr { error $ "memcpy failed!" };
+                tell("memcpy success");;
+                pure $ "success"
+            )
+        );
+        assert_equal("dest", src, dest);;
+        assert_equal("ret", "success", ret);;
+        pure $ ret
+    };
+    let (log, ret) = *wm.run_writer_t;
+    assert_equal("log", "memcpy success", log)
+);
+
 
 test_unlift_iofail_writer: TestCase;
 test_unlift_iofail_writer = (
@@ -204,6 +255,7 @@ main = (
         test_unlift_io_reader,
         test_unlift_iofail_reader,
         test_unlift_io_writer,
+        test_unlift_io_writer2,
         test_unlift_iofail_writer,
         test_unlift_io_state,
         test_unlift_iofail_state,

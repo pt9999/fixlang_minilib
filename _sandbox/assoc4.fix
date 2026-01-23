@@ -1,0 +1,41 @@
+module Main;
+
+trait [m: *->*] m: MyTrait {
+    type MyResult m a;
+    to_io: m a -> IO (MyResult m a);
+}
+
+impl IO: MyTrait {
+    type MyResult IO a = a;
+    to_io = |io| io;
+}
+
+impl IOFail: MyTrait {
+    type MyResult IOFail a = Result ErrMsg a;
+    to_io = |iofail| iofail.to_result;
+}
+
+// `MyResult m` が Functor であるという制約条件を書きたいが、現状ではできない
+
+//-- こちらを有効にすると次のエラーが出る: error: Invalid number of arguments for associated type `Main::MyTrait::MyResult`. Expect: 2, found: 1.
+catch: [m: MyTrait, f: Functor, MyResult m = f] String -> m a -> IO (MyResult m (String, a));
+
+//-- こちらを有効にすると次のエラーが出る: error: `#a75 : Std::Functor` is required in the type inference of this expression but cannot be deduced from assumptions.
+//catch: [m: MyTrait] String -> m a -> IO (MyResult m (String, a));
+
+catch = |name, ma| (
+    let ca: MyResult m a = *ma.to_io;
+    pure $ ca.Functor::map(|a:a| (name, a))
+);
+
+check_even: I64 -> IOFail I64;
+check_even = |val| (
+    if val % 2 != 0 { throw $ "not even" };
+    pure $ val
+);
+
+main: IO ();
+main = (
+    let res: Result ErrMsg (String, I64) = *check_even(42).catch("name");
+    println(res.to_string)
+);

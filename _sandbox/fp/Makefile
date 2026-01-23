@@ -53,6 +53,9 @@ test-svar:
 test-traversable-a:
 	fix run -f traversable_a.fix -f traversable_a_test.fix -f applicative.fix
 
+test-unlift-io:
+	fix run -f unlift_io.fix -f unlift_io_test.fix
+
 test-yield:
 	fix run -f yield_example.fix
 

@@ -1,46 +1,214 @@
 module Main;
 
+import Minilib.Common.IORef;
 import Minilib.Monad.IO;
-import Minilib.Monad.Iden;
 import Minilib.Monad.Reader;
+import Minilib.Monad.State;
 import Minilib.Monad.Result;
+import Minilib.Monad.Writer;
 import Minilib.Monad.UnliftIO;
 import Minilib.Testing.UnitTest;
 
-type MockIOHandle = I64;
+// Std::IO:with_file : Path -> String -> (IOHandle -> IOFail a) -> IOFail a;
 
-mock_with_file: Path -> (MockIOHandle -> IO a) -> IO a;
-mock_with_file = |filepath, f| (
-    println("mock_with_file: filepath="+filepath);;
-    let handle = 123;
-    let a = *f(handle);
-    pure $ a
+with_file_m: [m: MonadUnliftIOFail] Path -> String -> (IOHandle -> m a) -> m a;
+with_file_m = |path, mode, body| (
+    with_run_in_iofail(|run|
+        with_file(path, mode, body >> run)
+    )
 );
 
-mock_read_line: MockIOHandle -> IO String;
-mock_read_line = |handle| pure $ "line";
+type MockIOHandle = I64;
 
-test_unlift_reader: TestCase;
-test_unlift_reader = (
-    make_test("test_unlift_reader") $ |_|
-    let get_env: ReaderT String IO String = ask;
-    let rm: ReaderT String IO String = do {
-        with_run_in_io $ |run|
-        mock_with_file("filepath", |handle|
+mock_with_file: IORef String -> Path -> (MockIOHandle -> IO a) -> IO a;
+mock_with_file = |logger, filepath, body| (
+    logger.mod(concat("[mock_with_file] filepath="+filepath));;
+    let handle = 123;
+    body(handle)
+);
+
+mock_with_file_m: [m: MonadUnliftIO] IORef String -> Path -> (MockIOHandle -> m a) -> m a;
+mock_with_file_m = |logger, filepath, body| (
+    with_run_in_io(|run|
+        mock_with_file(logger, filepath, body >> run)
+    )
+);
+
+mock_read_line: [m: MonadIO] MockIOHandle -> m String;
+mock_read_line = |handle| pure $ "this is test content";
+
+test_unlift_io_reader: TestCase;
+test_unlift_io_reader = (
+    make_test("test_unlift_io_reader") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let rm: ReaderT String IOFail String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
             let line = *mock_read_line(handle);
-            let env = (*get_env.run).get;
-            pure $ Iden::make $ "line="+line+ " env="+env
-        ).lift_io
+            let env = *ask;
+            pure $ "line="+line+ " env="+env
+        )
     };
-    let expected = "line=line env=env";
-    let actual = *rm.run_reader_t("env").lift;
-    assert_equal("eq", expected, actual)
+    let expected = "line=this is test content env=some-config";
+    let actual = *rm.run_reader_t("some-config");
+    assert_equal("result", expected, actual);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_iofail_reader: TestCase;
+test_unlift_iofail_reader = (
+    make_test("test_unlift_iofail_reader") $ |_|
+    let path = "tmp.test_unlift_io.tmp";
+    let rm: ReaderT String IOFail String = do {
+        with_file_m(path, "w", |handle|
+            let env = *ask;
+            write_string(handle, "env=" + env).lift_iofail;;
+            pure $ "result"
+        )
+    };
+    let actual = *rm.run_reader_t("some-config");
+    assert_equal("result", "result", actual);;
+    let expected = "env=some-config";
+    let actual = *read_file_string(path);
+    assert_equal("content", expected, actual);;
+    pure()
+);
+
+test_unlift_io_writer: TestCase;
+test_unlift_io_writer = (
+    make_test("test_unlift_io_writer") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let wm: WriterT String IOFail String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
+            let line = *mock_read_line(handle);
+            tell("hello\n");;
+            tell("world\n");;
+            pure $ "line="+line
+        )
+    };
+    let expected = "line=this is test content";
+    let (content, actual) = *wm.run_writer_t;
+    assert_equal("result", expected, actual);;
+    assert_equal("content", "hello\nworld\n", content);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_iofail_writer: TestCase;
+test_unlift_iofail_writer = (
+    make_test("test_unlift_iofail_writer") $ |_|
+    let path = "tmp.test_unlift_io.tmp";
+    let wm: WriterT String IOFail String = do {
+        with_file_m(path, "w", |handle|
+            write_string(handle, "test content").lift_iofail;;
+            tell("hello\n");;
+            tell("world\n");;
+            pure $ "result"
+        )
+    };
+    let (log, result) = *wm.run_writer_t;
+    assert_equal("result", "result", result);;
+    assert_equal("log", "hello\nworld\n", log);;
+    let content = *read_file_string(path);
+    assert_equal("content", "test content", content);;
+    pure()
+);
+
+test_unlift_io_state: TestCase;
+test_unlift_io_state = (
+    make_test("test_unlift_io_state") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let state: String = "state123";
+    let sm: StateT String IOFail String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
+            let old_state = *get_state;
+            let line = *mock_read_line(handle);
+            put_state("state456");;
+            pure $ "line="+line+ " old_state="+state
+        )
+    };
+    let expected = "line=this is test content old_state=state123";
+    let (state, actual) = *sm.run_state_t(state);
+    assert_equal("result", expected, actual);;
+    assert_equal("state", "state456", state);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_iofail_state: TestCase;
+test_unlift_iofail_state = (
+    make_test("test_unlift_iofail_state") $ |_|
+    let path = "tmp.test_unlift_io.tmp";
+    let sm: StateT String IOFail String = do {
+        with_file_m(path, "w", |handle|
+            let old_state = *get_state;
+            write_string(handle, "old_state=" + old_state).lift_iofail;;
+            put_state("state456");;
+            pure $ "result"
+        )
+    };
+    let (state, result) = *sm.run_state_t("state123");
+    assert_equal("result", "result", result);;
+    assert_equal("state", "state456", state);;
+    let content = *read_file_string(path);
+    assert_equal("content", "old_state=state123", content);;
+    pure()
+);
+
+test_unlift_io_result: TestCase;
+test_unlift_io_result = (
+    make_test("test_unlift_io_result") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let rm: ResultT ErrMsg IOFail String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
+            let line = *mock_read_line(handle);
+            if line == "abc" { result_t $ pure $ err("error") };
+            pure $ "line="+line
+        )
+    };
+    let expected = ok $ "line=this is test content";
+    let actual = *rm.run_result_t;
+    assert_equal("result", expected, actual);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_iofail_result: TestCase;
+test_unlift_iofail_result = (
+    make_test("test_unlift_iofail_result") $ |_|
+    let path = "tmp.test_unlift_io.tmp";
+    let rm: ResultT ErrMsg IOFail String = do {
+        with_file_m(path, "w", |handle|
+            write_string(handle, "test content").lift_iofail;;
+            pure $ "result"
+        )
+    };
+    let result = *rm.run_result_t;
+    assert_equal("result", ok $ "result", result);;
+    let content = *read_file_string(path);
+    assert_equal("content", "test content", content);;
+    pure()
 );
 
 main: IO ();
 main = (
     [
-        test_unlift_reader,
+        test_unlift_io_reader,
+        test_unlift_iofail_reader,
+        test_unlift_io_writer,
+        test_unlift_iofail_writer,
+        test_unlift_io_state,
+        test_unlift_iofail_state,
+        test_unlift_io_result,
+        test_unlift_iofail_result,
     ]
     .run_test_driver
 );

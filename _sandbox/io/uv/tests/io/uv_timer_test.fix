@@ -15,19 +15,20 @@ test_timer_init = (
     make_test("test_timer_init") $ |_|
     let loop = *UvLoop::make;
     let timer = *UvTimer::init(loop);
+    assert_true("loop", *timer.get_loop == loop);;
     loop.run_default;;
     pure()
 );
 
-test_timer_start: TestCase;
-test_timer_start = (
+test_timer_once: TestCase;
+test_timer_once = (
     make_test("test_timer_start") $ |_|
     let res = *IORef::make(err("not done"): Result ErrMsg ());
     let loop = *UvLoop::make;
     let timer = *UvTimer::init(loop);
-    let on_timer = |timer| (
+    let on_timer = |timer: UvTimer| (
         do {
-            emprintln("on_timer");;
+            emprintln("test_timer_once: on_timer");;
             timer.stop;;
             res.set(ok())
         }
@@ -42,11 +43,41 @@ test_timer_start = (
     pure()
 );
 
+test_timer_repeat: TestCase;
+test_timer_repeat = (
+    make_test("test_timer_repeat") $ |_|
+    let counter = *IORef::make(0);
+    let res = *IORef::make(err("not done"): Result ErrMsg ());
+    let loop = *UvLoop::make;
+    let timer = *UvTimer::init(loop);
+    let on_timer = |timer: UvTimer| (
+        do {
+            emprintln("test_timer_repeat: on_timer");;
+            counter.mod(add(1));;
+            if *counter.get >= 5 {
+                //timer.stop;;
+                (*timer.get_loop).stop;;
+                res.set(ok())
+            };
+            pure()
+        }
+        .try(|errmsg|
+            // TODO: exit loop
+            res.set(err(errmsg))
+        )
+    );
+    timer.start(on_timer, 100, 100);;
+    loop.run_default;;
+    assert_equal("res", ok(), *res.get);;
+    pure()
+);
+
 main: IO ();
 main = (
     [
         test_timer_init,
-        test_timer_start,
+        test_timer_once,
+        test_timer_repeat,
     ]
     .run_test_driver
 );

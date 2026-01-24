@@ -1,6 +1,7 @@
 module Minilib.IO.Uv;
 
 import Minilib.Monad.IO;
+import Minilib.Monad.Iden;
 
 log_debug: String -> ();
 //log_debug = |str| debug_eprintln("\u001b[035m[Minilib.IO.Uv]\u001b[m " + str);
@@ -17,6 +18,13 @@ trait [m: * -> *] m: MonadBorrowIF {
     borrow_m: (a -> m b) -> Destructor a -> m b;
     borrow_c_str_m: (Ptr -> m b) -> String -> m b;
     mutate_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m (a, b);
+}
+
+impl Iden: MonadBorrowIF {
+    borrow_boxed_m = |f| borrow_boxed(f >> Iden::get) >> Iden::make;
+    borrow_m = |f| borrow(f >> Iden::get) >> Iden::make;
+    borrow_c_str_m = |f| borrow_c_str(f >> Iden::get) >> Iden::make;
+    mutate_boxed_m = |f| mutate_boxed(f >> Iden::get >> pure) >> Iden::make;
 }
 
 impl IO: MonadBorrowIF {
@@ -66,6 +74,17 @@ namespace UvPtrWithOwnership {
 
     make_borrowed: Ptr -> UvPtrWithOwnership;
     make_borrowed = borrowed;
+}
+
+impl UvPtrWithOwnership: Eq {
+    eq = |a, b| (
+        a.borrow_ptr_m(|pa|
+            b.borrow_ptr_m(|pb|
+                pure $ pa == pb
+            )
+        )
+        .Iden::get
+    );
 }
 
 impl UvPtrWithOwnership: BorrowPtrM {
@@ -121,8 +140,9 @@ type UvLoop = unbox struct {
 };
 
 namespace UvLoop {
-    make: IOFail UvLoop;
-    make = (
+    // Creates and initializes an event loop.
+    make: [m: MonadIOFail] m UvLoop;
+    make = lift_iofail $ do {
         let ptr = *FFI_CALL_IO[Ptr minilib_uv_loop_init()].lift;
         if ptr == nullptr { throw $ "uv_loop_init failed!" };
         pure $ UvLoop {
@@ -131,22 +151,42 @@ namespace UvLoop {
                 pure $ nullptr
             ).lift
         }
-    );
+    };
 
-    default: UvLoop;
-    default = (
-        UvLoop {
-            wptr: UvPtrWithOwnership::make_borrowed $
-                FFI_CALL[Ptr uv_default_loop()]
-        }
-    );
+    // Gets the default event loop.
+    default: [m: MonadIO] m UvLoop;
+    default = lift_io $ do {
+        let p_loop = *FFI_CALL_IO[Ptr uv_default_loop()];
+        from_ptr(p_loop)
+    };
 
-    run_default: UvLoop -> IOFail ();
-    run_default = |loop| (
+    // Runs the event loop until there are no more active and referenced handles or requests. 
+    run_default: [m: MonadIOFail] UvLoop -> m ();
+    run_default = |loop| lift_iofail $ do {
         loop.borrow_ptr_m(|p_loop|
             _check_err $ FFI_CALL_IO[CInt minilib_uv_loop_run_default(Ptr), p_loop]
         )
-    );
+    };
+
+    // Stops the event loop.
+    stop: [m: MonadIO] UvLoop -> m ();
+    stop = |loop| lift_io $ do {
+        loop.borrow_ptr_m(|p_loop|
+            FFI_CALL_IO[() uv_stop(Ptr), p_loop]
+        )
+    };
+}
+
+impl UvLoop: Eq {
+    eq = |a, b| a.@wptr == b.@wptr;
+}
+
+impl UvLoop: FromPtr{
+    from_ptr = |p_loop| lift_io $ do {
+        pure $ UvLoop {
+            wptr: UvPtrWithOwnership::make_borrowed $ p_loop
+        }
+    };
 }
 
 impl UvLoop: BorrowPtrM {
@@ -183,6 +223,15 @@ namespace UvHandle {
     close = |handle| lift_io $ do {
         handle.borrow_ptr_m(|p_handle|
             FFI_CALL_IO[() minilib_uv_handle_close(Ptr), p_handle]
+        )
+    };
+
+    get_loop: [m: MonadIO] UvHandle t -> m UvLoop;
+    get_loop = |handle| lift_io $ do {
+        handle.borrow_ptr_m(|p_handle|
+            // TODO: should implement minilib_uv_handle_get_loop?
+            let p_loop = *FFI_CALL_IO[Ptr uv_handle_get_loop(Ptr), p_handle];
+            from_ptr(p_loop)
         )
     };
 

@@ -22,6 +22,7 @@ void minilib_uv_handle_close_callback(uv_handle_t* handle);
 void minilib_uv_handle_dealloc(uv_handle_t* handle);
 
 // in uv.fix
+void minilib_uv_timer_callback(uv_timer_t *timer);
 void minilib_uv_fs_open_callback(uv_fs_t *req);
 void minilib_uv_fs_close_callback(uv_fs_t *req);
 void minilib_uv_fs_read_callback(uv_fs_t *req);
@@ -88,7 +89,7 @@ void minilib_uv_loop_close(uv_loop_t* loop)
 // ----------------------------------
 struct minilib_uv_handledata_s {
     void* fix_cb;
-    int read_started;
+    int started;
     void* extra_data;
 };
 typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
@@ -103,7 +104,7 @@ uv_handle_t* minilib_uv_handle_alloc(size_t size)
     handle->data = data;
 
     data->fix_cb = NULL;
-    data->read_started = 0;
+    data->started = 0;
     data->extra_data = NULL;
 
     return handle;
@@ -161,6 +162,12 @@ void* minilib_uv_handle_get_fix_cb(uv_handle_t* handle)
     void* fix_cb = data->fix_cb;
     data->fix_cb = NULL;
     return fix_cb;
+}
+
+int minilib_uv_is_started(uv_handle_t *handle)
+{
+    minilib_uv_handledata_t* data = handle->data;
+    return data->started;
 }
 
 void minilib_uv_handle_set_extra_data(uv_handle_t* handle, void* extra_data)
@@ -267,6 +274,52 @@ void* minilib_uv_req_get_extra_data(uv_req_t* req)
 }
 
 // ----------------------------------
+// uv_timer_t
+// ----------------------------------
+
+uv_timer_t* minilib_uv_timer_init(uv_loop_t* loop)
+{
+    uv_timer_t *timer = (uv_timer_t*) minilib_uv_handle_alloc(sizeof(uv_timer_t));
+    LOG_DEBUG(("minilib_uv_timer_init timer=%p\n", timer));
+    int err = uv_timer_init(loop, timer);
+    if (err < 0) {
+        minilib_uv_handle_dealloc((uv_handle_t*) timer);
+        return NULL;
+    }
+    return timer;
+}
+
+void minilib_uv_timer_cb(uv_timer_t *timer)
+{
+    LOG_DEBUG(("minilib_uv_timer_cb timer=%p\n", timer));
+    minilib_uv_timer_callback(timer);
+}
+
+int minilib_uv_timer_start(uv_timer_t *timer, uint64_t timeout, uint64_t repeat)
+{
+    LOG_DEBUG(("minilib_uv_timer_start timer=%p\n", timer));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)timer)->data;
+    if (data->started) return UV_EALREADY;
+    int err = uv_timer_start(timer, minilib_uv_timer_cb, timeout, repeat);
+    LOG_DEBUG(("minilib_uv_timer_start err=%d\n", err));
+    if (err < 0) return err;
+    data->started = 1;
+    return err;
+}
+
+int minilib_uv_timer_stop(uv_timer_t *timer)
+{
+    LOG_DEBUG(("minilib_uv_timer_stop timer=%p\n", timer));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)timer)->data;
+    if (!data->started) return 0;
+    int err = uv_timer_stop(timer);
+    LOG_DEBUG(("minilib_uv_timer_stop err=%d\n", err));
+    if (err < 0) return err;
+    data->started = 0;
+    return err;
+}
+
+// ----------------------------------
 // uv_fs_t
 // ----------------------------------
 
@@ -365,21 +418,15 @@ void minilib_uv_read_cb(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
     free(buf->base);
 }
 
-int minilib_uv_is_read_started(uv_stream_t *stream)
-{
-    minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
-    return data->read_started;
-}
-
 int minilib_uv_read_start(uv_stream_t *stream)
 {
     LOG_DEBUG(("minilib_uv_read_start stream=%p\n", stream));
     minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
-    if (data->read_started) return UV_EALREADY;
+    if (data->started) return UV_EALREADY;
     int err = uv_read_start(stream, minilib_uv_read_alloc_cb, minilib_uv_read_cb);
     LOG_DEBUG(("minilib_uv_read_start err=%d\n", err));
     if (err < 0) return err;
-    data->read_started = 1;
+    data->started = 1;
     return err;
 }
 
@@ -387,10 +434,10 @@ int minilib_uv_read_stop(uv_stream_t *stream)
 {
     LOG_DEBUG(("minilib_uv_read_stop stream=%p\n", stream));
     minilib_uv_handledata_t* data = ((uv_handle_t*)stream)->data;
-    if (!data->read_started) return 0;
+    if (!data->started) return 0;
     int err = uv_read_stop(stream);
     if (err < 0) return err;
-    data->read_started = 0;
+    data->started = 0;
     return err;
 }
 

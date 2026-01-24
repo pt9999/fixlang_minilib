@@ -185,7 +185,14 @@ namespace UvHandle {
             FFI_CALL_IO[() minilib_uv_handle_close(Ptr), p_handle]
         )
     };
-    
+
+    is_started: [m: MonadIO] UvHandle t -> m Bool;
+    is_started = |handle| lift_io $ do {
+        handle.borrow_ptr_m(|p_handle|
+            FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_handle]
+        ).map(|ret| ret != 0.to_CInt)
+    };
+
     // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
     set_user_callback: [m: MonadIO] cb -> UvHandle t -> m ();
     set_user_callback = |cb, handle| lift_io $ do {
@@ -248,7 +255,7 @@ namespace UvReq {
         req.borrow_ptr_m(|p_req| FFI_CALL_IO[() minilib_uv_req_release(Ptr), p_req])
     };
 
-    // ユーザが用意したコールバック関数を設定する。型を正しく合わせる必要がある。
+    // ユーザが用意したコールバック関数を設定し、retainする。型を正しく合わせる必要がある。
     set_user_callback: [m: MonadIO] cb -> UvReq t -> m ();
     set_user_callback = |cb, req| lift_io $ do {
         req.borrow_ptr_m(|p_req|
@@ -259,7 +266,7 @@ namespace UvReq {
         )
     };
 
-    // ユーザが用意したコールバック関数を取得する。型を正しく合わせる必要がある。
+    // ユーザが用意したコールバック関数を取得し、releaseする。型を正しく合わせる必要がある。
     get_user_callback: [m: MonadIO] UvReq t -> m cb;
     get_user_callback = |req| lift_io $ do {
         req.borrow_ptr_m(|p_req|
@@ -286,6 +293,69 @@ namespace UvReq {
         )
     };
 }
+
+//-----------------------------------------------------------------
+// UvTimer
+//-----------------------------------------------------------------
+
+type UvTimerTag = unbox struct {};
+trait tag: IsUvTimerTag {}
+impl UvTimerTag: IsUvTimerTag {}
+
+type UvTimer = UvHandle UvTimerTag;
+
+namespace UvTimer {
+    init: UvLoop -> IOFail UvTimer;
+    init = |loop| (
+        loop.borrow_ptr_m(|p_loop|
+            let p_timer = *FFI_CALL_IO[Ptr minilib_uv_timer_init(Ptr), p_loop].lift;
+            if p_timer == nullptr { throw $ "minilib_uv_timer_init failed!" };
+            from_ptr(p_timer).lift
+        )
+    );
+
+    // timer のコールバック
+    // # Parameters
+    // * timer: タイマー(uv_timer_t*)
+    type UvTimerCallback = UvTimer -> IO ();
+
+    start: [t: IsUvTimerTag, m: MonadIOFail] UvTimerCallback -> I64 -> I64 -> UvHandle t -> m ();
+    start = |cb, timeout, repeat, timer| lift_iofail $ do {
+        if *timer.is_started {
+            throw $ "timer already started"
+        };
+        timer.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_timer_start(Ptr, U64, U64), p_timer, timeout.to_U64, repeat.to_U64]
+            ._check_err
+        )
+    };
+    minilib_uv_timer_callback : Ptr ->  ();
+    minilib_uv_timer_callback = |p_timer| (
+        eval log_debug("minilib_uv_timer_callback: p_timer=" + p_timer.to_string);
+        let timer: UvTimer = *from_ptr(p_timer);
+        let cb: UvTimerCallback = *timer.get_user_callback;     // ユーザが用意したコールバック関数を取得する(release)
+        timer.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        cb(timer)
+    ).unsafe_perform;
+    FFI_EXPORT[minilib_uv_timer_callback, minilib_uv_timer_callback];
+
+    stop: [t: IsUvTimerTag, m: MonadIOFail] UvHandle t -> m ();
+    stop = |timer| lift_iofail $ do {
+        let ret = *timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_timer]
+        ).lift;
+        if ret == 0.to_CInt {
+            pure()
+        };
+        let err = *timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_timer_stop(Ptr), p_timer]
+        ).lift;
+        let cb: UvTimerCallback = *timer.get_user_callback.lift;     // ユーザが用意したコールバック関数を取得する(release)
+        pure(err)._check_err
+    };
+}
+
 
 //-----------------------------------------------------------------
 // UvFile
@@ -324,7 +394,7 @@ namespace UvStream {
     read_start: [t: IsUvStreamTag, m: MonadIOFail] UvReadCallback -> UvHandle t -> m ();
     read_start = |cb, stream| lift_iofail $ do {
         stream.borrow_ptr_m(|p_stream|
-            let ret = *FFI_CALL_IO[CInt minilib_uv_is_read_started(Ptr), p_stream].lift;
+            let ret = *FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_stream].lift;
             if ret != 0.to_CInt {
                 throw $ "reading already started"
             };
@@ -354,7 +424,7 @@ namespace UvStream {
     read_stop: [t: IsUvStreamTag, m: MonadIOFail] UvHandle t -> m ();
     read_stop = |stream| lift_iofail $ do {
         let ret = *stream.borrow_ptr_m(|p_stream|
-            FFI_CALL_IO[CInt minilib_uv_is_read_started(Ptr), p_stream]
+            FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_stream]
         ).lift;
         if ret == 0.to_CInt {
             pure()
@@ -428,7 +498,7 @@ impl UvPipeTag: IsUvStreamTag {}
 type UvPipe = UvHandle UvPipeTag;
 
 namespace UvPipe {
-    // uv_pipe_t* を確保して初期化し、UvFsを作成する。
+    // uv_pipe_t* を確保して初期化し、UvPipeを作成する。
     init: UvLoop -> IOFail UvPipe;
     init = |loop| (
         loop.borrow_ptr_m(|p_loop|

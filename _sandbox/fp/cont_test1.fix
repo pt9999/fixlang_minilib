@@ -6,6 +6,7 @@ import Minilib.Monad.Cont;
 import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
 type [cm: * -> *] Label cm a b = box struct {
@@ -97,6 +98,46 @@ test_loan_pattern1 = (
     }
 );
 
+mutate_boxed_io_2: [a : Std::Boxed] (Std::Ptr -> Std::IO (a, b)) -> a -> Std::IO (a, b);
+mutate_boxed_io_2 = |f, a| (
+    a.mutate_boxed_io(f >> map(Tuple2::@1))
+);
+
+test_loan_pattern2: TestCase;
+test_loan_pattern2 = (
+    make_test("test_loan_pattern2") $ |_|
+    let src = "abcde".get_bytes.pop_back;
+    let dest = "-----".get_bytes.pop_back;
+    let size = 5;
+    let cm: ContT (Array U8, ()) IO (Array U8, ()) = do {
+        let p_dest = *dest.flip(mutate_boxed_io_2).cont_t;
+        let p_src = *src.flip(borrow_boxed_io).cont_t;
+        FFI_CALL_IO[Ptr memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, size.to_CSizeT].lift_io;;
+        pure $ ([], ())
+    };
+    let (dest, ()) = *cm.eval_cont_t.lift;
+    let dest = dest._unsafe_to_string;
+    assert_equal("eq", "abcde", dest)
+);
+
+reset_t: [m: Monad] ContT r m r -> ContT rr m r;
+reset_t = eval_cont_t >> lift_t;
+
+reset: [m: Monad] Cont r r -> Cont rr r;
+reset = eval_cont >> pure;
+
+shift_t: [m: Monad] ((a -> m r) -> ContT r m r) -> ContT r m a;
+shift_t = |f| (f >> eval_cont_t).cont_t;
+
+shift: [m: Monad] ((a -> r) -> Cont r r) -> Cont r a;
+shift = |f: ((a -> r) -> ContT r Iden r)| (
+    let h: (a -> Iden r) -> (a -> r) = |ff, a| ff(a).Iden::get;
+    let g: (a -> Iden r) -> Iden r = (h >> f >> eval_cont_t);
+    g.cont_t
+);
+
+// TODO: test_reset_shift
+
 main: IO ();
 main = (
     set_unbuffered_mode(stdout);;
@@ -105,6 +146,7 @@ main = (
         test_exit_cont,
         //test_label,
         test_loan_pattern1,
+        test_loan_pattern2,
     ]
     .run_test_driver
 );

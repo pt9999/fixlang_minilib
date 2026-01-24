@@ -1,7 +1,7 @@
 all:
 
 test: test-alternative test-applicative test-array-t test-compose test-const \
-		test-effect test-either-t test-eq1 \
+		test-cont test-effect test-either-t test-eq1 \
 		test-free test-free-t test-iterator-t test-pipe test-pipe-t \
 		test-svar test-traversable-a test-yield test-yield-t test-misc
 
@@ -19,6 +19,9 @@ test-compose:
 
 test-const:
 	fix run -f const.fix -f const_test.fix
+
+test-cont:
+	fix run -f cont_test1.fix
 
 test-effect:
 	fix run -f effect_example1.fix -f either_t.fix -f eq1.fix -f free.fix

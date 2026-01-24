@@ -1,9 +1,12 @@
 module Main;
 
+import Minilib.Common.Common;
 import Minilib.Common.IOEx;
 import Minilib.Monad.Cont;
+import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Monad.Trans;
+import Minilib.Testing.UnitTest;
 
 type [cm: * -> *] Label cm a b = box struct {
     // the argument of a jump
@@ -24,8 +27,9 @@ namespace Label {
     );
 }
 
-test_label: IOFail ();
+test_label: TestCase;
 test_label = (
+    make_test("test_label") $ |_|
     let cont: ContT () IOFail () = do {
         let label = *Label::make(0);
         print(label.@arg.to_string + "> ").lift.lift_t;;
@@ -45,9 +49,9 @@ postpone = |g| (
     cont_t $ |f: () -> m r| f().bind(g >> pure)
 );
 
-test_postpone: IOFail ();
+test_postpone: TestCase;
 test_postpone = (
-    println("=== test_postpone ===").lift;;
+    make_test("test_postpone") $ |_|
     let cont: ContT (Array String) IOFail (Array String) = do {
         //postpone(reverse);;
         postpone(push_back("third"));;
@@ -66,9 +70,9 @@ exit_cont = |r| (
     cont_t $ |f: () -> m r| pure $ r
 );
 
-test_exit_cont: IOFail ();
+test_exit_cont: TestCase;
 test_exit_cont = (
-    println("=== test_exit_cont ===").lift;;
+    make_test("test_exit_cont") $ |_|
     let cont: ContT (Array String) IOFail (Array String) = do {
         postpone(push_back("third"));;
         exit_cont $ [ "aborted" ];;
@@ -79,14 +83,31 @@ test_exit_cont = (
     println(arr.to_string).lift
 );
 
+test_loan_pattern1: TestCase;
+test_loan_pattern1 = (
+    make_test("test_loan_pattern1") $ |_|
+    eval_cont_t $ do {
+        let handle = *with_file("tmp.test.tmp", "w").cont_t;
+        write_string(handle, "hello").lift_iofail
+    };;
+    eval_cont_t $ do {
+        let handle = *with_file("tmp.test.tmp", "r").cont_t;
+        let content = *read_string(handle).lift_iofail;
+        assert_equal("eq", "hello", content)
+    }
+);
+
 main: IO ();
-main = do {
-    set_unbuffered_mode(stdout).lift;;
-    test_postpone;;
-    test_exit_cont;;
-    //test_label;;
-    pure()
-}.try(eprintln);
+main = (
+    set_unbuffered_mode(stdout);;
+    [
+        test_postpone,
+        test_exit_cont,
+        //test_label,
+        test_loan_pattern1,
+    ]
+    .run_test_driver
+);
 
 /*
 type [cm: * -> *] LabelPair cm a b = box struct {
@@ -149,27 +170,5 @@ coroutine1 = |lp| (
     };
     eval debug_eprintln("coroutine1 c");
     pure $ lp
-);
-*/
-
-
-/*
-type Yield y a = box union {
-    y_pure: a,
-    y_yield: y -> a,
-};
-
-
-yield: I64 -> Generator I64;
-yield = |i| ...;
-
-generator1: Generator I64;
-generator1 = (
-    loop_m(
-        (0, 1), |(i, j)|
-        if i >= 100 { break_m $ i };
-        let j = *yield(i);
-        continue_m $ (i + j, j)
-    )
 );
 */

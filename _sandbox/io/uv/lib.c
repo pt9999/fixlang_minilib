@@ -118,11 +118,9 @@ struct minilib_uv_handledata_s {
 };
 typedef struct minilib_uv_handledata_s minilib_uv_handledata_t;
 
-uv_handle_t* minilib_uv_handle_alloc(size_t size)
+uv_handle_t* minilib_uv_handle_init(uv_handle_t* handle)
 {
-    uv_handle_t* handle = malloc(size);
     if (handle == NULL) return NULL;
-
     minilib_uv_handledata_t* data = malloc(sizeof(minilib_uv_handledata_t));
     if (data == NULL) return NULL;
     handle->data = data;
@@ -130,7 +128,6 @@ uv_handle_t* minilib_uv_handle_alloc(size_t size)
     data->fix_cb = NULL;
     data->started = 0;
     data->extra_data = NULL;
-
     return handle;
 }
 
@@ -242,7 +239,6 @@ void minilib_uv_req_retain(uv_req_t* req)
 {
     if (req != NULL && req->data != NULL) {
         minilib_uv_reqdata_t* data = req->data;
-        uv_req_type type = req->type;
         LOG_DEBUG(("minilib_uv_req_retain req=%p type=%d refcount: %d -> %d\n", req, type, data->refcount, data->refcount+1));
         data->refcount++;
     }
@@ -252,7 +248,6 @@ void minilib_uv_req_release(uv_req_t* req)
 {
     if (req != NULL && req->data != NULL) {
         minilib_uv_reqdata_t* data = req->data;
-        uv_req_type type = req->type;
         LOG_DEBUG(("minilib_uv_req_release req=%p type=%d refcount: %d -> %d\n", req, type, data->refcount, data->refcount-1));
         data->refcount--;
         if (data->refcount <= 0) {
@@ -303,7 +298,8 @@ void* minilib_uv_req_get_extra_data(uv_req_t* req)
 
 uv_timer_t* minilib_uv_timer_init(uv_loop_t* loop)
 {
-    uv_timer_t *timer = (uv_timer_t*) minilib_uv_handle_alloc(sizeof(uv_timer_t));
+    uv_timer_t *timer = (uv_timer_t*) minilib_uv_handle_init(malloc(sizeof(uv_timer_t)));
+    if (timer == NULL) return NULL;
     LOG_DEBUG(("minilib_uv_timer_init timer=%p\n", timer));
     int err = uv_timer_init(loop, timer);
     if (err < 0) {
@@ -350,7 +346,8 @@ int minilib_uv_timer_stop(uv_timer_t *timer)
 
 uv_idle_t* minilib_uv_idle_init(uv_loop_t* loop)
 {
-    uv_idle_t *idle = (uv_idle_t*) minilib_uv_handle_alloc(sizeof(uv_idle_t));
+    uv_idle_t *idle = (uv_idle_t*) minilib_uv_handle_init(malloc(sizeof(uv_idle_t)));
+    if (idle == NULL) return NULL;
     LOG_DEBUG(("minilib_uv_idle_init idle=%p\n", idle));
     int err = uv_idle_init(loop, idle);
     if (err < 0) {
@@ -542,7 +539,8 @@ uv_stream_t* minilib_uv_write_get_stream(uv_write_t* write_req)
 
 uv_pipe_t* minilib_uv_pipe_init(uv_loop_t* loop)
 {
-    uv_pipe_t *pipe = (uv_pipe_t*) minilib_uv_handle_alloc(sizeof(uv_pipe_t));
+    uv_pipe_t *pipe = (uv_pipe_t*) minilib_uv_handle_init(malloc(sizeof(uv_pipe_t)));
+    if (pipe == NULL) return NULL;
     LOG_DEBUG(("minilib_uv_pipe_init pipe=%p\n", pipe));
     int ipc = 0;
     int err = uv_pipe_init(loop, pipe, ipc);

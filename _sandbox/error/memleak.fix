@@ -1,0 +1,29 @@
+// メモリリークの検証方法
+// 1. dmalloc をインストール
+//    $ sudo apt install libdmalloc-dev
+// 2. fixproj.toml の [build] に以下の行を追加
+//    dynamic_links = ["dmalloc"]
+// 3. ビルドする
+//    $ fix build -o a.out
+// 4. dmalloc のデバッグレベルを中程度(medium)に設定し、ログを dmalloc.log に記録する
+//    $ eval $(command dmalloc -b medium -l dmalloc.log)
+//    もしくは以下を実行しても同じ結果になる
+//    $ export DMALLOC_OPTIONS=debug=0x4f48d03,log=dmalloc.log
+// 5. a.out を実行する
+//    $ ./a.out
+// 6. dmalloc.log が作成されているので、内容を確認する
+//    $ less dmalloc.log
+//    以下のような行が大量に出力される
+//    not freed: '0x7f2fbdd46248|s1' (48 bytes) from 'unknown'
+module Main;
+
+main: IO ();
+main = (
+    if true {
+        // -O basic でコンパイルするとメモリリークする
+        range(0,1000).map(|i| pure()).to_array.to_iter.collect_m.forget
+    } else {
+        // こっちはメモリリークしない
+        range(0,1000).map(|i| pure()).collect_m.forget
+    }
+);

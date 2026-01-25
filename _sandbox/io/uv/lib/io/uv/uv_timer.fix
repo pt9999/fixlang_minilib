@@ -1,0 +1,67 @@
+module Minilib.IO.Uv.UvTimer;
+
+import Minilib.IO.Uv;
+import Minilib.Monad.IO;
+
+
+//-----------------------------------------------------------------
+// UvTimer
+//-----------------------------------------------------------------
+
+type UvTimerTag = unbox struct {};
+trait tag: IsUvTimerTag {}
+impl UvTimerTag: IsUvTimerTag {}
+
+type UvTimer = UvHandle UvTimerTag;
+
+namespace UvTimer {
+    init: UvLoop -> IOFail UvTimer;
+    init = |loop| (
+        loop.borrow_ptr_m(|p_loop|
+            let p_timer = *FFI_CALL_IO[Ptr minilib_uv_timer_init(Ptr), p_loop].lift;
+            if p_timer == nullptr { throw $ "minilib_uv_timer_init failed!" };
+            from_ptr(p_timer).lift
+        )
+    );
+
+    // timer のコールバック
+    // # Parameters
+    // * timer: タイマー(uv_timer_t*)
+    type UvTimerCallback = UvTimer -> IO ();
+
+    start: [t: IsUvTimerTag, m: MonadIOFail] UvTimerCallback -> I64 -> I64 -> UvHandle t -> m ();
+    start = |cb, timeout, repeat, timer| lift_iofail $ do {
+        if *timer.is_started {
+            throw $ "timer already started"
+        };
+        timer.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_timer_start(Ptr, U64, U64), p_timer, timeout.to_U64, repeat.to_U64]
+            ._check_err
+        )
+    };
+    minilib_uv_timer_callback : Ptr ->  ();
+    minilib_uv_timer_callback = |p_timer| (
+        eval log_debug("minilib_uv_timer_callback: p_timer=" + p_timer.to_string);
+        let timer: UvTimer = *from_ptr(p_timer);
+        let cb: UvTimerCallback = *timer.get_user_callback;     // ユーザが用意したコールバック関数を取得する(release)
+        timer.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        cb(timer)
+    ).unsafe_perform;
+    FFI_EXPORT[minilib_uv_timer_callback, minilib_uv_timer_callback];
+
+    stop: [t: IsUvTimerTag, m: MonadIOFail] UvHandle t -> m ();
+    stop = |timer| lift_iofail $ do {
+        let ret = *timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_timer]
+        ).lift;
+        if ret == 0.to_CInt {
+            pure()
+        };
+        let err = *timer.borrow_ptr_m(|p_timer|
+            FFI_CALL_IO[CInt minilib_uv_timer_stop(Ptr), p_timer]
+        ).lift;
+        let cb: UvTimerCallback = *timer.get_user_callback.lift;     // ユーザが用意したコールバック関数を取得する(release)
+        pure(err)._check_err
+    };
+}

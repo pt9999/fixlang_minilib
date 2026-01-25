@@ -23,6 +23,7 @@ void minilib_uv_handle_dealloc(uv_handle_t* handle);
 
 // in uv.fix
 void minilib_uv_timer_callback(uv_timer_t *timer);
+void minilib_uv_idle_callback(uv_idle_t *timer);
 void minilib_uv_fs_open_callback(uv_fs_t *req);
 void minilib_uv_fs_close_callback(uv_fs_t *req);
 void minilib_uv_fs_read_callback(uv_fs_t *req);
@@ -314,6 +315,53 @@ int minilib_uv_timer_stop(uv_timer_t *timer)
     if (!data->started) return 0;
     int err = uv_timer_stop(timer);
     LOG_DEBUG(("minilib_uv_timer_stop err=%d\n", err));
+    if (err < 0) return err;
+    data->started = 0;
+    return err;
+}
+
+
+// ----------------------------------
+// uv_idle_t
+// ----------------------------------
+
+uv_idle_t* minilib_uv_idle_init(uv_loop_t* loop)
+{
+    uv_idle_t *idle = (uv_idle_t*) minilib_uv_handle_alloc(sizeof(uv_idle_t));
+    LOG_DEBUG(("minilib_uv_idle_init idle=%p\n", idle));
+    int err = uv_idle_init(loop, idle);
+    if (err < 0) {
+        minilib_uv_handle_dealloc((uv_handle_t*) idle);
+        return NULL;
+    }
+    return idle;
+}
+
+void minilib_uv_idle_cb(uv_idle_t *idle)
+{
+    LOG_DEBUG(("minilib_uv_idle_cb idle=%p\n", idle));
+    minilib_uv_idle_callback(idle);
+}
+
+int minilib_uv_idle_start(uv_idle_t *idle)
+{
+    LOG_DEBUG(("minilib_uv_idle_start idle=%p\n", idle));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)idle)->data;
+    if (data->started) return UV_EALREADY;
+    int err = uv_idle_start(idle, minilib_uv_idle_cb);
+    LOG_DEBUG(("minilib_uv_idle_start err=%d\n", err));
+    if (err < 0) return err;
+    data->started = 1;
+    return err;
+}
+
+int minilib_uv_idle_stop(uv_idle_t *idle)
+{
+    LOG_DEBUG(("minilib_uv_idle_stop idle=%p\n", idle));
+    minilib_uv_handledata_t* data = ((uv_handle_t*)idle)->data;
+    if (!data->started) return 0;
+    int err = uv_idle_stop(idle);
+    LOG_DEBUG(("minilib_uv_idle_stop err=%d\n", err));
     if (err < 0) return err;
     data->started = 0;
     return err;

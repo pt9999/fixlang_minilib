@@ -1,0 +1,85 @@
+module UvIdleTest;
+
+import Minilib.Common.IORef;
+import Minilib.IO.Uv;
+import Minilib.IO.Uv.UvIdle;
+import Minilib.Monad.IO;
+import Minilib.Monad.Reader;
+import Minilib.Monad.Error;
+import Minilib.Testing.UnitTest;
+
+//log_test: [m: MonadIO] String -> m () = |str| println("[TEST] " + str).lift_io;
+log_test: [m: MonadIO] String -> m () = |str| pure();
+
+test_idle_init: TestCase;
+test_idle_init = (
+    make_test("test_idle_init") $ |_|
+    let loop = *UvLoop::make;
+    let idle = *UvIdle::init(loop);
+    assert_true("loop", *idle.get_loop == loop);;
+    loop.run_default;;
+    pure()
+);
+
+test_idle_once: TestCase;
+test_idle_once = (
+    make_test("test_idle_start") $ |_|
+    let res = *IORef::make(err("not done"): Result ErrMsg ());
+    let loop = *UvLoop::make;
+    let idle = *UvIdle::init(loop);
+    let on_idle = |idle: UvIdle| (
+        do {
+            emprintln("test_idle_once: on_idle");;
+            idle.stop;;
+            idle.close;;
+            res.set(ok())
+        }
+        .try(|errmsg|
+            // TODO: exit loop
+            res.set(err(errmsg))
+        )
+    );
+    idle.start(on_idle);;
+    loop.run_default;;
+    assert_equal("res", ok(), *res.get);;
+    pure()
+);
+
+test_idle_repeat: TestCase;
+test_idle_repeat = (
+    make_test("test_idle_repeat") $ |_|
+    let counter = *IORef::make(0);
+    let res = *IORef::make(err("not done"): Result ErrMsg ());
+    let loop = *UvLoop::make;
+    let idle = *UvIdle::init(loop);
+    let on_idle = |idle: UvIdle| (
+        do {
+            emprintln("test_idle_repeat: on_idle");;
+            counter.mod(add(1));;
+            if *counter.get >= 5 {
+                //idle.stop;;
+                (*idle.get_loop).stop;;
+                res.set(ok())
+            };
+            pure()
+        }
+        .try(|errmsg|
+            // TODO: exit loop
+            res.set(err(errmsg))
+        )
+    );
+    idle.start(on_idle);;
+    loop.run_default;;
+    assert_equal("res", ok(), *res.get);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_idle_init,
+        test_idle_once,
+        test_idle_repeat,
+    ]
+    .run_test_driver
+);

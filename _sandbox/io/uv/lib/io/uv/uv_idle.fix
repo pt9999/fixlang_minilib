@@ -1,0 +1,67 @@
+module Minilib.IO.Uv.UvIdle;
+
+import Minilib.IO.Uv;
+import Minilib.Monad.IO;
+
+
+//-----------------------------------------------------------------
+// UvIdle
+//-----------------------------------------------------------------
+
+type UvIdleTag = unbox struct {};
+trait tag: IsUvIdleTag {}
+impl UvIdleTag: IsUvIdleTag {}
+
+type UvIdle = UvHandle UvIdleTag;
+
+namespace UvIdle {
+    init: UvLoop -> IOFail UvIdle;
+    init = |loop| (
+        loop.borrow_ptr_m(|p_loop|
+            let p_idle = *FFI_CALL_IO[Ptr minilib_uv_idle_init(Ptr), p_loop].lift;
+            if p_idle == nullptr { throw $ "minilib_uv_idle_init failed!" };
+            from_ptr(p_idle).lift
+        )
+    );
+
+    // idle のコールバック
+    // # Parameters
+    // * idle: アイドル(uv_idle_t*)
+    type UvIdleCallback = UvIdle -> IO ();
+
+    start: [t: IsUvIdleTag, m: MonadIOFail] UvIdleCallback -> UvHandle t -> m ();
+    start = |cb, idle| lift_iofail $ do {
+        if *idle.is_started {
+            throw $ "idle already started"
+        };
+        idle.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        idle.borrow_ptr_m(|p_idle|
+            FFI_CALL_IO[CInt minilib_uv_idle_start(Ptr), p_idle]
+            ._check_err
+        )
+    };
+    minilib_uv_idle_callback : Ptr ->  ();
+    minilib_uv_idle_callback = |p_idle| (
+        eval log_debug("minilib_uv_idle_callback: p_idle=" + p_idle.to_string);
+        let idle: UvIdle = *from_ptr(p_idle);
+        let cb: UvIdleCallback = *idle.get_user_callback;     // ユーザが用意したコールバック関数を取得する(release)
+        idle.set_user_callback(cb);;     // ユーザが用意したコールバック関数を設定する(retain)
+        cb(idle)
+    ).unsafe_perform;
+    FFI_EXPORT[minilib_uv_idle_callback, minilib_uv_idle_callback];
+
+    stop: [t: IsUvIdleTag, m: MonadIOFail] UvHandle t -> m ();
+    stop = |idle| lift_iofail $ do {
+        let ret = *idle.borrow_ptr_m(|p_idle|
+            FFI_CALL_IO[CInt minilib_uv_is_started(Ptr), p_idle]
+        ).lift;
+        if ret == 0.to_CInt {
+            pure()
+        };
+        let err = *idle.borrow_ptr_m(|p_idle|
+            FFI_CALL_IO[CInt minilib_uv_idle_stop(Ptr), p_idle]
+        ).lift;
+        let cb: UvIdleCallback = *idle.get_user_callback.lift;     // ユーザが用意したコールバック関数を取得する(release)
+        pure(err)._check_err
+    };
+}

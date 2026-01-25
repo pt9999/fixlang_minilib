@@ -85,6 +85,29 @@ void minilib_uv_loop_close(uv_loop_t* loop)
     free(loop);
 }
 
+/*
+int minilib_atexit_cb_registered = 0;
+void minilib_atexit_cb()
+{
+    uv_loop_t* loop = uv_default_loop();
+    if (loop != NULL) {
+        uv_loop_close(loop);
+    }
+}
+*/
+
+uv_loop_t* minilib_uv_get_default_loop()
+{
+    /*
+    // TODO: thread safety
+    if (!minilib_atexit_cb_registered) {
+        atexit(&minilib_atexit_cb);
+        minilib_atexit_cb_registered = 1;
+    }
+    */
+    return uv_default_loop();
+}
+
 // ----------------------------------
 // uv_handle_t
 // ----------------------------------

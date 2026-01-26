@@ -1,0 +1,73 @@
+module Publisher.Tests.AppTest;
+
+import Minilib.App.Clap;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+import Publisher.App;
+import Publisher.Publish;
+
+test_to_publish_args_default: TestCase;
+test_to_publish_args_default = (
+    make_test("test_to_publish_args_default") $ |_|
+    let command_line = "_publisher.out /some/dir";
+    let args: Array String = command_line.split(" ").to_array;
+    let matches = *command_publish.get_matches_from(args).from_result;
+    let args: PublishArgs = matches.to_publish_args;
+    assert_equal("subproject_dir", "/some/dir", args.@subproject_dir);;
+    assert_equal("new_version", none(), args.@new_version);;
+    assert_equal("release", false, args.@release);;
+    assert_equal("confirm", true, args.@confirm);;
+    assert_equal("commit", false, args.@commit);;
+    assert_equal("push", false, args.@push);;
+    assert_equal("tag", false, args.@tag);;
+    assert_equal("update_document", false, args.@update_document);;
+    pure()
+);
+
+test_to_publish_args_new_version: TestCase;
+test_to_publish_args_new_version = (
+    make_test("test_to_publish_args_new_version") $ |_|
+    let command_line = "_publisher.out /some/dir --new-version 1.2.0";
+    let args: Array String = command_line.split(" ").to_array;
+    let matches = *command_publish.get_matches_from(args).from_result;
+    let args: PublishArgs = matches.to_publish_args;
+    assert_equal("new_version", some("1.2.0"), args.@new_version);;
+    pure()
+);
+
+test_to_publish_args_bool_opts: TestCase;
+test_to_publish_args_bool_opts = (
+    make_test("test_to_publish_args_bool_opts") $ |_|
+    [
+        ("release", @release),
+        ("confirm", @confirm),
+        ("commit", @commit),
+        ("push", @push),
+        ("tag", @tag),
+        ("update-document", @update_document),
+    ]
+    .to_iter.foreach_m(|(option, field)|
+        [true, false].to_iter.foreach_m(|is_true|
+            let option = if is_true { "--" + option } else { "--no-" + option };
+            let command_line = "_publisher.out /some/dir " + option;
+            let args: Array String = command_line.split(" ").to_array;
+            let matches = *command_publish.get_matches_from(args).from_result;
+            let args: PublishArgs = matches.to_publish_args;
+            let expected = is_true;
+            let actual = field(args);
+            //eprintln((option, expected, actual).to_string).lift;;
+            assert_equal(option, expected, actual)
+        )
+    )
+);
+
+testsuite: TestCase;
+testsuite = (
+    [
+        test_to_publish_args_default,
+        test_to_publish_args_new_version,
+        test_to_publish_args_bool_opts,
+    ]
+    .run_tests
+);

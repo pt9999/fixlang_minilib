@@ -1,3 +1,24 @@
+// With MonadUnliftIO, you can use your monad type in a callback function.
+//
+// Example:
+// You can use `ReaderT` monad in the `body` function.
+// ```
+// with_file_using_reader_monad: Path -> String -> (IOHandle -> ReaderT e IOFail a) -> ReaderT e IOFail a;
+// with_file_using_reader_monad = |path, mode, body| (
+//     with_run_in_iofail(|run|
+//         with_file(path, mode, body >> run)
+//     )
+// );
+// ```
+// More generally, you can use any monad which implements `MonadUnliftIOFail` in the `body` function.
+// ```
+// with_file_m: [m: MonadUnliftIOFail] Path -> String -> (IOHandle -> m a) -> m a;
+// with_file_m = |path, mode, body| (
+//     with_run_in_iofail(|run|
+//         with_file(path, mode, body >> run)
+//     )
+// );
+// ```
 module Minilib.Monad.UnliftIO;
 
 import Minilib.Common.Common;
@@ -13,10 +34,22 @@ trait MonadUnliftIO = Monad + MonadUnliftIOIF;
 trait MonadUnliftIOFail = Monad + MonadUnliftIOIF + MonadUnliftIOFailIF;
 
 trait [m: *->*] m: MonadUnliftIOIF {
+    // A functor which is used in the return type of the `run` function and the `body` function.
+    // This is a kind of "unlifted" version of the return type.
+    // For example, it is like `(e, a)` for the Writer Monad, and `Result ErrMsg a` for the ResultT monad.
+    // This is a functor, so you can use `Functor::map` in the `body` function.
     type UnliftedIO m: * -> *;
+
+    // # Parameters
+    // - `body`: A function which receives the `run` function as an argument,
+    //           and returns an IO monad.
+    //           The `run` function converts your monad `m a` into an IO monad of type `UnliftedIO m a`.
+    //           You have to return an IO monad of type `UnliftedIO m b` from the `body` function.
     with_run_in_io: ((m a -> IO (UnliftedIO m a)) -> IO (UnliftedIO m b)) -> m b;
 }
 
+// This interface is similar to `MonadUnliftIOIF`. 
+// The `run` function converts your monad to an `IOFail` monad, not an `IO` monad.
 trait [m: *->*] m: MonadUnliftIOFailIF {
     type UnliftedIOFail m: * -> *;
     with_run_in_iofail: ((m a -> IOFail (UnliftedIOFail m a)) -> IOFail (UnliftedIOFail m b)) -> m b;

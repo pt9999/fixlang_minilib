@@ -1,0 +1,107 @@
+module Main;
+
+import Hash;
+import HashMap;
+
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+// Updates an element into a HashMap.
+// 
+// `updater` is a function which takes an `Option v` as an argument and returns an `Option v`.
+//  The argument of `updater` is `some(old_value)` if there is an entry for the key `k`, `none()` if there is no entry.
+//  `updater` should return `some(new_value)` if you want to keep the entry (with or without changing the value),
+//  `none()` if you want to remove the entry.
+//
+// # Parameters
+// - `k`: A key
+// - `updater`: A function which updates the value
+// - `mp`: A hashmap
+update : [k : HashKey] k -> (Option v -> Option v) -> HashMap k v -> HashMap k v;
+update = |k, updater, mp| (
+    let size = mp.get_size;
+    let cap = mp.get_capacity;
+    let mp = if size < cap { mp } else { mp.reserve(size+1) };
+    let (table_idx, opt_bucket_idx) = mp._find_place(k);
+    match opt_bucket_idx {
+        some(bucket_idx) => (
+            //mp.mod__table(Array::mod(table_idx, Array::set(bucket_idx, Option::some $ (k, v))))
+            let opt_kv: Option (k, v) = mp[^_table][table_idx][bucket_idx].iget;
+            let opt_v: Option v = opt_kv.map(Tuple2::@1);
+            match updater(opt_v) {
+                none() => (
+                    let mp = mp.mod__size(Add::add(-1));
+                    mp[^_table][table_idx][bucket_idx].iset(Option::none())
+                ),
+                some(v) => (
+                    mp[^_table][table_idx][bucket_idx].iset(Option::some $ (k, v))
+                )
+            }
+        ),
+        none() => (
+            match updater(none()) {
+                none() => mp,
+                some(v) => (
+                    let open_idx = mp.@_table.@(table_idx).find_by(Option::is_none);
+                    let mp = if open_idx.is_some {
+                        let open_idx = open_idx.as_some;
+                        //mp.mod__table(Array::mod(table_idx, Array::set(open_idx, Option::some $ (k, v))))
+                        mp[^_table][table_idx][open_idx].iset(Option::some $ (k, v))
+                    } else {
+                        //mp.mod__table(Array::mod(table_idx, Array::push_back(Option::some $ (k, v))))
+                        mp[^_table][table_idx].imod(push_back $ Option::some $ (k, v))
+                    };
+                    mp.mod__size(Add::add(1))            
+                )
+            }
+        )
+    }
+);
+
+test_update: TestCase;
+test_update = (
+    make_test("test_update") $ |_|
+    let h: HashMap I64 I64 = HashMap::empty(10);
+    let n = 1000;
+    let count = 10;
+    let h = range(0, count).fold(
+        h, |_, h|
+        range(0, n).fold(
+            h, |i, h|
+            h.update(i, |opt_v| some $ opt_v.map_or(1, add(1)))
+        )
+    );
+    assert_equal("size", n, h.get_size);;
+    range(0, n).foreach_m(|i|
+        let expected = some $ count;
+        let actual = h.find(i);
+        assert_equal("after increment i="+i.to_string, expected, actual)
+    );;
+    let h = range(0, count).fold(
+        h, |_, h|
+        range(0, n).fold(
+            h, |i, h|
+            h.update(i, |opt_v| 
+                match opt_v {
+                    none() => none(),
+                    some(v) => if v <= 1 { none() } else { some(v-1) }
+                }
+            )
+        )
+    );
+    range(0, n).foreach_m(|i|
+        let expected = none();
+        let actual = h.find(i);
+        assert_equal("after decrement i="+i.to_string, expected, actual)
+    );;
+    assert_equal("size", 0, h.get_size);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_update,
+    ]
+    .run_test_driver
+);

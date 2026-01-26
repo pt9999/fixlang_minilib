@@ -1,6 +1,8 @@
 module Minilib.Monad.UnliftIO;
 
 import Minilib.Common.Common;
+import Minilib.Functor.Pair;
+import Minilib.Monad.Iden;
 import Minilib.Monad.IO;
 import Minilib.Monad.Reader;
 import Minilib.Monad.Writer;
@@ -11,32 +13,32 @@ trait MonadUnliftIO = Monad + MonadUnliftIOIF;
 trait MonadUnliftIOFail = Monad + MonadUnliftIOIF + MonadUnliftIOFailIF;
 
 trait [m: *->*] m: MonadUnliftIOIF {
-    type UnliftedIO m a;
+    type UnliftedIO m: * -> *;
     with_run_in_io: ((m a -> IO (UnliftedIO m a)) -> IO (UnliftedIO m b)) -> m b;
 }
 
 trait [m: *->*] m: MonadUnliftIOFailIF {
-    type UnliftedIOFail m a;
+    type UnliftedIOFail m: * -> *;
     with_run_in_iofail: ((m a -> IOFail (UnliftedIOFail m a)) -> IOFail (UnliftedIOFail m b)) -> m b;
 }
 
 impl IO: MonadUnliftIOIF {
-    type UnliftedIO IO a = a;
-    with_run_in_io = |body| body(id);
+    type UnliftedIO IO = Iden;
+    with_run_in_io = |body| body(map(Iden::make)).map(Iden::get);
 }
 
 impl IOFail: MonadUnliftIOIF {
-    type UnliftedIO IOFail a = Result ErrMsg a;
+    type UnliftedIO IOFail = Result ErrMsg;
     with_run_in_io = |body| body(to_result).from_io_result;
 }
 
 impl IOFail: MonadUnliftIOFailIF {
-    type UnliftedIOFail IOFail a = a;
-    with_run_in_iofail = |body| body(id);
+    type UnliftedIOFail IOFail = Iden;
+    with_run_in_iofail = |body| body(map(Iden::make)).map(Iden::get);
 }
 
 impl [m: MonadUnliftIO] ReaderT e m: MonadUnliftIOIF {
-    type UnliftedIO (ReaderT e m) a = UnliftedIO m a;
+    type UnliftedIO (ReaderT e m) = UnliftedIO m;
     with_run_in_io = |body| (
         reader_t $ |e|
         with_run_in_io(|run|
@@ -46,7 +48,7 @@ impl [m: MonadUnliftIO] ReaderT e m: MonadUnliftIOIF {
 }
 
 impl [m: MonadUnliftIOFail] ReaderT e m: MonadUnliftIOFailIF {
-    type UnliftedIOFail (ReaderT e m) a = UnliftedIOFail m a;
+    type UnliftedIOFail (ReaderT e m) = UnliftedIOFail m;
     with_run_in_iofail = |body| (
         reader_t $ |e|
         with_run_in_iofail(|run|
@@ -56,70 +58,62 @@ impl [m: MonadUnliftIOFail] ReaderT e m: MonadUnliftIOFailIF {
 }
 
 impl [m: MonadUnliftIO] WriterT e m: MonadUnliftIOIF {
-    type UnliftedIO (WriterT e m) a = UnliftedIO m (e, a);
+    type UnliftedIO (WriterT e m) = PairRT e (UnliftedIO m);
     with_run_in_io = |body| (
         writer_t $
         with_run_in_io(|run|
-            body(run_writer_t >> run)
+            body(run_writer_t >> run >> map(PairRT::make)).map(PairRT::get)
         )
     );
 }
 
 impl [m: MonadUnliftIOFail] WriterT e m: MonadUnliftIOFailIF {
-    type UnliftedIOFail (WriterT e m) a = UnliftedIOFail m (e, a);
+    type UnliftedIOFail (WriterT e m) = PairRT e (UnliftedIOFail m);
     with_run_in_iofail = |body| (
         writer_t $
         with_run_in_iofail(|run|
-            body(run_writer_t >> run)
+            body(run_writer_t >> run >> map(PairRT::make)).map(PairRT::get)
         )
     );
 }
 
 impl [m: MonadUnliftIO] StateT s m: MonadUnliftIOIF {
-    type UnliftedIO (StateT s m) a = UnliftedIO m (s, a);
+    type UnliftedIO (StateT s m) = PairRT s (UnliftedIO m);
     with_run_in_io = |body| (
         state_t $ |s|
         with_run_in_io(|run|
-            body(run_state_t(s) >> run)
+            body(run_state_t(s) >> run >> map(PairRT::make)).map(PairRT::get)
         )
     );
 }
 
 impl [m: MonadUnliftIOFail] StateT s m: MonadUnliftIOFailIF {
-    type UnliftedIOFail (StateT s m) a = UnliftedIOFail m (s, a);
+    type UnliftedIOFail (StateT s m) = PairRT s (UnliftedIOFail m);
     with_run_in_iofail = |body| (
         state_t $ |s|
         with_run_in_iofail(|run|
-            body(run_state_t(s) >> run)
+            body(run_state_t(s) >> run >> map(PairRT::make)).map(PairRT::get)
         )
     );
 }
 
-/*
-namespace ResultT {
-    from_iofail: IOFail a -> ResultT ErrMsg IO a;
-    from_iofail = |iof| (
-         result_t $ iof.to_result
-    );
-
-    to_iofail: ResultT ErrMsg IO a -> IOFail a;
-    to_iofail = |res| (
-        from_io_result $ res.run_result_t
-    );
-}
-*/
-
 impl [m: MonadUnliftIO] ResultT e m: MonadUnliftIOIF {
-    type UnliftedIO (ResultT e m) a = UnliftedIO m (Result e a);
+    type UnliftedIO (ResultT e m) = ResultT e (UnliftedIO m);
     with_run_in_io = |body| (
-        result_t $ with_run_in_io(|run| body(run_result_t >> run))
+        result_t $ 
+        with_run_in_io(|run| 
+            body(run_result_t >> run >> map(result_t)).map(run_result_t)
+        )
     );
 }
 
 // TODO: can implement with only [m: MonadUnliftIO]?
 impl [m: MonadUnliftIOFail] ResultT e m: MonadUnliftIOFailIF {
-    type UnliftedIOFail (ResultT e m) a = UnliftedIOFail m (Result e a);
+    type UnliftedIOFail (ResultT e m) = ResultT e (UnliftedIOFail m);
     with_run_in_iofail = |body| (
-        result_t $ with_run_in_iofail(|run| body(run_result_t >> run))
+        result_t $ 
+        with_run_in_iofail(|run| 
+            body(run_result_t >> run >> map(result_t)).map(run_result_t)
+        )
     );
 }

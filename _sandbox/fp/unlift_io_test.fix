@@ -32,9 +32,8 @@ borrow_boxed_m = |body, a| (
 
 //mutate_boxed_io : [a : Boxed] (Ptr -> IO b) -> a -> IO (a, b);
 
-// 関連型の型パラメータを部分適用した型が Functor であるという制約を書きたいが、現状ではできない
-//mutate_boxed_m : [m: MonadUnliftIO, UnliftedIO m = f, f: Functor, a : Boxed] (Ptr -> m b) -> a -> m (a, b);
-mutate_boxed_m : [m: MonadUnliftIO, a : Boxed] (Ptr -> m b) -> a -> m (a, b);
+// UnliftedIO m = f, f: Functor と書けるようになった！！
+mutate_boxed_m : [m: MonadUnliftIO, UnliftedIO m = f, f: Functor, a : Boxed] (Ptr -> m b) -> a -> m (a, b);
 mutate_boxed_m = |body, a| (
     with_run_in_io(|run|
         let (a: a, fb: UnliftedIO m b) = *a.mutate_boxed_io(body >> run);
@@ -63,6 +62,62 @@ mock_with_file_m = |logger, filepath, body| (
 
 mock_read_line: [m: MonadIO] MockIOHandle -> m String;
 mock_read_line = |handle| pure $ "this is test content";
+
+test_unlift_io_io: TestCase;
+test_unlift_io_io = (
+    make_test("test_unlift_io_io") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let io: IO String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
+            let line = *mock_read_line(handle);
+            pure $ "line="+line
+        )
+    };
+    let expected = "line=this is test content";
+    let actual = *io.lift;
+    assert_equal("result", expected, actual);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_io_iofail: TestCase;
+test_unlift_io_iofail = (
+    make_test("test_unlift_io_iofail") $ |_|
+    let logger: IORef String = *IORef::make("");
+    let iofail: IOFail String = do {
+        mock_with_file_m(logger, "/tmp/test.txt", |handle|
+            let line = *mock_read_line(handle);
+            pure $ "line="+line
+        )
+    };
+    let expected = "line=this is test content";
+    let actual = *iofail;
+    assert_equal("result", expected, actual);;
+    let expected = "[mock_with_file] filepath=/tmp/test.txt";
+    let actual = *logger.get;
+    assert_equal("logger", expected, actual);;
+    pure()
+);
+
+test_unlift_iofail_iofail: TestCase;
+test_unlift_iofail_iofail = (
+    make_test("test_unlift_iofail_iofail") $ |_|
+    let path = "tmp.test_unlift_io.tmp";
+    let iofail: IOFail String = do {
+        with_file_m(path, "w", |handle|
+            write_string(handle, "content").lift_iofail;;
+            pure $ "result"
+        )
+    };
+    let actual = *iofail;
+    assert_equal("result", "result", actual);;
+    let expected = "content";
+    let actual = *read_file_string(path);
+    assert_equal("content", expected, actual);;
+    pure()
+);
 
 test_unlift_io_reader: TestCase;
 test_unlift_io_reader = (
@@ -147,7 +202,6 @@ test_unlift_io_writer2 = (
     let (log, ret) = *wm.run_writer_t;
     assert_equal("log", "memcpy success", log)
 );
-
 
 test_unlift_iofail_writer: TestCase;
 test_unlift_iofail_writer = (
@@ -252,6 +306,8 @@ test_unlift_iofail_result = (
 main: IO ();
 main = (
     [
+        test_unlift_io_io,
+        test_unlift_io_iofail,
         test_unlift_io_reader,
         test_unlift_iofail_reader,
         test_unlift_io_writer,

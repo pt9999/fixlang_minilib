@@ -2,11 +2,15 @@
 
 .PHONY: all build test test-fix test-document clean document update-deps
 
-### Options for `_verup.py`
+### Options for `_verup.py` and `_publisher`
 CONFIRM = --confirm
 CONFIRM_OPTS = $(if $(CONFIRM), $(CONFIRM), --no-confirm)
+RELEASE =
+RELEASE_OPTS = $(if $(RELEASE), --release, --no-release)
 VERUP_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS)
 # VERUP_OPTS = $(CONFIRM_OPTS)
+PUBLISHER_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS) $(RELEASE_OPTS)
+# PUBLISHER_OPTS = $(CONFIRM_OPTS) $(RELEASE_OPTS)
 
 all: build
 
@@ -52,7 +56,7 @@ update-deps:
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
-	../_publisher/publisher.out . --confirm --commit --push --tag --update-document
+	../_publisher/publisher.out . $(PUBLISHER_OPTS)
 
 
 publish_old:

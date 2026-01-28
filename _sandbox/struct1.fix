@@ -1,0 +1,174 @@
+module Main;
+
+import Minilib.Text.Hex;
+
+copy_bytes: [a: Boxed] I64 -> a -> IO (Array U8);
+copy_bytes = |size, a| (
+    let buf = Array::fill(size, 0_U8);
+    //let a = range(0, size).map(to_U8).to_array;
+    let (buf, _) = *buf.mutate_boxed_io(|p_buf|
+        a.borrow_boxed(|p_a|
+            FFI_CALL_IO[Ptr memcpy(Ptr, Ptr, CSizeT), p_buf, p_a, size.to_CSizeT]
+        )
+    );
+    eval a;
+    pure $ buf
+);
+
+dump_bytes: [a: Boxed] I64 -> a -> IO ();
+dump_bytes = |size, a| (
+    let bytes = *a.copy_bytes(size);
+    let n = bytes.get_size;
+    let step = 16;
+    loop_m(
+        0, |addr|
+        if addr >= n { break_m() };
+        let row = bytes.get_sub(addr, min(n, addr + step));
+        let row = row.to_iter.map(to_string_hex).join(" ");
+        let addr_hex = addr.to_U64.to_string_hex;
+        println(addr_hex + ": " + row);;
+        continue_m $ addr + step
+    )
+);
+
+endmark: U64 = 0xffffffffffffffff_U64;
+
+type StructTuple = box struct {
+    a: (U8, 
+       U16),    // aligned to multiple of 2
+    b: (U8, 
+       U32),    // aligned to multiple of 4
+    c: (U8, 
+       U64),    // aligned to multiple of 8
+    end: U64,
+};
+
+test_struct_tuple: IO () = (
+    println("=== test_struct_tuple ===");;
+    let u8 = 0x01_U8;
+    let u16 = 0x0123_U16;
+    let u32 = 0x01234567_U32;
+    let u64 = 0x0123456789abcdef_U64;
+
+    let st = StructTuple { 
+        a: (u8, u16),
+        b: (u8, u32),
+        c: (u8, u64),
+        end: endmark,
+    };
+    st.dump_bytes(0x28)
+);
+
+type StructOption a = box struct {
+    a: Option a,
+    b: Option a,
+    end: U64
+};
+
+/*
+=== test_struct_option_u64 ===
+0000000000000000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   // 0x00 * 16 bytes
+0000000000000010: 01 3d 3d 20 74 65 73 74 ef cd ab 89 67 45 23 01   // 0x01 + garbage(7 bytes) + data(8 bytes)
+0000000000000020: ff ff ff ff ff ff ff ff
+*/
+test_struct_option_u64: IO () = (
+    println("=== test_struct_option_u64 ===");;
+    let u64 = 0x0123456789abcdef_U64;
+
+    let st: StructOption U64 = StructOption { 
+        a: none(),
+        b: some(u64),
+        end: endmark,
+    };
+    st.dump_bytes(0x28)
+);
+
+/*
+=== test_struct_option_u8 ===
+0000000000000000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   // 0x00 * 16 bytes
+0000000000000010: 01 53 42 01 00 00 00 00 89 00 00 00 00 00 00 00   // 0x01 + garbage(7 bytes) + data(8 bytes)
+0000000000000020: ff ff ff ff ff ff ff ff
+*/
+test_struct_option_u8: IO () = (
+    println("=== test_struct_option_u8 ===");;
+    let u8 = 0x89_U8;
+
+    let st: StructOption U8 = StructOption { 
+        a: none(),
+        b: some(u8),
+        end: endmark,
+    };
+    st.dump_bytes(0x28)
+);
+
+/*
+0000000000000000: 00 00 00 00 00 00 00 00 01 37 fb 27 48 7f 00 00   // 0x00 + garbage(7 bytes), 0x01 + garbage(7 bytes)
+0000000000000010: ff ff ff ff ff ff ff ff
+*/
+test_struct_option_unit: IO () = (
+    println("=== test_struct_option_unit ===");;
+    let unit = ();
+
+    let st: StructOption () = StructOption { 
+        a: none(),
+        b: some(unit),
+        end: endmark,
+    };
+    st.dump_bytes(0x18)
+);
+
+type StructResult a = box struct {
+    a: Result ErrMsg a,
+    b: Result ErrMsg a,
+    end: U64
+};
+
+/*
+0000000000000000: 01 00 00 00 00 00 00 00 70 ab 0e 02 00 00 00 00   // 0x00 + garbage(7 bytes) + Ptr(8 bytes)
+0000000000000010: 00 a3 0e 02 00 00 00 00 ef cd ab 89 67 45 23 01   // 0x01 + garbage(7 bytes) + data(8 bytes)
+0000000000000020: ff ff ff ff ff ff ff ff
+*/
+test_struct_result: IO () = (
+    println("=== test_struct_result ===");;
+    let u64 = 0x0123456789abcdef_U64;
+
+    let st: StructResult U64 = StructResult { 
+        a: err("abcde"),
+        b: ok(u64),
+        end: endmark,
+    };
+    st.dump_bytes(0x28)
+);
+
+type StructBoxed a = box struct {
+    a: Array a,
+    b: String,
+    end: U64
+};
+
+/*
+=== test_struct_boxed ===
+0000000000000000: a0 de 48 00 00 00 00 00 40 db 48 00 00 00 00 00   // Ptr(8 bytes) + Ptr(8 bytes) ?
+0000000000000010: ff ff ff ff ff ff ff ff
+*/
+test_struct_boxed: IO () = (
+    println("=== test_struct_boxed ===");;
+
+    let st: StructBoxed U8 = StructBoxed { 
+        a: [1_U8, 2_U8],
+        b: "abc",
+        end: endmark,
+    };
+    st.dump_bytes(0x18)
+);
+
+main: IO ();
+main = (
+    test_struct_tuple;;
+    test_struct_option_u64;;
+    test_struct_option_u8;;
+    test_struct_option_unit;;
+    test_struct_result;;
+    test_struct_boxed;;
+    pure()
+);

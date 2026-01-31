@@ -481,27 +481,56 @@ namespace FileView {
     );
 }
 
+type StatusView = unbox struct {
+    window: Window,
+};
+
+namespace StatusView {
+    make: Window -> IOFail StatusView;
+    make = |win| (
+        pure $ StatusView {
+            window: win
+        }
+    );
+
+    show: StateIOF StatusView ();
+    show = (
+        let window = *select_state(StatusView::@window);
+        let (w, h) = *window.get_window_size;
+        window.clear;;
+        window.set_color_pair(cp_white, normal);;
+        window.move_add_wstr(0, 0, "q:終了 Enter:選択 ^:上の階層 jk:カーソル移動");;
+        window.refresh;;
+        pure()
+    );
+}
+
+
 type App = unbox struct {
     window: Window,
     file_list_view: FileListView,
     file_view: FileView,
+    status_view: StatusView,
 };
 
 namespace App {
     make: Window -> IOFail App;
-    make = |win| (
-        let (w, h) = *win.get_window_size;
-        let flv_w = w * 1 / 3;
-        let flv_win = *win.make_sub_window(0, 0, flv_w, h);
-        let fv_win = *win.make_sub_window(flv_w, 0, w - flv_w, h);
+    make = |app_win| (
+        let (app_w, app_h) = *app_win.get_window_size;
+        let flv_w = app_w * 1 / 3;
+        let flv_win = *app_win.make_sub_window(0, 0, flv_w, app_h - 1);
+        let fv_win = *app_win.make_sub_window(flv_w, 0, app_w - flv_w, app_h - 1);
+        let status_win = *app_win.make_sub_window(0, app_h - 1, app_w, 1);
         let flv = *FileListView::make(flv_win, *realpath("."));
         let flv = flv.mod_list_view(set_id(0) >> set_has_focus(true));
         let fv = *FileView::make(fv_win);
         let fv = fv.mod_list_view(set_id(1) >> set_has_focus(false));
+        let status_view = *StatusView::make(status_win);
         pure $ App {
-            window: win,
+            window: app_win,
             file_list_view: flv,
-            file_view: fv
+            file_view: fv,
+            status_view: status_view,
         }
     );
 
@@ -511,10 +540,14 @@ namespace App {
     with_file_view: StateIOF FileView a -> StateIOF App a;
     with_file_view = |sm| sm.lens_state_t(act_file_view);
 
+    with_status_view: StateIOF StatusView a -> StateIOF App a;
+    with_status_view = |sm| sm.lens_state_t(act_status_view);
+
     show: StateIOF App ();
     show = (
         with_file_list_view(FileListView::show);;
         with_file_view(FileView::show);;
+        with_status_view(StatusView::show);;
         pure()
     );
 

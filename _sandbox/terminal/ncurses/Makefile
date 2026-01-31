@@ -19,9 +19,12 @@ clean:
 	fix build -o $@ -f $<
 
 EXAMPLES = \
+	examples/demo_attributes.out \
+	examples/demo_colors.out \
 	examples/display_bounds.out \
 	examples/filer.out \
 	examples/hello_world.out \
+	examples/hello_world2.out \
 	examples/loadavg.out \
 
 .PHONY: examples

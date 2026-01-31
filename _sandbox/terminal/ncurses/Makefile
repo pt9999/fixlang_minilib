@@ -27,3 +27,6 @@ EXAMPLES = \
 .PHONY: examples
 examples: $(EXAMPLES)
 
+install: examples/filer.out
+	install examples/filer.out $(HOME)/.local/bin/filer
+

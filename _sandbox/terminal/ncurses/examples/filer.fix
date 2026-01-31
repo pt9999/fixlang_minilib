@@ -14,25 +14,27 @@ select_state: [m: Monad] (s -> a) -> StateT s m a;
 select_state = |selector| get_state.map(selector);
 
 namespace StringUtils {
-    pad_right: I64 -> U8 -> String -> String;
-    pad_right = |result_size, char, str| (
+    // pads to the right and truncate to prefix
+    xpad_right: I64 -> U8 -> String -> String;
+    xpad_right = |result_size, char, str| (
         let str_size = str.get_size;
         if str_size >= result_size {
             str.get_sub(0, result_size)
         };
-        let pad_size = result_size - str_size;
-        let pad = Array::fill(pad_size, char)._unsafe_to_string;
+        let xpad_size = result_size - str_size;
+        let pad = Array::fill(xpad_size, char)._unsafe_to_string;
         str + pad
     );
 
-    pad_left: I64 -> U8 -> String -> String;
-    pad_left = |result_size, char, str| (
+    // pads to the left and truncate to suffix
+    xpad_left: I64 -> U8 -> String -> String;
+    xpad_left = |result_size, char, str| (
         let str_size = str.get_size;
         if str_size >= result_size {
             str.get_sub(str_size - result_size, str_size)
         };
-        let pad_size = result_size - str_size;
-        let pad = Array::fill(pad_size, char)._unsafe_to_string;
+        let xpad_size = result_size - str_size;
+        let pad = Array::fill(xpad_size, char)._unsafe_to_string;
         pad + str
     );
 
@@ -266,7 +268,7 @@ namespace FileItem {
         pure $ FileItem {
             file_name: file_name,
             file_path: file_path,
-            stat: *stat(file_path)
+            stat: *lstat(file_path)
         }
     );
 
@@ -283,8 +285,8 @@ namespace FileItem {
         let name = if stat.is_dir { name + "/" }
         else if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { name + "*" }
         else { name };
-        name.pad_right(20, ' ') +
-        stat.st_size.format_file_size.pad_left(13, ' ')
+        name.xpad_right(20, ' ') +
+        stat.st_size.format_file_size.xpad_left(13, ' ')
     );
 
     // Convert a file size to a String in human readable format.
@@ -305,6 +307,7 @@ namespace FileItem {
     get_attr = |item| (
         let stat = item.@stat;
         if stat.is_dir { color_pair(cp_blue).bit_or(bold) };
+        if stat.is_symbolic_link { color_pair(cp_cyan).bit_or(bold) };
         if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { color_pair(cp_green).bit_or(bold) };
         color_pair(cp_white)
     );

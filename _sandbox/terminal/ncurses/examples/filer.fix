@@ -7,6 +7,7 @@ import Minilib.Monad.IO;
 import Minilib.Terminal.Ncurses;
 import Minilib.Trait.Traversable;
 import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
 
 type StateIOF s = StateT s IOFail;
 
@@ -149,7 +150,7 @@ namespace ListView {
                 //window.set_color_pair(cp_white, normal)
                 window.set_attr(item.@attr)
             };;
-            window.move_add_str(1, i + 1, item.@text);;
+            window.move_add_wstr(1, i + 1, item.@text);;
             continue_m $ i + 1
         );;
         if (has_focus) {
@@ -158,8 +159,8 @@ namespace ListView {
             window.set_color_pair(cp_white, normal)
         };;
         window.draw_border;;
-        window.move_add_str(2, 0, " " + ellipsis(w - 6, title) + " ").when(title != "");;
-        window.move_add_str(2, h - 1, " " + ellipsis(w - 6, message) + " ").when(message != "");;
+        window.move_add_wstr(2, 0, " " + ellipsis(w - 6, title) + " ").when(title != "");;
+        window.move_add_wstr(2, h - 1, " " + ellipsis(w - 6, message) + " ").when(message != "");;
         window.refresh;;
         pure()
     );
@@ -445,8 +446,11 @@ namespace FileView {
     open_file: String -> StateIOF FileView ();
     open_file = |file_path| (
         let contents = *read_file_bytes(file_path).lift_iofail;
-        let contents = contents._unsafe_to_string;
-        let items = contents.split("\n").to_array.map(|line|
+        let is_binary = contents.find_by(|u8| u8 == 0_U8).is_some;
+
+        let lines = if is_binary { _hexdump(contents, 1000) }
+        else { contents._unsafe_to_string.split("\n").to_array };
+        let items = lines.map(|line|
             let line = if line == "" { " " } else { line };
             ListItem {
                 text: line,
@@ -454,6 +458,24 @@ namespace FileView {
             }
         );
         with_list_view $ mod_state(set_items(items) >> set_title(Path::basename(file_path)))
+    );
+
+    _hexdump: Array U8 -> I64 -> Array String;
+    _hexdump = |contents, max_lines| (
+        loop(
+            ([], 0), |(lines, start)|
+            if start >= contents.get_size {
+                break $ lines
+            };
+            if lines.get_size >= max_lines {
+                break $ lines.push_back("...")
+            };
+            let end = min(start + 16, contents.get_size);
+            let bytes = contents.get_sub(start, end);
+            let line = start.to_U64.to_string_hex + ": " + bytes.to_iter.map(to_string_hex).join(" ");
+            let lines = lines.push_back(line);
+            continue $ (lines, start + 16)
+        )
     );
 
     show: StateIOF FileView ();
@@ -499,7 +521,7 @@ namespace StatusView {
         let (w, h) = *window.get_window_size;
         window.clear;;
         window.set_color_pair(cp_white, normal);;
-        window.move_add_wstr(0, 0, "q:終了 Enter:選択 ^:上の階層 jk:カーソル移動");;
+        window.move_add_wstr(0, 0, "q:終了 Enter:選択 ^:上の階層 jk:カーソル移動 TAB:フォーカス切替");;
         window.refresh;;
         pure()
     );

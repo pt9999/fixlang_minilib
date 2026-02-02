@@ -22,14 +22,10 @@ EXAMPLES = \
 	examples/demo_attributes.out \
 	examples/demo_colors.out \
 	examples/display_bounds.out \
-	examples/filer.out \
 	examples/hello_world.out \
 	examples/hello_world2.out \
 	examples/loadavg.out \
 
 .PHONY: examples
 examples: $(EXAMPLES)
-
-install: examples/filer.out
-	install examples/filer.out $(HOME)/.local/bin/filer
 

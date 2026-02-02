@@ -3,6 +3,7 @@ module DepGraph;
 
 import Minilib.Collection.TreeMap;
 import Minilib.Collection.TreeSet;
+import Minilib.Collection.Trait;
 import Minilib.Monad.State;
 import Minilib.Trait.Traversable;
 
@@ -44,7 +45,7 @@ namespace DepGraph {
     get_nodes = |graph| (
         graph.@parent_to_child.to_iter.fold(
             TreeSet::make(), |(parent, child), ts|
-            ts.TreeSet::insert(parent).TreeSet::insert(child)
+            ts.insert(parent).insert(child)
         )
     );
 
@@ -74,7 +75,7 @@ namespace DepGraph {
     find_descendants = |node, graph| (
         let inner: NodeId -> State (TreeSet NodeId) () = fix $ |inner, node| (
             if (*get_state).contains(node) { pure() };
-            State::mod_state(TreeSet::insert(node));;
+            State::mod_state(Set::insert(node));;
             graph.find_children(node).foreach_m(inner)
         );
         inner(node).exec_state(TreeSet::make())
@@ -132,7 +133,7 @@ namespace DepGraph {
         let topo_sorted = graph.toposort.to_iter.reverse.to_array;
         let topo_order: TreeMap NodeId I64 = topo_sorted.to_iter.zip(count_up(0)).fold(
             TreeMap::make(), |(node, order), map|
-            map.insert(node, order)
+            map.insert((node, order))
         );
 
         // Create the reduced graph by updating using the nodes in reverse topological order
@@ -140,7 +141,7 @@ namespace DepGraph {
         topo_sorted.to_iter.reverse.fold(
             reduced_graph, |parent, reduced_graph|
             // Reachable nodes from the parent
-            let reachable = TreeSet::make().TreeSet::insert(parent);
+            let reachable = TreeSet::make().insert(parent);
             // Find direct children of the parent and sort them in topological order
             let children = graph.find_children(parent).to_array;
             let children = children.sort_by(

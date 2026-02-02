@@ -1,0 +1,81 @@
+module Filer.Common;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+type StateIOF s = StateT s IOFail;
+
+select_state: [m: Monad] (s -> a) -> StateT s m a;
+select_state = |selector| get_state.map(selector);
+
+namespace StringUtils {
+    // pads to the right and truncate to prefix
+    xpad_right: I64 -> U8 -> String -> String;
+    xpad_right = |result_size, char, str| (
+        let str_size = str.get_size;
+        if str_size >= result_size {
+            str.get_sub(0, result_size)
+        };
+        let xpad_size = result_size - str_size;
+        let pad = Array::fill(xpad_size, char)._unsafe_to_string;
+        str + pad
+    );
+
+    // pads to the left and truncate to suffix
+    xpad_left: I64 -> U8 -> String -> String;
+    xpad_left = |result_size, char, str| (
+        let str_size = str.get_size;
+        if str_size >= result_size {
+            str.get_sub(str_size - result_size, str_size)
+        };
+        let xpad_size = result_size - str_size;
+        let pad = Array::fill(xpad_size, char)._unsafe_to_string;
+        pad + str
+    );
+
+    ellipsis: I64 -> String -> String;
+    ellipsis = |result_size, str| (
+        let str_size = str.get_size;
+        let result_size = max(0, result_size);
+        if str_size <= result_size { str };
+        if result_size < 3 { str.get_sub(0, result_size) };
+        "..." + str.get_sub(str_size - (result_size - 3), str_size)
+    );
+}
+
+namespace CustomColorPair {
+    cp_selected: ColorPair;
+    cp_selected = 10;
+
+    init_custom_color_pairs: IOFail ();
+    init_custom_color_pairs = (
+        pure();;    // make it lazy
+        init_color_pair(cp_selected, white, blue);;
+        pure()
+    );
+}
+
+type ListViewId = I64;
+
+type ListItem = unbox struct {
+    text: String,
+    attr: ChType
+};
+
+type Action = unbox union {
+    no_action: (),
+    action_quit: (),
+    action_next_focus: (),
+    action_select_prev_item: ListViewId,
+    action_select_next_item: ListViewId,
+    action_page_up: ListViewId,
+    action_page_down: ListViewId,
+    action_open_file: (),
+    action_up_directory: (),
+};

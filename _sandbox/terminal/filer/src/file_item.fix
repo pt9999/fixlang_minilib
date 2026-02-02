@@ -1,0 +1,78 @@
+module Filer.FileItem;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+import Filer.Common;
+
+type FileItem = box struct {
+    file_name: String,
+    file_path: String,
+    stat: FileStat,
+};
+
+namespace FileItem {
+    get_file_item: String -> String -> IOFail FileItem;
+    get_file_item = |dir_path, file_name| (
+        let file_path = join_paths([dir_path, file_name]);
+        pure $ FileItem {
+            file_name: file_name,
+            file_path: file_path,
+            stat: *lstat(file_path)
+        }
+    );
+
+    get_file_items: String -> IOFail (Array FileItem);
+    get_file_items = |dir_path| (
+        let file_names = *list_dir(dir_path);
+        file_names.map_m(|name| get_file_item(dir_path, name))
+    );
+
+    format_file_item: FileItem -> String;
+    format_file_item = |item| (
+        let name = item.@file_name;
+        let stat = item.@stat;
+        let name = if stat.is_dir { name + "/" }
+        else if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { name + "*" }
+        else { name };
+        name.xpad_right(20, ' ') +
+        stat.st_size.format_file_size.xpad_left(13, ' ')
+    );
+
+    // Convert a file size to a String in human readable format.
+    // Example: 123 => "123  B", 1234 => "1.2 KB", 123456 => "123 KB", 1234567 => "1.2 MB"
+    format_file_size: I64 -> String;
+    format_file_size = |size| (
+        let short = |x:F64| (
+            if x < 10.0 { x.to_string_precision(1_U8) }
+            else { x.to_string_precision(0_U8) }
+        );
+        if size < 1e3 { size.to_string + "  B" };
+        if size < 1e6 { (size.to_F64 / 1.0e3).short + " KB" };
+        if size < 1e9 { (size.to_F64 / 1.0e6).short + " MB" };
+        (size.to_F64 / 1.0e9).short + " GB"
+    );
+
+    get_attr: FileItem -> ChType;
+    get_attr = |item| (
+        let stat = item.@stat;
+        if stat.is_dir { color_pair(cp_blue).bit_or(bold) };
+        if stat.is_symbolic_link { color_pair(cp_cyan).bit_or(bold) };
+        if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { color_pair(cp_green).bit_or(bold) };
+        color_pair(cp_white)
+    );
+
+    to_list_item: FileItem -> ListItem;
+    to_list_item = |file_item| (
+        ListItem {
+            text: file_item.format_file_item,
+            attr: file_item.get_attr
+        }
+    );
+}

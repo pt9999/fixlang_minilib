@@ -1,0 +1,93 @@
+module Filer.FileView;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+import Filer.Common;
+import Filer.ListView;
+
+type FileView = unbox struct {
+    list_view: ListView,
+};
+
+impl FileView: WithListView {
+    type ListViewType FileView = ListView;
+    with_list_view = |sm| sm.lens_state_t(act_list_view);
+}
+
+namespace FileView {
+    make: Window -> IOFail FileView;
+    make = |win| (
+        pure $ FileView {
+            list_view: *ListView::make(win, []),
+        }
+    );
+
+    has_focus: StateIOF FileView Bool;
+    has_focus = with_list_view(has_focus);
+
+    open_file: String -> StateIOF FileView ();
+    open_file = |file_path| (
+        let contents = *read_file_bytes(file_path).lift_iofail;
+        let is_binary = contents.find_by(|u8| u8 == 0_U8).is_some;
+
+        let lines = if is_binary { _hexdump(contents, 1000) }
+        else { contents._unsafe_to_string.split("\n").to_array };
+        let items = lines.map(|line|
+            let line = if line == "" { " " } else { line };
+            ListItem {
+                text: line,
+                attr: normal
+            }
+        );
+        with_list_view $ mod_state(set_items(items) >> set_title(Path::basename(file_path)))
+    );
+
+    _hexdump: Array U8 -> I64 -> Array String;
+    _hexdump = |contents, max_lines| (
+        loop(
+            ([], 0), |(lines, start)|
+            if start >= contents.get_size {
+                break $ lines
+            };
+            if lines.get_size >= max_lines {
+                break $ lines.push_back("...")
+            };
+            let end = min(start + 16, contents.get_size);
+            let bytes = contents.get_sub(start, end);
+            let line = start.to_U64.to_string_hex + ": " + bytes.to_iter.map(to_string_hex).join(" ");
+            let lines = lines.push_back(line);
+            continue $ (lines, start + 16)
+        )
+    );
+
+    show: StateIOF FileView ();
+    show = (
+        with_list_view(ListView::show)
+    );
+
+    handle_key: StateIOF FileView Action;
+    handle_key = (
+        let key = *with_list_view(ListView::get_key);
+        //eval debug_eprintln(key);
+
+        let action = *with_list_view(ListView::handle_key(key));
+        if ! action.is_no_action { pure $ action };
+
+        pure $ no_action()
+    );
+
+    handle_action: Action -> StateIOF FileView ();
+    handle_action = |action| (
+        with_list_view(ListView::handle_action(action));;
+        match action {
+            _ => pure $ ()
+        }
+    );
+}

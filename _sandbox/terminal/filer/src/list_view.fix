@@ -1,0 +1,188 @@
+module Filer.ListView;
+
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Monad.State;
+import Minilib.Monad.IO;
+import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
+import Minilib.Text.StringEx;
+import Minilib.Text.Hex;
+
+import Filer.Common;
+
+type ListView = unbox struct {
+    id: I64,
+    window: Window,
+    visible: Bool,
+    has_focus: Bool,
+    title: String,
+    items: Array ListItem,
+    scroll_top: I64,
+    selected_index: I64,
+    message: String,
+};
+
+namespace ListView {
+    make: Window -> Array ListItem -> IOFail ListView;
+    make = |window, items| (
+        pure $ ListView {
+            id: 0,
+            window: window,
+            visible: true,
+            has_focus: false,
+            title: "",
+            items: items,
+            scroll_top: 0,
+            selected_index: -1,
+            message: "",
+        }
+    );
+
+    show: StateIOF ListView ();
+    show = (
+        let ListView {
+            has_focus: has_focus,
+            title: title,
+            items: items,
+            scroll_top: scroll_top,
+            selected_index: selected_index,
+            message: message,
+            window: window
+        } = *get_state;
+
+        window.clear;;
+
+        let (w, h) = *window.get_window_size;
+        let visible_lines = max(0, h - 2);
+        let scroll_top = (
+            if selected_index < 0 {
+                scroll_top
+            } else if selected_index < scroll_top || scroll_top + visible_lines <= selected_index {
+                max(0, selected_index - visible_lines / 2)
+            } else {
+                scroll_top
+            }
+        );
+        State::mod_state(set_scroll_top(scroll_top));;
+
+        loop_m(
+            0, |i|
+            let item_index = scroll_top + i;
+            if i >= visible_lines || item_index >= items.get_size { break_m $ () };
+            let item = items.@(item_index);
+            if item_index == selected_index {
+                if (has_focus) {
+                    window.set_color_pair(cp_selected, normal)
+                } else {
+                    window.set_color_pair(cp_selected, dim)
+                }
+            } else {
+                //window.set_color_pair(cp_white, normal)
+                window.set_attr(item.@attr)
+            };;
+            window.move_add_wstr(1, i + 1, item.@text);;
+            continue_m $ i + 1
+        );;
+        if (has_focus) {
+            window.set_color_pair(cp_green, normal)
+        } else {
+            window.set_color_pair(cp_white, normal)
+        };;
+        window.draw_border;;
+        window.move_add_wstr(2, 0, " " + ellipsis(w - 6, title) + " ").when(title != "");;
+        window.move_add_wstr(2, h - 1, " " + ellipsis(w - 6, message) + " ").when(message != "");;
+        window.refresh;;
+        pure()
+    );
+
+    handle_key: KeyName -> StateIOF ListView Action;
+    handle_key = |key| (
+        let id = *select_state(@id);
+
+        //State::mod_state(ListView::set_title("key=" + key));;
+
+        if key == "q" || key == "Q" || key == "KEY_ESC" || key == "^[" {
+            pure $ action_quit()
+        };
+        if key == "j" || key == "^N" || key == "KEY_DOWN" {
+            pure $ action_select_next_item(id)
+        };
+        if key == "k" || key == "^P" || key == "KEY_UP" {
+            pure $ action_select_prev_item(id)
+        };
+        if key == "b" || key == "^B" || key == "KEY_PPAGE" {
+            pure $ action_page_up(id)
+        };
+        if key == "f" || key == "^F" || key == "KEY_NPAGE" {
+            pure $ action_page_down(id)
+        };
+        if key == "^I" {
+            pure $ action_next_focus()
+        };
+        pure $ no_action()
+    );
+
+    handle_action: Action -> StateIOF ListView ();
+    handle_action = |action| (
+        match action {
+            action_select_prev_item(target) => ListView::select_prev_item(target),
+            action_select_next_item(target) => ListView::select_next_item(target),
+            action_page_up(target) => ListView::page_up(target),
+            action_page_down(target) => ListView::page_down(target),
+            _ => pure()
+        }
+    );
+
+    has_focus: StateIOF ListView Bool;
+    has_focus = select_state(@has_focus);
+
+    set_focus: Bool -> StateIOF ListView ();
+    set_focus = |focus| mod_state $ set_has_focus(focus);
+
+    get_key: StateIOF ListView KeyName;
+    get_key = (
+        let window = *select_state(ListView::@window);
+        window.get_key
+    );
+
+    window_size: StateIOF ListView (I64, I64);
+    window_size = (
+        let window = *select_state(ListView::@window);
+        window.get_window_size
+    );
+
+    select_next_item: ListViewId -> StateIOF ListView ();
+    select_next_item = |target| (
+        if target != *select_state(@id) { pure() };
+        let size = *select_state(|s| s.@items.get_size);
+        mod_state $ mod_selected_index(|index| min(size - 1, index + 1))
+    );
+
+    select_prev_item: ListViewId -> StateIOF ListView ();
+    select_prev_item = |target| (
+        if target != *select_state(@id) { pure() };
+        mod_state $ mod_selected_index(|index| max(0, index - 1))
+    );
+
+    page_down: ListViewId -> StateIOF ListView ();
+    page_down = |target| (
+        if target != *select_state(@id) { pure() };
+        let size = *select_state(|s| s.@items.get_size);
+        let (w, h) = *ListView::window_size;
+        mod_state $ mod_selected_index(|index| min(size - 1, index + h / 2))
+    );
+
+    page_up: ListViewId -> StateIOF ListView ();
+    page_up = |target| (
+        if target != *select_state(@id) { pure() };
+        let (w, h) = *ListView::window_size;
+        mod_state $ mod_selected_index(|index| max(0, index - h / 2))
+    );
+}
+
+trait s: WithListView {
+    type ListViewType s;
+    with_list_view: [m: Monad, m: Functor] StateT (ListViewType s) m a -> StateT s m a;
+}
+

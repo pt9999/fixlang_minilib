@@ -1,0 +1,140 @@
+module Filer.DiskUsage;
+
+import AsyncTask;
+import Minilib.Monad.IO;
+import Minilib.Monad.State;
+import Minilib.IO.FileSystem;
+import Minilib.IO.Path;
+import Minilib.Thread.Channel;
+import Minilib.Thread.TaskPool;
+import Minilib.Thread.Future;
+
+// st_dev, st_ino
+type DevIno = (I64, I64);
+
+type DuNodeIndex = I64;
+
+type DuNode = unbox struct {
+    file_name: String,
+    file_path: String,
+    stat: FileStat,
+    size: I64,
+    size_inc: I64,
+    parent: DuNodeIndex,
+    children: Array DuNodeIndex,
+};
+
+namespace DuNode {
+    get_dev_ino: DuNode -> DevIno;
+    get_dev_ino = |node| (
+        (node.@stat.st_dev, node.@stat.st_ino)
+    );
+}
+
+type DuNodeMap = unbox struct {
+    dev_ino_to_index: HashMap DevIno DuNodeIndex,
+    nodes: Array DuNode,
+};
+
+namespace DuNodeMap {
+    empty: DuNodeMap;
+    empty = DuNodeMap {
+        dev_ino_to_index: HashMap::empty(10),
+        nodes: []
+    };
+
+    get_node: DuNodeIndex -> DuNodeMap -> DuNode;
+    get_node = |index, self| (
+        self.@nodes.@(index)
+    );
+
+    find_index_by_dev_ino: DevIno -> DuNodeMap -> Option DuNodeIndex;
+    find_index_by_dev_ino: |dev_ino, self| (
+        self.@dev_ino_to_index.find(dev_ino)
+    );
+
+    insert_node: DuNode -> DuNodeMap -> (DuNodeMap, DuNodeIndex);
+    insert_node = |node, self| (
+        let dev_ino = node.get_dev_ino;
+        match self.find_index_by_dev_ino(dev_ino) {
+            some(index) => (
+                let self = self[^nodes][index].iset(node);
+                (self, index)
+            ),
+            none() => (
+                let index = self.@nodes.@size;
+                let self = self[^nodes].imod(push_back(node));
+                let self = self[^dev_ino_to_index].imod(HashMap::insert(dev_ino, index));
+                (self, index)
+            ),
+        }
+    );
+}
+
+
+type DuUpdateSizeRequest = unbox struct {
+    path: String,
+    stat: FileStat,
+};
+
+type DuGetSizeRequest = unbox struct {
+    path: Path,
+    res_chan: Channel DuGetSizeResponse,
+};
+
+type DuGetSizeResponse = unbox struct {
+    size: I64
+};
+
+type DuRequest = unbox union {
+    req_get_size: DuGetSizeRequest,
+    req_shutdown: (),
+}
+
+type DuManagerTask = box struct {
+    task_pool: TaskPool,
+    req_chan: Channel DuRequest,
+}
+
+namespace DuManagerTask {
+    make: [m: MonadIO] m DuManagerTask;
+    make = lift_io $ do {
+        node_map: HashMap::empty(10),
+        task_pool: *TaskPool::make(number_of_processors),
+        req_chan: *Channel::make,
+    };
+
+    run: DuManagerTask -> IO (Result ErrMsg DuManagerTask);
+    run = |self| run_loop.exec_state_t(self).to_result;
+
+    run_loop: StateT DuManagerTask IOFail ();
+    run_loop = do {
+        let req_chan = *gets(@req_chan);
+        let req = *req_chan.recv.lift_iofail;
+        if req.is_req_shutdown { pure() };
+        State::mod_state(|self|
+        );;
+        run_loop
+    };
+}
+
+type DuWorkerTask = unbox struct {
+
+};
+
+namespace DuWorkerTask {
+    task_func: Path -> Channel DiskUsageReport -> TaskPool -> IO ();
+    task_func = |dir_path, report_chan, task_pool| (
+        do {
+            let file_names = *list_dir(dir_path);
+            let sizes = 
+            stat: *lstat(file_path)
+
+        }
+        .try(|errmsg|) {
+            eprintln(errmsg);;  // ignore?
+            pure()
+        }
+    );
+
+}

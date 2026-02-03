@@ -1,0 +1,160 @@
+module DiskUsageTest;
+
+import AsyncTask;
+import Minilib.Monad.State;
+import Minilib.Testing.UnitTest;
+import Minilib.Thread.Channel;
+
+import Filer.DiskUsage;
+
+test_node_map_simple: TestCase;
+test_node_map_simple = (
+    make_test("test_node_map_simple") $ |_|
+    let node_map = DuNodeMap::empty;
+    let node_map = node_map.add_size_by_path("/home/foo/bar/baz", 100);
+    let node_map = node_map.add_size_by_path("/home/foo/blah", 200);
+    let (node_map, node) = node_map.get_node_by_path("/home/foo");
+    assert_equal("size", 300, node.@size);;
+    pure()
+);
+
+mock_worker_env: DuWorkerEnv;
+mock_worker_env = (
+    let list_dir: Path -> IOFail (Array String) = |path| (
+        if path == "/foo" {
+            pure $ ["bar", "baz"]
+        };
+        throw $ "not found"
+    );
+    let lstat: Path -> IOFail DuWorkerFileStat = |path| (
+        if path == "/foo/bar" {
+            pure $ DuWorkerFileStat { size: 100, is_directory: true }
+        };
+        if path == "/foo/baz" {
+            pure $ DuWorkerFileStat { size: 200, is_directory: false }
+        };
+        throw $ "not found"
+    );
+    DuWorkerEnv {
+        list_dir: list_dir,
+        lstat: lstat
+    }
+);
+
+test_worker_run: TestCase;
+test_worker_run = (
+    make_test("test_worker_run") $ |_|
+    let env = mock_worker_env;
+    let dir_path = "/foo";
+    let req_chan: Channel DuRequest = *Channel::make;
+    let error_chan: Channel String = *Channel::make;
+    let worker = DuWorker {
+        env: env,
+        dir_path: dir_path,
+        req_chan: req_chan,
+        error_chan: error_chan,
+    };
+    worker.run.lift;;
+    assert_true("req", !*req_chan.is_empty);;
+    assert_true("error", *error_chan.is_empty);;
+    let req = *req_chan.recv;
+    assert_true("req.is_worker_result", req.is_req_worker_result);;
+    let res = req.as_req_worker_result;
+    assert_equal("dir_path", "/foo", res.@dir_path);;
+    assert_equal("dir_size", 300, res.@dir_size);;
+    assert_equal("subdirs", ["/foo/bar"], res.@subdirs);;
+
+    let worker = worker.set_dir_path("/not_exist");
+    worker.run.lift;;
+    assert_true("req", *req_chan.is_empty);;
+    assert_true("error", !*error_chan.is_empty);;
+    let err = *error_chan.recv;
+    assert_equal("err", "not found", err);;
+    pure()
+);
+
+mock_manager_env: Var (Array String) -> IOFail DuManagerEnv;
+mock_manager_env = |var_workers| (
+    pure $ DuManagerEnv {
+        req_chan: *Channel::make,
+        error_chan: *Channel::make,
+        start_worker: |path, req_chan, error_chan| (
+            var_workers.mod(push_back(path)).lift
+        ),
+    }
+);
+
+test_manager_shutdown: TestCase;
+test_manager_shutdown = (
+    make_test("test_manager_shutdown") $ |_|
+    let var_workers = *Var::make([]).lift;
+    let env = *mock_manager_env(var_workers);
+    let manager = *DuManager::make(env);
+    env.@req_chan.send(req_shutdown());;
+    let (manager, ret) = *DuManager::run_step.run_state_t(manager);
+    assert_equal("ret", false, ret);;
+    pure()
+);
+
+test_manager_get_size: TestCase;
+test_manager_get_size = (
+    make_test("test_manager_get_size") $ |_|
+    let var_workers = *Var::make([]).lift;
+    let env = *mock_manager_env(var_workers);
+    let manager = *DuManager::make(env);
+    let manager = manager.mod_node_map(
+        add_size_by_path("/home/foo/bar/baz", 100) >>
+        add_size_by_path("/home/foo/blah", 200)
+    );
+    let res_chan: Channel DuGetSizeResponse = *Channel::make;
+    let req = req_get_size $ DuGetSizeRequest {
+        dir_path: "/home/foo",
+        res_chan: res_chan,
+    };
+    env.@req_chan.send(req);;
+    let (manager, ret) = *DuManager::run_step.run_state_t(manager);
+    assert_equal("ret", true, ret);;
+    let res = *res_chan.recv;
+    assert_equal("res", 300, res.@size);;
+    pure()
+);
+
+test_manager_worker_result: TestCase;
+test_manager_worker_result = (
+    make_test("test_manager_worker_result") $ |_|
+    let var_workers = *Var::make([]).lift;
+    let env = *mock_manager_env(var_workers);
+    let manager = *DuManager::make(env);
+    let manager = manager.mod_node_map(
+        add_size_by_path("/home/foo/bar/baz", 100) >>
+        add_size_by_path("/home/foo/blah", 200)
+    );
+    let subdirs = [
+        "/home/foo/bar/hoge/fuga",
+        "/home/foo/bar/hoge/piyo",
+    ];
+    let req = req_worker_result $ DuWorkerResult {
+        dir_path: "/home/foo/bar/hoge",
+        dir_size: 400,
+        subdirs: subdirs
+    };
+    env.@req_chan.send(req);;
+    let (manager, ret) = *DuManager::run_step.run_state_t(manager);
+    assert_equal("ret", true, ret);;
+    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo");
+    assert_equal("size", 700, node.@size);;
+    assert_equal("workers", subdirs, *var_workers.get.lift);;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_node_map_simple,
+        test_worker_run,
+        test_manager_shutdown,
+        test_manager_get_size,
+        test_manager_worker_result,
+    ].run_test_driver
+);
+

@@ -1,4 +1,4 @@
-module Main;
+module Filer.AppView;
 
 import Minilib.IO.FileSystem;
 import Minilib.Monad.IO;
@@ -13,7 +13,7 @@ import Filer.FileView;
 import Filer.ListView;
 import Filer.StatusView;
 
-type App = unbox struct {
+type AppView = unbox struct {
     app_env: AppEnv,
     window: Window,
     file_list_view: FileListView,
@@ -21,8 +21,8 @@ type App = unbox struct {
     status_view: StatusView,
 };
 
-namespace App {
-    make: AppEnv -> Window -> IOFail App;
+namespace AppView {
+    make: AppEnv -> Window -> IOFail AppView;
     make = |app_env, app_win| (
         let (app_w, app_h) = *app_win.get_window_size;
         let flv_w = app_w * 1 / 3;
@@ -34,7 +34,7 @@ namespace App {
         let fv = *FileView::make(fv_win);
         let fv = fv.mod_list_view(set_id(1) >> set_has_focus(false));
         let status_view = *StatusView::make(status_win);
-        pure $ App {
+        pure $ AppView {
             app_env: app_env,
             window: app_win,
             file_list_view: flv,
@@ -43,16 +43,32 @@ namespace App {
         }
     );
 
-    with_file_list_view: StateIOF FileListView a -> StateIOF App a;
+    run: StateIOF AppView ();
+    run = (
+        loop_m(
+            (), |_|
+            AppView::show;;
+            let action = *AppView::handle_key;
+            if action.is_action_quit {
+                let app_env = *select_state(AppView::@app_env);
+                (app_env.@shutdown).lift_iofail;;
+                break_m $ ()
+            };
+            AppView::handle_action(action);;
+            continue_m $ ()
+        )
+    );
+
+    with_file_list_view: StateIOF FileListView a -> StateIOF AppView a;
     with_file_list_view = |sm| sm.lens_state_t(act_file_list_view);
 
-    with_file_view: StateIOF FileView a -> StateIOF App a;
+    with_file_view: StateIOF FileView a -> StateIOF AppView a;
     with_file_view = |sm| sm.lens_state_t(act_file_view);
 
-    with_status_view: StateIOF StatusView a -> StateIOF App a;
+    with_status_view: StateIOF StatusView a -> StateIOF AppView a;
     with_status_view = |sm| sm.lens_state_t(act_status_view);
 
-    show: StateIOF App ();
+    show: StateIOF AppView ();
     show = (
         with_file_list_view(FileListView::show);;
         with_file_view(FileView::show);;
@@ -60,27 +76,27 @@ namespace App {
         pure()
     );
 
-    get_focus: StateIOF App I64;
+    get_focus: StateIOF AppView I64;
     get_focus = (
         if *with_file_list_view(has_focus) { pure $ 0 };
         if *with_file_view(has_focus) { pure $ 1 };
         pure $ -1
     );
 
-    set_focus: I64 -> StateIOF App ();
+    set_focus: I64 -> StateIOF AppView ();
     set_focus = |id| (
         with_file_list_view $ with_list_view $ set_focus(id == 0);;
         with_file_view $ with_list_view $ set_focus(id == 1);;
         pure()
     );
 
-    next_focus: StateIOF App ();
+    next_focus: StateIOF AppView ();
     next_focus = (
         let focus = *get_focus;
         set_focus((focus + 1) % 2)
     );
 
-    handle_key: StateIOF App Action;
+    handle_key: StateIOF AppView Action;
     handle_key = (
         let focus = *get_focus;
         if focus == 0 { with_file_list_view $ FileListView::handle_key };
@@ -88,7 +104,7 @@ namespace App {
         pure $ no_action()
     );
 
-    handle_action: Action -> StateIOF App ();
+    handle_action: Action -> StateIOF AppView ();
     handle_action = |action| (
         with_file_list_view $ FileListView::handle_action(action);;
         with_file_view $ FileView::handle_action(action);;
@@ -112,23 +128,3 @@ namespace App {
         }
     );
 }
-
-main: IO ();
-main = do {
-    Ncurses::run $ |app_win| (
-        init_custom_color_pairs;;
-        let app_env = *AppEnv::real_env;
-        let app = *App::make(app_env, app_win);
-        loop_m(
-            (), |_|
-            App::show;;
-            let action = *App::handle_key;
-            if action.is_action_quit {
-                (app_env.@shutdown).lift_iofail;;
-                break_m $ ()
-            };
-            App::handle_action(action);;
-            continue_m $ ()
-        ).eval_state_t(app)
-    )
-}.try(eprintln);

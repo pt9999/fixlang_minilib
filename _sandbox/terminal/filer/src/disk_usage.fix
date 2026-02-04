@@ -30,6 +30,7 @@ type DuNode = unbox struct {
     path: String,
     //stat: Option FileStat,
     size: DirSize,
+    active: I64,    // -1:not checked 0: check complete, 1~: check in progress
     parent: DuNodeIndex,
 };
 
@@ -39,6 +40,7 @@ namespace DuNode {
         path: "",
         //stat: none(),
         size: 0,
+        active: -1,
         parent: DuNodeIndex::invalid,
     };
 }
@@ -101,26 +103,22 @@ namespace DuNodeMap {
         (self, node)
     );
 
-    get_node_by_path_m: [m: Monad] Path -> StateT DuNodeMap m DuNode;
-    get_node_by_path_m = |path| state_t $ get_node_by_path(path) >> pure;
-
-    add_size_by_path_m: [m: Monad] Path -> DirSize -> StateT DuNodeMap m ();
-    add_size_by_path_m = |path, size| State::mod_state $ add_size_by_path(path, size);
-
-    add_size_by_path: Path -> DirSize -> DuNodeMap -> DuNodeMap;
+    add_size_by_path: Path -> DirSize -> DuNodeMap -> (DuNodeMap, ());
     add_size_by_path = |path, size, self| (
         _assert_abs_path_lazy(path) $ |_|
         let (self, index) = self.get_node_index_by_path(path);
         self._add_size_recursive(index, size)
     );
 
-    _add_size_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> DuNodeMap;
+    _add_size_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
     _add_size_recursive = |index, size, self| (
-        if index == DuNodeIndex::invalid { self };
+        if index == DuNodeIndex::invalid { (self, ()) };
         let self = self[^nodes][index][^size].imod(add(size));
         let parent = self[^nodes][index][^parent].iget;
         self._add_size_recursive(parent, size)
     );
+
+    //_add_active_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
 }
 
 
@@ -186,10 +184,15 @@ namespace DuManager {
         pure $ true
     );
 
+    with_node_map: (DuNodeMap -> (DuNodeMap, a)) -> StateT DuManager IOFail a;
+    with_node_map = |f| (
+        lens_state_t(act_node_map) $ state_t $ f >> pure
+    );
+
     on_req_get_size: DuGetSizeRequest -> StateT DuManager IOFail ();
     on_req_get_size = |req| (
         let dir_path = req.@dir_path;
-        let node = *get_node_by_path_m(dir_path).lens_state_t(act_node_map);
+        let node = *with_node_map(get_node_by_path(dir_path));
         req.@res_chan.send(DuGetSizeResponse {
             size: node.@size
         })
@@ -198,7 +201,7 @@ namespace DuManager {
     on_req_worker_result: DuWorkerResult -> StateT DuManager IOFail ();
     on_req_worker_result = |res| (
         let env = *gets(DuManager::@env);
-        add_size_by_path_m(res.@dir_path, res.@dir_size).lens_state_t(act_node_map);;
+        with_node_map(add_size_by_path(res.@dir_path, res.@dir_size));;
         res.@subdirs.to_iter.foreach_m(|subdir|
             (env.@start_worker)(subdir, env.@req_chan, env.@error_chan).lift_iofail
         )

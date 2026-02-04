@@ -11,23 +11,33 @@ type FileItem = box struct {
     file_name: String,
     file_path: String,
     stat: FileStat,
+    size: I64,
+    active: I64,
 };
 
 namespace FileItem {
-    get_file_item: String -> String -> IOFail FileItem;
-    get_file_item = |dir_path, file_name| (
+    get_file_item: AppEnv -> String -> String -> IOFail FileItem;
+    get_file_item = |app_env, dir_path, file_name| (
         let file_path = join_paths([dir_path, file_name]);
+        let stat = *lstat(file_path);
+        let (size, active) = *if stat.is_dir {
+            (app_env.@disk_usage.@get_dir_size)(file_path)
+        } else {
+            pure $ (stat.st_size, 0)
+        };
         pure $ FileItem {
             file_name: file_name,
             file_path: file_path,
-            stat: *lstat(file_path)
+            stat: stat,
+            size: size,
+            active: active,
         }
     );
 
-    get_file_items: String -> IOFail (Array FileItem);
-    get_file_items = |dir_path| (
+    get_file_items: AppEnv -> String -> IOFail (Array FileItem);
+    get_file_items = |app_env, dir_path| (
         let file_names = *list_dir(dir_path);
-        file_names.map_m(|name| get_file_item(dir_path, name))
+        file_names.map_m(|name| get_file_item(app_env, dir_path, name))
     );
 
     format_file_item: FileItem -> String;
@@ -38,7 +48,8 @@ namespace FileItem {
         else if stat.is_symbolic_link { name }      // TODO: add readlink?
         else if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { name + "*" }
         else { name };
-        let size = stat.st_size.format_file_size;
+        let size = item.@size.format_file_size;
+        let size = if item.@active != 0 { item.@active.to_string + ":" + size } else { size };
         name.xpad_right(20, ' ') +
         size.xpad_left(13, ' ')
     );

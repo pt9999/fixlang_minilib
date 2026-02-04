@@ -10,6 +10,7 @@ import Filer.FileItem;
 import Filer.ListView;
 
 type FileListView = unbox struct {
+    app_env: AppEnv,
     list_view: ListView,
     dir_path: String,
     file_items: Array FileItem,
@@ -21,13 +22,14 @@ impl FileListView: WithListView {
 }
 
 namespace FileListView {
-    make: Window -> String -> IOFail FileListView;
-    make = |window, dir_path| (
-        let file_items = *get_file_items(dir_path);
+    make: AppEnv -> Window -> String -> IOFail FileListView;
+    make = |app_env, window, dir_path| (
+        let file_items = *get_file_items(app_env, dir_path);
         let list_items = file_items.map(to_list_item);
         let list_view = *ListView::make(window, list_items);
         let list_view = list_view.set_title(dir_path);
         pure $ FileListView {
+            app_env: app_env,
             list_view: list_view,
             dir_path: dir_path,
             file_items: file_items,
@@ -91,8 +93,9 @@ namespace FileListView {
     open_directory: String -> StateIOF FileListView ();
     open_directory = |dir_path| (
         let focus = *with_list_view(has_focus);
+        let app_env = *select_state(@app_env);
         let window = *with_list_view(select_state(@window));
-        put_state $ *FileListView::make(window, dir_path).lift_iofail;;
+        put_state $ *FileListView::make(app_env, window, dir_path).lift_iofail;;
         with_list_view(set_focus(focus));;
         pure()
     );

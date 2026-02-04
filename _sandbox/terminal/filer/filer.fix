@@ -1,9 +1,11 @@
 module Main;
 
 import Minilib.IO.FileSystem;
+import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Terminal.Ncurses;
 
+import Filer.AppEnv;
 import Filer.Common;
 import Filer.FileItem;
 import Filer.FileListView;
@@ -12,6 +14,7 @@ import Filer.ListView;
 import Filer.StatusView;
 
 type App = unbox struct {
+    app_env: AppEnv,
     window: Window,
     file_list_view: FileListView,
     file_view: FileView,
@@ -19,19 +22,20 @@ type App = unbox struct {
 };
 
 namespace App {
-    make: Window -> IOFail App;
-    make = |app_win| (
+    make: AppEnv -> Window -> IOFail App;
+    make = |app_env, app_win| (
         let (app_w, app_h) = *app_win.get_window_size;
         let flv_w = app_w * 1 / 3;
         let flv_win = *app_win.make_sub_window(0, 0, flv_w, app_h - 1);
         let fv_win = *app_win.make_sub_window(flv_w, 0, app_w - flv_w, app_h - 1);
         let status_win = *app_win.make_sub_window(0, app_h - 1, app_w, 1);
-        let flv = *FileListView::make(flv_win, *realpath("."));
+        let flv = *FileListView::make(app_env, flv_win, *realpath("."));
         let flv = flv.mod_list_view(set_id(0) >> set_has_focus(true));
         let fv = *FileView::make(fv_win);
         let fv = fv.mod_list_view(set_id(1) >> set_has_focus(false));
         let status_view = *StatusView::make(status_win);
         pure $ App {
+            app_env: app_env,
             window: app_win,
             file_list_view: flv,
             file_view: fv,
@@ -111,14 +115,16 @@ namespace App {
 
 main: IO ();
 main = do {
-    Ncurses::run $ |win| (
+    Ncurses::run $ |app_win| (
         init_custom_color_pairs;;
-        let app = *App::make(win);
+        let app_env = *AppEnv::real_env;
+        let app = *App::make(app_env, app_win);
         loop_m(
             (), |_|
             App::show;;
             let action = *App::handle_key;
             if action.is_action_quit {
+                (app_env.@shutdown).lift_iofail;;
                 break_m $ ()
             };
             App::handle_action(action);;

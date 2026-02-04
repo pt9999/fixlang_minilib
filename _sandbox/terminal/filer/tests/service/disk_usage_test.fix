@@ -5,16 +5,41 @@ import Minilib.Monad.State;
 import Minilib.Testing.UnitTest;
 import Minilib.Thread.Channel;
 
-import Filer.DiskUsage;
+import Filer.Service.DiskUsage;
 
-test_node_map_simple: TestCase;
-test_node_map_simple = (
-    make_test("test_node_map_simple") $ |_|
+test_node_map_add_size_by_path: TestCase;
+test_node_map_add_size_by_path = (
+    make_test("test_node_map_add_size_by_path") $ |_|
     let node_map = DuNodeMap::empty;
     let (node_map, _) = node_map.add_size_by_path("/home/foo/bar/baz", 100);
     let (node_map, _) = node_map.add_size_by_path("/home/foo/blah", 200);
     let (node_map, node) = node_map.get_node_by_path("/home/foo");
     assert_equal("size", 300, node.@size);;
+    pure()
+);
+
+test_node_map_add_active_by_path: TestCase;
+test_node_map_add_active_by_path = (
+    make_test("test_node_map_add_active_by_path") $ |_|
+    let node_map = DuNodeMap::empty;
+    let (node_map, node) = node_map.get_node_by_path("/home/foo");
+    assert_equal("/home/foo inactive", -1, node.@active);;
+    let (node_map, _) = node_map.add_active_by_path("/home/foo/bar/baz", 2);
+    let (node_map, _) = node_map.add_active_by_path("/home/foo/blah", 3);
+    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar/baz");
+    assert_equal("/home/foo/bar/baz active", 2, node.@active);;
+    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar");
+    assert_equal("/home/foo/bar active", 1, node.@active);;
+    let (node_map, node) = node_map.get_node_by_path("/home/foo/blah");
+    assert_equal("/home/foo/blah active", 3, node.@active);;
+    let (node_map, node) = node_map.get_node_by_path("/home/foo");
+    assert_equal("/home/foo active", 2, node.@active);;
+    let (node_map, _) = node_map.add_active_by_path("/home/foo/bar/baz", -2);
+    let (node_map, _) = node_map.add_active_by_path("/home/foo/blah", -3);
+    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar/baz");
+    assert_equal("/home/foo/bar/baz active", 0, node.@active);;
+    let (node_map, node) = node_map.get_node_by_path("/home/foo");
+    assert_equal("/home/foo active", 0, node.@active);;
     pure()
 );
 
@@ -78,7 +103,7 @@ mock_manager_env = |var_workers| (
     pure $ DuManagerEnv {
         req_chan: *Channel::make,
         error_chan: *Channel::make,
-        start_worker: |path, req_chan, error_chan| (
+        start_worker: |path| (
             var_workers.mod(push_back(path)).lift
         ),
     }
@@ -115,7 +140,13 @@ test_manager_get_size = (
     let (manager, ret) = *DuManager::run_step.run_state_t(manager);
     assert_equal("ret", true, ret);;
     let res = *res_chan.recv;
-    assert_equal("res", 300, res.@size);;
+    assert_equal("res.@size", 300, res.@size);;
+    assert_equal("res.@active", 1, res.@active);;
+    assert_equal("workers", ["/home/foo"], *var_workers.get.lift);;
+    let (manager, node) = *do {
+        with_node_map(get_node_by_path("/home/foo"))
+    }.run_state_t(manager);
+    assert_equal("node.@active", 1, node.@active);;
     pure()
 );
 
@@ -127,7 +158,10 @@ test_manager_worker_result = (
     let manager = *DuManager::make(env);
     let manager = *do {
         with_node_map(add_size_by_path("/home/foo/bar/baz", 100));;
-        with_node_map(add_size_by_path("/home/foo/blah", 200))
+        with_node_map(add_size_by_path("/home/foo/bar/hoge", 0));;
+        with_node_map(add_size_by_path("/home/foo/blah", 200));;
+        with_node_map(add_active_by_path("/home/foo/bar/hoge", 1));;
+        pure()
     }.exec_state_t(manager);
     let subdirs = [
         "/home/foo/bar/hoge/fuga",
@@ -141,16 +175,21 @@ test_manager_worker_result = (
     env.@req_chan.send(req);;
     let (manager, ret) = *DuManager::run_step.run_state_t(manager);
     assert_equal("ret", true, ret);;
-    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo");
-    assert_equal("size", 700, node.@size);;
     assert_equal("workers", subdirs, *var_workers.get.lift);;
+    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo/bar/hoge");
+    assert_equal("node.@size", 400, node.@size);;
+    assert_equal("node.@active", 2, node.@active);;
+    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo");
+    assert_equal("node.@size", 700, node.@size);;
+    assert_equal("node.@active", 1, node.@active);;
     pure()
 );
 
 main: IO ();
 main = (
     [
-        test_node_map_simple,
+        test_node_map_add_size_by_path,
+        test_node_map_add_active_by_path,
         test_worker_run,
         test_manager_shutdown,
         test_manager_get_size,

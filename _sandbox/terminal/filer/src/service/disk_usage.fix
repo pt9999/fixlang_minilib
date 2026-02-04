@@ -1,4 +1,4 @@
-module Filer.DiskUsage;
+module Filer.Service.DiskUsage;
 
 import HashMap;
 import AsyncTask;
@@ -12,6 +12,97 @@ import Minilib.Thread.Channel;
 import Minilib.Thread.TaskPool;
 import Minilib.Thread.Future;
 import Minilib.Trait.Traversable;
+
+import Filer.Common;
+
+/*
+log_debug: [m: MonadIOFail] String -> m ();
+log_debug = |str| lift_iofail $ do {
+    with_file("disk_usage.log", "a+", |handle|
+        write_string(handle, str + "\n")
+    )
+};
+*/
+
+namespace DiskUsageServiceApi {
+    mock_api: IOFail DiskUsageServiceApi;
+    mock_api = pure $ DiskUsageServiceApi {
+        get_dir_size: |path| pure $ (123, 1),
+        drain_errors: pure $ [],
+        shutdown: pure(),
+    };
+
+    real_api: IOFail DiskUsageServiceApi;
+    real_api = do {
+        pure();;
+        let service = *DiskUsageService::make;
+        pure $ DiskUsageServiceApi {
+            get_dir_size: |path| service.get_dir_size(path),
+            drain_errors: service.drain_errors,
+            shutdown: service.shutdown,
+        }
+    };
+}
+
+type DiskUsageService = unbox struct {
+    task_pool: TaskPool,
+    req_chan: Channel DuRequest,
+    error_chan: Channel String,
+    manager_task: IOTask (Result ErrMsg DuManager),
+};
+
+namespace DiskUsageService {
+    make: [m: MonadIOFail] m DiskUsageService;
+    make = lift_iofail $ do {
+        let task_pool = *TaskPool::make(number_of_processors);
+        let env = *DuManagerEnv::real_env(task_pool);
+        let manager = *DuManager::make(env);
+        let manager_task = *AsyncIOTask::make(manager.run).lift;
+        pure $ DiskUsageService {
+            task_pool: task_pool, 
+            req_chan: env.@req_chan,
+            error_chan: env.@error_chan, 
+            manager_task: manager_task,
+        }
+    };
+
+    get_dir_size: [m: MonadIOFail] Path -> DiskUsageService -> m (I64, I64);
+    get_dir_size = |path, service| (
+        let req = DuGetSizeRequest {
+            dir_path: path,
+            res_chan: *Channel::make
+        };
+        service.@req_chan.send(req_get_size $ req);;
+        let res = *req.@res_chan.recv;
+        pure $ (res.@size, res.@active)
+    );
+
+    drain_errors: [m: MonadIOFail] DiskUsageService -> m (Array String);
+    drain_errors = |service| (
+        loop_m(
+            [], |errors|
+            match *service.@error_chan.try_recv {
+                none() => break_m $ errors,
+                some(err) => continue_m $ errors.push_back(err)
+            }
+        )
+    );
+
+    shutdown: [m: MonadIOFail] DiskUsageService -> m ();
+    shutdown = |service| lift_iofail $ do {
+        let DiskUsageService { 
+            task_pool: task_pool, 
+            req_chan: req_chan,
+            error_chan: error_chan, 
+            manager_task: manager_task
+        } = service;
+        req_chan.send(req_shutdown());;
+        let res: Result ErrMsg DuManager = *manager_task.get.lift_io;
+        task_pool.shutdown;;
+        pure()
+    };
+}
+
 
 // directory size
 type DirSize = I64;
@@ -119,16 +210,17 @@ namespace DuNodeMap {
     add_active_by_path: Path -> I64 -> DuNodeMap -> (DuNodeMap, ());
     add_active_by_path = |path, diff, self| (
         let (self, index) = self.get_node_index_by_path(path);
-        self.add_active_recursive(index, size)
+        self.add_active_recursive(index, diff)
     );
 
     add_active_recursive: DuNodeIndex -> I64 -> DuNodeMap -> (DuNodeMap, ());
     add_active_recursive = |index, diff, self| (
         if index == DuNodeIndex::invalid { (self, ()) };
-        let old_value = max(0, self.@active);
+        let old_value = self[^nodes][index][^active].iget;
+        let old_value = max(0, old_value);
         let new_value = max(0, old_value + diff);
-        let self = self.set_active(new_value);
-        let parent = self.@parent;
+        let self = self[^nodes][index][^active].iset(new_value);
+        let parent = self[^nodes][index][^parent].iget;
         if old_value == 0 && new_value > 0 { self.add_active_recursive(parent, 1) }
         else if new_value == 0 && old_value > 0 { self.add_active_recursive(parent, -1) }
         else { (self, ()) }
@@ -142,7 +234,8 @@ type DuGetSizeRequest = unbox struct {
 };
 
 type DuGetSizeResponse = unbox struct {
-    size: I64
+    size: I64,
+    active: I64,
 };
 
 type DuRequest = unbox union {
@@ -154,8 +247,30 @@ type DuRequest = unbox union {
 type DuManagerEnv = unbox struct {
     req_chan: Channel DuRequest,
     error_chan: Channel String,
-    start_worker: Path -> Channel DuRequest -> Channel String -> IOFail (),
+    start_worker: Path -> IOFail (),
 };
+
+namespace DuManagerEnv {
+    real_env: [m: MonadIO] TaskPool -> m DuManagerEnv;
+    real_env = |task_pool| (
+        let req_chan = *Channel::make;
+        let error_chan = *Channel::make;
+        pure $ DuManagerEnv {
+            req_chan: req_chan,
+            error_chan: error_chan,
+            start_worker: |path| (
+                let worker = DuWorker {
+                    env: DuWorkerEnv::real_env,
+                    dir_path: path,
+                    req_chan: req_chan,
+                    error_chan: error_chan,
+                };
+                let future = *Future::make(task_pool, worker.run);
+                pure()
+            ),
+        }
+    );
+}
 
 type DuManager = box struct {
     env: DuManagerEnv,
@@ -193,32 +308,49 @@ namespace DuManager {
             _ => error $ "unknown request",
         }
     }.catch(|errmsg|
+        //log_debug("err:" + errmsg);;
         let env = *gets(DuManager::@env);
         env.@error_chan.send(errmsg);;
         pure $ true
     );
 
-    with_node_map: (DuNodeMap -> (DuNodeMap, a)) -> StateT DuManager IOFail a;
-    with_node_map = |f| (
+    lift_node_map: (DuNodeMap -> (DuNodeMap, a)) -> StateT DuManager IOFail a;
+    lift_node_map = |f| (
         lens_state_t(act_node_map) $ state_t $ f >> pure
     );
 
     on_req_get_size: DuGetSizeRequest -> StateT DuManager IOFail ();
     on_req_get_size = |req| (
+        let env = *gets(DuManager::@env);
         let dir_path = req.@dir_path;
-        let node = *with_node_map(get_node_by_path(dir_path));
+        start_worker_if_unchecked(dir_path);;
+        let node = *lift_node_map(get_node_by_path(dir_path));
         req.@res_chan.send(DuGetSizeResponse {
-            size: node.@size
+            size: node.@size,
+            active: node.@active,
         })
+    );
+
+    start_worker_if_unchecked: Path -> StateT DuManager IOFail ();
+    start_worker_if_unchecked = |dir_path| (
+        let node = *get_node_by_path(dir_path).lift_node_map;
+        if node.@active >= 0 { pure() };
+        //log_debug("start_worker: path=" + dir_path);;
+        let env = *gets(DuManager::@env);
+        (env.@start_worker)(dir_path).lift_iofail;;
+        add_active_by_path(dir_path, 1).lift_node_map
     );
 
     on_req_worker_result: DuWorkerResult -> StateT DuManager IOFail ();
     on_req_worker_result = |res| (
         let env = *gets(DuManager::@env);
-        with_node_map(add_size_by_path(res.@dir_path, res.@dir_size));;
-        res.@subdirs.to_iter.foreach_m(|subdir|
-            (env.@start_worker)(subdir, env.@req_chan, env.@error_chan).lift_iofail
-        )
+        let DuWorkerResult { dir_path: dir_path, dir_size: dir_size, subdirs: subdirs } = res;
+        //log_debug("end_worker: path=" + dir_path);;
+        subdirs.to_iter.foreach_m(|subdir_path|
+            start_worker_if_unchecked(subdir_path)
+        );;
+        add_size_by_path(dir_path, dir_size).lift_node_map;;
+        add_active_by_path(dir_path, -1).lift_node_map
     );
 }
 
@@ -237,10 +369,10 @@ namespace DuWorkerEnv {
     real_env = DuWorkerEnv {
         list_dir: FileSystem::list_dir,
         lstat: |path| (
-            let stat = *FileSystem::lstat(path);
+            let stat = *FileSystem::FileStat::lstat(path);
             pure $ DuWorkerFileStat {
                 size: stat.st_size,
-                is_directory: stat.is_directory,
+                is_directory: stat.is_dir,
             }
         ),
     };
@@ -261,7 +393,7 @@ type DuWorker = unbox struct {
 
 namespace DuWorker {
     run: DuWorker -> IO ();
-    run = |self| do {
+    run = |self| pure();; do {
         let env = self.@env;
         let file_names = *(env.@list_dir)(self.@dir_path);
         let file_paths = file_names.map(|name| [self.@dir_path, name].join_paths);

@@ -260,9 +260,10 @@ namespace Window {
     };
 
     // Reads a character from the window, then convert it to a keyname.
+    // If any error occurs, this function returns `""`.
     // For details, see [wgetch(3) - Linux man page](https://linux.die.net/man/3/wgetch) and
     // [keyname(3) - Linux man page](https://linux.die.net/man/3/keyname).
-    get_key: [m: MonadIOFail] Window -> m String;
+    get_key: [m: MonadIO] Window -> m String;
     get_key = |win| (
         let opt_ch = *win.getch;
         if opt_ch.is_none { pure $ "" };
@@ -487,12 +488,13 @@ type KeyName = String;
 
 namespace KeyFuncs {
     // Gets the name of a key.
-    keyname: [m: MonadIOFail] Key -> m KeyName;
-    keyname = |key| lift_iofail $ do {
-        let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.to_CInt].lift;
+    // If any error occurs, this function returns `""`.
+    keyname: [m: MonadIO] Key -> m KeyName;
+    keyname = |key| lift_io $ do {
+        let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.to_CInt];
         if ptr == nullptr {
-            throw $ "keyname failed!"
+            pure $ ""
         };
-        pure $ String::unsafe_from_c_str_ptr(ptr)
+        String::unsafe_from_c_str_ptr_io(ptr)
     };
 }

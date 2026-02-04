@@ -97,7 +97,6 @@ namespace DuNodeMap {
 
     get_node_by_path: Path -> DuNodeMap -> (DuNodeMap, DuNode);
     get_node_by_path = |path, self| (
-        _assert_abs_path_lazy(path) $ |_|
         let (self, index) = self.get_node_index_by_path(path);
         let node = self.get_node(index);
         (self, node)
@@ -105,20 +104,35 @@ namespace DuNodeMap {
 
     add_size_by_path: Path -> DirSize -> DuNodeMap -> (DuNodeMap, ());
     add_size_by_path = |path, size, self| (
-        _assert_abs_path_lazy(path) $ |_|
         let (self, index) = self.get_node_index_by_path(path);
-        self._add_size_recursive(index, size)
+        self.add_size_recursive(index, size)
     );
 
-    _add_size_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
-    _add_size_recursive = |index, size, self| (
+    add_size_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
+    add_size_recursive = |index, size, self| (
         if index == DuNodeIndex::invalid { (self, ()) };
         let self = self[^nodes][index][^size].imod(add(size));
         let parent = self[^nodes][index][^parent].iget;
-        self._add_size_recursive(parent, size)
+        self.add_size_recursive(parent, size)
     );
 
-    //_add_active_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
+    add_active_by_path: Path -> I64 -> DuNodeMap -> (DuNodeMap, ());
+    add_active_by_path = |path, diff, self| (
+        let (self, index) = self.get_node_index_by_path(path);
+        self.add_active_recursive(index, size)
+    );
+
+    add_active_recursive: DuNodeIndex -> I64 -> DuNodeMap -> (DuNodeMap, ());
+    add_active_recursive = |index, diff, self| (
+        if index == DuNodeIndex::invalid { (self, ()) };
+        let old_value = max(0, self.@active);
+        let new_value = max(0, old_value + diff);
+        let self = self.set_active(new_value);
+        let parent = self.@parent;
+        if old_value == 0 && new_value > 0 { self.add_active_recursive(parent, 1) }
+        else if new_value == 0 && old_value > 0 { self.add_active_recursive(parent, -1) }
+        else { (self, ()) }
+    );
 }
 
 

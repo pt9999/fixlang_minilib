@@ -1,6 +1,7 @@
 module DiskUsageTest;
 
 import AsyncTask;
+import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Testing.UnitTest;
 import Minilib.Thread.Channel;
@@ -11,38 +12,41 @@ test_node_map_add_size_by_path: TestCase;
 test_node_map_add_size_by_path = (
     make_test("test_node_map_add_size_by_path") $ |_|
     let node_map = DuNodeMap::empty;
-    let (node_map, _) = node_map.add_size_by_path("/home/foo/bar/baz", 100);
-    let (node_map, _) = node_map.add_size_by_path("/home/foo/blah", 200);
-    let (node_map, node) = node_map.get_node_by_path("/home/foo");
-    assert_equal("size", 300, node.@size);;
-    pure()
+    do {
+        add_size_by_path("/home/foo/bar/baz", 100);;
+        add_size_by_path("/home/foo/blah", 200);;
+        let node = *get_node_by_path("/home/foo");
+        assert_equal("size", 300, node.@size)
+    }.eval_state_t(node_map)
 );
 
 test_node_map_add_active_by_path: TestCase;
 test_node_map_add_active_by_path = (
     make_test("test_node_map_add_active_by_path") $ |_|
     let node_map = DuNodeMap::empty;
-    let (node_map, node) = node_map.get_node_by_path("/home/foo");
-    assert_equal("/home/foo inactive", -1, node.@active);;
-    let (node_map, _) = node_map.add_active_by_path("/home/foo/bar/baz", 2);
-    let (node_map, _) = node_map.add_active_by_path("/home/foo/blah", 3);
-    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar/baz");
-    assert_equal("/home/foo/bar/baz active", 2, node.@active);;
-    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar");
-    assert_equal("/home/foo/bar active", 2, node.@active);;
-    let (node_map, node) = node_map.get_node_by_path("/home/foo/blah");
-    assert_equal("/home/foo/blah active", 3, node.@active);;
-    let (node_map, node) = node_map.get_node_by_path("/home/foo");
-    assert_equal("/home/foo active", 5, node.@active);;
-    let (node_map, _) = node_map.add_active_by_path("/home/foo/bar/baz", -2);
-    let (node_map, node) = node_map.get_node_by_path("/home/foo");
-    assert_equal("/home/foo active", 3, node.@active);;
-    let (node_map, _) = node_map.add_active_by_path("/home/foo/blah", -3);
-    let (node_map, node) = node_map.get_node_by_path("/home/foo/bar/baz");
-    assert_equal("/home/foo/bar/baz active", 0, node.@active);;
-    let (node_map, node) = node_map.get_node_by_path("/home/foo");
-    assert_equal("/home/foo active", 0, node.@active);;
-    pure()
+    do {
+        let node = *get_node_by_path("/home/foo");
+        assert_equal("/home/foo inactive", -1, node.@active);;
+        add_active_by_path("/home/foo/bar/baz", 2);;
+        add_active_by_path("/home/foo/blah", 3);;
+        let node = *get_node_by_path("/home/foo/bar/baz");
+        assert_equal("/home/foo/bar/baz active", 2, node.@active);;
+        let node = *get_node_by_path("/home/foo/bar");
+        assert_equal("/home/foo/bar active", 2, node.@active);;
+        let node = *get_node_by_path("/home/foo/blah");
+        assert_equal("/home/foo/blah active", 3, node.@active);;
+        let node = *get_node_by_path("/home/foo");
+        assert_equal("/home/foo active", 5, node.@active);;
+        add_active_by_path("/home/foo/bar/baz", -2);;
+        let node = *get_node_by_path("/home/foo");
+        assert_equal("/home/foo active", 3, node.@active);;
+        add_active_by_path("/home/foo/blah", -3);;
+        let node = *get_node_by_path("/home/foo/bar/baz");
+        assert_equal("/home/foo/bar/baz active", 0, node.@active);;
+        let node = *get_node_by_path("/home/foo");
+        assert_equal("/home/foo active", 0, node.@active);;
+        pure()
+    }.eval_state_t(node_map)
 );
 
 mock_worker_env: DuWorkerEnv;
@@ -129,27 +133,28 @@ test_manager_get_size = (
     let var_workers = *Var::make([]).lift;
     let env = *mock_manager_env(var_workers);
     let manager = *DuManager::make(env);
-    let manager = *do {
-        add_size_by_path("/home/foo/bar/baz", 100).lift_node_map;;
-        add_size_by_path("/home/foo/blah", 200).lift_node_map
-    }.exec_state_t(manager);
-    let res_chan: Channel DuGetSizeResponse = *Channel::make;
-    let req = req_get_size $ DuGetSizeRequest {
-        dir_path: "/home/foo",
-        res_chan: res_chan,
-    };
-    env.@req_chan.send(req);;
-    let (manager, ret) = *DuManager::run_step.run_state_t(manager);
-    assert_equal("ret", true, ret);;
-    let res = *res_chan.recv;
-    assert_equal("res.@size", 300, res.@size);;
-    assert_equal("res.@active", 1, res.@active);;
-    assert_equal("workers", ["/home/foo"], *var_workers.get.lift);;
-    let (manager, node) = *do {
-        get_node_by_path("/home/foo").lift_node_map
-    }.run_state_t(manager);
-    assert_equal("node.@active", 1, node.@active);;
-    pure()
+    eval_state_t(manager) $ do {
+        lift_node_map $ do {
+            add_size_by_path("/home/foo/bar/baz", 100);;
+            add_size_by_path("/home/foo/blah", 200);;
+            pure()
+        };;
+        let res_chan: Channel DuGetSizeResponse = *Channel::make;
+        let req = req_get_size $ DuGetSizeRequest {
+            dir_path: "/home/foo",
+            res_chan: res_chan,
+        };
+        env.@req_chan.send(req);;
+        let ret = *DuManager::run_step;
+        assert_equal("ret", true, ret);;
+        let res = *res_chan.recv;
+        assert_equal("res.@size", 300, res.@size);;
+        assert_equal("res.@active", 1, res.@active);;
+        assert_equal("workers", ["/home/foo"], *var_workers.get.lift_io);;
+        let node = *get_node_by_path("/home/foo").lift_node_map;
+        assert_equal("node.@active", 1, node.@active);;
+        pure()
+    }
 );
 
 test_manager_worker_result: TestCase;
@@ -158,33 +163,36 @@ test_manager_worker_result = (
     let var_workers = *Var::make([]).lift;
     let env = *mock_manager_env(var_workers);
     let manager = *DuManager::make(env);
-    let manager = *do {
-        add_size_by_path("/home/foo/bar/baz", 100).lift_node_map;;
-        add_size_by_path("/home/foo/bar/hoge", 0).lift_node_map;;
-        add_size_by_path("/home/foo/blah", 200).lift_node_map;;
-        add_active_by_path("/home/foo/bar/hoge", 1).lift_node_map;;
+    eval_state_t(manager) $ do {
+        lift_node_map $ do {
+            add_size_by_path("/home/foo/bar/baz", 100);;
+            add_size_by_path("/home/foo/bar/hoge", 0);;
+            add_size_by_path("/home/foo/blah", 200);;
+            add_active_by_path("/home/foo/bar/hoge", 1);;
+            pure()
+        };;
+        let subdirs = [
+            "/home/foo/bar/hoge/fuga",
+            "/home/foo/bar/hoge/piyo",
+        ];
+        let req = req_worker_result $ DuWorkerResult {
+            dir_path: "/home/foo/bar/hoge",
+            dir_size: 400,
+            subdirs: subdirs
+        };
+        env.@req_chan.send(req);;
+
+        let ret = *DuManager::run_step;
+        assert_equal("ret", true, ret);;
+        assert_equal("workers", subdirs, *var_workers.get.lift_io);;
+        let node = *get_node_by_path("/home/foo/bar/hoge").lift_node_map;
+        assert_equal("node.@size", 400, node.@size);;
+        assert_equal("node.@active", 2, node.@active);;
+        let node = *get_node_by_path("/home/foo").lift_node_map;
+        assert_equal("node.@size", 700, node.@size);;
+        assert_equal("node.@active", 2, node.@active);;
         pure()
-    }.exec_state_t(manager);
-    let subdirs = [
-        "/home/foo/bar/hoge/fuga",
-        "/home/foo/bar/hoge/piyo",
-    ];
-    let req = req_worker_result $ DuWorkerResult {
-        dir_path: "/home/foo/bar/hoge",
-        dir_size: 400,
-        subdirs: subdirs
-    };
-    env.@req_chan.send(req);;
-    let (manager, ret) = *DuManager::run_step.run_state_t(manager);
-    assert_equal("ret", true, ret);;
-    assert_equal("workers", subdirs, *var_workers.get.lift);;
-    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo/bar/hoge");
-    assert_equal("node.@size", 400, node.@size);;
-    assert_equal("node.@active", 2, node.@active);;
-    let (node_map, node) = manager.@node_map.get_node_by_path("/home/foo");
-    assert_equal("node.@size", 700, node.@size);;
-    assert_equal("node.@active", 2, node.@active);;
-    pure()
+    }
 );
 
 main: IO ();

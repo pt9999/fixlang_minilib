@@ -5,6 +5,7 @@ import AsyncTask;
 import Minilib.Common.Assert;
 import Minilib.Common.TimeEx;
 import Minilib.Monad.Error;
+import Minilib.Monad.Iden;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.IO.FileSystem;
@@ -149,14 +150,17 @@ namespace DuNodeMap {
         nodes: []
     };
 
-    get_node: DuNodeIndex -> DuNodeMap -> DuNode;
-    get_node = |index, self| (
-        self[^nodes][index].iget
+    get_node: [m: Monad] DuNodeIndex -> StateT DuNodeMap m DuNode;
+    get_node = |index| (
+        let self = *get_state;
+        pure $ self[^nodes][index].iget
     );
 
-    mod_node: DuNodeIndex -> (DuNode -> DuNode) -> DuNodeMap -> DuNodeMap;
-    mod_node = |index, f, self| (
-        self[^nodes][index].imod(f)
+    mod_node: [m: Monad] DuNodeIndex -> (DuNode -> DuNode) -> StateT DuNodeMap m ();
+    mod_node = |index, f| (
+        State::mod_state(|self|
+            self[^nodes][index].imod(f)
+        )
     );
 
     _assert_abs_path_lazy: Path -> Lazy a -> a;
@@ -164,65 +168,69 @@ namespace DuNodeMap {
         assert_lazy(|_| "not an absolute path: " + path, path.starts_with("/")) $ lazy
     );
 
-    get_node_index_by_path: Path -> DuNodeMap -> (DuNodeMap, DuNodeIndex);
-    get_node_index_by_path = |path, self| (
+    get_node_index_by_path: [m: Monad] Path -> StateT DuNodeMap m DuNodeIndex;
+    get_node_index_by_path = |path| (
         _assert_abs_path_lazy(path) $ |_|
-        let opt = self.@path_to_index.find(path);
+        let nodes = SVar::make(|self| self[^nodes]);
+        let path_to_index = SVar::make(|self| self[^path_to_index]);
+
+        let opt = (*path_to_index.get).find(path);
         if opt.is_some {
-            (self, opt.as_some)
+            pure $ opt.as_some
         };
         
         let parent_path = dirname(path);
-        let (self, parent) = if parent_path == path { 
-            (self, DuNodeIndex::invalid) 
+        let parent = *if parent_path == path { 
+            pure $ DuNodeIndex::invalid
         } else {
-            self.get_node_index_by_path(parent_path) 
+            get_node_index_by_path(parent_path) 
         };
 
         let node = DuNode::empty;
         let node = node.set_path(path).set_parent(parent);
-        let index = self.@nodes.@size;
-        let self = self[^nodes].imod(push_back(node));
-        let self = self[^path_to_index].imod(insert(path, index));
-        (self, index)
+        let index = (*nodes.get).@size;
+        nodes.mod(push_back(node));;
+        path_to_index.mod(insert(path, index));;
+        pure $ index
     );
 
-    get_node_by_path: Path -> DuNodeMap -> (DuNodeMap, DuNode);
-    get_node_by_path = |path, self| (
-        let (self, index) = self.get_node_index_by_path(path);
-        let node = self.get_node(index);
-        (self, node)
+    get_node_by_path: [m: Monad] Path -> StateT DuNodeMap m DuNode;
+    get_node_by_path = |path| (
+        let index = *get_node_index_by_path(path);
+        get_node(index)
     );
 
-    add_size_by_path: Path -> DirSize -> DuNodeMap -> (DuNodeMap, ());
-    add_size_by_path = |path, size, self| (
-        let (self, index) = self.get_node_index_by_path(path);
-        self.add_size_recursive(index, size)
+    add_size_by_path: [m: Monad] Path -> DirSize -> StateT DuNodeMap m ();
+    add_size_by_path = |path, size| (
+        let index = *get_node_index_by_path(path);
+        add_size_recursive(index, size)
     );
 
-    add_size_recursive: DuNodeIndex -> DirSize -> DuNodeMap -> (DuNodeMap, ());
-    add_size_recursive = |index, size, self| (
-        if index == DuNodeIndex::invalid { (self, ()) };
-        let self = self[^nodes][index][^size].imod(add(size));
-        let parent = self[^nodes][index][^parent].iget;
-        self.add_size_recursive(parent, size)
+    add_size_recursive: [m: Monad] DuNodeIndex -> DirSize -> StateT DuNodeMap m ();
+    add_size_recursive = |index, size| (
+        if index == DuNodeIndex::invalid { pure() };
+        let node = SVar::make(|self| self[^nodes][index]);
+        node.mod(mod_size(add(size)));;
+        let parent = (*node.get).@parent;
+        add_size_recursive(parent, size)
     );
 
-    add_active_by_path: Path -> I64 -> DuNodeMap -> (DuNodeMap, ());
-    add_active_by_path = |path, diff, self| (
-        let (self, index) = self.get_node_index_by_path(path);
-        self.add_active_recursive(index, diff)
+    add_active_by_path: [m: Monad] Path -> I64 -> StateT DuNodeMap m ();
+    add_active_by_path = |path, diff| (
+        let index = *get_node_index_by_path(path);
+        add_active_recursive(index, diff)
     );
 
-    add_active_recursive: DuNodeIndex -> I64 -> DuNodeMap -> (DuNodeMap, ());
-    add_active_recursive = |index, diff, self| (
-        if index == DuNodeIndex::invalid { (self, ()) };
-        let old_value = self[^nodes][index][^active].iget;
+    add_active_recursive: [m: Monad] DuNodeIndex -> I64 -> StateT DuNodeMap m ();
+    add_active_recursive = |index, diff| (
+        if index == DuNodeIndex::invalid { pure() };
+        let node = SVar::make(|self| self[^nodes][index]);
+        let old_value = (*node.get).@active;
         let old_value = max(0, old_value);
         let new_value = max(0, old_value + diff);
-        let self = self[^nodes][index][^active].iset(new_value);
-        let parent = self[^nodes][index][^parent].iget;
-        self.add_active_recursive(parent, diff)
+        node.mod(set_active(new_value));;
+        let parent = (*node.get).@parent;
+        add_active_recursive(parent, diff)
     );
 }
 
@@ -313,17 +321,21 @@ namespace DuManager {
         pure $ true
     );
 
-    lift_node_map: (DuNodeMap -> (DuNodeMap, a)) -> StateT DuManager IOFail a;
-    lift_node_map = |f| (
-        lens_state_t(act_node_map) $ state_t $ f >> pure
+    /*
+    lift_node_map: (StateT DuNodeMap Identity a) -> StateT DuManager IOFail a;
+    lift_node_map = |sm| (
+        lens_state_t(act_node_map) $ map_state_t(lift_identity) $ sm
     );
+    */
+    lift_node_map: [m: Monad, m: Functor] StateT DuNodeMap m a -> StateT DuManager m a;
+    lift_node_map = lens_state_t(act_node_map);
 
     on_req_get_size: DuGetSizeRequest -> StateT DuManager IOFail ();
     on_req_get_size = |req| (
         let env = *gets(DuManager::@env);
         let dir_path = req.@dir_path;
         start_worker_if_unchecked(dir_path);;
-        let node = *lift_node_map(get_node_by_path(dir_path));
+        let node = *get_node_by_path(dir_path).lift_node_map;
         req.@res_chan.send(DuGetSizeResponse {
             size: node.@size,
             active: node.@active,

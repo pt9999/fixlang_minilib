@@ -11,11 +11,10 @@
 #include <errno.h>
 #include <assert.h>
 
+typedef void (*sighandler_t)(int);
+
 void handle_fatal_signal(int signum)
 {
-    //char newlines[]="\r\n\r\n";
-    //write(1, newlines, strlen(newlines));
-
     if (false) {
         endwin();       // finalize screen, but assertion-failed messages are also erased
     } else {
@@ -26,9 +25,31 @@ void handle_fatal_signal(int signum)
         curs_set(1);
     }
 
+    //char msg[]="got fatal signal\r\n";
+    //write(STDERR_FILENO, msg, strlen(msg));
+
     // re-raise signal
     signal(signum, SIG_DFL);
     kill(getpid(), signum);
+}
+
+void minilib_ncurses_init_signal_handlers()
+{
+    // https://man7.org/linux/man-pages/man7/signal.7.html
+    // signals whose action =~ /Core|Term/ && standard =~ /P[0-9]+/
+    int fatal_signals[] = {
+        SIGABRT, SIGALRM, SIGBUS, SIGFPE, SIGHUP, SIGILL, SIGINT, SIGKILL, SIGPIPE, 
+        SIGPOLL, SIGPROF, SIGQUIT, SIGSEGV, SIGSYS, SIGTERM, SIGTRAP, SIGUSR1, SIGUSR2, 
+        SIGVTALRM, SIGXCPU, SIGXFSZ, 
+    };
+    for (int i = 0; i < sizeof(fatal_signals) / sizeof(fatal_signals[0]); i++) {
+        // TODO: better to use sigaction(2)
+        int signum = fatal_signals[i];
+        sighandler_t old_handler = signal(signum, handle_fatal_signal);
+        if (old_handler == SIG_ERR) {
+            perror("signal");
+        }
+    }
 }
 
 void minilib_ncurses_initialize()
@@ -36,9 +57,8 @@ void minilib_ncurses_initialize()
     setlocale(LC_ALL, "");  // enable unicode
 
     initscr();      // init screen
-
-    signal(SIGABRT, handle_fatal_signal);
-    signal(SIGSEGV, handle_fatal_signal);
+    
+    minilib_ncurses_init_signal_handlers();     // setup signal handlers
 
     noecho();       // no echo back
     curs_set(0);    // set cursor invisible

@@ -24,6 +24,7 @@ impl FileListView: WithListView {
 namespace FileListView {
     make: AppEnv -> Window -> String -> IOFail FileListView;
     make = |app_env, window, dir_path| (
+        // TODO: create with empty file items then call update_file_items
         let file_items = *get_file_items(app_env, dir_path);
         let list_items = file_items.map(to_list_item);
         let list_view = *ListView::make(window, list_items);
@@ -34,6 +35,27 @@ namespace FileListView {
             dir_path: dir_path,
             file_items: file_items,
         }
+    );
+
+    has_active_file_items: StateIOF FileListView Bool;
+    has_active_file_items = (
+        let file_items = *select_state(@file_items);
+        pure $ file_items.to_iter.check_any(|file_item|
+            file_item.@active > 0
+        )
+    );
+
+    update_file_items: StateIOF FileListView ();
+    update_file_items = (
+        let FileListView {
+            app_env: app_env,
+            dir_path: dir_path
+        } = *get_state;
+        let file_items = *get_file_items(app_env, dir_path);
+        let list_items = file_items.map(to_list_item);
+        State::mod_state(set_file_items(file_items));;
+        with_list_view(change_items(list_items));;
+        pure()
     );
 
     has_focus: StateIOF FileListView Bool;
@@ -66,7 +88,9 @@ namespace FileListView {
 
     handle_key: StateIOF FileListView Action;
     handle_key = (
-        let key = *with_list_view(ListView::get_key);
+        let active = *has_active_file_items;
+        let delay = if active { 500 } else { -1 };
+        let key = *with_list_view(ListView::get_key_with_timeout(delay));
         //eval debug_eprintln(key);
 
         let action = *with_list_view(ListView::handle_key(key));
@@ -78,6 +102,9 @@ namespace FileListView {
         if key == "." || key == "^" || key == "KEY_BACKSPACE" {
             pure $ action_up_directory()
         };
+        if key == "" && active {
+            pure $ action_update_file_items()
+        };
         pure $ no_action()
     );
 
@@ -86,6 +113,7 @@ namespace FileListView {
         with_list_view(ListView::handle_action(action));;
         match action {
             action_up_directory() => up_directory,
+            action_update_file_items() => update_file_items,
             _ => pure()
         }
     );

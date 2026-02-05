@@ -2,6 +2,7 @@ module Filer.FileItem;
 
 import Minilib.IO.FileSystem;
 import Minilib.IO.Path;
+import Minilib.Monad.IO;
 import Minilib.Terminal.Ncurses;
 import Minilib.Trait.Traversable;
 
@@ -16,8 +17,8 @@ type FileItem = box struct {
 };
 
 namespace FileItem {
-    get_file_item: AppEnv -> String -> String -> IOFail FileItem;
-    get_file_item = |app_env, dir_path, file_name| (
+    get_file_item: [m: MonadIOFail] AppEnv -> String -> String -> m FileItem;
+    get_file_item = |app_env, dir_path, file_name| lift_iofail $ do {
         let file_path = join_paths([dir_path, file_name]);
         let stat = *lstat(file_path);
         let (size, active) = *if stat.is_dir {
@@ -32,13 +33,13 @@ namespace FileItem {
             size: size,
             active: active,
         }
-    );
+    };
 
-    get_file_items: AppEnv -> String -> IOFail (Array FileItem);
-    get_file_items = |app_env, dir_path| (
+    get_file_items: [m: MonadIOFail] AppEnv -> String -> m (Array FileItem);
+    get_file_items = |app_env, dir_path| lift_iofail $ do {
         let file_names = *list_dir(dir_path);
         file_names.map_m(|name| get_file_item(app_env, dir_path, name))
-    );
+    };
 
     format_file_item: FileItem -> String;
     format_file_item = |item| (

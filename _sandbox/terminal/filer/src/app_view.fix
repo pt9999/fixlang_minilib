@@ -3,7 +3,10 @@ module Filer.AppView;
 import Minilib.IO.FileSystem;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
+import Minilib.Text.Unicode;
+import Minilib.Text.WideChar;
 import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
 
 import Filer.AppEnv;
 import Filer.Common;
@@ -48,7 +51,8 @@ namespace AppView {
         loop_m(
             (), |_|
             AppView::show;;
-            let action = *AppView::handle_key;
+            let key = *AppView::get_key;
+            let action = *AppView::handle_key(key);
             if action.is_action_quit {
                 let app_env = *select_state(AppView::@app_env);
                 (app_env.@shutdown).lift_iofail;;
@@ -96,13 +100,49 @@ namespace AppView {
         set_focus((focus + 1) % 2)
     );
 
-    handle_key: StateIOF AppView Action;
-    handle_key = (
+    get_key: StateIOF AppView KeyName;
+    get_key = (
         let focus = *get_focus;
-        if focus == 0 { with_file_list_view $ FileListView::handle_key };
-        if focus == 1 { with_file_view $ FileView::handle_key };
+        if focus == 0 { with_file_list_view $ FileListView::get_key };
+        if focus == 1 { with_file_view $ FileView::get_key };
+        pure $ ""
+    );
+
+    handle_key: KeyName -> StateIOF AppView Action;
+    handle_key = |key| (
+        let focus = *get_focus;
+        let action = *(
+            if focus == 0 { with_file_list_view $ FileListView::handle_key(key) }
+            else if focus == 1 { with_file_view $ FileView::handle_key(key) }
+            else { pure $ no_action() }
+        );
+        if !action.is_no_action { pure $ action };
+        if key == "q" || key == "Q" || key == "KEY_ESC" || key == "^[" {
+            pure $ action_quit()
+        };
+        if key == "h" || key == "?" {
+            pure $ action_help()
+        };
+        if key == "^I" {
+            pure $ action_next_focus()
+        };
         pure $ no_action()
     );
+
+    help_messages: StateIOF AppView (Array (String, String));
+    help_messages = do {
+        let focus = *get_focus;
+        let help = *(
+            if focus == 0 { with_file_list_view $ FileListView::help_messages }
+            else if focus == 1 { with_file_view $ FileView::help_messages }
+            else { pure $ [] }
+        );
+        pure $ [
+            ("  ESC     q     ", "終了"),
+            ("   ?      h     ", "ヘルプ"),
+            ("  TAB         ^I", "フォーカス"),
+        ] + help
+    };
 
     handle_action: Action -> StateIOF AppView ();
     handle_action = |action| (
@@ -124,7 +164,36 @@ namespace AppView {
                     )
                 }
             ),
+            action_help() => show_help,
             _ => pure()
         }
+    );
+
+    show_help: StateIOF AppView ();
+    show_help = (
+        let app_win = *select_state(AppView::@window);
+        let (app_w, app_h) = *app_win.get_window_size;
+        let help = *AppView::help_messages;
+        let help = help.map(|(left, right)| (left.to_utf32_string, right.to_utf32_string));
+        let help_w = help.to_iter.map(|(left, right)| left.get_width + 2 + right.get_width).fold(0, max);
+        let help_h = help.get_size;
+        let dlg_w = max(2, min(app_w - 2, help_w + 2));
+        let dlg_h = max(2, min(app_h - 2, help_h + 2));
+        let window = *app_win.make_sub_window((app_w - dlg_w) / 2, (app_h - dlg_h) / 2, dlg_w, dlg_h);
+        window.clear;;
+        window.draw_border;;
+        let title = "HELP";
+        window.move_add_wstr(2, 0, " " + ellipsis(dlg_w - 6, title) + " ").when(title != "");;
+        range(1, dlg_h-1).foreach_m(|y|
+            let i = y - 1;
+            if 0 <= i && i < help.get_size {
+                let (left, right) = help.@(i);
+                let wstr = left + "  ".to_utf32_string + right;
+                //let wstr = wstr.ellipsis(dlg_w - 5) // TODO: implement ellipsis for UTF32String 
+                window.move_add_wstr(1, y, wstr)
+            } else { pure() }
+        );;
+        let key = *window.get_key;
+        pure()
     );
 }

@@ -17,8 +17,8 @@ type ListView = unbox struct {
     has_focus: Bool,
     title: String,
     items: Array ListItem,
-    scroll_top: I64,
     selected_index: I64,
+    scroll_top: I64,
     message: String,
 };
 
@@ -32,14 +32,27 @@ namespace ListView {
             has_focus: false,
             title: "",
             items: items,
-            scroll_top: 0,
             selected_index: -1,
+            scroll_top: 0,
             message: "",
         }
     );
 
-    change_items: Array ListItem -> StateIOF ListView ();
-    change_items = |items| (
+    // Replace items.
+    // The selected index and the scroll top are reset to the initial state.
+    replace_items: Array ListItem -> StateIOF ListView ();
+    replace_items = |items| (
+        State::mod_state(
+            set_items(items) >>
+            set_selected_index(-1) >>
+            set_scroll_top(0)
+        )
+    );
+
+    // Updates items.
+    // The selected index and the scroll top are retained unless they are out of bounds.
+    update_items: Array ListItem -> StateIOF ListView ();
+    update_items = |items| (
         State::mod_state(set_items(items));;
         State::mod_state(mod_selected_index(|selected_index|
             min(selected_index, items.get_size - 1)
@@ -113,14 +126,11 @@ namespace ListView {
 
         //State::mod_state(ListView::set_title("key=" + key));;
 
-        if key == "q" || key == "Q" || key == "KEY_ESC" || key == "^[" {
-            pure $ action_quit()
+        if key == "k" || key == "^P" || key == "KEY_UP" {
+            pure $ action_select_prev_item(id)
         };
         if key == "j" || key == "^N" || key == "KEY_DOWN" {
             pure $ action_select_next_item(id)
-        };
-        if key == "k" || key == "^P" || key == "KEY_UP" {
-            pure $ action_select_prev_item(id)
         };
         if key == "b" || key == "^B" || key == "KEY_PPAGE" {
             pure $ action_page_up(id)
@@ -128,11 +138,16 @@ namespace ListView {
         if key == "f" || key == "^F" || key == "KEY_NPAGE" {
             pure $ action_page_down(id)
         };
-        if key == "^I" {
-            pure $ action_next_focus()
-        };
         pure $ no_action()
     );
+
+    help_messages: StateIOF ListView (Array (String, String));
+    help_messages = pure $ [
+        ("   ↑      k   ^P", "前の項目"),
+        ("   ↓      j   ^N", "次の項目"),
+        (" PageUp   b   ^B", "前ページ"),
+        ("PageDown  f   ^F", "次ページ"),
+    ];
 
     handle_action: Action -> StateIOF ListView ();
     handle_action = |action| (

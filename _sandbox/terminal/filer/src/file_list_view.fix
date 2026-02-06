@@ -54,7 +54,7 @@ namespace FileListView {
         let file_items = *get_file_items(app_env, dir_path);
         let list_items = file_items.map(to_list_item);
         State::mod_state(set_file_items(file_items));;
-        with_list_view(change_items(list_items));;
+        with_list_view(update_items(list_items));;
         pure()
     );
 
@@ -86,13 +86,17 @@ namespace FileListView {
         with_list_view $ ListView::show
     );
 
-    handle_key: StateIOF FileListView Action;
-    handle_key = (
+    get_key: StateIOF FileListView KeyName;
+    get_key = (
         let active = *has_active_file_items;
         let delay = if active { 500 } else { -1 };
         let key = *with_list_view(ListView::get_key_with_timeout(delay));
         //eval debug_eprintln(key);
+        pure $ key
+    );
 
+    handle_key: KeyName -> StateIOF FileListView Action;
+    handle_key = |key| (
         let action = *with_list_view(ListView::handle_key(key));
         if ! action.is_no_action { pure $ action };
 
@@ -102,11 +106,20 @@ namespace FileListView {
         if key == "." || key == "^" || key == "KEY_BACKSPACE" {
             pure $ action_up_directory()
         };
-        if key == "" && active {
+        if key == "" && *has_active_file_items {
             pure $ action_update_file_items()
         };
         pure $ no_action()
     );
+
+    help_messages: StateIOF FileListView (Array (String, String));
+    help_messages = do {
+        let help = *with_list_view(ListView::help_messages);
+        pure $ help + [
+            (" Enter        ^J", "開く"),
+            ("   .      ^     ", "親ディレクトリ"),
+        ]
+    };
 
     handle_action: Action -> StateIOF FileListView ();
     handle_action = |action| (

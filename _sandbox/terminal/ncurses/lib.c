@@ -13,6 +13,12 @@
 
 typedef void (*sighandler_t)(int);
 
+int minilib_ncurses_failed(const char* func_name) {
+    endwin();
+    fprintf(stderr, "%s failed!\n", func_name);
+    return ERR;
+}
+
 void handle_fatal_signal(int signum)
 {
     if (false) {
@@ -33,14 +39,14 @@ void handle_fatal_signal(int signum)
     kill(getpid(), signum);
 }
 
-void minilib_ncurses_init_signal_handlers()
+int minilib_ncurses_init_signal_handlers()
 {
     // https://man7.org/linux/man-pages/man7/signal.7.html
     // signals whose action =~ /Core|Term/ && standard =~ /P[0-9]+/
     int fatal_signals[] = {
-        SIGABRT, SIGALRM, SIGBUS, SIGFPE, SIGHUP, SIGILL, SIGINT, SIGKILL, SIGPIPE, 
-        SIGPOLL, SIGPROF, SIGQUIT, SIGSEGV, SIGSYS, SIGTERM, SIGTRAP, SIGUSR1, SIGUSR2, 
-        SIGVTALRM, SIGXCPU, SIGXFSZ, 
+        SIGABRT, SIGALRM, SIGBUS, SIGFPE, SIGHUP, SIGILL, SIGINT, /*SIGKILL,*/ SIGPIPE,
+        SIGPOLL, SIGPROF, SIGQUIT, SIGSEGV, SIGSYS, SIGTERM, SIGTRAP, SIGUSR1, SIGUSR2,
+        SIGVTALRM, SIGXCPU, SIGXFSZ,
     };
     for (int i = 0; i < sizeof(fatal_signals) / sizeof(fatal_signals[0]); i++) {
         // TODO: better to use sigaction(2)
@@ -48,27 +54,44 @@ void minilib_ncurses_init_signal_handlers()
         sighandler_t old_handler = signal(signum, handle_fatal_signal);
         if (old_handler == SIG_ERR) {
             perror("signal");
+            return ERR;
         }
     }
+    return OK;
 }
 
-void minilib_ncurses_initialize()
+int minilib_ncurses_initialize()
 {
-    setlocale(LC_ALL, "");  // enable unicode
+    const char* locale = setlocale(LC_ALL, "");  // enable unicode
+    if (locale == NULL) {
+        fprintf(stderr, "setlocale failed!\n");
+        return ERR;
+    }
 
-    initscr();      // init screen
-    
-    minilib_ncurses_init_signal_handlers();     // setup signal handlers
+    WINDOW* win = initscr();      // init screen
+    if (win == NULL) {
+        fprintf(stderr, "initscr failed!\n");
+        return ERR;
+    }
 
-    noecho();       // no echo back
-    curs_set(0);    // set cursor invisible
-    cbreak();       // disable line buffering on input
-    keypad(stdscr, TRUE);   // enable function keys (arrow keys etc.)
+    int ret;
+    ret = minilib_ncurses_init_signal_handlers();     // setup signal handlers
+    if (ret == ERR) { return minilib_ncurses_failed("signal"); }
+
+    ret = noecho();       // no echo back
+    if (ret == ERR) { return minilib_ncurses_failed("noecho"); }
+    ret = curs_set(0);    // set cursor invisible
+    if (ret == ERR) { return minilib_ncurses_failed("curs_set"); }
+    ret = cbreak();       // disable line buffering on input
+    if (ret == ERR) { return minilib_ncurses_failed("cbreak"); }
+    ret = keypad(stdscr, TRUE);   // enable function keys (arrow keys etc.)
+    if (ret == ERR) { return minilib_ncurses_failed("keypad"); }
 
     //erase();        // clear screen
 
     // initialize colors
-    start_color();
+    ret = start_color();
+    if (ret == ERR) { return minilib_ncurses_failed("start_color"); }
     /*
     init_color(COLOR_BLACK, 0, 0, 0);
     init_color(COLOR_RED, 255, 0, 0);
@@ -88,6 +111,8 @@ void minilib_ncurses_initialize()
     init_pair(5, COLOR_MAGENTA, COLOR_BLACK);
     init_pair(6, COLOR_CYAN, COLOR_BLACK);
     init_pair(7, COLOR_WHITE, COLOR_BLACK);
+
+    return OK;
 }
 
 void minilib_ncurses_finialize()

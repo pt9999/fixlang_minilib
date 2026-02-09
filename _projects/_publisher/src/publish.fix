@@ -161,10 +161,12 @@ type PublishArgs = unbox struct {
     new_version: Option String,
     release: Bool,
     confirm: Bool,
+    test: Bool,
     commit: Bool,
     push: Bool,
     tag: Bool,
     update_document: Bool,
+    check_branch: Bool,
 };
 
 namespace PublishArgs {
@@ -174,10 +176,12 @@ namespace PublishArgs {
         new_version: none(),
         release: false,
         confirm: false,
+        test: true,
         commit: false,
         push: false,
         tag: false,
         update_document: false,
+        check_branch: true,
     };
 
     update_realpath: [m: MonadFs] PublishArgs -> m PublishArgs;
@@ -205,13 +209,13 @@ do_publish = |args| (
     let project_file_path = C::fixproj_toml;
     check_if_file_exists(project_file_path);;
 
-    check_branch_name(C::branch_main);;
+    check_branch_name(C::branch_main).when(args.@check_branch);;
     check_uncommitted_files;;
     if *no_commit_since_latest {
         log_message("### No commit since latest, so only run tests with the latest dependencies");;
         run_fix_clean;;
         run_fix_deps_update;;
-        run_fix_test;;
+        run_fix_test.when(args.@test);;
         run_fix_docs;;
         reset_fixdeps_lock;;
         reset_documents;;
@@ -221,7 +225,7 @@ do_publish = |args| (
 
     run_fix_clean;;
     run_fix_deps_update;;
-    run_fix_test;;
+    run_fix_test.when(args.@test);;
     run_fix_docs;;
 
     log_message("### Update the project file");;

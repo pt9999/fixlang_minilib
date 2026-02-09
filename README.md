@@ -3,7 +3,7 @@
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 This library is still in alpha stage.
 
-The latest Fix program v1.2.0-beta.2+ (2026-02-01) is recommended.
+The latest Fix program v1.2.0 (2026-02-07) is recommended.
 For backward compatibility, see [Compatibility](#Compatibility) section below.
 
 Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
@@ -56,7 +56,29 @@ For details, see README.md in [fixlang-minilib-examples](https://github.com/pt99
 
 ### Compatibility
 
-For older version of Fix program (1.1.0-alpha.12), you might need to use following versions.
+For older version of Fix program, you might need to use following versions.
+
+### Compatible versions for Fix v1.2.0
+```
+minilib-app = 0.6.2
+minilib-binary = 0.5.6
+minilib-collection = 0.6.6
+minilib-common = 0.11.4
+minilib-comonad = 0.5.9
+minilib-crypto = 0.5.8
+minilib-io = 0.7.2
+minilib-json = 0.5.7
+minilib-math = 0.6.8
+minilib-media = 0.5.11
+minilib-monad = 0.10.1
+minilib-net = 0.6.8
+minilib-random = 0.6.8
+minilib-text = 0.7.3
+minilib-thread = 0.6.1
+minilib-xml = 0.5.7
+```
+
+### Compatible versions for Fix v1.1.0-alpha.12
 ```
 minilib-app = 0.5.1
 minilib-binary = 0.5.1

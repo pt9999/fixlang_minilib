@@ -26,10 +26,10 @@ test-fix:
 test-document:
 	fix deps update
 	fix docs -o docs
-	git checkout -- fixdeps.lock docs
+	-git checkout -- fixdeps.lock docs
 
 reset-document:
-	git checkout -- fixdeps.lock docs
+	-git checkout -- fixdeps.lock docs
 
 clean:
 	fix clean

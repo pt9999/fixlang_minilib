@@ -7,6 +7,7 @@ import Minilib.Monad.Error;
 import Minilib.Testing.UnitTest;
 
 import Publisher.Common;
+import Publisher.Env;
 import Publisher.Publish;
 import Publisher.ProcessRunner;
 import Publisher.Fs;
@@ -15,57 +16,13 @@ import Publisher.Tests.MockProcessRunner;
 import Publisher.Tests.MockFs;
 import Publisher.Tests.MockConsoleUi;
 
-// A trait for an environment of a Reader monad.
-trait e: Env {
-    // Creates an empty environment.
-    make_empty_env: [m: MonadIO] m e;
-}
-
-namespace Env {
-    // `env.get(@field)` returns the object referenced by `env.@field`.
-    // The type of the field should be an IORef of that object.
-    get: [e: Env, m: MonadIO] (e -> IORef a) -> e -> m a;
-    get = |@field, env| env.@field.get.lift_io;
-
-    // `env.gets(@field, f)` gets the object referenced by `env.@field`, then apply `f` to that object.
-    gets: [e: Env, m: MonadIO, m: Functor] (e -> IORef a) -> (a -> b) -> e -> m b;
-    gets = |@field, f, env| env.get(@field).map(f);
-
-    // `env.set(@field, object)` sets the object referenced by `env.@field`.
-    set: [e: Env, m: MonadIO] (e -> IORef a) -> a -> e -> m ();
-    set = |@field, a, env| env.@field.IORef::set(a).lift_io;
-
-    // `env.mod(@field, f)` modifies the object referenced by `env.@field` using the function `f`.
-    mod: [e: Env, m: MonadIO] (e -> IORef a) -> (a -> a) -> e -> m ();
-    mod = |@field, f, env| env.@field.mod(f).lift_io;
-
-    // `setup` is a synonym of `mod`.
-    setup: [e: Env, m: MonadIO] (e -> IORef a) -> (a -> a) -> e -> m ();
-    setup = mod;
-
-    // `make_env_test(testname) $ |env| ...` creates a TestCase which uses an Env.
-    make_env_test: [e: Env] String -> (e -> IOFail ()) -> TestCase;
-    make_env_test = |testname, body| (
-        make_test(testname) $ |_|
-        let env: e = *make_empty_env;
-        body(env)
-    );
-
-    // `env.run(rio)` runs a Reader monad using an Env.
-    // This is equal to `rio.run_reader_t(env)`.
-    run: [e: Env] RIO e a -> e -> IOFail a;
-    run = |rio, env| (
-        rio.run_reader_t(env)
-    );
-
-    // `env.run_catch(rio)` runs a Reader monad using an Env, catching any error.
-    // This is equal to `rio.run_reader_t(env).to_result.lift`.
-    run_catch: [e: Env] RIO e a -> e -> IOFail (Result ErrMsg a);
-    run_catch = |rio, env| (
-        env.run(rio).to_result.lift
-    );
-}
-
+// `make_env_test(testname) $ |env| ...` creates a TestCase which uses an Env.
+make_env_test: [e: Env] String -> (e -> IOFail ()) -> TestCase;
+make_env_test = |testname, body| (
+    make_test(testname) $ |_|
+    let env: e = *make_empty_env;
+    body(env)
+);
 
 type MockEnv = unbox struct {
     runner: IORef MockProcessRunner,

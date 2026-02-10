@@ -8,7 +8,7 @@ import Minilib.Text.StringEx;
 
 import Publisher.Fs;
 import Publisher.ConsoleUi;
-import Publisher.Verup;
+import Publisher.ProjectVersion;
 
 type ProjectFileField = unbox struct {
     key: String,
@@ -29,33 +29,50 @@ namespace ProjectFileField {
 }
 
 type ProjectFile = unbox struct {
-    filepath: Path,
     lines: Array String,
 };
 
 namespace ProjectFile {
-    make: Path -> Array String -> ProjectFile;
-    make = |path, lines| ProjectFile {
-        filepath: path,
+    // Creates a ProjectFile structure.
+    //
+    // # Parameters
+    // - `lines`: contents of the project file
+    make: Array String -> ProjectFile;
+    make = |lines| ProjectFile {
         lines: lines
     };
 
+    // Reads a project file.
+    //
+    // # Parameters
+    // - `path`: the path of the project file
     from_file: [m: MonadFs] Path -> m ProjectFile;
     from_file = |path| (
         let contents = *fs_read_file_string(path);
         let lines = contents.split("\n").to_array;
-        pure $ ProjectFile::make(path, lines)
+        pure $ ProjectFile::make(lines)
     );
 
-    save: [m: MonadFs, m: MonadConsoleUi] ProjectFile -> m ();
-    save = |project_file| (
+    // Writes to a project file.
+    //
+    // # Parameters
+    // - `path`: the path of the project file
+    // - `project_file`: a ProjectFile structure
+    write_file: [m: MonadFs, m: MonadConsoleUi] Path -> ProjectFile -> m ();
+    write_file = |path, project_file| (
         let contents = project_file.@lines.to_iter.join("\n");
-        fs_write_file_string(project_file.@filepath, contents);;
-        ui_println("Wrote " + project_file.@filepath)
+        fs_write_file_string(path, contents);;
+        ui_println("Wrote " + path)
     );
 
+    // Find a field from a ProjectFile structure.
+    //
+    // # Parameters
+    // - `section_to_find`: the section to find
+    // - `key_to_find`: the key to find
+    // - `project_file`: a ProjectFile structure
     find_field: [m: MonadError] String -> String -> ProjectFile -> m ProjectFileField;
-    find_field = 
+    find_field =
         |section_to_find, key_to_find, project_file| (
         let regexp_section = *RegExp::compile("^\\[(.*)\\]$", "").lift_result;
         let section = "";
@@ -82,16 +99,29 @@ namespace ProjectFile {
         )
     );
 
+    // Gets the project name of a project.
+    //
+    // # Parameters
+    // - `project_file`: a ProjectFile structure
     get_project_name: [m: MonadError, m: Functor] ProjectFile -> m String;
     get_project_name = |project_file| (
         project_file.find_field("general", "name").map(unquote)
     );
 
+    // Gets the project version of a project.
+    //
+    // # Parameters
+    // - `project_file`: a ProjectFile structure
     get_project_version: [m: MonadError, m: Functor] ProjectFile -> m String;
     get_project_version = |project_file| (
         project_file.find_field("general", "version").map(unquote)
     );
 
+    // Sets the project version of a project.
+    //
+    // # Parameters
+    // - `version`: a project version
+    // - `project_file`: a ProjectFile structure
     set_project_version: [m: MonadError, m: Functor] String -> ProjectFile -> m ProjectFile;
     set_project_version = |version, project_file| (
         let field = *project_file.find_field("general", "version");
@@ -99,12 +129,19 @@ namespace ProjectFile {
         pure $ project_file[^lines][field.@line_index].iset(line)
     );
 
-    upgrade_project_version: [m: MonadConsoleUi, m: MonadFs] Path -> Option String -> Bool -> Bool -> m String;
+    // Reads a project file, bumps the project version, prompts the user for confirmation, then writes back to the project file.
+    //
+    // # Parameters
+    // - `project_file_path`: a file path to the project file
+    // - `new_version`: a default value of the new version
+    // - `release`: if true, removes the prerelease part from the version string
+    // - `confirm`: if true, prompts the user for confirmation
+    upgrade_project_version: [m: MonadConsoleUi, m: MonadFs, m: MonadError] Path -> Option String -> Bool -> Bool -> m String;
     upgrade_project_version = |project_file_path, new_version, release, confirm| (
         let project_file = *ProjectFile::from_file(project_file_path);
         let project_name = *project_file.get_project_name;
         let old_version = *project_file.get_project_version;
-        let new_version = *if new_version.is_some { 
+        let new_version = *if new_version.is_some {
             pure $ new_version.as_some
         } else {
             increment_version(old_version, /*remove_prerelease:*/ release).lift_result
@@ -117,8 +154,10 @@ namespace ProjectFile {
         when(confirm,
             confirm_upgrade(old_version, new_version)
         );;
+        ProjectVersion::validate(new_version);;
+
         let project_file = *project_file.set_project_version(new_version);
-        project_file.save;;
+        project_file.write_file(project_file_path);;
         pure $ new_version
     );
 }

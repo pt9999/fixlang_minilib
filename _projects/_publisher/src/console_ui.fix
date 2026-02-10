@@ -7,45 +7,42 @@ import Minilib.Text.StringEx;
 
 import Publisher.Common;
 
+//------------------------------------------------------------------
+//  MonadConsoleUi Interface
+//------------------------------------------------------------------
+
+// A trait alias for monads which support console UI operations.
 trait MonadConsoleUi = MonadIOFail + MonadErrorIF + MonadConsoleUiIF;
 
+// A trait for monads which support console UI operations.
 trait [m: *->*] m: MonadConsoleUiIF {
+    // Prints a string to the console output.
+    //
+    // # Parameters
+    // - `str`: a string
     ui_print: String -> m ();
+
+    // Reads a line from the console input.
+    //
     ui_input_line: m String;
 }
 
+//------------------------------------------------------------------
+//  Functions that use MonadConsoleUi Interface
+//------------------------------------------------------------------
+
+// Prints a string and a newline to the console output.
+//
+// # Parameters
+// - `str`: a string
 ui_println: [m: MonadConsoleUi] String -> m ();
 ui_println = |str| ui_print(str + "\n");
 
-impl IOFail: MonadConsoleUiIF {
-    ui_print = |str| (
-        eprint(str).lift;;
-        flush(IO::stderr).forget.lift
-    );
-
-    ui_input_line = (
-        input_line_s.lift
-    );
-}
-
-type ConsoleUiApi = unbox struct {
-    ui_print: String -> IOFail (),
-    ui_input_line: IOFail String,
-};
-
-trait e: HasConsoleUiApi {
-    get_console_ui_api: e -> IOFail ConsoleUiApi;
-}
-
-impl [e: HasConsoleUiApi] ReaderT e IOFail: MonadConsoleUiIF {
-    ui_print = |str| (
-        call_api(get_console_ui_api, @ui_print, |func| func(str))
-    );
-    ui_input_line = (
-        call_api(get_console_ui_api, @ui_input_line, |func| func)
-    );
-}
-
+// Prints the project name and asks a new version.
+//
+// # Parameters
+// - `project_name`: the project name
+// - `new_version`: a default value of the new version
 ask_new_version: [m: MonadConsoleUi] String -> String -> m String;
 ask_new_version = |project_name, new_version| (
     ui_println $ (project_name,).format("Project name: {}");;
@@ -55,6 +52,11 @@ ask_new_version = |project_name, new_version| (
     pure $ if answer != "" { answer } else { new_version }
 );
 
+// Prints the old version and the new version, then asks a confirmation.
+//
+// # Parameters
+// - `old_version`: the old version
+// - `new_version`: the new version
 confirm_upgrade: [m: MonadConsoleUi] String -> String -> m ();
 confirm_upgrade = |old_version, new_version| (
     do {
@@ -70,3 +72,56 @@ confirm_upgrade = |old_version, new_version| (
     };
     pure()
 );
+
+//------------------------------------------------------------------
+//  MonadConsoleUi Implementations & ConsoleUiApi Interface
+//------------------------------------------------------------------
+
+// An API structure for console UI operations.
+type ConsoleUiApi = unbox struct {
+    ui_print: String -> IOFail (),
+    ui_input_line: IOFail String,
+};
+
+// A trait for environments which have `ConsoleUiApi`.
+trait e: HasConsoleUiApi {
+    // Retrieves `ConsoleUiApi` from the environment.
+    get_console_ui_api: e -> IOFail ConsoleUiApi;
+}
+
+impl [e: HasConsoleUiApi] ReaderT e IOFail: MonadConsoleUiIF {
+    ui_print = |str| (
+        call_api(get_console_ui_api, @ui_print, |func| func(str))
+    );
+    ui_input_line = (
+        call_api(get_console_ui_api, @ui_input_line, |func| func)
+    );
+}
+
+// TODO: Deprecate when RealConsoleUi is used
+impl IOFail: MonadConsoleUiIF {
+    ui_print = |str| (
+        eprint(str).lift;;
+        flush(IO::stderr).forget.lift
+    );
+
+    ui_input_line = (
+        input_line_s.lift
+    );
+}
+
+//------------------------------------------------------------------
+//  ConsoleUiApi Implementations
+//------------------------------------------------------------------
+
+namespace RealConsoleUi {
+    // A ConsoleUiApi for the real world.
+    api: ConsoleUiApi;
+    api = ConsoleUiApi {
+        ui_print: |str| (
+            eprint(str).lift;;
+            flush(IO::stderr).forget.lift
+        ),
+        ui_input_line: input_line_s.lift,
+    };
+}

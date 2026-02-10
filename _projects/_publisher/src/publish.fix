@@ -29,6 +29,10 @@ namespace GitTask {
         )
     );
 
+    // Checks if the current branch name is equal to the specified branch name.
+    //
+    // # Parameters
+    // - `expected`: an expected branch name
     check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
     check_branch_name = |expected| (
         log_message((expected,).format("### Checking if the current branch name is `{}`"));;
@@ -40,6 +44,7 @@ namespace GitTask {
         pure()
     );
 
+    // Checks if the uncommited files exist
     check_uncommitted_files: [m: MonadRunProcess, m: MonadError] m ();
     check_uncommitted_files = (
         log_message("### Checking for uncommitted files");;
@@ -50,9 +55,10 @@ namespace GitTask {
         pure()
     );
 
+    // Checks if there is any commit since the latest release
     no_commit_since_latest:  [m: MonadRunProcess] m Bool;
     no_commit_since_latest = (
-        log_message("### Checking if there is any commit from the latest release");;
+        log_message("### Checking if there is any commit since the latest release");;
         let (stdout, stderr) = *run_process(["git", "diff", "--name-only", TagName::latest]);
         if stdout == "" {
             pure $ true
@@ -60,14 +66,16 @@ namespace GitTask {
         pure $ false
     );
 
-    reset_fixdeps_lock:  [m: MonadRunProcess] m ();
-    reset_fixdeps_lock = (
+    // Resets the lock files if modified.
+    reset_lock_files:  [m: MonadRunProcess] m ();
+    reset_lock_files = (
         let (stdout, stderr) = *run_process(["git", "checkout", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         pure()
     );
 
-    commit_fixdeps_lock: [m: MonadRunProcess] m ();
-    commit_fixdeps_lock = (
+    // Commits the lock files if modified.
+    commit_lock_files: [m: MonadRunProcess] m ();
+    commit_lock_files = (
         let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         if stdout == "" { pure() };
         log_message("### Commit fixdeps.lock");;
@@ -76,6 +84,7 @@ namespace GitTask {
         pure()
     );
 
+    // Commits the documents if modified.
     commit_documents: [m: MonadRunProcess] m ();
     commit_documents = (
         let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", DirName::docs]);
@@ -86,54 +95,71 @@ namespace GitTask {
         pure()
     );
 
+    // Resets the documents if modified.
     reset_documents: [m: MonadRunProcess] m ();
     reset_documents = (
         let (stdout, stderr) = *run_process(["git", "checkout", "--", DirName::docs]);
         pure()
     );
 
-    commit_project_file: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
-    commit_project_file = |args, filepath, version| (
+    // Commits the project file if modified.
+    commit_project_file: [m: MonadRunProcess] Path -> String -> m ();
+    commit_project_file = |filepath, version| (
         log_message("### Commit the project file");;
         let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
         let message = "version " + version;
         let (stdout, stderr) = *run_process(["git", "commit", "--verbose", "-m", message]);
-        when(args.@tag, do {
-            log_message("### Make a version tag");;
-            let (stdout, stderr) = *run_process(["git", "tag", version]);
-            let (stdout, stderr) = *run_process(["git", "tag", TagName::latest, "-f"]);
-            pure()
-        });;
-        when(args.@push, do {
-            log_message("### Push to the remote repository");;
-            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin]);
-            pure()
-        });;
-        when(args.@push && args.@tag, do {
-            log_message("### Push tags to the remote repository");;
-            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, version]);
-            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, TagName::latest, "-f"]);
-            pure()
-        });;
+        pure()
+    );
+
+    // Makes a version tag.
+    make_version_tag: [m: MonadRunProcess] String -> m ();
+    make_version_tag = |version| (
+        log_message("### Make a version tag");;
+        let (stdout, stderr) = *run_process(["git", "tag", version]);
+        let (stdout, stderr) = *run_process(["git", "tag", TagName::latest, "-f"]);
+        pure()
+    );
+
+    push_branch_to_remote: [m: MonadRunProcess] m ();
+    push_branch_to_remote = (
+        log_message("### Push to the remote repository");;
+        let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin]);
+        pure()
+    );
+
+    push_tags_to_remote: [m: MonadRunProcess] String -> m ();
+    push_tags_to_remote = |version| (
+        log_message("### Push tags to the remote repository");;
+        let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, version]);
+        let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, TagName::latest, "-f"]);
         pure()
     );
 }
 
 namespace ProjectTask {
 
+    // Changes the current working directory to the project directory.
+    //
+    // # Parameters
+    // - `project_dir`: a project directory
     chdir_to_project_dir: [m: MonadFs] Path -> m ();
     chdir_to_project_dir = |project_dir| (
         log_message("### Chdir to `" + project_dir + "`");;
         fs_chdir(project_dir)
     );
 
-    // Checks if the project file (fixproj.toml) exists
+    // Checks if the project file (fixproj.toml) exists.
     check_project_file_exists: [m: MonadFs] m ();
     check_project_file_exists = (
         let project_file_path = FileName::fixproj_toml;
         check_if_file_exists(project_file_path)
     );
 
+    // Checks if the specified file exists.
+    //
+    // # Parameters
+    // - `filepath`: a filepath
     check_if_file_exists: [m: MonadFs] Path -> m ();
     check_if_file_exists = |filepath| (
         if ! *fs_file_exists(filepath) {
@@ -219,44 +245,55 @@ namespace PublishArgs {
 do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] PublishArgs -> m ();
 do_publish = |args| (
     let args = *args.update_realpath;
-    
+
     chdir_to_project_dir(args.@project_dir);;
 
+    // Checks preconditions
     check_git_working_tree;;
     check_project_file_exists;;
     check_branch_name(BranchName::main).when(args.@check_branch);;
     check_uncommitted_files;;
+
+    // If there is no commit since the latest release, only run tests with the latest dependencies
     if *no_commit_since_latest {
         log_message("### No commit since latest, so only run tests with the latest dependencies");;
         run_fix_clean;;
         run_fix_deps_update;;
         run_fix_test.when(args.@test);;
         run_fix_docs;;
-        reset_fixdeps_lock;;
+        reset_lock_files;;
         reset_documents;;
         log_message("### No need to publish");;
         pure()
     };
 
+    // Clean, update deps, run tests, generate docs
     run_fix_clean;;
     run_fix_deps_update;;
     run_fix_test.when(args.@test);;
-    run_fix_docs;;
+    run_fix_docs.when(args.@update_document);;
 
     log_message("### Update the project file");;
     let project_file_path = FileName::fixproj_toml;
     let new_version = *upgrade_project_version(project_file_path, args.@new_version, args.@release, args.@confirm);
 
-    reset_documents;;
+    // Re-generates documents with the new version
+    reset_documents.when(args.@update_document);;
+    run_fix_docs.when(args.@update_document);;
 
-    commit_fixdeps_lock;;
+    // Commits lock files
+    commit_lock_files.when(args.@commit);;
 
-    when(args.@update_document, do {
-        run_fix_docs;;
-        commit_documents
-    });;
-    when(args.@commit && new_version != "",
-        commit_project_file(args, project_file_path, new_version));;
+    // Commits documents
+    commit_documents.when(args.@commit && args.@update_document);;
+
+    // Commits the project file
+    commit_project_file(project_file_path, new_version).when(args.@commit);;
+
+    make_version_tag(new_version).when(args.@tag);;
+    push_branch_to_remote.when(args.@push);;
+    push_tags_to_remote(new_version).when(args.@push && args.@tag);;
+
     pure()
 );
 

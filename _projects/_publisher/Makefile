@@ -3,6 +3,9 @@ all: build
 build:
 	fix build
 
+document:
+	fix docs -o docs
+
 test:
 	fix test -o a.out
 

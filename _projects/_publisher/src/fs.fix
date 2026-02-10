@@ -9,30 +9,53 @@ import Minilib.Monad.IO;
 
 import Publisher.Common;
 
+//------------------------------------------------------------------
+//  MonadFs Interface
+//------------------------------------------------------------------
+
+// A trait alias for monads which support file system operations.
 trait MonadFs = Functor + MonadIOFail + MonadErrorIF + MonadFsIF;
 
+// A trait for monads which support file system operations.
 trait [m: *->*] m: MonadFsIF {
+    // Checks if the specified file exists.
+    //
+    // # Parameters
+    // - `path`: a file path
     fs_file_exists: Path -> m Bool;
+    // Checks if the specified directory exists.
+    //
+    // # Parameters
+    // - `path`: a directory path
     fs_directory_exists: Path -> m Bool;
+    // Changes the current working directory.
+    //
+    // # Parameters
+    // - `path`: a directory path
     fs_chdir: Path -> m ();
+    // Returns the canonicalized absolute pathname of the specified path.
+    //
+    // # Parameters
+    // - `path`: a file or directory path
     fs_realpath: Path -> m Path;
+    // Reads the entire contents of the specified file as a string.
+    //
+    // # Parameters
+    // - `path`: a file path
     fs_read_file_string: Path -> m String;
+    // Writes a string to the specified file.
+    //
+    // # Parameters
+    // - `path`: a file path
+    // - `str`: a string
     fs_write_file_string: Path -> String -> m ();
 }
 
-impl IOFail: MonadFsIF {
-    fs_file_exists = |path| file_exists(path).lift;
-    fs_directory_exists = |path| (
-        let cwd = *getcwd;
-        eval debug_eprintln("fs_directory_exists: path=" + path +" cwd=" + cwd);
-        directory_exists(path).lift
-    );
-    fs_chdir = |path| chdir(path);
-    fs_realpath = |path| realpath(path);
-    fs_read_file_string = |path| read_file_string(path);
-    fs_write_file_string = |path, contents| write_file_string(path, contents);
-}
+//------------------------------------------------------------------
+//  MonadFs Implementations & FileSystemApi Interface
+//------------------------------------------------------------------
 
+// An API structure for file system operations.
 type FileSystemApi = unbox struct {
     file_exists: Path -> IOFail Bool,
     directory_exists: Path -> IOFail Bool,
@@ -42,7 +65,9 @@ type FileSystemApi = unbox struct {
     write_file_string: Path -> String -> IOFail (),
 };
 
+// A trait for environments which have `FileSystemApi`.
 trait e: HasFileSystemApi {
+    // Retrieves `FileSystemApi` from the environment.
     get_file_system_api: e -> IOFail FileSystemApi;
 }
 
@@ -66,4 +91,40 @@ impl [e: HasFileSystemApi] ReaderT e IOFail: MonadFsIF {
         call_api(get_file_system_api, @write_file_string, |func| func(path, contents))
     );
 }
+
+// TODO: Deprecate when RealFileSystem is used
+impl IOFail: MonadFsIF {
+    fs_file_exists = |path| file_exists(path).lift;
+    fs_directory_exists = |path| (
+        let cwd = *getcwd;
+        eval debug_eprintln("fs_directory_exists: path=" + path +" cwd=" + cwd);
+        directory_exists(path).lift
+    );
+    fs_chdir = |path| chdir(path);
+    fs_realpath = |path| realpath(path);
+    fs_read_file_string = |path| read_file_string(path);
+    fs_write_file_string = |path, contents| write_file_string(path, contents);
+}
+
+//------------------------------------------------------------------
+//  FileSystemApi Implementations
+//------------------------------------------------------------------
+
+namespace RealFileSystem {
+    // A FileSystemApi for the real world.
+    api: FileSystemApi;
+    api = FileSystemApi {
+        file_exists: |path| file_exists(path).lift,
+        directory_exists: |path| (
+            let cwd = *getcwd;
+            eval debug_eprintln("fs_directory_exists: path=" + path +" cwd=" + cwd);
+            directory_exists(path).lift
+        ),
+        chdir: |path| chdir(path),
+        realpath: |path| realpath(path),
+        read_file_string: |path| read_file_string(path),
+        write_file_string: |path, contents| write_file_string(path, contents),
+    };
+}
+
 

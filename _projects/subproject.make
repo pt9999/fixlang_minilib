@@ -9,8 +9,8 @@ RELEASE =
 RELEASE_OPTS = $(if $(RELEASE), --release, --no-release)
 VERUP_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS)
 # VERUP_OPTS = $(CONFIRM_OPTS)
-PUBLISHER_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS) $(RELEASE_OPTS)
-# PUBLISHER_OPTS = $(CONFIRM_OPTS) $(RELEASE_OPTS)
+PUBLISHER_OPTS = $(CONFIRM_OPTS) $(RELEASE_OPTS)
+# PUBLISHER_OPTS = --no-update-document --no-test --no-commit --no-tag --no-push
 
 all: build
 

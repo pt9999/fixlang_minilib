@@ -7,6 +7,114 @@ import Minilib.Monad.IO;
 
 import Publisher.Common;
 
+//------------------------------------------------------------------
+//  MonadRunProcess Interface
+//------------------------------------------------------------------
+
+trait MonadRunProcess = MonadIOFail + MonadRunProcessIF;
+
+trait [m: *->*] m: MonadRunProcessIF {
+    // Runs a process using the specified command line arguments.
+    // This function returns the standard output and standard error of the process as `(stdout, stderr)`.
+    //
+    // The running environment is determined by the specified options.
+    // If "verbose" option is set, the command line arguments, standard output, and standard error will be printed.
+    // If "has_input" option is set, `IO::stdin` is duplicated to the process's input. (but currently it does not work correctly)
+    //
+    // # Parameters
+    // - `args`: command line arguments
+    // - `options`: list of options. valid options are: "verbose", "has_input".
+    run_process_with_options: Array String -> Array String -> m (String, String);
+}
+
+//------------------------------------------------------------------
+//  Functions that use MonadRunProcess Interface
+//------------------------------------------------------------------
+
+// Runs a process without "verbose" option.
+// This function returns the standard output and standard error of the process as `(stdout, stderr)`.
+//
+// # Parameters
+// - `args`: command line arguments
+run_process_quietly: [m: MonadRunProcessIF] Array String -> m (String, String);
+run_process_quietly = |args| (
+    run_process_with_options(args, [])
+);
+
+// Runs a process with "verbose" option.
+// This function returns the standard output and standard error of the process as `(stdout, stderr)`.
+//
+// # Parameters
+// - `args`: command line arguments
+run_process: [m: MonadRunProcessIF] Array String -> m (String, String);
+run_process = |args| (
+    run_process_with_options(args, ["verbose"])
+);
+
+
+//------------------------------------------------------------------
+//  MonadRunProcess Implementations & ProcessRunnerApi Interface
+//------------------------------------------------------------------
+
+// An API structure for process runner operations.
+type ProcessRunnerApi = unbox struct {
+    run_process_with_options: Array String -> Array String -> IOFail (String, String),
+};
+
+// A trait for environments which have `ProcessRunnerApi`.
+trait e: HasProcessRunnerApi {
+    // Retrieves `ProcessRunnerApi` from the environment.
+    get_process_runner_api: e -> IOFail ProcessRunnerApi;
+}
+
+impl [e: HasProcessRunnerApi] ReaderT e IOFail: MonadRunProcessIF {
+    run_process_with_options = |args, options| (
+        call_api(get_process_runner_api, @run_process_with_options, |func| func(args, options))
+    );
+}
+
+// TODO: Deprecate when RealProcessRunner is used
+impl IOFail: MonadRunProcessIF {
+    run_process_with_options = |args, options| (
+        pure();;
+        let verbose = options.contains("verbose");
+        when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
+        let com = args.@(0);
+        let input = "";
+        let worker = _make_worker(options);
+        let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
+        if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+            pure $ (stdout, stderr)
+        } else {
+            throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+        }
+    );
+}
+//------------------------------------------------------------------
+//  ProcessRunnerApi Implementations
+//------------------------------------------------------------------
+
+namespace RealProcessRunner {
+    // A ProcessRunnerApi for the real world.
+    api: ProcessRunnerApi;
+    api = ProcessRunnerApi {
+        run_process_with_options: |args, options| (
+            pure();;
+            let verbose = options.contains("verbose");
+            when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
+            let com = args.@(0);
+            let input = "";
+            let worker = _make_worker(options);
+            let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
+            if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+                pure $ (stdout, stderr)
+            } else {
+                throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+            }
+        ),
+    };
+}
+
 exit_status_to_string: ExitStatus -> String;
 exit_status_to_string = |ex| (
     match ex {
@@ -59,49 +167,3 @@ _make_worker = |options|
     pure $ (texts.@(0), texts.@(1))
 );
 
-trait MonadRunProcess = MonadIOFail + MonadRunProcessIF;
-
-trait [m: *->*] m: MonadRunProcessIF {
-    run_process_with_options: Array String -> Array String -> m (String, String);
-}
-
-impl IOFail: MonadRunProcessIF {
-    run_process_with_options = |args, options| (
-        pure();;
-        let verbose = options.contains("verbose");
-        when(verbose, eprintln("+ " + args.to_iter.join(" ")).lift);;
-        let com = args.@(0);
-        let input = "";
-        let worker = _make_worker(options);
-        let ((stdout, stderr), exit_status) = *Subprocess::run_with_stream(com, args, worker);
-        if exit_status.is_exit && exit_status.as_exit == 0_U8 {
-            pure $ (stdout, stderr)
-        } else {
-            throw $ "subprocess failed with " + exit_status_to_string(exit_status)
-        }
-    );
-}
-
-type ProcessRunnerApi = unbox struct {
-    run_process_with_options: Array String -> Array String -> IOFail (String, String),
-};
-
-trait e: HasProcessRunnerApi {
-    get_process_runner_api: e -> IOFail ProcessRunnerApi;
-}
-
-impl [e: HasProcessRunnerApi] ReaderT e IOFail: MonadRunProcessIF {
-    run_process_with_options = |args, options| (
-        call_api(get_process_runner_api, @run_process_with_options, |func| func(args, options))
-    );
-}
-
-run_process_quietly: [m: MonadRunProcessIF] Array String -> m (String, String);
-run_process_quietly = |args| (
-    run_process_with_options(args, [])
-);
-
-run_process: [m: MonadRunProcessIF] Array String -> m (String, String);
-run_process = |args| (
-    run_process_with_options(args, ["verbose"])
-);

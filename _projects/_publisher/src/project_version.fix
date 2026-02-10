@@ -1,0 +1,87 @@
+module Publisher.ProjectVersion;
+
+import RegExp;
+//import Minilib.IO.Errno;
+//import Minilib.IO.FileSystem;
+//import Minilib.IO.Path;
+import Minilib.Monad.Error;
+//import Minilib.Monad.IO;
+import Minilib.Text.StringEx;
+
+
+type ProjectVersion = unbox struct {
+    major: String,
+    minor: String,
+    patch: String,
+    prerelease: String,
+    metadata: String,
+};
+
+impl ProjectVersion: FromString {
+    from_string = |version_str| (
+        let regexp = *RegExp::compile("^(\\d+.\\d+.\\d+)(-[-0-9.A-Za-z]+)?(\\+[-0-9.A-Za-z]+)?$", "");
+        let groups = *regexp.match_one(version_str).catch(|errmsg|
+            error $ "invalid version format: " + version_str
+        );
+        let triplets = groups.@(1);
+        let prerelease = groups.@(2);
+        let metadata = groups.@(3);
+        let triplets = triplets.split(".").take(3).to_array;
+        let major = triplets.@(0);
+        let minor = triplets.@(1);
+        let patch = triplets.@(2);
+        ok $ ProjectVersion {
+            major: major,
+            minor: minor,
+            patch: patch,
+            prerelease: prerelease,
+            metadata: metadata
+        }
+    );
+}
+
+impl ProjectVersion: ToString {
+    to_string = |v| (
+        let triplets = v.@major + "." + v.@minor + "." + v.@patch;
+        triplets + v.@prerelease + v.@metadata
+    );
+}
+
+namespace ProjectVersion {
+    validate: [m: MonadError] String -> m ();
+    validate = |version_str| (
+        let version: ProjectVersion = *from_string(version_str).from_result_t;
+        pure()
+    );
+}
+
+increment_prerelease: String -> Result ErrMsg String;
+increment_prerelease = |prerelease| (
+    let regexp = *RegExp::compile("^(.*\\D)?(\\d+)?$", "");
+    let groups = *regexp.match_one(prerelease).catch(|errmsg|
+        error $ "invalid prerelease format: " + prerelease
+    );
+    let prefix = groups.@(1);
+    let suffix = groups.@(2);
+    if suffix == "" {
+        pure $ prefix + ".1"
+    };
+    let suffix: I64 = *from_string(suffix);
+    let suffix = (suffix + 1).to_string;
+    pure $ prefix + suffix
+);
+
+increment_version: String -> Bool -> Result ErrMsg String;
+increment_version = |version_str, remove_prerelease| (
+    let version: ProjectVersion = *from_string(version_str);
+    let version = *if version.@prerelease == "" {
+        let patch = (*from_string(version.@patch) + 1).to_string;
+        pure $ version.set_patch(patch)
+    } else if remove_prerelease {
+        pure $ version.set_prerelease("")
+    } else {
+        let prerelease = *increment_prerelease(version.@prerelease);
+        pure $ version.set_prerelease(prerelease)
+    };
+    pure $ version.to_string
+);

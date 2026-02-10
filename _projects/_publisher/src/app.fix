@@ -4,24 +4,47 @@ import Minilib.App.Clap;
 
 import Publisher.Publish;
 
+// TODO: move to Minilib.App.Clap
+namespace ClapEx {
+    namespace Command {
+        empty: Command;
+        empty = Command::new("");
+    }
+    type CommandRunner = ArgMatches -> IOFail ();
+
+    is_true: String -> ArgMatches -> Bool;
+    is_true = |name, matches| (
+        matches.get_one(name) == some("true")
+    );
+
+    handle_subcommands: Array (Command, CommandRunner) -> CommandRunner;
+    handle_subcommands = |subcommand_runners, matches| (
+        let (name, submatches) = matches.subcommand.as_some_or(("", ArgMatches::empty));
+        match subcommand_runners.to_iter.filter(|(command, runner)| command.@name == name).get_first {
+            some((command, runner)) => runner(submatches),
+            none() => throw $ "invalid subcommand: " + name
+        }
+    );
+}
+
 to_publish_args: ArgMatches -> PublishArgs;
-to_publish_args = |submatches| (
+to_publish_args = |matches| (
     PublishArgs::empty
-    .set_subproject_dir(submatches.get_one("DIR").as_some)
-    .set_new_version(submatches.get_one("new_version"))
-    .set_release(submatches.get_one("release") == some("true"))
-    .set_confirm(submatches.get_one("confirm") == some("true"))
-    .set_test(submatches.get_one("test") == some("true"))
-    .set_commit(submatches.get_one("commit") == some("true"))
-    .set_push(submatches.get_one("push") == some("true"))
-    .set_tag(submatches.get_one("tag") == some("true"))
-    .set_update_document(submatches.get_one("update_document") == some("true"))
-    .set_check_branch(submatches.get_one("check_branch") == some("true"))
+    .set_project_dir(matches.get_one("DIR").as_some)
+    .set_new_version(matches.get_one("new_version"))
+    .set_release(matches.is_true("release"))
+    .set_confirm(matches.is_true("confirm"))
+    .set_test(matches.is_true("test"))
+    .set_commit(matches.is_true("commit"))
+    .set_push(matches.is_true("push"))
+    .set_tag(matches.is_true("tag"))
+    .set_update_document(matches.is_true("update_document"))
+    .set_check_branch(matches.is_true("check_branch"))
 );
 
 run_command_publish: ArgMatches -> IOFail ();
-run_command_publish = |submatches| (
-    let args = submatches.to_publish_args;
+run_command_publish = |matches| (
+    let args = matches.to_publish_args;
     do_publish(args)
 );
 
@@ -29,9 +52,8 @@ command_publish: Command;
 command_publish = (
     Command::new("publish")
     .display_name("publish")
-    .version("0.1.0")
     .about("Make a release for a Fix project")
-    .arg(Arg::new("DIR").help("the project directory").takes_value.required)
+    .arg(Arg::new("DIR").help("the project directory").takes_value.default_value("."))
     .arg(Arg::new("new_version").long("new-version").help("the new version").takes_value)
     .arg(Arg::new("release").long("release").help("remove prerelease if exists"))
     .arg(Arg::new("confirm").long("confirm").help("confirm when version up").default_value("true"))
@@ -43,35 +65,56 @@ command_publish = (
     .arg(Arg::new("check_branch").long("check-branch").help("check if the current branch is main").default_value("true"))
 );
 
-/*
+run_command_project_show: ArgMatches -> IOFail ();
+run_command_project_show = |matches| (
+    let args = ProjectArgs::empty
+        .set_project_dir(matches.get_one("DIR").as_some);
+    do_project_show(args)
+);
+
+command_project_show: Command;
+command_project_show = (
+    Command::new("show")
+    .display_name("show")
+    .about("Shows a project file contents")
+    .arg(Arg::new("DIR").help("the project directory").takes_value.default_value("."))
+);
+
+command_project: Command;
+command_project = (
+    Command::new("project")
+    .display_name("project")
+    .about("Manages a project file")
+    .subcommand(command_project_show)
+);
+
+run_command_project: ArgMatches -> IOFail ();
+run_command_project = handle_subcommands([
+        (command_project_show, run_command_project_show),
+        (Command::empty, run_command_project_show),
+]);
+
 command_main: Command;
 command_main = (
     Command::new("publisher.out")
     .version("0.1.0")
     .about("Publish tool for subprojects")
     .subcommand(command_publish)
+    .subcommand(command_project)
 );
 
 run_command_main: ArgMatches -> IOFail ();
-run_command_main = |matches| (
-    if matches.subcommand.is_none {
-        throw $ "no subcommand is specified"
-    };
-    let (name, submatches) = matches.subcommand.as_some;
-    if name == "publish" {
-        run_command_publish(submatches)
-    } else {
-        throw $ "invalid subcommand: " + name
-    }
-);
-*/
+run_command_main = handle_subcommands([
+    (command_publish, run_command_publish),
+    (command_project, run_command_project),
+]);
 
 main: IO ();
 main = (
     do {
         let args = *IO::get_args.lift;
-        let matches = *command_publish.get_matches_from(args).from_result;
-        run_command_publish(matches);;
+        let matches = *command_main.get_matches_from(args).from_result;
+        run_command_main(matches);;
         IO::exit(0).lift
     }.try(|errmsg| 
         eprintln("\nError: " + errmsg);;

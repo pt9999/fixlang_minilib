@@ -1,7 +1,7 @@
-all:
+all: build
 
 build:
-	fix build -o publisher.out
+	fix build
 
 test:
 	fix test -o a.out

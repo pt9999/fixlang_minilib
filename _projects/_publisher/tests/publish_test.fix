@@ -16,6 +16,27 @@ import Publisher.Tests.MockFs;
 import Publisher.Tests.MockConsoleUi;
 import Publisher.Tests.MockEnv;
 
+test_check_git_working_tree_ok1: TestCase;
+test_check_git_working_tree_ok1 = (
+    make_env_test("test_check_git_working_tree_ok1") $ |env: MockEnv|
+    env.setup_fs(add_directory(".git"));;
+    env.run(check_git_working_tree)
+);
+
+test_check_git_working_tree_ok2: TestCase;
+test_check_git_working_tree_ok2 = (
+    make_env_test("test_check_git_working_tree_ok2") $ |env: MockEnv|
+    env.setup_fs(add_file(".git", "some content"));;
+    env.run(check_git_working_tree)
+);
+
+test_check_git_working_tree_ng: TestCase;
+test_check_git_working_tree_ng = (
+    make_env_test("test_check_git_working_tree_ng") $ |env: MockEnv|
+    let res = *env.run_catch(check_git_working_tree);
+    assert_equal("res", err $ "File not found: " + DirName::git, res)
+);
+
 test_check_branch_name_ok: TestCase;
 test_check_branch_name_ok = (
     make_env_test("test_check_branch_name_ok") $ |env: MockEnv|
@@ -60,7 +81,7 @@ test_no_commit_since_latest_ok = (
     env.setup_runner(next_stdout(""));;
     let result = *env.run(no_commit_since_latest);
     let expected = [
-        MockProcess::make(["git", "diff", "--name-only", C::tag_latest]).verbose
+        MockProcess::make(["git", "diff", "--name-only", TagName::latest]).verbose
     ];
     assert_equal("processes", expected, *env.gets(@runner, @processes));;
     assert_equal("result", true, result)
@@ -72,7 +93,7 @@ test_no_commit_since_latest_ng = (
     env.setup_runner(next_stdout("some_commit"));;
     let result = *env.run(no_commit_since_latest);
     let expected = [
-        MockProcess::make(["git", "diff", "--name-only", C::tag_latest]).verbose
+        MockProcess::make(["git", "diff", "--name-only", TagName::latest]).verbose
     ];
     assert_equal("processes", expected, *env.gets(@runner, @processes));;
     assert_equal("result", false, result)
@@ -84,7 +105,7 @@ test_reset_fixdeps_lock_ok = (
     env.setup_runner(next_stdout("some_commit"));;
     env.run(reset_fixdeps_lock);;
     let expected = [
-        MockProcess::make(["git", "checkout", "--", C::fixdeps_lock]).verbose
+        MockProcess::make(["git", "checkout", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]).verbose
     ];
     assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
@@ -95,9 +116,9 @@ test_commit_fixdeps_lock_ok = (
     env.setup_runner(next_stdout("fixdeps.lock"));;
     env.run(commit_fixdeps_lock);;
     let expected = [
-        MockProcess::make(["git", "diff", "--name-only", "--", C::fixdeps_lock]),
-        MockProcess::make(["git", "add", "--", C::fixdeps_lock]).verbose,
-        MockProcess::make(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]).verbose,
+        MockProcess::make(["git", "diff", "--name-only", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]),
+        MockProcess::make(["git", "add", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]).verbose,
+        MockProcess::make(["git", "commit", "-m", "update deps", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]).verbose,
     ];
     assert_equal("processes", expected, *env.gets(@runner, @processes))
 );
@@ -108,9 +129,37 @@ test_commit_fixdeps_lock_ng = (
     env.setup_runner(next_stdout(""));;
     env.run(commit_fixdeps_lock);;
     let expected = [
-        MockProcess::make(["git", "diff", "--name-only", "--", C::fixdeps_lock]),
+        MockProcess::make(["git", "diff", "--name-only", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]),
     ];
     assert_equal("processes", expected, *env.gets(@runner, @processes))
+);
+
+test_chdir_to_project_dir_ok: TestCase;
+test_chdir_to_project_dir_ok = (
+    make_env_test("test_check_if_file_exists_ok") $ |env: MockEnv|
+    env.setup_fs(add_directory("some/dir"));;
+    env.run(chdir_to_project_dir("some/dir"))
+);
+
+test_chdir_to_project_dir_ng: TestCase;
+test_chdir_to_project_dir_ng = (
+    make_env_test("test_chdir_to_project_dir_ng") $ |env: MockEnv|
+    let res = *env.run_catch(chdir_to_project_dir("nonexistent/dir"));
+    assert_equal("res", err $ "Directory not found: nonexistent/dir", res)
+);
+
+test_check_project_file_exists_ok: TestCase;
+test_check_project_file_exists_ok = (
+    make_env_test("test_check_project_file_exists_ok") $ |env: MockEnv|
+    env.setup_fs(add_file(FileName::fixproj_toml, "some_contents"));;
+    env.run(check_project_file_exists)
+);
+
+test_check_project_file_exists_ng: TestCase;
+test_check_project_file_exists_ng = (
+    make_env_test("test_check_project_file_exists_ng") $ |env: MockEnv|
+    let res = *env.run_catch(check_project_file_exists);
+    assert_equal("res", err $ "File not found: " + FileName::fixproj_toml, res)
 );
 
 test_check_if_file_exists_ok: TestCase;
@@ -146,6 +195,7 @@ test_check_if_directory_exists_ng = (
 make_publish_fixture: PublishArgs -> MockEnv -> IOFail MockEnv;
 make_publish_fixture = |args, env| (
     env.setup_fs(|fs| fs.add_directory(".git"));;
+    env.setup_fs(|fs| fs.add_directory("proj1"));;
     let project_file_path = "fixproj.toml";
     let project_file_contents = "[general]\nname = \"project1\"\nversion = \"0.1.0\"\n";
     env.setup_fs(|fs| fs.add_file(project_file_path, project_file_contents));;
@@ -162,10 +212,10 @@ make_publish_fixture = |args, env| (
 test_do_publish: TestCase;
 test_do_publish = (
     make_env_test("test_do_publish") $ |env: MockEnv|
-    let args = PublishArgs::empty.set_subproject_dir("proj1").set_confirm(false).set_commit(true).set_push(true).set_tag(true).set_update_document(true);
+    let args = PublishArgs::empty.set_project_dir("proj1").set_confirm(false).set_commit(true).set_push(true).set_tag(true).set_update_document(true);
     let env = *env.make_publish_fixture(args);
     env.run(do_publish(args));;
-    let expected = args.@subproject_dir;
+    let expected = args.@project_dir;
     assert_equal("cwd", expected, *env.gets(@fs, @cwd));;
     let processes = *env.gets(@runner, @processes);
     let cmdlines = processes.to_iter.map(get_cmdline).to_array;
@@ -182,6 +232,9 @@ test_do_publish = (
 testsuite: TestCase;
 testsuite = (
     [
+        test_check_git_working_tree_ok1,
+        test_check_git_working_tree_ok2,
+        test_check_git_working_tree_ng,
         test_check_branch_name_ok,
         test_check_branch_name_ng,
         test_check_uncommitted_files_ok,
@@ -191,6 +244,10 @@ testsuite = (
         test_reset_fixdeps_lock_ok,
         test_commit_fixdeps_lock_ok,
         test_commit_fixdeps_lock_ng,
+        test_chdir_to_project_dir_ok,
+        test_chdir_to_project_dir_ng,
+        test_check_project_file_exists_ok,
+        test_check_project_file_exists_ng,
         test_check_if_file_exists_ok,
         test_check_if_file_exists_ng,
         test_check_if_directory_exists_ok,

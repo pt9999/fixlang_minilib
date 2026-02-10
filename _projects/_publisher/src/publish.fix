@@ -14,9 +14,20 @@ import Publisher.Fs;
 import Publisher.ProjectFile;
 
 log_message: [m: MonadIO] String -> m ();
-log_message = |str| println(str).lift_io;
+log_message = |str| eprintln(str).lift_io;
 
 namespace GitTask {
+
+    // Checks if the current directory is the root of a Git working tree.
+    check_git_working_tree: [m: MonadFs, m: MonadError] m ();
+    check_git_working_tree = (
+        // `.git` is a directory in a standalone Git repository.
+        // `.git` is a file in a submodule of a Git repository, or a worktree.
+        let git_dir = DirName::git;
+        check_if_directory_exists(git_dir).catch(|errmsg|
+            check_if_file_exists(git_dir)
+        )
+    );
 
     check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
     check_branch_name = |expected| (
@@ -42,7 +53,7 @@ namespace GitTask {
     no_commit_since_latest:  [m: MonadRunProcess] m Bool;
     no_commit_since_latest = (
         log_message("### Checking if there is any commit from the latest release");;
-        let (stdout, stderr) = *run_process(["git", "diff", "--name-only", C::tag_latest]);
+        let (stdout, stderr) = *run_process(["git", "diff", "--name-only", TagName::latest]);
         if stdout == "" {
             pure $ true
         };
@@ -51,38 +62,38 @@ namespace GitTask {
 
     reset_fixdeps_lock:  [m: MonadRunProcess] m ();
     reset_fixdeps_lock = (
-        let (stdout, stderr) = *run_process(["git", "checkout", "--", C::fixdeps_lock]);
+        let (stdout, stderr) = *run_process(["git", "checkout", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         pure()
     );
 
     commit_fixdeps_lock: [m: MonadRunProcess] m ();
     commit_fixdeps_lock = (
-        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::fixdeps_lock]);
+        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         if stdout == "" { pure() };
         log_message("### Commit fixdeps.lock");;
-        let (stdout, stderr) = *run_process(["git", "add", "--", C::fixdeps_lock]);
-        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", C::fixdeps_lock]);
+        let (stdout, stderr) = *run_process(["git", "add", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
+        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update deps", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         pure()
     );
 
     commit_documents: [m: MonadRunProcess] m ();
     commit_documents = (
-        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", C::dir_docs]);
+        let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", DirName::docs]);
         if stdout == "" { pure() };
         log_message("### Commit documents");;
-        let (stdout, stderr) = *run_process(["git", "add", "--", C::dir_docs]);
-        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update documents", "--", C::dir_docs]);
+        let (stdout, stderr) = *run_process(["git", "add", "--", DirName::docs]);
+        let (stdout, stderr) = *run_process(["git", "commit", "-m", "update documents", "--", DirName::docs]);
         pure()
     );
 
     reset_documents: [m: MonadRunProcess] m ();
     reset_documents = (
-        let (stdout, stderr) = *run_process(["git", "checkout", "--", C::dir_docs]);
+        let (stdout, stderr) = *run_process(["git", "checkout", "--", DirName::docs]);
         pure()
     );
 
-    commit_fixproj_toml: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
-    commit_fixproj_toml = |args, filepath, version| (
+    commit_project_file: [m: MonadRunProcess] PublishArgs -> Path -> String -> m ();
+    commit_project_file = |args, filepath, version| (
         log_message("### Commit the project file");;
         let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
         let message = "version " + version;
@@ -90,18 +101,18 @@ namespace GitTask {
         when(args.@tag, do {
             log_message("### Make a version tag");;
             let (stdout, stderr) = *run_process(["git", "tag", version]);
-            let (stdout, stderr) = *run_process(["git", "tag", C::tag_latest, "-f"]);
+            let (stdout, stderr) = *run_process(["git", "tag", TagName::latest, "-f"]);
             pure()
         });;
         when(args.@push, do {
             log_message("### Push to the remote repository");;
-            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin]);
+            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin]);
             pure()
         });;
         when(args.@push && args.@tag, do {
             log_message("### Push tags to the remote repository");;
-            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, version]);
-            let (stdout, stderr) = *run_process(["git", "push", C::remote_origin, C::tag_latest, "-f"]);
+            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, version]);
+            let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, TagName::latest, "-f"]);
             pure()
         });;
         pure()
@@ -109,6 +120,20 @@ namespace GitTask {
 }
 
 namespace ProjectTask {
+
+    chdir_to_project_dir: [m: MonadFs] Path -> m ();
+    chdir_to_project_dir = |project_dir| (
+        log_message("### Chdir to `" + project_dir + "`");;
+        fs_chdir(project_dir)
+    );
+
+    // Checks if the project file (fixproj.toml) exists
+    check_project_file_exists: [m: MonadFs] m ();
+    check_project_file_exists = (
+        let project_file_path = FileName::fixproj_toml;
+        check_if_file_exists(project_file_path)
+    );
+
     check_if_file_exists: [m: MonadFs] Path -> m ();
     check_if_file_exists = |filepath| (
         if ! *fs_file_exists(filepath) {
@@ -150,14 +175,14 @@ namespace ProjectTask {
     run_fix_docs: [m: MonadRunProcess] m ();
     run_fix_docs = (
         log_message("### Generate documents");;
-        let (stdout, stderr) = *run_process(["fix", "docs", "-o", C::dir_docs]);
+        let (stdout, stderr) = *run_process(["fix", "docs", "-o", DirName::docs]);
         pure()
     );
 }
 
 
 type PublishArgs = unbox struct {
-    subproject_dir: Path,
+    project_dir: Path,
     new_version: Option String,
     release: Bool,
     confirm: Bool,
@@ -172,7 +197,7 @@ type PublishArgs = unbox struct {
 namespace PublishArgs {
     empty: PublishArgs;
     empty = PublishArgs {
-        subproject_dir: "",
+        project_dir: "",
         new_version: none(),
         release: false,
         confirm: false,
@@ -186,7 +211,7 @@ namespace PublishArgs {
 
     update_realpath: [m: MonadFs] PublishArgs -> m PublishArgs;
     update_realpath = |args| (
-        let args = *args.act_subproject_dir(fs_realpath);
+        let args = *args.act_project_dir(fs_realpath);
         pure $ args
     );
 }
@@ -195,21 +220,11 @@ do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] P
 do_publish = |args| (
     let args = *args.update_realpath;
     
-    let subproject_dir = args.@subproject_dir;
-    log_message("### Chdir to `" + subproject_dir + "`");;
-    fs_chdir(subproject_dir);;
+    chdir_to_project_dir(args.@project_dir);;
 
-    // `.git` is a directory in a standalone Git repository.
-    // `.git` is a file in a submodule of a Git repository.
-    let git_dir = C::dir_git;
-    check_if_directory_exists(git_dir).catch(|errmsg|
-        check_if_file_exists(git_dir)
-    );;
-
-    let project_file_path = C::fixproj_toml;
-    check_if_file_exists(project_file_path);;
-
-    check_branch_name(C::branch_main).when(args.@check_branch);;
+    check_git_working_tree;;
+    check_project_file_exists;;
+    check_branch_name(BranchName::main).when(args.@check_branch);;
     check_uncommitted_files;;
     if *no_commit_since_latest {
         log_message("### No commit since latest, so only run tests with the latest dependencies");;
@@ -229,6 +244,7 @@ do_publish = |args| (
     run_fix_docs;;
 
     log_message("### Update the project file");;
+    let project_file_path = FileName::fixproj_toml;
     let new_version = *upgrade_project_version(project_file_path, args.@new_version, args.@release, args.@confirm);
 
     reset_documents;;
@@ -240,7 +256,27 @@ do_publish = |args| (
         commit_documents
     });;
     when(args.@commit && new_version != "",
-        commit_fixproj_toml(args, project_file_path, new_version));;
+        commit_project_file(args, project_file_path, new_version));;
     pure()
 );
 
+type ProjectArgs = unbox struct {
+    project_dir: Path,
+};
+
+namespace ProjectArgs {
+    empty: ProjectArgs;
+    empty = ProjectArgs {
+        project_dir: "",
+    };
+}
+
+do_project_show: [m: MonadIO, m: MonadFs, m: MonadError] ProjectArgs -> m ();
+do_project_show = |args| (
+    chdir_to_project_dir(args.@project_dir);;
+    let project_file_path = FileName::fixproj_toml;
+    let project_file = *ProjectFile::from_file(project_file_path);
+    let project_name = *project_file.get_project_name;
+    let project_version = *project_file.get_project_version;
+    mprintln(project_name + " = " + project_version)
+);

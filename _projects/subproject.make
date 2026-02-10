@@ -57,7 +57,7 @@ update-deps:
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
-	../_publisher/publisher.out . $(PUBLISHER_OPTS)
+	../_publisher/publisher.out publish . $(PUBLISHER_OPTS)
 
 
 publish_old:

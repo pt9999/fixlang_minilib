@@ -8,7 +8,7 @@ _sqlite3_open: String -> IOFail Ptr;
 _sqlite3_open = |filepath| (
     let pdb : Array Ptr = Array::fill(1, nullptr);
     let (pdb, res) = *pdb.mutate_boxed_io(|p_pdb|
-        filepath.borrow_c_str(|p_filepath|
+        filepath.borrow_c_str_io(|p_filepath|
             FFI_CALL_IO[I32 sqlite3_open(Ptr, Ptr), p_filepath, p_pdb]
         )
     ).lift;
@@ -94,7 +94,7 @@ _sqlite3_column_text = |icol, stmt| (
     //eval debug_eprintln("get text: icol="+icol.to_string);
     let ptr = *FFI_CALL_IO[Ptr sqlite3_column_text(Ptr, I32), stmt, icol.to_I32].lift;
     //eval debug_eprintln("get text done: icol="+icol.to_string);
-    let str = unsafe_from_c_str_ptr(ptr);
+    let str = *unsafe_from_c_str_ptr_io(ptr).lift;
     pure $ str
 );
 
@@ -124,11 +124,11 @@ namespace Sqlite {
     open: String -> IOFail Sqlite;
     open = |filepath| (
         let db = *_sqlite3_open(filepath);
-        let dtor = Destructor::make(db, |db|
+        let dtor = *Destructor::make(db, |db|
             eval debug_eprintln ("closing db");
             _sqlite3_close(db).try(eprintln);;
             pure $ nullptr
-        );
+        ).lift;
         pure $ Sqlite { dtor:dtor }
     );
 }
@@ -144,11 +144,11 @@ namespace Statement {
         eval debug_eprintln ("prepare: "+ sql);
         db.@dtor.borrow(|pdb|
             let stmt = *_sqlite3_prepare_v2(pdb, sql);
-            let dtor = Destructor::make(stmt, |stmt|
+            let dtor = *Destructor::make(stmt, |stmt|
                 eval debug_eprintln ("finalizing statement");
                 _sqlite3_finalize(stmt).try(eprintln);;
                 pure $ nullptr
-            );
+            ).lift;
             pure $ Statement { db:db, dtor:dtor }
         )
     );
@@ -233,7 +233,7 @@ main: IO ();
 main = (
     do {
         //let ptr = *_sqlite3_open("a.db");
-        let db = *Sqlite::open("a.db");
+        let db = *Sqlite::open("tmp.sqlite.db");
         let stmt = *db.prepare("DROP TABLE IF EXISTS t1;");
         stmt.step_and_show;;
         let stmt = *db.prepare("CREATE TABLE t1 (a int, b text);");

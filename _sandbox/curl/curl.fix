@@ -15,12 +15,12 @@ make = (
     eval debug_eprintln("curl_glue_init");
     let glue = *FFI_CALL_IO[Ptr curl_glue_init()].lift;
     let curl = Curl {
-        dtor: Destructor::make(glue, |glue|
+        dtor: *Destructor::make(glue, |glue|
             eval debug_eprintln("curl_glue_cleanup");
             if glue == nullptr { pure $ nullptr };
             FFI_CALL_IO[() curl_glue_cleanup(Ptr), glue];;
             pure $ nullptr
-        )
+        ).lift
     };
     pure $ curl
 );
@@ -30,8 +30,9 @@ _check_error: IO CInt -> Ptr -> IOFail ();
 _check_error = |io_code, glue| (
     let code = *io_code.lift;
     if code != 0.to_CInt {
-        let errmsg = *FFI_CALL_IO[Ptr curl_glue_get_error_message(Ptr), glue].lift;
-        throw $ "curl: " + String::unsafe_from_c_str_ptr(errmsg)
+        let p_errmsg = *FFI_CALL_IO[Ptr curl_glue_get_error_message(Ptr), glue].lift;
+        let errmsg = *String::unsafe_from_c_str_ptr_io(p_errmsg).lift;
+        throw $ "curl: " + errmsg
     };
     pure()
 );
@@ -125,10 +126,10 @@ set_write_callback: WriteFunc -> Curl -> IOFail ();
 set_write_callback = |func, curl| (
     pure();;
     let boxed: Box (Destructor WriteFunc) = Box {
-        value: Destructor::make(func, |func|
+        value: *Destructor::make(func, |func|
             eval debug_eprintln("write_func destructor is called");
             pure $ func
-        )
+        ).lift
     };
     curl._set_boxed_value(0, boxed);;
     curl._borrow_glue_iofail(|glue|

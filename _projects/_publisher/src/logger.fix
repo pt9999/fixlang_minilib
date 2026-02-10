@@ -1,0 +1,71 @@
+module Publisher.Logger;
+
+import Minilib.Monad.Reader;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Text.StringEx;
+
+import Publisher.Common;
+
+//------------------------------------------------------------------
+//  MonadLogger Interface
+//------------------------------------------------------------------
+
+// A trait alias for monads which support logging operations.
+trait MonadLogger = Monad + MonadLoggerIF;
+
+// A trait for monads which support logging operations.
+trait [m: *->*] m: MonadLoggerIF {
+    // Writes a message and a new line as a log entry.
+    //
+    // # Parameters
+    // - `message`: a message
+    log_message: String -> m ();
+}
+
+
+//------------------------------------------------------------------
+//  MonadLogger Implementations & LoggerApi Interface
+//------------------------------------------------------------------
+
+// An API structure for logging operations.
+type LoggerApi = unbox struct {
+    log_message: String -> IOFail (),
+};
+
+// A trait for environments which have `LoggerApi`.
+trait e: HasLoggerApi {
+    // Retrieves `LoggerApi` from the environment.
+    get_logger_api: e -> IOFail LoggerApi;
+}
+
+impl [e: HasLoggerApi] ReaderT e IOFail: MonadLoggerIF {
+    log_message = |message| (
+        call_api(get_logger_api, @log_message, |func| func(message))
+    );
+}
+
+// TODO: Deprecate when StderrLogger is used
+impl IOFail: MonadLoggerIF {
+    log_message = |message| emprintln(message);
+}
+
+//------------------------------------------------------------------
+//  LoggerApi Implementations
+//------------------------------------------------------------------
+
+namespace StderrLogger {
+    // A LoggerApi which writes log entries to the stderr.
+    api: LoggerApi;
+    api = LoggerApi {
+        log_message: |message| emprintln(message),
+    };
+}
+
+namespace NullLogger {
+    // A LoggerApi which does not write log entries at all.
+    api: LoggerApi;
+    api = LoggerApi {
+        log_message: |message| pure(),
+    };
+}

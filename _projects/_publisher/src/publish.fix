@@ -11,10 +11,8 @@ import Publisher.Common;
 import Publisher.ProcessRunner;
 import Publisher.ConsoleUi;
 import Publisher.Fs;
+import Publisher.Logger;
 import Publisher.ProjectFile;
-
-log_message: [m: MonadIO] String -> m ();
-log_message = |str| eprintln(str).lift_io;
 
 namespace GitTask {
 
@@ -33,7 +31,7 @@ namespace GitTask {
     //
     // # Parameters
     // - `expected`: an expected branch name
-    check_branch_name: [m: MonadRunProcess, m: MonadError] String -> m ();
+    check_branch_name: [m: MonadLogger, m: MonadRunProcess, m: MonadError] String -> m ();
     check_branch_name = |expected| (
         log_message((expected,).format("### Checking if the current branch name is `{}`"));;
         let (stdout, stderr) = *run_process_quietly(["git", "rev-parse", "--abbrev-ref", "HEAD"]);
@@ -45,7 +43,7 @@ namespace GitTask {
     );
 
     // Checks if the uncommited files exist
-    check_uncommitted_files: [m: MonadRunProcess, m: MonadError] m ();
+    check_uncommitted_files: [m: MonadLogger, m: MonadRunProcess, m: MonadError] m ();
     check_uncommitted_files = (
         log_message("### Checking for uncommitted files");;
         let (stdout, stderr) = *run_process(["git", "diff", "--name-only"]);
@@ -56,7 +54,7 @@ namespace GitTask {
     );
 
     // Checks if there is any commit since the latest release
-    no_commit_since_latest:  [m: MonadRunProcess] m Bool;
+    no_commit_since_latest:  [m: MonadLogger, m: MonadRunProcess] m Bool;
     no_commit_since_latest = (
         log_message("### Checking if there is any commit since the latest release");;
         let (stdout, stderr) = *run_process(["git", "diff", "--name-only", TagName::latest]);
@@ -74,7 +72,7 @@ namespace GitTask {
     );
 
     // Commits the lock files if modified.
-    commit_lock_files: [m: MonadRunProcess] m ();
+    commit_lock_files: [m: MonadLogger, m: MonadRunProcess] m ();
     commit_lock_files = (
         let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", FileName::fixdeps_lock, FileName::fixdeps_test_lock]);
         if stdout == "" { pure() };
@@ -85,7 +83,7 @@ namespace GitTask {
     );
 
     // Commits the documents if modified.
-    commit_documents: [m: MonadRunProcess] m ();
+    commit_documents: [m: MonadLogger, m: MonadRunProcess] m ();
     commit_documents = (
         let (stdout, stderr) = *run_process_quietly(["git", "diff", "--name-only", "--", DirName::docs]);
         if stdout == "" { pure() };
@@ -103,7 +101,7 @@ namespace GitTask {
     );
 
     // Commits the project file if modified.
-    commit_project_file: [m: MonadRunProcess] Path -> String -> m ();
+    commit_project_file: [m: MonadLogger, m: MonadRunProcess] Path -> String -> m ();
     commit_project_file = |filepath, version| (
         log_message("### Commit the project file");;
         let (stdout, stderr) = *run_process(["git", "add", "--verbose", "--", filepath]);
@@ -113,7 +111,7 @@ namespace GitTask {
     );
 
     // Makes a version tag.
-    make_version_tag: [m: MonadRunProcess] String -> m ();
+    make_version_tag: [m: MonadLogger, m: MonadRunProcess] String -> m ();
     make_version_tag = |version| (
         log_message("### Make a version tag");;
         let (stdout, stderr) = *run_process(["git", "tag", version]);
@@ -121,14 +119,14 @@ namespace GitTask {
         pure()
     );
 
-    push_branch_to_remote: [m: MonadRunProcess] m ();
+    push_branch_to_remote: [m: MonadLogger, m: MonadRunProcess] m ();
     push_branch_to_remote = (
         log_message("### Push to the remote repository");;
         let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin]);
         pure()
     );
 
-    push_tags_to_remote: [m: MonadRunProcess] String -> m ();
+    push_tags_to_remote: [m: MonadLogger, m: MonadRunProcess] String -> m ();
     push_tags_to_remote = |version| (
         log_message("### Push tags to the remote repository");;
         let (stdout, stderr) = *run_process(["git", "push", RemoteName::origin, version]);
@@ -143,7 +141,7 @@ namespace ProjectTask {
     //
     // # Parameters
     // - `project_dir`: a project directory
-    chdir_to_project_dir: [m: MonadFs] Path -> m ();
+    chdir_to_project_dir: [m: MonadLogger, m: MonadFs] Path -> m ();
     chdir_to_project_dir = |project_dir| (
         log_message("### Chdir to `" + project_dir + "`");;
         fs_chdir(project_dir)
@@ -176,21 +174,21 @@ namespace ProjectTask {
         pure()
     );
 
-    run_fix_clean: [m: MonadRunProcess] m ();
+    run_fix_clean: [m: MonadLogger, m: MonadRunProcess] m ();
     run_fix_clean = (
         log_message("### Clean");;
         let (stdout, stderr) = *run_process(["fix", "clean"]);
         pure()
     );
 
-    run_fix_deps_update: [m: MonadRunProcess] m ();
+    run_fix_deps_update: [m: MonadLogger, m: MonadRunProcess] m ();
     run_fix_deps_update = (
         log_message("### Update deps");;
         let (stdout, stderr) = *run_process(["fix", "deps", "update"]);
         pure()
     );
 
-    run_fix_test: [m: MonadRunProcess] m ();
+    run_fix_test: [m: MonadLogger, m: MonadRunProcess] m ();
     run_fix_test = (
         log_message("### Run tests");;
         let (stdout, stderr) = *run_process(["fix", "test", "-O", "basic"]);
@@ -198,7 +196,7 @@ namespace ProjectTask {
         pure()
     );
 
-    run_fix_docs: [m: MonadRunProcess] m ();
+    run_fix_docs: [m: MonadLogger, m: MonadRunProcess] m ();
     run_fix_docs = (
         log_message("### Generate documents");;
         let (stdout, stderr) = *run_process(["fix", "docs", "-o", DirName::docs]);
@@ -242,7 +240,7 @@ namespace PublishArgs {
     );
 }
 
-do_publish: [m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] PublishArgs -> m ();
+do_publish: [m: MonadLogger, m: MonadConsoleUi, m: MonadFs, m: MonadRunProcess, m: MonadError] PublishArgs -> m ();
 do_publish = |args| (
     let args = *args.update_realpath;
 
@@ -308,7 +306,7 @@ namespace ProjectArgs {
     };
 }
 
-do_project_show: [m: MonadIO, m: MonadFs, m: MonadError] ProjectArgs -> m ();
+do_project_show: [m: MonadLogger, m: MonadIO, m: MonadFs, m: MonadError] ProjectArgs -> m ();
 do_project_show = |args| (
     chdir_to_project_dir(args.@project_dir);;
     let project_file_path = FileName::fixproj_toml;

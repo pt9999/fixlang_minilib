@@ -1,7 +1,7 @@
 all: build
 
 build:
-	fix build
+	fix build -o publisher.out
 
 document:
 	fix docs -o docs

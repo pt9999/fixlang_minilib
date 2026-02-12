@@ -9,10 +9,10 @@ import Math;
 import Time;
 import Cairo;
 import Cairo.ImageSurface;
-
-import AsyncTask;
 import RingBuffer;
 import Random;
+
+import Minilib.Common.IORef;
 import Minilib.Monad.Random;
 import Minilib.Monad.State;
 
@@ -34,13 +34,12 @@ color_white_a50 = (1.0, 1.0, 1.0, 0.5);
 null_random: Random;
 null_random = Random::init_by_seed(0_U64);
 
-eval_random: Var Random -> State Random a -> IO a;
-eval_random = |var_random, sma| (
-    var_random.lock(|random|
-        var_random.Var::set(null_random);;   // to make `random` unique
+eval_random: IORef Random -> State Random a -> IO a;
+eval_random = |ior_random, sma| (
+    ior_random.act(|random|
+        let random = random.assert_unique(|_| "not unique");
         let (random, a) = sma.run_state(random);
-        var_random.Var::set(random);;
-        pure $ a
+        pure $ (a, random)
     )
 );
 
@@ -53,7 +52,7 @@ random_F64_range = |begin, end| (
 );
 
 type Obj = box struct {
-    var_random: Var Random,
+    ior_random: IORef Random,
     point: Vec2,
     line: RingBuffer Vec2,
     velocity: Vec2,
@@ -61,9 +60,9 @@ type Obj = box struct {
 };
 
 namespace Obj {
-    generate: Var Random -> IO Obj;
-    generate = |var_random| (
-        eval_random(var_random) $ do {
+    generate: IORef Random -> IO Obj;
+    generate = |ior_random| (
+        eval_random(ior_random) $ do {
             let win_w = window_size.@0.to_F64;
             let win_h = window_size.@1.to_F64;
             let x = -0.50 * win_w; // *random_F64_range(-0.9 * win_w, -0.8 * win_w);
@@ -77,7 +76,7 @@ namespace Obj {
             let line = RingBuffer::create([]);
 
             pure $ Obj {
-                var_random: var_random,
+                ior_random: ior_random,
                 point: Vec2::make(x, y),
                 line: line,
                 velocity: Vec2::make(vx, vy),
@@ -112,28 +111,30 @@ namespace Obj {
         let g = 0.0; // 150.0;
         let win_w = window_size.@0.to_F64;
         let win_h = window_size.@1.to_F64;
-        let (x0, x1) = (-win_w / 2.0, win_w / 2.0);
-        let (y0, y1) = (-win_h / 2.0, win_h / 2.0);
-        let obj = obj.mod_velocity(mod_y(add(g * dt)));
-        //let th = *random_F64_range(-1.0, 1.0).eval_random(obj.@var_random);
+        let (min_x, max_x) = (-win_w / 2.0, win_w / 2.0);
+        let (min_y, max_y) = (-win_h / 2.0, win_h / 2.0);
+        let obj = obj[^velocity][^y].imod(add(g * dt));
+        //let th = *random_F64_range(-1.0, 1.0).eval_random(obj.@ior_random);
         //let th = th * (pi64 * 5.0 / 180.0);
         //let obj = obj.mod_velocity(rotated(th));
-        let obj = obj.mod_point(add(obj.@velocity.scaled(dt)));
-        let dydt = 0.50 * win_h * *random_F64_range(-1.0, 1.0).eval_random(obj.@var_random);
-        let obj = obj.mod_point(mod_y(add(dydt * dt)));
-        let obj = if obj.@point.@x < x0 {
-            obj.mod_velocity(mod_x(mul(-1.0))).mod_point(mod_x(|x| 2.0 * x0 - x))
-        } else if obj.@point.@x > x1 {
-            obj.mod_velocity(mod_x(mul(-1.0))).mod_point(mod_x(|x| 2.0 * x1 - x))
+        let obj = obj[^point].imod(add(obj.@velocity.scaled(dt)));
+        let dydt = 0.50 * win_h * *random_F64_range(-1.0, 1.0).eval_random(obj.@ior_random);
+        let obj = obj[^point][^y].imod(add(dydt * dt));
+        let obj = if obj.@point.@x < min_x {
+            let obj = obj[^velocity][^x].imod(mul(-1.0));
+            obj[^point][^x].imod(|x| 2.0 * min_x - x)
+        } else if obj.@point.@x > max_x {
+            let obj = obj[^velocity][^x].imod(mul(-1.0));
+            obj[^point][^x].imod(|x| 2.0 * max_x - x)
         } else { obj };
         /*
-        let obj = if obj.@point.@y < y0 {
-            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * y0 - y))
-        } else if obj.@point.@y > y1 {
-            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * y1 - y))
+        let obj = if obj.@point.@y < min_y {
+            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * min_y - y))
+        } else if obj.@point.@y > max_y {
+            obj.mod_velocity(mod_y(mul(-1.0))).mod_point(mod_y(|y| 2.0 * max_y - y))
         } else { obj };
         */
-        let obj = obj.mod_line(|line|
+        let obj = obj[^line].imod(|line|
             let line = line.push_back(obj.@point);
             loop(line, |line|
                 if line.get_size <= 100 { break $ line };
@@ -159,12 +160,12 @@ namespace Obj {
 main : IO ();
 main = (
     let random = Random::init_by_seed((*Time::get_now).to_F64.to_U64);
-    let var_random = *Var::make(random);
+    let ior_random = *IORef::make(random);
     let config = Funim::Config::default(window_size);
     //let config = Funim::Config::encode(window_size, 60.0, "frames");
 
     let n_obj = 50;
-    let objs = *range(0, 50).map(|_| Obj::generate(var_random)).collect_m;
+    let objs = *range(0, 50).map(|_| Obj::generate(ior_random)).collect_m;
     let animation = Animation::stack $ objs.map(animate);
     /*
     let animation : Animation = Animation::stack $ [

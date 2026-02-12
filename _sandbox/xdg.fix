@@ -1,0 +1,296 @@
+// Directory locations defined in [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir/0.8/).
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Common.IOEx;
+import Minilib.IO.Errno;
+import Minilib.Monad.IO;
+import Minilib.Monad.Error;
+import Minilib.Testing.UnitTest;
+
+getenv_or: [m: MonadIO] String -> String -> m String;
+getenv_or = |name, default_value| (
+    let value = *getenv(name);
+    if value != "" { pure $ value };
+    pure $ default_value
+);
+
+setenv: [m: MonadIOFail] String -> String -> Bool -> m ();
+setenv = |name, value, overwrite| lift_iofail $ do {
+    let ret = *name.borrow_c_str_io(|p_name|
+        value.borrow_c_str_io(|p_value|
+            FFI_CALL_IO[CInt setenv(Ptr, Ptr, CInt), p_name, p_value, if overwrite { 1.to_CInt } else { 0.to_CInt }]
+        )
+    ).lift;
+    if ret != 0.to_CInt {
+        throw $ "setenv(\"" + name + "," + value + "," + overwrite.to_string + "\") failed!: " + *get_last_error.lift
+    };
+    pure()
+};
+
+unsetenv: [m: MonadIOFail] String -> m ();
+unsetenv = |name| lift_iofail $ do {
+    let ret = *name.borrow_c_str_io(|p_name|
+        FFI_CALL_IO[CInt unsetenv(Ptr), p_name]
+    ).lift;
+    if ret != 0.to_CInt {
+        throw $ "unsetenv(\"" + name + "\") failed!: " + *get_last_error.lift
+    };
+    pure()
+};
+
+with_env: [m: MonadIOFail, m: MonadError] String -> String -> m a -> m a;
+with_env = |name, value, body| (
+    let original_value = *getenv(name);
+    do {
+        if value == "" { unsetenv(name) }
+        else { setenv(name, value, true) };;
+        body
+    }
+    .finally(do {
+        if original_value == "" { unsetenv(name) }
+        else { setenv(name, original_value, true) }
+    })
+);
+
+test_with_env: TestCase;
+test_with_env = (
+    make_test("test_with_env") $ |_|
+    let original = *getenv("HOME");
+    with_env("HOME", "") $ do {
+        assert_equal("empty", "", *getenv("HOME"));;
+        with_env("HOME", "/foo/bar") $ do {
+            assert_equal("foobar", "/foo/bar", *getenv("HOME"))
+        }
+    };;
+    assert_equal("original", original, *getenv("HOME"))
+);
+
+// Returns the base directory of user-specific data files.
+//
+// If the environment variable `"$XDG_DATA_HOME"` is set, it will be returned.
+// Otherwise, `"$HOME/.local/share"` will be returned.
+get_data_home: [m: MonadIO] m Path;
+get_data_home = (
+    let val = *getenv("XDG_DATA_HOME");
+    if val != "" { pure $ val };
+    let home = *getenv("HOME");
+    pure $ home + "/.local/share"
+);
+
+test_get_data_home: TestCase;
+test_get_data_home = (
+    make_test("test_get_data_home") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_DATA_HOME", "/home/foo/mydata") $ do {
+            assert_equal("mydata", "/home/foo/mydata", *get_data_home)
+        };;
+        with_env("XDG_DATA_HOME", "") $ do {
+            assert_equal("localshare", "/home/foo/.local/share", *get_data_home)
+        }
+    }
+);
+
+// Returns the base directory of user-specific configuration files.
+//
+// If the environment variable `"$XDG_CONFIG_HOME"` is set, it will be returned.
+// Otherwise, `"$HOME/.config"` will be returned.
+get_config_home: [m: MonadIO] m Path;
+get_config_home = (
+    let val = *getenv("XDG_CONFIG_HOME");
+    if val != "" { pure $ val };
+    let home = *getenv("HOME");
+    pure $ home + "/.config"
+);
+
+test_get_config_home: TestCase;
+test_get_config_home = (
+    make_test("test_get_config_home") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_CONFIG_HOME", "/home/foo/myconfig") $ do {
+            assert_equal("myconfig", "/home/foo/myconfig", *get_config_home)
+        };;
+        with_env("XDG_CONFIG_HOME", "") $ do {
+            assert_equal("config", "/home/foo/.config", *get_config_home)
+        }
+    }
+);
+
+// Returns the base directory of user-specific state files.
+//
+// If the environment variable `"$XDG_STATE_HOME"` is set, it will be returned.
+// Otherwise, `"$HOME/.local/state"` will be returned.
+get_state_home: [m: MonadIO] m Path;
+get_state_home = (
+    let val = *getenv("XDG_STATE_HOME");
+    if val != "" { pure $ val };
+    let home = *getenv("HOME");
+    pure $ home + "/.local/state"
+);
+
+test_get_state_home: TestCase;
+test_get_state_home = (
+    make_test("test_get_state_home") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_STATE_HOME", "/home/foo/mystate") $ do {
+            assert_equal("mystate", "/home/foo/mystate", *get_state_home)
+        };;
+        with_env("XDG_STATE_HOME", "") $ do {
+            assert_equal("localstate", "/home/foo/.local/state", *get_state_home)
+        }
+    }
+);
+
+// Returns the directory of user-specific executable files.
+//
+// `"$HOME/.local/bin"` will be returned.
+get_local_bin: [m: MonadIO] m Path;
+get_local_bin = (
+    let home = *getenv("HOME");
+    pure $ home + "/.local/bin"
+);
+
+test_get_local_bin: TestCase;
+test_get_local_bin = (
+    make_test("test_get_local_bin") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        assert_equal("localbin", "/home/foo/.local/bin", *get_local_bin)
+    }
+);
+
+// Returns an array that concatenates the user-specific and system-wide data directories.
+//
+// The user-specific data directory is same as the `get_data_home` function returns.
+//
+// The system-wide data directories are the result of splitting the value of `"$XDG_DATA_DIRS"` with a colon separator.
+// If `"$XDG_DATA_DIRS"` is not set or empty, `"/usr/local/share/:/usr/share/"` is used instead.
+get_data_dirs: [m: MonadIO] m (Array Path);
+get_data_dirs = (
+    let user_data_dir = *get_data_home;
+    let system_data_dirs = *getenv_or("XDG_DATA_DIRS", "/usr/local/share/:/usr/share/");
+    let system_data_dirs = system_data_dirs.split(":").filter(|s| s != "").to_array;
+    pure $ [user_data_dir] + system_data_dirs
+);
+
+test_get_data_dirs: TestCase;
+test_get_data_dirs = (
+    make_test("test_get_data_dirs") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_DATA_HOME", "/home/foo/mydata") $ do {
+            with_env("XDG_DATA_DIRS", "/opt/share:/local/share") $ do {
+                assert_equal("pattern 1", ["/home/foo/mydata", "/opt/share", "/local/share"], *get_data_dirs)
+            };;
+            with_env("XDG_DATA_DIRS", "") $ do {
+                assert_equal("pattern 2", ["/home/foo/mydata", "/usr/local/share/", "/usr/share/"], *get_data_dirs)
+            }
+        };;
+        with_env("XDG_DATA_HOME", "") $ do {
+            with_env("XDG_DATA_DIRS", "/opt/share:/local/share") $ do {
+                assert_equal("pattern 3", ["/home/foo/.local/share", "/opt/share", "/local/share"], *get_data_dirs)
+            };;
+            with_env("XDG_DATA_DIRS", "") $ do {
+                assert_equal("pattern 4", ["/home/foo/.local/share", "/usr/local/share/", "/usr/share/"], *get_data_dirs)
+            }
+        }
+    }
+);
+
+// Returns an array that concatenates the user-specific and system-wide config directories.
+//
+// The user-specific config directory is same as the `get_config_home` function returns.
+//
+// The system-wide config directories are the result of splitting the value of `"$XDG_CONFIG_DIRS"` with a colon separator.
+// If `"$XDG_CONFIG_DIRS"` is not set or empty, `"/etc/xdg"` is used instead.
+get_config_dirs: [m: MonadIO] m (Array Path);
+get_config_dirs = (
+    let user_config_dir = *get_config_home;
+    let system_config_dirs = *getenv_or("XDG_CONFIG_DIRS", "/etc/xdg");
+    let system_config_dirs = system_config_dirs.split(":").filter(|s| s != "").to_array;
+    pure $ [user_config_dir] + system_config_dirs
+);
+
+test_get_config_dirs: TestCase;
+test_get_config_dirs = (
+    make_test("test_get_config_dirs") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_CONFIG_HOME", "/home/foo/myconfig") $ do {
+            with_env("XDG_CONFIG_DIRS", "/opt/etc:/local/etc") $ do {
+                assert_equal("pattern 1", ["/home/foo/myconfig", "/opt/etc", "/local/etc"], *get_config_dirs)
+            };;
+            with_env("XDG_CONFIG_DIRS", "") $ do {
+                assert_equal("pattern 2", ["/home/foo/myconfig", "/etc/xdg"], *get_config_dirs)
+            }
+        };;
+        with_env("XDG_CONFIG_HOME", "") $ do {
+            with_env("XDG_CONFIG_DIRS", "/opt/etc:/local/etc") $ do {
+                assert_equal("pattern 3", ["/home/foo/.config", "/opt/etc", "/local/etc"], *get_config_dirs)
+            };;
+            with_env("XDG_CONFIG_DIRS", "") $ do {
+                assert_equal("pattern 4", ["/home/foo/.config", "/etc/xdg"], *get_config_dirs)
+            }
+        }
+    }
+);
+
+// Returns the base directory of user-specific non-essential data files.
+//
+// If the environment variable `"$XDG_CACHE_HOME"` is set, it will be returned.
+// Otherwise, `"$HOME/.cache"` will be returned.
+get_cache_home: [m: MonadIO] m Path;
+get_cache_home = (
+    let val = *getenv("XDG_CACHE_HOME");
+    if val != "" { pure $ val };
+    let home = *getenv("HOME");
+    pure $ home + "/.cache"
+);
+
+test_get_cache_home: TestCase;
+test_get_cache_home = (
+    make_test("test_get_cache_home") $ |_|
+    with_env("HOME", "/home/foo") $ do {
+        with_env("XDG_CACHE_HOME", "/home/foo/mycache") $ do {
+            assert_equal("mycache", "/home/foo/mycache", *get_cache_home)
+        };;
+        with_env("XDG_CACHE_HOME", "") $ do {
+            assert_equal(".cache", "/home/foo/.cache", *get_cache_home)
+        }
+    }
+);
+
+// Returns the base directory of user-specific non-essential runtime files and other file objects (sockets, named pipes etc).
+//
+// If the environment variable `"$XDG_RUNTIME_DIR"` is set, it will be returned.
+// Otherwise, an error will be thrown.
+get_runtime_dir: [m: MonadIO, m: MonadError] m Path;
+get_runtime_dir = (
+    let val = *getenv("XDG_RUNTIME_DIR");
+    if val != "" { pure $ val };
+    error $ "XDG_RUNTIME_DIR is not set"
+);
+
+test_get_runtime_dir: TestCase;
+test_get_runtime_dir = (
+    make_test("test_get_runtime_dir") $ |_|
+    with_env("XDG_RUNTIME_DIR", "/run/user/9999") $ do {
+        assert_equal("/run/user/9999", "/run/user/9999", *get_runtime_dir)
+    };;
+    with_env("XDG_RUNTIME_DIR", "") $ do {
+        assert_equal("err", err $ "XDG_RUNTIME_DIR is not set", *get_runtime_dir.to_result_t)
+    }
+);
+
+main: IO ();
+main = (
+    [
+        test_with_env,
+        test_get_data_home,
+        test_get_config_home,
+        test_get_state_home,
+        test_get_local_bin,
+        test_get_data_dirs,
+        test_get_config_dirs,
+        test_get_cache_home,
+        test_get_runtime_dir,
+    ]
+    .run_test_driver
+);

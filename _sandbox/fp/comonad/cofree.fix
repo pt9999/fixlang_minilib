@@ -1,0 +1,57 @@
+module Minilib.Comonad.Cofree;
+
+import Minilib.Trait.Comonad;
+
+type [f: * -> *] Cofree f a = box struct {
+    data: (a, f (Cofree f a))
+};
+
+cofree: [f: * -> *] (a, f (Cofree f a)) -> Cofree f a;
+cofree = |(a, fwa)| Cofree { data: (a, fwa) };
+
+run_cofree: [f: * -> *] Cofree f a -> (a, f (Cofree f a));
+run_cofree = @data;
+
+impl [f: Functor] Cofree f: Functor {
+    map = |h, wa| (
+        let (a, fwa) = wa.run_cofree;
+        cofree $ (h(a), fwa.map(map(h)))
+    );
+}
+
+_duplicate_cofree: [f: Functor] Cofree f a -> Cofree f (Cofree f a);
+_duplicate_cofree = |wa| (
+    let (a, fwa) = wa.run_cofree;
+    cofree $ (wa, fwa.map(_duplicate_cofree))
+);
+
+impl [f: Functor] Cofree f: Comonad {
+    extract = |wa| wa.run_cofree.@0;
+    extend = |h, wb| (
+        let wwb = wb._duplicate_cofree;
+        wwb.map(h)
+    );
+}
+
+trait ComonadCofree = Comonad + ComonadCofreeIF;
+trait [w: *->*] w: ComonadCofreeIF {
+    type FunctorType w: *->*;
+    unwrap: w a -> FunctorType w (w a);
+}
+
+impl [f: *->*] Cofree f: ComonadCofreeIF {
+    type FunctorType (Cofree f) = f;
+    unwrap = |Cofree { data: (a, fwa) }| fwa;
+}
+
+unfold: [f: Functor] (b -> (a, f b)) -> b -> Cofree f a;
+unfold = |h, b| (
+    let (a, fb) = h(b);
+    cofree $ (a, fb.map(unfold(h)))
+);
+
+coiter: [f: Functor] (a -> f a) -> a -> Cofree f a;
+coiter = |f, a| (
+    let fa = f(a);
+    cofree $ (a, fa.map(coiter(f)))
+);

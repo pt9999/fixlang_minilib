@@ -1,0 +1,43 @@
+module Main;
+
+import Minilib.Comonad.IdentityC;
+import Minilib.Comonad.Env;
+import Minilib.Comonad.Traced;
+import Minilib.Trait.Comonad;
+import Minilib.Testing.UnitTest;
+
+default_extend: [w: Functor] (w b -> w (w b)) -> (w b -> a) -> w b -> w a;
+default_extend = |duplicate, h, wb| (
+    wb.duplicate.map(h)
+);
+
+extend1: [w: Comonad, w: Functor] (w b -> a) -> w b -> w a;
+extend1 = default_extend(duplicate);
+
+test_traced_default_extend: TestCase;
+test_traced_default_extend = (
+    make_test("test_traced_default_extend") $ |_|
+    let w = traced $ |str| str + "x";
+    let f: Traced String String -> String = |w| w.extract + "y";
+    let g: Traced String String -> String = |w| w.extract + "z";
+    let h: String -> String = |s| "<" + s + ">";
+    assert_equal("", "ax", w.extend1(extract).run_traced("a"));;
+    assert_equal("", "xy", w.extend1(f).extract);;
+    assert_equal("", "axyz", w.extend1(f).extend1(g).run_traced("a"));;
+    assert_equal("", "axyz", w.extend1(extend1(f) >> g).run_traced("a"));;
+    assert_equal("", "ax", w.duplicate.extract.run_traced("a"));;
+    assert_equal("", "ax", w.duplicate.map(extract).run_traced("a"));;
+    assert_equal("", "axy", w.extend1(f).run_traced("a"));;
+    assert_equal("", "axy", w.duplicate.map(f).run_traced("a"));;
+    assert_equal("", "<ax>", w.map(h).run_traced("a"));;
+    assert_equal("", "<ax>", w.extend1(h << extract).run_traced("a"));;
+    pure()
+);
+
+main: IO ();
+main = (
+    [
+        test_traced_default_extend,
+    ]
+    .run_test_driver
+);

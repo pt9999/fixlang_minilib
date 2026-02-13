@@ -1,0 +1,223 @@
+module Main;
+
+import Minilib.Comonad.Cofree;
+import Minilib.Trait.Comonad;
+import Minilib.Testing.UnitTest;
+
+type NonEmptyList a = Cofree Option a;
+
+namespace NonEmptyList {
+    singleton: a -> NonEmptyList a;
+    singleton = |a| cofree $ (a, none());
+
+    push_front: a -> NonEmptyList a -> NonEmptyList a;
+    push_front = |a, list| cofree $ (a, some $ list);
+
+    to_array: NonEmptyList a -> Array a;
+    to_array = |list| (
+        loop(
+            (list, []), |(list, arr)|
+            let arr = arr.push_back(list.extract);
+            match list.unwrap {
+                none() => break $ arr,
+                some(list) => continue $ (list, arr)
+            }
+        )
+    );
+}
+
+test_cofree_nonemptylist_functor: TestCase;
+test_cofree_nonemptylist_functor = (
+    make_test("test_cofree_nonemptylist_functor") $ |_|
+    let list: NonEmptyList I64 = singleton(1).push_front(2).push_front(3);
+    let list: NonEmptyList String = list.map(to_string);
+    let arr = list.to_array;
+    assert_equal("eq", ["3", "2", "1"], arr)
+);
+
+test_cofree_nonemptylist_extract: TestCase;
+test_cofree_nonemptylist_extract = (
+    make_test("test_cofree_nonemptylist_extract") $ |_|
+    let list: NonEmptyList I64 = singleton(1).push_front(2).push_front(3);
+    assert_equal("extract", 3, list.extract)
+);
+
+test_cofree_nonemptylist_extend: TestCase;
+test_cofree_nonemptylist_extend = (
+    make_test("test_cofree_nonemptylist_extend") $ |_|
+    let list: NonEmptyList I64 = singleton(1).push_front(2).push_front(3);
+    let list: NonEmptyList String = list.extend(|list| list.extract.to_string);
+    let arr = list.to_array;
+    assert_equal("extend", ["3", "2", "1"], arr)
+);
+
+test_cofree_nonemptylist_duplicate: TestCase;
+test_cofree_nonemptylist_duplicate = (
+    make_test("test_cofree_nonemptylist_duplicate") $ |_|
+    let list: NonEmptyList I64 = singleton(1).push_front(2).push_front(3);
+    let list: NonEmptyList (NonEmptyList I64) = list.duplicate;
+    let arr = list.to_array.map(to_array);
+    assert_equal("duplicate", [[3, 2, 1], [2, 1], [1]], arr)
+);
+
+test_cofree_nonemptylist_unwrap: TestCase;
+test_cofree_nonemptylist_unwrap = (
+    make_test("test_cofree_nonemptylist_unwrap") $ |_|
+    let list: NonEmptyList I64 = singleton(1).push_front(2).push_front(3);
+    let opt: Option (NonEmptyList I64) = list.unwrap;
+    let opt: Option (Array I64) = opt.map(to_array);
+    assert_equal("unwrap", some $ [2, 1], opt)
+);
+
+type Tree a = Cofree Array a;
+
+namespace Tree {
+    root: a -> Tree a;
+    root = |a| cofree $ (a, []);
+
+    append_child: Tree a -> Tree a -> Tree a;
+    append_child = |child, parent| (
+        let (a, children) = parent.run_cofree;
+        cofree $ (a, children.push_back(child))
+    );
+
+    tree_to_string: [a: ToString] Tree a -> String;
+    tree_to_string = |tree| (
+        let (a, children) = tree.run_cofree;
+        let arr = [a.to_string] + children.map(tree_to_string);
+        arr.to_string
+    );
+}
+
+test_cofree_tree_functor: TestCase;
+test_cofree_tree_functor = (
+    make_test("test_cofree_tree_functor") $ |_|
+    let tree: Tree I64 = (
+        root(1)
+        .append_child(
+            root(2)
+            .append_child(root(3))
+            .append_child(root(4))
+        )
+        .append_child(
+            root(5)
+            .append_child(
+                root(6)
+                .append_child(root(7))
+            )
+        )
+    );
+    let tree: Tree I64 = tree.map(add(10));
+    let str = tree.tree_to_string;
+    assert_equal("eq", "[11, [12, [13], [14]], [15, [16, [17]]]]", str)
+);
+
+test_cofree_tree_extract: TestCase;
+test_cofree_tree_extract = (
+    make_test("test_cofree_tree_extract") $ |_|
+    let tree: Tree I64 = (
+        root(1)
+        .append_child(root(2))
+        .append_child(root(3))
+    );
+    assert_equal("eq", 1, tree.extract)
+);
+
+test_cofree_tree_extend: TestCase;
+test_cofree_tree_extend = (
+    make_test("test_cofree_tree_extend") $ |_|
+    let tree: Tree I64 = (
+        root(1)
+        .append_child(
+            root(2)
+            .append_child(root(3))
+        )
+    );
+    let str = tree.tree_to_string;
+    assert_equal("eq", "[1, [2, [3]]]", str);;
+    let tree: Tree String = tree.extend(tree_to_string);
+    let str = tree.tree_to_string;
+    assert_equal("eq", "[[1, [2, [3]]], [[2, [3]], [[3]]]]", str)
+);
+
+
+type Machine i o = Cofree (Arrow i) o;
+
+namespace Machine {
+    make: o -> (i -> Machine i o) -> Machine i o;
+    make = |o, f| cofree $ (o, f);
+
+    id: i -> Machine i i;
+    id = |i| cofree $ (i, id);
+
+    const: o -> Machine i o;
+    const = |o| cofree $ (o, |i| const(o));
+
+    generate: o -> (i -> o -> o) -> Machine i o;
+    generate = |o, f| cofree $ (o, |i| generate(f(i, o), f));
+
+    fold_machine: [it: Iterator, Item it = i] it -> Machine i o -> Array o;
+    fold_machine = |iter, machine| (
+        loop(
+            (iter, machine, []), |(iter, machine, output)|
+            let output = output.push_back(machine.extract);
+            match iter.advance {
+                none() => break $ output,
+                some((iter, i)) => continue $ (iter, machine.unwrap $ i, output)
+            }
+        )
+    );
+
+}
+
+test_cofree_machine_fold_machine: TestCase;
+test_cofree_machine_fold_machine = (
+    make_test("test_cofree_machine_fold_machine") $ |_|
+    let machine: Machine I64 I64 = Machine::make(1, Machine::id);
+    let arr = machine.fold_machine([10, 11, 12].to_iter);
+    assert_equal("eq", [1, 10, 11, 12], arr)
+);
+
+test_cofree_machine_functor: TestCase;
+test_cofree_machine_functor = (
+    make_test("test_cofree_machine_functor") $ |_|
+    let machine: Machine I64 I64 = Machine::generate(0, add);
+    let machine: Machine I64 String = machine.map(to_string);
+    let arr = machine.fold_machine([10, 11, 12].to_iter);
+    assert_equal("eq", ["0", "10", "21", "33"], arr)
+);
+
+test_cofree_machine_unfold: TestCase;
+test_cofree_machine_unfold = (
+    make_test("test_cofree_machine_unfold") $ |_|
+    let machine: Machine I64 (Array I64) = unfold(|arr| (arr, |i| arr.push_back(i)), []);
+    let arr = machine.fold_machine([10, 11, 12].to_iter);
+    assert_equal("eq", [[], [10], [10, 11], [10, 11, 12]], arr)
+);
+
+test_cofree_machine_coiter: TestCase;
+test_cofree_machine_coiter = (
+    make_test("test_cofree_machine_coiter") $ |_|
+    let machine: Machine I64 I64 = coiter(add, 0);
+    let arr = machine.fold_machine([10, 11, 12].to_iter);
+    assert_equal("eq", [0, 10, 21, 33], arr)
+);
+
+main: IO ();
+main = (
+    [
+        test_cofree_nonemptylist_functor,
+        test_cofree_nonemptylist_extract,
+        test_cofree_nonemptylist_extend,
+        test_cofree_nonemptylist_duplicate,
+        test_cofree_nonemptylist_unwrap,
+        test_cofree_tree_functor,
+        test_cofree_tree_extract,
+        test_cofree_tree_extend,
+        test_cofree_machine_fold_machine,
+        test_cofree_machine_functor,
+        test_cofree_machine_unfold,
+        test_cofree_machine_coiter,
+    ]
+    .run_test_driver
+);

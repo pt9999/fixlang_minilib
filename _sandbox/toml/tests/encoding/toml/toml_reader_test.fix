@@ -1,7 +1,8 @@
-module Main;
+module TomlReaderTest;
 
 import Minilib.Encoding.Toml.TomlReader;
 import Minilib.Text.SimpleParser;
+import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
 eval_parser_str: String -> Parser a -> Result ErrMsg a;
@@ -18,7 +19,7 @@ test_parse_ws = (
             ("  \t\t\nabc", ok $ "  \t\t"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_ws.eval_parser_str(input))
+        assert_equal("eq", expected, _parse_ws.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -32,7 +33,7 @@ test_parse_newline = (
             ("\r\n\n", ok $ "\r\n"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_newline.eval_parser_str(input))
+        assert_equal("eq", expected, _parse_newline.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -44,7 +45,7 @@ test_parse_comment = (
             ("#  \t\tabc あいう\n", ok $ "#  \t\tabc あいう"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_comment.eval_parser_str(input))
+        assert_equal("eq", expected, _parse_comment.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -62,10 +63,53 @@ test_parse_unquoted_key = (
             ("123", ok $ "123"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_unquoted_key.eval_parser_str(input))
+        assert_equal("eq", expected, _parse_unquoted_key.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
+test_parse_basic_string: TestCase;
+test_parse_basic_string = (
+    make_table_test("test_parse_basic_string",
+        [
+            ("", err $ _NotMatch),
+            ("\"abc", err $ _NotMatch),
+            ("\"abc\"", ok $ "abc"),
+            ("\"\\\"\\\\\\b\\e\\f\\n\\r\\t\"", ok $ "\"\\\u0008\u001b\u000c\u000a\u000d\u0009"),
+            ("\"\\x41\"", ok $ "A"),
+            ("\"\\u3042\"", ok $ "あ"),
+            ("\"\\U0001F600\"", ok $ "😀"),
+            ("\"\\x41\\u3042\\U0001F600\"", ok $ "Aあ😀"),
+            ("\"Aあ😀\"", ok $ "Aあ😀"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+    )
+);
+
+test_parse_ml_basic_string: TestCase;
+test_parse_ml_basic_string = (
+    make_table_test("test_parse_ml_basic_string",
+        [
+            ("", err $ _NotMatch),
+            ("\"abc\"", err $ _NotMatch),
+            ("\"\"\"abc\"\"\"", ok $ "abc"),
+            ("\"\"\"\"abc\"\"\"\"", ok $ "\"abc\""),
+            ("\"\"\"\"\"abc\"\"\"\"\"", ok $ "\"\"abc\"\""),
+            ("\"\"\"\\\"\\\\\\b\\e\\f\\n\\r\\t\"\"\"", ok $ "\"\\\u0008\u001b\u000c\u000a\u000d\u0009"),
+            ("\"\"\"\\x41\\u3042\\U0001F600Aあ😀\"\"\"", ok $ "Aあ😀Aあ😀"),
+            ("\"\"\"\nRoses are red\nViolets are blue\"\"\"", ok $ "Roses are red\nViolets are blue"),
+            ("\"\"\"\r\nRoses are red\r\nViolets are blue\"\"\"", ok $ "Roses are red\r\nViolets are blue"),
+            ("\"\"\"\nThe quick brown \\\n \n  \n  fox jumps over \\\n\tthe lazy dog.\"\"\"", ok $ "The quick brown fox jumps over the lazy dog."),
+            ("\"\"\"\\\n       The quick brown \\\n       fox jumps over \\\n       the lazy dog.\\\n       \"\"\"", ok $ "The quick brown fox jumps over the lazy dog."),
+            ("\"\"\"Here are two quotation marks: \"\". Simple enough.\"\"\"", ok $ "Here are two quotation marks: \"\". Simple enough."),
+            ("\"\"\"Here are three quotation marks: \"\"\".\"\"\"", ok $ "Here are three quotation marks: "),   // .\"\"\" is remained
+            ("\"\"\"Here are three quotation marks: \"\"\\\".\"\"\"", ok $ "Here are three quotation marks: \"\"\"."),
+            ("\"\"\"\"This,\" she said, \"is just a pointless statement.\"\"\"\"", ok $ "\"This,\" she said, \"is just a pointless statement.\""),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, _parse_ml_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+    )
+);
 
 main: IO ();
 main = (
@@ -74,6 +118,8 @@ main = (
         test_parse_newline,
         test_parse_comment,
         test_parse_unquoted_key,
+        test_parse_basic_string,
+        test_parse_ml_basic_string,
     ]
     .run_test_driver
 );

@@ -3,25 +3,81 @@
 // https://github.com/toml-lang/toml/blob/1.0.0/toml.abnf
 module Minilib.Encoding.Toml.TomlReader;
 
+import Minilib.Common.Common;
 import Minilib.Encoding.Toml;
 import Minilib.Text.SimpleParser;
+import Minilib.Text.Unicode;
 import Minilib.Text.StringEx;
-
-//parse_toml: Parser Toml;
+import Minilib.Trait.Traversable;
 
 type TomlChar = U8;
 
-_parse_ws: Parser String;
+namespace SimpleParserEx {
+    /*
+    times: Parser a -> I64 -> Parser (Array a);
+    times = |p, n| (
+        Array::fill(n, p).sequence
+    );
+    */
+
+}
+
+_get_matched_content_and_value: Parser a -> Parser (Array TomlChar, a);
+_get_matched_content_and_value = |parser| (
+    let start = *get_stream;
+    let a = *parser;
+    let end = *get_stream;
+    let content = start.read_string_between(end);
+    pure $ (content.get_bytes.pop_back, a)
+);
+
+_get_matched_content: Parser a -> Parser (Array TomlChar);
+_get_matched_content = |parser| (
+    _get_matched_content_and_value(parser).map(Tuple2::@0)
+);
+
+// TomlToken is a value with its span.
+type TomlToken a = unbox struct {
+    value: a,
+    new_value: Option a,
+    span: Option (I64, I64),
+};
+
+namespace TomlToken {
+    make: a -> Option a -> Option (I64, I64) -> TomlToken a;
+    make = |value, new_value, span| TomlToken {
+        value: value,
+        new_value: new_value,
+        span: span
+    };
+}
+
+impl TomlToken: Functor {
+    map = |f, tok| TomlToken::make(f(tok.@value), tok.@new_value.map(f), tok.@span);
+}
+
+_with_span: Parser a -> Parser (TomlToken a);
+_with_span = |p| (
+    let begin = *get_stream;
+    let a = *p;
+    let end = *get_stream;
+    let span = some $ (begin.@position, end.@position);
+    pure $ TomlToken::make(a, none(), span)
+);
+
+//parse_toml: Parser Toml;
+
+_parse_ws: Parser (Array TomlChar);
 _parse_ws = (
     repeat(
         match_any_char.filter(_is_wschar)
-    ).map(_unsafe_to_string)
+    )
 );
 
 _is_wschar: TomlChar -> Bool;
 _is_wschar = |c| c == 0x20_U8 || c == 0x09_U8;
 
-_parse_newline: Parser String;
+_parse_newline: Parser (Array TomlChar);
 _parse_newline = (
     _get_matched_content $ do {
         match_char(0x0a_U8)
@@ -42,7 +98,7 @@ _is_non_eol = |c| (
     _is_non_ascii(c)
 );
 
-_parse_comment: Parser String;
+_parse_comment: Parser (Array TomlChar);
 _parse_comment = (
     _get_matched_content $ do {
         match_char(0x23_U8);;   // '#'
@@ -61,7 +117,7 @@ _parse_key = undefined("");
 _parse_simple_key: Parser TomlKey;
 _parse_simple_key = undefined("");
 
-_parse_unquoted_key: Parser String;
+_parse_unquoted_key: Parser (Array TomlChar);
 _parse_unquoted_key = (
     one_or_more(
         match_any_char.filter(|c|
@@ -71,7 +127,7 @@ _parse_unquoted_key = (
             c == 0x2d_U8 ||             // '-'
             c == 0x5f_U8                // '_'
         )
-    ).map(_unsafe_to_string)
+    )
 );
 
 _parse_quoted_key: Parser ();
@@ -102,72 +158,153 @@ _parse_val = undefined("");
 //-----------------------------------------------------
 // String
 
-_parse_string: Parser String;
+_parse_string: Parser (Array TomlChar);
 _parse_string = undefined("");
 
-_parse_basic_string: Parser String;
+//-----------------------------------------------------
+// Basic String
+
+_parse_basic_string: Parser (Array TomlChar);
 _parse_basic_string = (
-    _parse_quotation_mark;;
-    let chars = *repeat(_parse_basic_char);
-    _parse_quotation_mark;;
-    pure $ chars._unsafe_to_string
+    _parse_quotation_mark.forget;;
+    let chars_array: Array (Array TomlChar) = *repeat(_parse_basic_chars);
+    let chars: Array TomlChar = chars_array.flatten;
+    _parse_quotation_mark.forget;;
+    pure $ chars
 );
 
-_parse_quotation_mark: Parser ();
-_parse_quotation_mark = match_char(0x22_U8);    // '\"'
+_parse_quotation_mark: Parser TomlChar;
+_parse_quotation_mark = match_char_class(|c| c == 0x22_U8);    // '\"'
 
-_parse_basic_char: Parser TomlChar;
-_parse_basic_char = (
-    _parse_basic_unescaped.or_elseF $ 
+_parse_basic_chars: Parser (Array TomlChar);
+_parse_basic_chars = (
+    one_or_more(_parse_basic_unescaped).or_elseF $ 
     _parse_escaped
 );
 
 _parse_basic_unescaped: Parser TomlChar;
 _parse_basic_unescaped = (
-    // TODO: support TomlChar >= 0x100
-    match_any_char.filter(|c|
-        _is_ws_char(c) ||
+    match_char_class(|c|
+        _is_wschar(c) ||
         c == 0x21_U8 ||
         (0x23_U8 <= c && c <= 0x5B_U8) ||
         (0x5D_U8 <= c && c <= 0x7E_U8) ||
-        _is_non_ascii(c)
+        _is_non_ascii(c)    // the encoding of Toml file is UTF-8, so U+0080 or above characters are all encoded in 0x80..0xFF
     )
 );
 
-_parse_escaped: Parser TomlChar;
-_parse_escaped = undefined("");
-
-_parse_escape: Parser ();
-_parse_escape = match_char(0x5C_U8);    // '\\'
-
-_is_escape_seq_char: TomlChar -> Bool;
-_is_escape_seq_char = |c| (
-    // TODO: support \uXXXX and \UXXXXXXXX
-    // TODO: convert escaped char to unescaped char here?
-    //   For the purpose of TomlReader, it is better to 
-    //   unescape chars here.
-    //   But if the toml is read then immediately written to a new file,
-    //   the escaped string may be changed, since it is unescaped once and
-    //   then escaped back.
-    undefined("")
+_parse_escaped: Parser (Array TomlChar);
+_parse_escaped = (
+    match_char(0x5C_U8);;    // '\\'
+    _parse_single_escape_seq_char.or_elseF $
+    _parse_hex_escape_seq_char(0x78_U8, 2).or_elseF $ // xHH                  U+00HH
+    _parse_hex_escape_seq_char(0x75_U8, 4).or_elseF $ // uHHHH                U+HHHH
+    _parse_hex_escape_seq_char(0x55_U8, 8)            // UHHHHHHHH            U+HHHHHHHH
 );
 
-
-
-
-
-_get_matched_content_and_value: Parser a -> Parser (String, a);
-_get_matched_content_and_value = |parser| (
-    let start = *get_stream;
-    let a = *parser;
-    let end = *get_stream;
-    let content = start.read_string_between(end);
-    pure $ (content, a)
+_parse_single_escape_seq_char:  Parser (Array TomlChar);
+_parse_single_escape_seq_char = (
+    let c = *match_any_char;
+    let c = *(
+        if c == 0x22_U8 { pure $ 0x22_U8 }; // "    quotation mark  U+0022
+        if c == 0x5C_U8 { pure $ 0x5C_U8 }; // \    reverse solidus U+005C
+        if c == 0x62_U8 { pure $ 0x08_U8 }; // b    backspace       U+0008
+        if c == 0x65_U8 { pure $ 0x1B_U8 }; // e    escape          U+001B
+        if c == 0x66_U8 { pure $ 0x0C_U8 }; // f    form feed       U+000C
+        if c == 0x6E_U8 { pure $ 0x0A_U8 }; // n    line feed       U+000A
+        if c == 0x72_U8 { pure $ 0x0D_U8 }; // r    carriage return U+000D
+        if c == 0x74_U8 { pure $ 0x09_U8 }; // t    tab             U+0009
+        not_match
+    );
+    pure $ [c]
 );
 
-_get_matched_content: Parser a -> Parser String;
-_get_matched_content = |parser| (
-    _get_matched_content_and_value(parser).map(Tuple2::@0)
+_parse_hexdig: Parser TomlChar;
+_parse_hexdig = (
+    match_char_class(|c|
+        ('0' <= c && c <= '9')
+        || ('A' <= c && c <= 'F')
+        //|| ('a' <= c && c <= 'f')
+    )
+);
+
+_decode_hexchars: Array TomlChar -> U32;
+_decode_hexchars = |input| (
+    input.to_iter.fold(
+        0_U32, |c, output|
+        let h = (
+            if '0' <= c && c <= '9' { c - '0' };
+            if 'A' <= c && c <= 'F' { c - 'A' + 10_U8 };
+            if 'a' <= c && c <= 'f' { c - 'a' + 10_U8 };
+            0_U8
+        );
+        output.shift_left(4_U32).bit_or(h.to_U32)
+    )
+);
+
+_parse_hex_escape_seq_char: U8 -> I64 -> Parser (Array TomlChar);
+_parse_hex_escape_seq_char = |c, n| (
+    match_char(c);;
+    let hexchars = *Array::fill(n, _parse_hexdig).sequence;
+    let code_point = _decode_hexchars(hexchars);
+    pure $ encode_code_point_to_utf8(code_point, [])
+);
+
+//-----------------------------------------------------
+// Multiline Basic String
+
+_parse_ml_basic_string: Parser (Array TomlChar);
+_parse_ml_basic_string = (
+    Array::fill(3, _parse_quotation_mark).sequence.forget;;
+    _parse_newline.if_exists.forget;;
+    let chars: Array TomlChar = *_parse_ml_basic_body;
+    Array::fill(3, _parse_quotation_mark).sequence.forget;;
+    let opt1 = *_parse_quotation_mark.if_exists;
+    let chars = chars.apply $ opt1.map_or(id, Array::push_back);
+    let opt2 = *_parse_quotation_mark.if_exists;
+    let chars = chars.apply $ opt2.map_or(id, Array::push_back);
+    pure $ chars
+);
+
+_parse_ml_basic_body: Parser (Array TomlChar);
+_parse_ml_basic_body = (
+    let body = *_parse_mlb_contents;
+    let tail = *zero_or_more(do {
+        let quotes = *_parse_mlb_quotes;
+        let body = *_parse_mlb_contents;
+        if body.get_size < 1 { not_match };
+        pure $ quotes + body
+    });
+    pure $ body + tail.flatten
+);
+
+_parse_mlb_contents: Parser (Array TomlChar);
+_parse_mlb_contents = (
+    repeat(
+        _parse_basic_chars.or_elseF $
+        _parse_newline.or_elseF $
+        _parse_mlb_escaped_nl
+    ).map(flatten)
+);
+
+_parse_mlb_quotes: Parser (Array TomlChar);
+_parse_mlb_quotes = (
+    let chars = *_parse_quotation_mark.map(|c| [c]);
+    let opt2 = *_parse_quotation_mark.if_exists;
+    let chars = chars.apply $ opt2.map_or(id, Array::push_back);
+    pure $ chars
+);
+
+_parse_mlb_escaped_nl: Parser (Array TomlChar);
+_parse_mlb_escaped_nl = (
+    match_char(0x5C_U8);;    // '\\'
+    _parse_ws.forget;;
+    _parse_newline.forget;;
+    repeat(
+        match_char_class(_is_wschar).forget.or_elseF $
+        _parse_newline.forget
+    ).forget;;
+    pure $ []
 );
 
 

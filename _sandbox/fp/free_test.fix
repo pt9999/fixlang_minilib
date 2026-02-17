@@ -5,9 +5,52 @@ import Minilib.Common.IORef;
 import Minilib.Common.TimeEx;
 import Minilib.Monad.Free;
 import Minilib.Monad.IO;
+import Minilib.Monad.Error;
 import Minilib.Monad.State;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
+
+test_free_lift_f: TestCase;
+test_free_lift_f = (
+    make_test("test_free_lift_f") $ |_|
+    let free: Free Array I64 = [123, 456].lift_f;
+    assert_true("free.is_f_functor", free.is_f_functor);;
+    let arr: Array (Free Array I64) = free.as_f_functor;
+    assert_equal("arr.@size", 2, arr.@size);;
+    assert_true("arr.@(0).is_f_pure", arr.@(0).is_f_pure);;
+    assert_true("arr.@(1).is_f_pure", arr.@(1).is_f_pure);;
+    assert_equal("arr.@(0).as_f_pure", 123, arr.@(0).as_f_pure);;
+    assert_equal("arr.@(1).as_f_pure", 456, arr.@(1).as_f_pure);;
+    pure()
+);
+
+test_free_functor: TestCase;
+test_free_functor = (
+    make_test("test_free_functor") $ |_|
+    let free: Free Option I64 = some(123).lift_f;
+    let free: Free Option String = free.map(to_string);
+    assert_true("is_f_functor", free.is_f_functor);;
+    let opt: Option (Free Option String) = free.as_f_functor;
+    assert_true("opt.is_some", opt.is_some);;
+    assert_true("opt.as_some.is_f_pure", opt.as_some.is_f_pure);;
+    assert_equal("opt.as_some.as_f_pure", "123", opt.as_some.as_f_pure);;
+    pure()
+);
+
+test_free_monad: TestCase;
+test_free_monad = (
+    make_test("test_free_monad") $ |_|
+    let free: Free Option I64 = pure(123);
+    assert_true("free.is_f_pure", free.is_f_pure);;
+    assert_equal("free.as_f_pure", 123, free.as_f_pure);;
+    let free2: Free Option String = free.bind(|a| some(a.to_string).lift_f);
+    assert_true("free2.is_f_functor", free2.is_f_functor);;
+    let opt: Option (Free Option String) = free2.as_f_functor;
+    assert_true("opt.is_some", opt.is_some);;
+    assert_true("opt.as_some.is_f_pure", opt.as_some.is_f_pure);;
+    assert_equal("opt.as_some.as_f_pure", "123", opt.as_some.as_f_pure);;
+    pure()
+);
 
 type Op a = box union {
     op_iof: IOFail a,
@@ -146,6 +189,9 @@ test_freeop_perf = (
 main: IO ();
 main = (
     [
+        test_free_lift_f,
+        test_free_functor,
+        test_free_monad,
         test_freeop,
         test_freeop_perf,
     ]

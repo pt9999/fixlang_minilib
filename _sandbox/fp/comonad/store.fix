@@ -1,0 +1,46 @@
+module Minilib.Comonad.Store;
+
+import Minilib.Comonad.IdentityC;
+import Minilib.Trait.Comonad;
+
+type [w: * -> *] StoreT s w a = unbox struct {
+    data: (s, w (s -> a))
+};
+
+type Store s a = StoreT s IdentityC a;
+
+namespace Store {
+    store_t: [w: * -> *] (s, w (s -> a)) -> StoreT s w a;
+    store_t = |data| StoreT { data: data };
+
+    store: (s, (s -> a)) -> Store s a;
+    store = |(s, f)| store_t $ (s, IdentityC::make(f));
+
+    run_store_t: [w: * -> *] StoreT s w a -> (s, w (s -> a));
+    run_store_t = @data;
+
+    run_store: Store s a -> (s, s -> a);
+    run_store = |store| (
+        let (s, wf) = store.@data;
+        (s, wf.extract)
+    );
+}
+
+impl [w: Functor] StoreT s w: Functor {
+    map = |g, swa| (
+        let (s, wf) = swa.run_store_t;
+        store_t $ (s, wf.map(map(g)))
+    );
+}
+
+impl [w: Comonad] StoreT s w: Comonad {
+    extract = |swa| (
+        let (s, wf) = swa.run_store_t;
+        (wf.extract)(s)
+    );
+    extend: (StoreT s w b -> a) -> StoreT s w b -> StoreT s w a
+     = |g, swb| (
+        let (s, wfb) = swb.run_store_t;
+        undefined("not impl yet")
+    );
+}

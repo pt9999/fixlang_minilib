@@ -1,131 +1,330 @@
 module Minilib.Encoding.Toml;
 
+import Minilib.Common.Common;
+import Minilib.Collection.OrderedMap;
+import Minilib.Encoding.Toml.TomlWriter;
+import Minilib.Monad.Error;
 import Minilib.Text.StringEx;
 
-trait a: TomlEncode {
-    toml_encode: a -> String -> String;
-}
-
-impl String: TomlEncode {
-    toml_encode = |s, out| (
-        out + s
-    );
-}
+//-------------------------------------------------------------
+//  Toml
+//-------------------------------------------------------------
 
 type Toml = unbox struct {
-    exprs: Array TomlExpr
+    map: OrderedMap TomlKey TomlVal,
 };
 
-impl Toml: TomlEncode {
-    toml_encode = |toml, out| (
-        toml.@exprs.to_iter.fold(
-            out, toml_encode
+namespace Toml {
+    empty: Toml;
+    empty = Toml {
+        map: OrderedMap::empty(10),
+    };
+
+    parse: String -> Result ErrMsg Toml;
+    parse = err $ "not impl";
+
+    act: [f: Functor] TomlKey -> (TomlVal -> f TomlVal) -> Toml -> f Toml;
+    act = |key, action, toml| (
+        let val = toml.@map.find(key).as_some_or(v_none());
+        action(val).map(|val|
+            if val.is_v_none { toml.mod_map(OrderedMap::erase(key)) };
+            toml.mod_map(OrderedMap::insert(key, val))
+        )
+    );
+
+    to_iter: Toml -> OrderedMapIterator TomlKey TomlVal;
+    to_iter = |toml| toml.@map.to_iter;
+}
+
+impl Toml: ToString {
+    to_string = |toml| "".toml_write(toml);
+}
+
+impl Toml: Indexable {
+    type Elem Toml = TomlVal;
+    type Index Toml = TomlKey;
+    act_at_index = Toml::act;
+}
+
+//-------------------------------------------------------------
+//  TomlTable
+//-------------------------------------------------------------
+
+type TomlTable = unbox struct {
+    map: OrderedMap TomlKey TomlVal,
+};
+
+namespace TomlTable {
+    empty: TomlTable;
+    empty = TomlTable {
+        map: OrderedMap::empty(10),
+    };
+
+    get_size: TomlTable -> I64;
+    get_size = |table| table.@map.get_size;
+
+    find: TomlKey -> TomlTable -> Option TomlVal;
+    find = |key, table| (
+        table.@map.find(key)
+    );
+
+    insert: TomlKey -> TomlVal -> TomlTable -> TomlTable;
+    insert = |key, val, table| (
+        table.mod_map(OrderedMap::insert(key, val))
+    );
+
+    erase: TomlKey -> TomlTable -> TomlTable;
+    erase = |key, table| (
+        table.mod_map(OrderedMap::erase(key))
+    );
+
+    act: [f: Functor] TomlKey -> (TomlVal -> f TomlVal) -> TomlTable -> f TomlTable;
+    act = |key, action, table| (
+        /*
+        let (head, tail) = key.uncons;
+        let action_recursive = |val| match tail {
+            none() => action(val),
+            some(tail) => val.act(tail, action)
+        };
+        */
+        let val = table.find(key).as_some_or(v_none());
+        action(val).map(|val|
+            if val.is_v_none { table.erase(key) };
+            table.insert(key, val)
+        )
+    );
+
+    to_iter: TomlTable -> OrderedMapIterator TomlKey TomlVal;
+    to_iter = |table| table.@map.to_iter;
+}
+
+impl TomlTable: Eq {
+    eq = |table1, table2| (
+        if table1.get_size != table2.get_size { false };
+        table1.to_iter.check_all(|(k, v)|
+            table2.find(k) == some(v)
         )
     );
 }
 
-type TomlExpr = unbox union {
-    expr_comment: TomlExprComment,
-    expr_keyval: TomlExprKeyVal,
-    expr_table: TomlExprTable,
+impl TomlTable: ToString {
+    to_string = |table| "".toml_write(table);
+}
+
+impl TomlTable: Indexable {
+    type Elem TomlTable = TomlVal;
+    type Index TomlTable = TomlKey;
+    act_at_index = TomlTable::act;
+}
+
+//-------------------------------------------------------------
+//  TomlArray
+//-------------------------------------------------------------
+
+type TomlArray = unbox struct {
+    arr: Array TomlVal,
 };
 
-impl TomlExpr: TomlEncode {
-    toml_encode = |expr| (
-        match expr {
-            expr_comment(e) => toml_encode(e),
-            expr_keyval(e) => toml_encode(e),
-            expr_table(e) => toml_encode(e),
+namespace TomlArray {
+    empty: TomlArray;
+    empty = TomlArray { arr: [] };
+
+    make: Array TomlVal -> TomlArray;
+    make = |arr| TomlArray { arr: arr };
+
+    act: [f: Functor] I64 -> (TomlVal -> f TomlVal) -> TomlArray -> f TomlArray;
+    act = |index, action, array| (
+        if index < 0 { action(v_none()).map(|val| array) };
+        let array = loop(
+            array, |array|
+            if index < array.@arr.get_size { break $ array };
+            continue $ array.mod_arr(push_back(v_none()))
+        );
+        array.act_arr(Array::act(index, action))
+    );
+
+    get_size: TomlArray -> I64;
+    get_size = |array| array.@arr.get_size;
+
+    @: I64 -> TomlArray -> TomlVal;
+    @ = |index, array| (
+        let store = |f| array.act(index, f);
+        store.iget
+    );
+
+    set: I64 -> TomlVal -> TomlArray -> TomlArray;
+    set = |index, val, array| (
+        let store = |f| array.act(index, f);
+        store.iset(val)
+    );
+
+    to_iter: TomlArray -> ArrayIterator TomlVal;
+    to_iter = |array| array.@arr.to_iter;
+}
+
+impl TomlArray: Eq {
+    eq = |array1, array2| array1.@arr == array2.@arr;
+}
+
+impl TomlArray: ToString {
+    to_string = |array| "".toml_write(array);
+}
+
+impl TomlArray: Indexable {
+    type Elem TomlArray = TomlVal;
+    type Index TomlArray = I64;
+    act_at_index = TomlArray::act;
+}
+
+//-------------------------------------------------------------
+//  TomlKey
+//-------------------------------------------------------------
+
+type TomlKey = String;
+
+//-------------------------------------------------------------
+//  TomlDottedKey
+//-------------------------------------------------------------
+
+type TomlDottedKey = box union {
+    k_single: TomlKey,
+    k_dotted: (TomlKey, TomlDottedKey),
+};
+
+namespace TomlDottedKey {
+    cons: TomlKey -> TomlDottedKey -> TomlDottedKey;
+    cons = |head, tail| k_dotted $ (head, tail);
+
+    uncons: TomlDottedKey -> (TomlKey, Option TomlDottedKey);
+    uncons = |key| match key {
+        k_single(name) => (name, none()),
+        k_dotted((name, tail)) => (name, some(tail)),
+    };
+}
+
+//-------------------------------------------------------------
+//  TomlVal
+//-------------------------------------------------------------
+
+type TomlVal = unbox union {
+    v_none: (),
+    v_string: String,
+    v_int: I64,
+    v_float: F64,
+    v_bool: Bool,
+    v_array: TomlArray,
+    v_table: TomlTable,
+    v_array_table: Array TomlTable,
+};
+
+impl TomlVal: Eq {
+    eq = |a, b| (
+        match a {
+            v_none() => b.is_v_none,
+            v_string(str) => b.is_v_string && b.as_v_string == str,
+            v_int(i64) => b.is_v_int && b.as_v_int == i64,
+            v_float(f64) => b.is_v_float && b.as_v_float == f64,
+            v_bool(bool) => b.is_v_bool && b.as_v_bool == bool,
+            v_array(array) => b.is_v_array && b.as_v_array == array,
+            v_table(table) => b.is_v_table && b.as_v_table == table,
+            v_array_table(array_table) => b.is_v_array_table && b.as_v_array_table == array_table,
         }
     );
 }
 
-type TomlWs = String;
+impl TomlVal: ToString {
+    to_string = |val| "".toml_write(val);
+}
 
-type TomlComment = String;
 
-type TomlExprComment = unbox struct {
-    ws: TomlWs,
-    comment: TomlComment,
-};
-
-impl TomlExprComment: TomlEncode {
-    toml_encode = |e| (
-        toml_encode(e.@ws) >>
-        toml_encode(e.@comment)
+namespace TomlVal {
+    act: [f: Functor] TomlKey -> (TomlVal -> f TomlVal) -> TomlVal -> f TomlVal;
+    act = |key, action, outer| (
+        /*
+        let (head, tail) = key.uncons;
+        let action_recursive = |val| match tail {
+            none() => action(val),
+            some(tail) => val.act(tail, action)
+        };
+        */
+        let res: Result ErrMsg I64 = key.from_string;
+        if res.is_ok && res.as_ok >= 0 {
+            let index = res.as_ok;
+            let array = match outer {
+                v_array(arr) => arr,
+                _ => TomlArray::empty
+            };
+            array.act(index, action).map(v_array)
+        };
+        let table = match outer {
+            v_table(table) => table,
+            _ => TomlTable::empty
+        };
+        table.act(key, action).map(v_table)
     );
 }
 
-type TomlExprKeyVal = unbox struct {
-    ws1: TomlWs,
-    keyval: TomlKeyVal,
-    ws2: TomlWs,
-    comment: TomlComment,
-};
+impl TomlVal: Indexable {
+    type Elem TomlVal = TomlVal;
+    type Index TomlVal = String;
+    act_at_index = TomlVal::act;
+}
 
-impl TomlExprKeyVal: TomlEncode {
-    toml_encode = |e| (
-        toml_encode(e.@ws1) >>
-        toml_encode(e.@keyval) >>
-        toml_encode(e.@ws2) >>
-        toml_encode(e.@comment)
+//-------------------------------------------------------------
+//  ToTomlVal, FromTomlVal
+//-------------------------------------------------------------
+
+trait a: ToTomlVal {
+    to_toml_val: a -> TomlVal;
+}
+
+trait a: FromTomlVal {
+    from_toml_val: TomlVal -> Result ErrMsg a;
+}
+
+impl TomlVal: ToTomlVal {
+    to_toml_val = id;
+}
+
+impl TomlVal: FromTomlVal {
+    from_toml_val = pure;
+}
+
+impl String: ToTomlVal {
+    to_toml_val = v_string;
+}
+
+impl String: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_string(str) => ok $ str,
+        _ => err $ "not a string",
+    };
+}
+
+impl I64: ToTomlVal {
+    to_toml_val = v_int;
+}
+
+impl I64: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_int(i64) => ok $ i64,
+        _ => err $ "not an integer",
+    };
+}
+
+impl [a: ToTomlVal] Array a: ToTomlVal {
+    to_toml_val = |arr| (
+        let arr = arr.map(to_toml_val);
+        v_array $ TomlArray::make $ arr
     );
 }
 
-type TomlExprTable = unbox struct {
-    ws1: TomlWs,
-    text: String,
-    ws2: TomlWs,
-    comment: TomlComment,
-};
+//-------------------------------------------------------------
+//  Index operations
+//-------------------------------------------------------------
 
-impl TomlExprTable: TomlEncode {
-    toml_encode = |e| (
-        toml_encode(e.@ws1) >>
-        toml_encode(e.@text) >>
-        toml_encode(e.@ws2) >>
-        toml_encode(e.@comment)
-    );
-}
+tset: [a: ToTomlVal] a -> ((TomlVal -> Identity TomlVal) -> Identity c) -> c;
+tset = |val, store| store.iset(val.to_toml_val);
 
-type TomlKeyVal = unbox struct {
-    key: TomlKey,
-    keyval_sep: TomlKeyValSep,
-    val: TomlVal,
-};
-
-impl TomlKeyVal: TomlEncode {
-    toml_encode = |e| (
-        toml_encode(e.@key) >>
-        toml_encode(e.@keyval_sep) >>
-        toml_encode(e.@val)
-    );
-}
-
-type TomlKey = String;
-
-// TODO: quote key if needed
-
-type TomlKeyValSep = unbox struct {
-    ws1: TomlWs,
-    sep: String,
-    ws2: TomlWs,
-};
-
-impl TomlKeyValSep: TomlEncode {
-    toml_encode = |e| (
-        toml_encode(e.@ws1) >>
-        toml_encode(e.@sep) >>
-        toml_encode(e.@ws2)
-    );
-}
-
-type TomlVal = unbox union {
-    vstring: String,
-    vint: I64,
-    vfloat: F64,
-    vbool: Bool,
-    varray: Array TomlVal,
-    vtable: Array TomlKeyVal,
-};
-
+tget: [m: MonadError, a:FromTomlVal] ((TomlVal -> Const TomlVal TomlVal) -> Const TomlVal c) -> m a;
+tget = |store| store.iget.from_toml_val.lift_result;

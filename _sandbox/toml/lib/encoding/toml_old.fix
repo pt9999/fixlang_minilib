@@ -1,0 +1,131 @@
+module Minilib.Encoding.Toml;
+
+import Minilib.Text.StringEx;
+
+trait a: TomlEncode {
+    toml_encode: a -> String -> String;
+}
+
+impl String: TomlEncode {
+    toml_encode = |s, out| (
+        out + s
+    );
+}
+
+type Toml = unbox struct {
+    exprs: Array TomlExpr
+};
+
+impl Toml: TomlEncode {
+    toml_encode = |toml, out| (
+        toml.@exprs.to_iter.fold(
+            out, toml_encode
+        )
+    );
+}
+
+type TomlExpr = unbox union {
+    expr_comment: TomlExprComment,
+    expr_keyval: TomlExprKeyVal,
+    expr_table: TomlExprTable,
+};
+
+impl TomlExpr: TomlEncode {
+    toml_encode = |expr| (
+        match expr {
+            expr_comment(e) => toml_encode(e),
+            expr_keyval(e) => toml_encode(e),
+            expr_table(e) => toml_encode(e),
+        }
+    );
+}
+
+type TomlWs = String;
+
+type TomlComment = String;
+
+type TomlExprComment = unbox struct {
+    ws: TomlWs,
+    comment: TomlComment,
+};
+
+impl TomlExprComment: TomlEncode {
+    toml_encode = |e| (
+        toml_encode(e.@ws) >>
+        toml_encode(e.@comment)
+    );
+}
+
+type TomlExprKeyVal = unbox struct {
+    ws1: TomlWs,
+    keyval: TomlKeyVal,
+    ws2: TomlWs,
+    comment: TomlComment,
+};
+
+impl TomlExprKeyVal: TomlEncode {
+    toml_encode = |e| (
+        toml_encode(e.@ws1) >>
+        toml_encode(e.@keyval) >>
+        toml_encode(e.@ws2) >>
+        toml_encode(e.@comment)
+    );
+}
+
+type TomlExprTable = unbox struct {
+    ws1: TomlWs,
+    text: String,
+    ws2: TomlWs,
+    comment: TomlComment,
+};
+
+impl TomlExprTable: TomlEncode {
+    toml_encode = |e| (
+        toml_encode(e.@ws1) >>
+        toml_encode(e.@text) >>
+        toml_encode(e.@ws2) >>
+        toml_encode(e.@comment)
+    );
+}
+
+type TomlKeyVal = unbox struct {
+    key: TomlKey,
+    keyval_sep: TomlKeyValSep,
+    val: TomlVal,
+};
+
+impl TomlKeyVal: TomlEncode {
+    toml_encode = |e| (
+        toml_encode(e.@key) >>
+        toml_encode(e.@keyval_sep) >>
+        toml_encode(e.@val)
+    );
+}
+
+type TomlKey = String;
+
+// TODO: quote key if needed
+
+type TomlKeyValSep = unbox struct {
+    ws1: TomlWs,
+    sep: String,
+    ws2: TomlWs,
+};
+
+impl TomlKeyValSep: TomlEncode {
+    toml_encode = |e| (
+        toml_encode(e.@ws1) >>
+        toml_encode(e.@sep) >>
+        toml_encode(e.@ws2)
+    );
+}
+
+type TomlVal = unbox union {
+    vstring: String,
+    vint: I64,
+    vfloat: F64,
+    vbool: Bool,
+    varray: Array TomlVal,
+    vtable: Array TomlKeyVal,
+};
+

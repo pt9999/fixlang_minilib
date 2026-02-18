@@ -5,11 +5,6 @@ import Minilib.Text.SimpleParser;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
-eval_parser_str: String -> Parser a -> Result ErrMsg a;
-eval_parser_str = |str, p| (
-    p.run_parser_str(str).map(Tuple2::@0)
-);
-
 test_parse_ws: TestCase;
 test_parse_ws = (
     make_table_test("test_parse_ws",
@@ -19,7 +14,7 @@ test_parse_ws = (
             ("  \t\t\nabc", ok $ "  \t\t"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_ws.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_ws.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -33,7 +28,7 @@ test_parse_newline = (
             ("\r\n\n", ok $ "\r\n"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_newline.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_newline.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -45,7 +40,7 @@ test_parse_comment = (
             ("#  \t\tabc あいう\n", ok $ "#  \t\tabc あいう"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_comment.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_comment.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -63,7 +58,23 @@ test_parse_unquoted_key = (
             ("123", ok $ "123"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_unquoted_key.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_unquoted_key.map(_unsafe_to_string).eval_parser_str(input))
+    )
+);
+
+test_parse_string: TestCase;
+test_parse_string = (
+    make_table_test("test_parse_string",
+        [
+            ("", err $ _NotMatch),
+            ("\"\"", ok $ ""),
+            ("\"abc\"", ok $ "abc"),
+            ("\"\"\"abc\"\"\"", ok $ "abc"),
+            ("'abc'", ok $ "abc"),
+            ("'''abc'''", ok $ "abc"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_string.eval_parser_str(input))
     )
 );
 
@@ -73,6 +84,7 @@ test_parse_basic_string = (
         [
             ("", err $ _NotMatch),
             ("\"abc", err $ _NotMatch),
+            ("\"\"", ok $ ""),
             ("\"abc\"", ok $ "abc"),
             ("\"\\\"\\\\\\b\\e\\f\\n\\r\\t\"", ok $ "\"\\\u0008\u001b\u000c\u000a\u000d\u0009"),
             ("\"\\x41\"", ok $ "A"),
@@ -82,7 +94,7 @@ test_parse_basic_string = (
             ("\"Aあ😀\"", ok $ "Aあ😀"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_basic_string.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -92,6 +104,7 @@ test_parse_ml_basic_string = (
         [
             ("", err $ _NotMatch),
             ("\"abc\"", err $ _NotMatch),
+            ("\"\"\"\"\"\"", ok $ ""),
             ("\"\"\"abc\"\"\"", ok $ "abc"),
             ("\"\"\"\"abc\"\"\"\"", ok $ "\"abc\""),
             ("\"\"\"\"\"abc\"\"\"\"\"", ok $ "\"\"abc\"\""),
@@ -107,7 +120,51 @@ test_parse_ml_basic_string = (
             ("\"\"\"\"This,\" she said, \"is just a pointless statement.\"\"\"\"", ok $ "\"This,\" she said, \"is just a pointless statement.\""),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, _parse_ml_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_ml_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+    )
+);
+
+test_parse_literal_string: TestCase;
+test_parse_literal_string = (
+    make_table_test("test_parse_literal_string",
+        [
+            ("", err $ _NotMatch),
+            ("'abc", err $ _NotMatch),
+            ("'abc'", ok $ "abc"),
+            ("'\u0009 !\"#$%&()*+,-./012'", ok $ "\u0009 !\"#$%&()*+,-./012"),
+            ("'[\\]^_`{|}~}'", ok $ "[\\]^_`{|}~}"),
+            ("'αДあ😀'", ok $ "αДあ😀"),
+            ("'C:\\Users\\nodejs\\templates'", ok $ "C:\\Users\\nodejs\\templates"),
+            ("'\\\\ServerX\\admin$\\system32\\'", ok $ "\\\\ServerX\\admin$\\system32\\"),
+            ("'Tom \"Dubs\" Preston-Werner'", ok $ "Tom \"Dubs\" Preston-Werner"),
+            ("'<\\i\\c*\\s*>'", ok $ "<\\i\\c*\\s*>"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_literal_string.map(_unsafe_to_string).eval_parser_str(input))
+    )
+);
+
+test_parse_ml_literal_string: TestCase;
+test_parse_ml_literal_string = (
+    make_table_test("test_parse_ml_literal_string",
+        [
+            ("", err $ _NotMatch),
+            ("'abc'", err $ _NotMatch),
+            ("''''''", ok $ ""),
+            ("'''''''", ok $ "'"),
+            ("''''''''", ok $ "''"),
+            ("'''abc'''", ok $ "abc"),
+            ("''''abc''''", ok $ "'abc'"),
+            ("'''''abc'''''", ok $ "''abc''"),
+            ("'''I [dw]on't need \\d{2} apples'''", ok $ "I [dw]on't need \\d{2} apples"),
+            ("'''\nRoses are red\nViolets are blue'''", ok $ "Roses are red\nViolets are blue"),
+            ("'''\r\nRoses are red\r\nViolets are blue'''", ok $ "Roses are red\r\nViolets are blue"),
+            ("'''\n The quick brown\nfox jumps over\nthe lazy dog.\n'''", ok $ " The quick brown\nfox jumps over\nthe lazy dog.\n"),
+            ("'''Here are two quotation marks: ''. Simple enough.'''", ok $ "Here are two quotation marks: ''. Simple enough."),
+            ("''''That,' she said, 'is still pointless.''''", ok $ "'That,' she said, 'is still pointless.'"),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_ml_literal_string.map(_unsafe_to_string).eval_parser_str(input))
     )
 );
 
@@ -118,8 +175,11 @@ main = (
         test_parse_newline,
         test_parse_comment,
         test_parse_unquoted_key,
+        test_parse_string,
         test_parse_basic_string,
         test_parse_ml_basic_string,
+        test_parse_literal_string,
+        test_parse_ml_literal_string,
     ]
     .run_test_driver
 );

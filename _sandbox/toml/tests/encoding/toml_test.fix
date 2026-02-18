@@ -1,0 +1,82 @@
+module TomlTest;
+
+import Minilib.Encoding.Toml;
+import Minilib.Text.StringEx;
+import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+test_simple: TestCase;
+test_simple = (
+    make_test("test_simple") $ |_|
+    let toml = Toml::empty;
+    let toml = toml["key1"].tset("value1");
+    let val: String = *toml["key1"].tget;
+    assert_equal("eq", "value1", val);;
+    let res: Result ErrMsg I64 = toml["key1"].tget;
+    assert_equal("eq", err $ "not an integer", res)
+);
+
+test_tomltable_simple: TestCase;
+test_tomltable_simple = (
+    make_test("test_tomltable_simple") $ |_|
+    let table = TomlTable::empty;
+    let table = table.insert("key1", v_string("value1"));
+    assert_equal("size", 1, table.get_size);;
+    assert_equal("find key1", some $ v_string("value1"), table.find("key1"));;
+    assert_equal("find key2", none(), table.find("key2"));;
+    let table = table.erase("key1");
+    assert_equal("size", 0, table.get_size);;
+    assert_equal("find key1", none(), table.find("key1"));;
+    pure()
+);
+
+test_tomlarray_simple: TestCase;
+test_tomlarray_simple = (
+    make_test("test_tomlarray_simple") $ |_|
+    let array = TomlArray::empty;
+    let array = array.set(2, v_string("a"));
+    assert_equal("size", 3, array.get_size);;
+    assert_equal("@(1)", v_none(), array.@(1));;
+    assert_equal("@(2)", v_string("a"), array.@(2));;
+    assert_equal("@(3)", v_none(), array.@(3));;
+    assert_equal("to_iter", [v_none(), v_none(), v_string("a")], array.to_iter.to_array);;
+    pure()
+);
+
+test_tomlval_eq: TestCase;
+test_tomlval_eq = (
+    make_test("test_tomlval_eq") $ |_|
+    let arr = [
+        v_none(),
+        v_string("a"),
+        v_string("b"),
+        v_int(1),
+        v_int(2),
+        v_float(1.0),
+        v_float(2.0),
+        v_array(TomlArray::make $ [v_int(1)]),
+        v_array(TomlArray::make $ [v_int(2)]),
+        v_table(TomlTable::empty.insert("a", v_string("a"))),
+        v_table(TomlTable::empty.insert("a", v_string("b"))),
+        // TODO: add v_array_table
+    ];
+    let n = arr.get_size;
+    range(0, n).foreach_m(|i|
+        range(i, n).foreach_m(|j|
+            let expected = i == j;
+            let actual = arr.@(i) == arr.@(j);
+            assert_equal("(i,j)=" + (i, j).to_string, expected, actual)
+        )
+    )
+);
+
+main: IO ();
+main = (
+    [
+        test_simple,
+        test_tomltable_simple,
+        test_tomlarray_simple,
+        test_tomlval_eq,
+    ]
+    .run_test_driver
+);

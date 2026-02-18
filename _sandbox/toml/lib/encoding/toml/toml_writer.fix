@@ -2,121 +2,198 @@ module Minilib.Encoding.Toml.TomlWriter;
 
 import Minilib.Common.Common;
 import Minilib.Text.StringEx;
+import Minilib.Text.Unicode;
 import Minilib.Encoding.Toml;
 
-trait a: TomlWrite {
-    toml_write: a -> String -> String;
-}
-
-impl String: TomlWrite {
-    toml_write = |s, out| (
-        out + s
-    );
-}
-
-impl Toml: TomlWrite {
-    toml_write = |toml, out| (
-        let iter = toml.to_iter;
-        let out = iter.filter(|(k, v)| !(v.is_v_table || v.is_v_array_table || v.is_v_none)).fold(
-            out, |(k, v), out|
-            out.toml_write_kv(k, v)
-        );
-        // TODO: recursively extract table names with dotted keys
-        let out = iter.filter(|(k, v)| v.is_v_table).fold(
-            out, |(k, v), out|
-            out.toml_write_table(k, v.as_v_table)
-        );
-        let out = iter.filter(|(k, v)| v.is_v_array_table).fold(
-            out, |(k, v), out|
-            out.toml_write_array_table(k, v.as_v_array_table)
-        );
-        out
-    );
-}
-
-toml_write_key: TomlKey -> String -> String;
-toml_write_key = |key| (
-    toml_write(key)     // TODO: escape keys
+toml_write: String -> String -> String;
+toml_write = |s, out| (
+    out + s
 );
 
-toml_write_kv: TomlKey -> TomlVal -> String -> String;
-toml_write_kv = |key, val| (
+toml_write_table: TomlTable -> String -> String;
+toml_write_table = |table| (
+    toml_write_child_table([], false, table)
+);
+
+toml_write_child_table: Array TomlKey -> Bool -> TomlTable -> String -> String;
+toml_write_child_table = |keys, is_array_table, table, out| (
+    let out = (
+        if keys.is_empty { out };
+        if is_array_table {
+            out.toml_write("[[")
+            .toml_write_keys(keys)
+            .toml_write("]]\n")
+        };
+        out.toml_write("[")
+        .toml_write_keys(keys)
+        .toml_write("]\n")
+    );
+    let iter = table.to_iter;
+    let out = iter.filter(|(k, v)| !(v.is_v_table || v.is_v_array_table || v.is_v_none)).fold(
+        out, |(k, v), out|
+        out.toml_write_keyval(k, v)
+    );
+    // TODO: recursively extract table names with dotted keys
+    let out = iter.filter(|(k, v)| v.is_v_table).fold(
+        out, |(k, v), out|
+        out.toml_write_child_table(keys.push_back(k), false, v.as_v_table)
+    );
+    let out = iter.filter(|(k, v)| v.is_v_array_table).fold(
+        out, |(k, v), out|
+        out.toml_write_array_table(keys.push_back(k), v.as_v_array_table)
+    );
+    out
+);
+
+toml_write_array_table: Array TomlKey -> TomlArray -> String -> String;
+toml_write_array_table = |keys, array_table, out| (
+    array_table.to_iter.fold(
+        out, |val, out|
+        match val {
+            v_table(table) => out.toml_write_child_table(keys, true, table),
+            _ => undefined("toml_write_array_table: not a table"),
+        }
+    )
+);
+
+toml_write_inline_table: TomlTable -> String -> String;
+toml_write_inline_table = |table, out| (
+    let out = out.toml_write("{");
+    let out = table.to_iter.zip(count_up(0)).fold(
+        out, |((key, val), i), out|
+        out.mod_if(i != 0, toml_write(", "))
+        .toml_write_key(key)
+        .toml_write(" = ")
+        .toml_write_val(val)
+    );
+    out.toml_write("}")
+);
+
+toml_write_array: TomlArray -> String -> String;
+toml_write_array = |array, out| (
+    let out = out.toml_write("[");
+    let out = array.to_iter.zip(count_up(0)).fold(
+        out, |(val, i), out|
+        out.mod_if(i != 0, toml_write(", "))
+        .toml_write_val(val)
+    );
+    out.toml_write("]")
+);
+
+toml_write_keyval: TomlKey -> TomlVal -> String -> String;
+toml_write_keyval = |key, val| (
     toml_write_key(key) >>
     toml_write(" = ") >>
-    toml_write(val) >>                       // TODO inline table? array? array of table?
+    toml_write_val(val) >>                       // TODO inline table? array? array of table?
     toml_write("\n")
 );
 
-toml_write_table: TomlKey -> TomlTable -> String -> String;
-toml_write_table = |key, table, out| (
-    let out = out.toml_write("[" + key + "]\n");        // TODO escape, dotted keys
-    let iter = table.to_iter;
-    iter.fold(
-        out, |(k, v), out|
-        out.toml_write_kv(k, v)
+toml_write_keys: Array TomlKey -> String -> String;
+toml_write_keys = |keys, out| (
+    keys.to_iter.zip(count_up(0)).fold(
+        out, |(key, index)|
+        mod_if(index != 0, toml_write(".")) >>
+        toml_write_key(key)
     )
 );
 
-toml_write_array_table: TomlKey -> Array TomlTable -> String -> String;
-toml_write_array_table = |key, array_table, out| (
-    array_table.to_iter.fold(
-        out, |table, out|
-        toml_write_table("[" + key + "]", table, out)
-    )
+toml_write_key: TomlKey -> String -> String;
+toml_write_key = |key, out| (
+    let can_be_unquoted = !key.is_empty && key.to_iter.check_all(|c|
+        ('A' <= c && c <= 'Z') ||
+        ('a' <= c && c <= 'z') ||
+        ('0' <= c && c <= '9') ||
+        c == 0x2D_U8 ||     // '-'
+        c == 0x5F_U8        // '_'
+    );
+    if can_be_unquoted {
+        out.toml_write(key)
+    } else {
+        out.toml_write_basic_string(key)
+    }
 );
 
-impl TomlTable: TomlWrite {
-    toml_write = |table, out| (
-        let out = out.toml_write("{");
-        let out = table.to_iter.zip(count_up(0)).fold(
-            out, |((key, val), i), out|
-            out.mod_if(i != 0, toml_write(", "))
-            .toml_write_key(key)
-            .toml_write(" = ")
-            .toml_write(val)
-        );
-        out.toml_write("}")
-    );
-}
+toml_write_val: TomlVal -> String -> String;
+toml_write_val = |val, out| (
+    match val {
+        v_none() => (
+            out.toml_write("***none***")                // should not be written to toml file
+        ),
+        v_string(str) => (
+            out.toml_write_basic_string(str)       // TODO: ml-basic-string, literal-string, ml-literal-string
+        ),
+        v_int(i64) => (
+            out.toml_write(i64.to_string)           // TODO: ok?
+        ),
+        v_float(f64) => (
+            out.toml_write(f64.to_string)           // TODO: ok?
+        ),
+        v_bool(bool) => (
+            out.toml_write(bool.to_string)           // TODO: ok?
+        ),
+        v_array(array) => (
+            out.toml_write_array(array)
+        ),
+        v_table(table) => (
+            out.toml_write_inline_table(table)
+        ),
+        v_array_table(array) => (
+            out.toml_write_array(array)             // should not be written as key = val
+        ),
+    }
+);
 
-impl TomlArray: TomlWrite {
-    toml_write = |array, out| (
-        let out = out.toml_write("[");
-        let out = array.to_iter.zip(count_up(0)).fold(
-            out, |(val, i), out|
-            out.mod_if(i != 0, toml_write(", "))
-            .toml_write(val)
-        );
-        out.toml_write("]")
+toml_write_basic_string: String -> String -> String;
+toml_write_basic_string = |str, out| (
+    let wstr = str.to_utf32_string;
+    let wcs = wstr.to_iter.fold(
+        [], toml_write_basic_wchar
     );
-}
+    let wstr: UTF32String = UTFString::make $ wcs;
+    let out = out.toml_write("\"");
+    let out = out.toml_write(wstr.to_string);
+    let out = out.toml_write("\"");
+    out
+);
 
-impl TomlVal: TomlWrite {
-    toml_write = |val, out| (
-        match val {
-            v_none() => (
-                out.toml_write("(none)")                // should not be written to toml file
-            ),
-            v_string(str) => (
-                out.toml_write("\"" + str + "\"")       // TODO: basic-string, ml-basic-string, literal-string, ml-literal-string
-            ),
-            v_int(i64) => (
-                out.toml_write(i64.to_string)           // TODO: ok?
-            ),
-            v_float(f64) => (
-                out.toml_write(f64.to_string)           // TODO: ok?
-            ),
-            v_bool(bool) => (
-                out.toml_write(bool.to_string)           // TODO: ok?
-            ),
-            v_array(array) => (
-                out.toml_write(array)
-            ),
-            v_table(table) => (
-                out.toml_write(table)
-            ),
-            // TODO: support v_array_table
-            v_array_table(_) => undefined("not impl"),
-        }
-    );
-}
+toml_write_basic_wchar: U32 -> Array U32 -> Array U32;
+toml_write_basic_wchar = |wc, out| (
+    if (wc == 0x20_U32 ||
+        // wc == 0x09_U32 ||        // '\t' does not need to be escaped, but I want to escape it
+        wc == 0x21_U32 ||
+        (0x23_U32 <= wc && wc <= 0x5B_U32) ||
+        (0x5D_U32 <= wc && wc <= 0x7E_U32) ||
+        (0x80_U32 <= wc && wc <= 0xD7FF_U32) ||
+        (0xE000_U32 <= wc && wc <= 0x10FFFF_U32)
+    ) {
+        // unescaped
+        out.push_back(wc)
+    };
+    // escaped
+    let out = out.push_back(0x5C_U32);          // \    reverse solidus U+005C
+    if wc == 0x22_U32 { out.push_back(wc) };    // "    quotation mark  U+0022
+    if wc == 0x5C_U32 { out.push_back(wc) };    // \    reverse solidus U+005C
+    if wc == 0x08_U32 { out.push_back(0x62_U32) };    // b    backspace       U+0008
+    if wc == 0x0C_U32 { out.push_back(0x66_U32) };    // f    form feed       U+000C
+    if wc == 0x0A_U32 { out.push_back(0x6E_U32) };    // n    line feed       U+000A
+    if wc == 0x0D_U32 { out.push_back(0x72_U32) };    // r    carriage return U+000D
+    if wc == 0x09_U32 { out.push_back(0x74_U32) };    // t    tab             U+0009
+    if wc <= 0xFFFF_U32 {
+        let out = out.push_back(0x75_U32);          // uXXXX                U+XXXX
+        out.toml_write_wchar_hex(wc, 4)
+    } else {
+        // TODO ここには来ない？
+        let out = out.push_back(0x55_U32);          // UXXXXXXXX            U+XXXXXXXX
+        out.toml_write_wchar_hex(wc, 8)
+    }
+);
+
+toml_write_wchar_hex: U32 -> I64 -> Array U32 -> Array U32;
+toml_write_wchar_hex = |wc, n, out| (
+    range_step(n-1, -1, -1).fold(
+        out, |i, out|
+        let h = wc.to_I64.shift_right(i * 4).bit_and(15);
+        let c = if h < 10 { '0' + h.to_U8 } else { 'A' + (h - 10).to_U8 };
+        out.push_back(c.to_U32)
+    )
+);

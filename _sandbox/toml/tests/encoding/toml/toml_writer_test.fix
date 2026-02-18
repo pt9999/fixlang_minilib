@@ -5,28 +5,28 @@ import Minilib.Encoding.Toml.TomlWriter;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 
-test_simple: TestCase;
-test_simple = (
-    make_test("test_simple") $ |_|
-    let toml = Toml::empty;
-    let toml = toml["key2"].tset("value2");
-    let toml = toml["key1"].tset("value1");
+test_table_simple: TestCase;
+test_table_simple = (
+    make_test("test_table_simple") $ |_|
+    let table = TomlTable::empty;
+    let table = table["key2"].tset("value2");
+    let table = table["key1"].tset("value1");
     let expected = (
         "key2 = \"value2\"\n"
         + "key1 = \"value1\"\n"
     );
-    let actual = "".toml_write(toml);
+    let actual = "".toml_write_table(table);
     assert_equal("eq", expected, actual)
 );
 
-test_table: TestCase;
-test_table = (
-    make_test("test_table") $ |_|
-    let toml = Toml::empty;
-    let toml = toml["table2"]["key21"].tset("value21");
-    let toml = toml["table1"]["key11"].tset("value11");
-    let toml = toml["key2"].tset("value2");
-    let toml = toml["key1"].tset("value1");
+test_table_child: TestCase;
+test_table_child = (
+    make_test("test_table_child") $ |_|
+    let table = TomlTable::empty;
+    let table = table["table2"]["key21"].tset("value21");
+    let table = table["table1"]["key11"].tset("value11");
+    let table = table["key2"].tset("value2");
+    let table = table["key1"].tset("value1");
     let expected = (
         "key2 = \"value2\"\n"
         + "key1 = \"value1\"\n"
@@ -35,15 +35,80 @@ test_table = (
         + "[table1]\n"
         + "key11 = \"value11\"\n"
     );
-    let actual = "".toml_write(toml);
+    let actual = "".toml_write_table(table);
     assert_equal("eq", expected, actual)
+);
+
+test_toml_write_keys: TestCase;
+test_toml_write_keys = (
+    make_table_test("test_toml_write_keys",
+        [
+            ([], ""),
+            ([""], "\"\""),
+            (["", ""], "\"\".\"\""),
+            (["a", "b", "c"], "a.b.c"),
+            (["some", "key"], "some.key"),
+            (["some", "dotted.key"], "some.\"dotted.key\""),
+            (["あいう", "漢字", "😊😀"], "\"あいう\".\"漢字\".\"😊😀\""),
+        ],
+        |(keys, expected)|
+        let actual = "".toml_write_keys(keys);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_toml_write_key: TestCase;
+test_toml_write_key = (
+    make_table_test("test_toml_write_key",
+        [
+            ("", "\"\""),
+            ("1", "1"),
+            ("-1", "-1"),
+            ("a", "a"),
+            ("AZaz09-_", "AZaz09-_"),
+            ("ABC-def_012", "ABC-def_012"),
+            ("abc.def.ghi", "\"abc.def.ghi\""),
+            (" a b c", "\" a b c\""),
+            ("\"\\\u0008\u000c\n\r\t", "\"\\\"\\\\\\b\\f\\n\\r\\t\""),
+            ("\u0001\u001b\u007f", "\"\\u0001\\u001B\\u007F\""),
+            ("あいう漢字😊😀", "\"あいう漢字😊😀\""),
+        ],
+        |(key, expected)|
+        let actual = "".toml_write_key(key);
+        assert_equal("eq", expected, actual)
+    )
+);
+
+test_toml_write_basic_string: TestCase;
+test_toml_write_basic_string = (
+    make_table_test("test_toml_write_basic_string",
+        [
+            ("", "\"\""),
+            ("1", "\"1\""),
+            ("-1", "\"-1\""),
+            ("a", "\"a\""),
+            ("AZaz09-_", "\"AZaz09-_\""),
+            ("ABC-def_012", "\"ABC-def_012\""),
+            ("abc.def.ghi", "\"abc.def.ghi\""),
+            (" a b c", "\" a b c\""),
+            ("\"\\\u0008\u000c\n\r\t", "\"\\\"\\\\\\b\\f\\n\\r\\t\""),
+            ("\u0001\u001b\u007f", "\"\\u0001\\u001B\\u007F\""),
+            ("あいう漢字😊😀", "\"あいう漢字😊😀\""),
+        ],
+        |(str, expected)|
+        let actual = "".toml_write_basic_string(str);
+        assert_equal("eq", expected, actual)
+    )
 );
 
 main: IO ();
 main = (
     [
-        test_simple,
-        test_table,
+        test_table_simple,
+        test_table_child,
+        test_toml_write_keys,
+        test_toml_write_key,
+        test_toml_write_basic_string,
     ]
     .run_test_driver
 );

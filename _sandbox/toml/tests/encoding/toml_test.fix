@@ -5,17 +5,6 @@ import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
 
-test_simple: TestCase;
-test_simple = (
-    make_test("test_simple") $ |_|
-    let toml = Toml::empty;
-    let toml = toml["key1"].tset("value1");
-    let val: String = *toml["key1"].tget;
-    assert_equal("eq", "value1", val);;
-    let res: Result ErrMsg I64 = toml["key1"].tget;
-    assert_equal("eq", err $ "not an integer", res)
-);
-
 test_tomltable_simple: TestCase;
 test_tomltable_simple = (
     make_test("test_tomltable_simple") $ |_|
@@ -28,6 +17,17 @@ test_tomltable_simple = (
     assert_equal("size", 0, table.get_size);;
     assert_equal("find key1", none(), table.find("key1"));;
     pure()
+);
+
+test_tomltable_indexable_simple: TestCase;
+test_tomltable_indexable_simple = (
+    make_test("test_tomltable_indexable_simple") $ |_|
+    let table = TomlTable::empty;
+    let table = table["key1"].tset("value1");
+    let val: String = *table["key1"].tget;
+    assert_equal("eq", "value1", val);;
+    let res: Result ErrMsg I64 = table["key1"].tget;
+    assert_equal("eq", err $ "not an integer", res)
 );
 
 test_tomlarray_simple: TestCase;
@@ -70,13 +70,63 @@ test_tomlval_eq = (
     )
 );
 
+test_tomlval_to_string: TestCase;
+test_tomlval_to_string = (
+    make_test("test_tomlval_to_string") $ |_|
+    assert_equal("string", "\"a\"", v_string("a").to_string);;
+    assert_equal("int", "1", v_int(1).to_string);;
+    assert_equal("float", "1.000000", v_float(1.0).to_string);;
+    assert_equal("bool", "true", v_bool(true).to_string);;
+    let array = TomlArray::make $ [v_string("a"), v_int(1)];
+    assert_equal("array", "[\"a\", 1]", v_array(array).to_string);;
+    let table = TomlTable::empty.insert("a", v_int(1)).insert("b", v_string("c"));
+    assert_equal("table", "{a = 1, b = \"c\"}", v_table(table).to_string);;
+    pure()
+);
+
+test_to_toml_val: TestCase;
+test_to_toml_val = (
+    make_test("test_to_toml_val") $ |_|
+    assert_equal("val", v_int(1), v_int(1).to_toml_val);;
+    assert_equal("string", v_string("a"), "a".to_toml_val);;
+    assert_equal("int", v_int(1), 1.to_toml_val);;
+    assert_equal("float", v_float(1.0), 1.0.to_toml_val);;
+    assert_equal("bool", v_bool(true), true.to_toml_val);;
+    let array = TomlArray::make $ [v_int(1), v_int(2)];
+    assert_equal("array", v_array(array), [1, 2].to_toml_val);;
+    pure()
+);
+
+test_from_toml_val: TestCase;
+test_from_toml_val = (
+    make_test("test_from_toml_val") $ |_|
+    assert_equal("val ok", ok $ v_int(1), v_int(1).from_toml_val: Result ErrMsg TomlVal);;
+    assert_equal("string ok", ok $ "a", v_string("a").from_toml_val: Result ErrMsg String);;
+    assert_equal("string err", err $ "not a string", v_int(1).from_toml_val: Result ErrMsg String);;
+    assert_equal("int ok", ok $ 1, v_int(1).from_toml_val: Result ErrMsg I64);;
+    assert_equal("int err", err $ "not an integer", v_string("a").from_toml_val: Result ErrMsg I64);;
+    assert_equal("float ok", ok $ 1.0, v_float(1.0).from_toml_val: Result ErrMsg F64);;
+    assert_equal("float err", err $ "not a floating point", v_int(1).from_toml_val: Result ErrMsg F64);;
+    assert_equal("bool ok", ok $ true, v_bool(true).from_toml_val: Result ErrMsg Bool);;
+    assert_equal("bool err", err $ "not a boolean", v_int(1).from_toml_val: Result ErrMsg Bool);;
+    let array = TomlArray::empty.push_back(v_int(1)).push_back(v_int(2));
+    assert_equal("array ok", ok $ [1, 2], v_array(array).from_toml_val: Result ErrMsg (Array I64));;
+    let array = TomlArray::empty.push_back(v_int(1)).push_back(v_string("a"));
+    assert_equal("array err 1", err $ "not an integer", v_array(array).from_toml_val: Result ErrMsg (Array I64));;
+    assert_equal("array err 2", err $ "not an array", v_int(1).from_toml_val: Result ErrMsg (Array I64));;
+    pure()
+);
+
 main: IO ();
 main = (
     [
-        test_simple,
         test_tomltable_simple,
+        test_tomltable_indexable_simple,
         test_tomlarray_simple,
         test_tomlval_eq,
+        test_tomlval_to_string,
+        test_to_toml_val,
+        test_from_toml_val,
     ]
     .run_test_driver
 );

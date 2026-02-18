@@ -7,46 +7,6 @@ import Minilib.Monad.Error;
 import Minilib.Text.StringEx;
 
 //-------------------------------------------------------------
-//  Toml
-//-------------------------------------------------------------
-
-type Toml = unbox struct {
-    map: OrderedMap TomlKey TomlVal,
-};
-
-namespace Toml {
-    empty: Toml;
-    empty = Toml {
-        map: OrderedMap::empty(10),
-    };
-
-    parse: String -> Result ErrMsg Toml;
-    parse = err $ "not impl";
-
-    act: [f: Functor] TomlKey -> (TomlVal -> f TomlVal) -> Toml -> f Toml;
-    act = |key, action, toml| (
-        let val = toml.@map.find(key).as_some_or(v_none());
-        action(val).map(|val|
-            if val.is_v_none { toml.mod_map(OrderedMap::erase(key)) };
-            toml.mod_map(OrderedMap::insert(key, val))
-        )
-    );
-
-    to_iter: Toml -> OrderedMapIterator TomlKey TomlVal;
-    to_iter = |toml| toml.@map.to_iter;
-}
-
-impl Toml: ToString {
-    to_string = |toml| "".toml_write(toml);
-}
-
-impl Toml: Indexable {
-    type Elem Toml = TomlVal;
-    type Index Toml = TomlKey;
-    act_at_index = Toml::act;
-}
-
-//-------------------------------------------------------------
 //  TomlTable
 //-------------------------------------------------------------
 
@@ -108,7 +68,7 @@ impl TomlTable: Eq {
 }
 
 impl TomlTable: ToString {
-    to_string = |table| "".toml_write(table);
+    to_string = |table| "".toml_write_inline_table(table);
 }
 
 impl TomlTable: Indexable {
@@ -132,6 +92,17 @@ namespace TomlArray {
     make: Array TomlVal -> TomlArray;
     make = |arr| TomlArray { arr: arr };
 
+    get_size: TomlArray -> I64;
+    get_size = |array| array.@arr.get_size;
+
+    push_back: TomlVal -> TomlArray -> TomlArray;
+    push_back = |val, array| (
+        array.mod_arr(push_back(val))
+    );
+
+    to_iter: TomlArray -> ArrayIterator TomlVal;
+    to_iter = |array| array.@arr.to_iter;
+
     act: [f: Functor] I64 -> (TomlVal -> f TomlVal) -> TomlArray -> f TomlArray;
     act = |index, action, array| (
         if index < 0 { action(v_none()).map(|val| array) };
@@ -143,23 +114,15 @@ namespace TomlArray {
         array.act_arr(Array::act(index, action))
     );
 
-    get_size: TomlArray -> I64;
-    get_size = |array| array.@arr.get_size;
-
     @: I64 -> TomlArray -> TomlVal;
     @ = |index, array| (
-        let store = |f| array.act(index, f);
-        store.iget
+        array[index].iget
     );
 
     set: I64 -> TomlVal -> TomlArray -> TomlArray;
     set = |index, val, array| (
-        let store = |f| array.act(index, f);
-        store.iset(val)
+        array[index].iset(val)
     );
-
-    to_iter: TomlArray -> ArrayIterator TomlVal;
-    to_iter = |array| array.@arr.to_iter;
 }
 
 impl TomlArray: Eq {
@@ -167,7 +130,7 @@ impl TomlArray: Eq {
 }
 
 impl TomlArray: ToString {
-    to_string = |array| "".toml_write(array);
+    to_string = |array| "".toml_write_array(array);
 }
 
 impl TomlArray: Indexable {
@@ -214,7 +177,7 @@ type TomlVal = unbox union {
     v_bool: Bool,
     v_array: TomlArray,
     v_table: TomlTable,
-    v_array_table: Array TomlTable,
+    v_array_table: TomlArray,
 };
 
 impl TomlVal: Eq {
@@ -233,7 +196,7 @@ impl TomlVal: Eq {
 }
 
 impl TomlVal: ToString {
-    to_string = |val| "".toml_write(val);
+    to_string = |val| "".toml_write_val(val);
 }
 
 
@@ -312,11 +275,45 @@ impl I64: FromTomlVal {
     };
 }
 
+impl F64: ToTomlVal {
+    to_toml_val = v_float;
+}
+
+impl F64: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_float(f64) => ok $ f64,
+        _ => err $ "not a floating point",
+    };
+}
+
+impl Bool: ToTomlVal {
+    to_toml_val = v_bool;
+}
+
+impl Bool: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_bool(bool) => ok $ bool,
+        _ => err $ "not a boolean",
+    };
+}
+
 impl [a: ToTomlVal] Array a: ToTomlVal {
     to_toml_val = |arr| (
         let arr = arr.map(to_toml_val);
         v_array $ TomlArray::make $ arr
     );
+}
+
+impl [a: FromTomlVal] Array a: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_array(array) => (
+            array.to_iter.fold_m(
+                [], |val, arr|
+                pure $ arr.push_back(*val.from_toml_val)
+            )
+        ),
+        _ => err $ "not an array",
+    };
 }
 
 //-------------------------------------------------------------

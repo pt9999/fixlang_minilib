@@ -4,7 +4,7 @@
 module Minilib.Encoding.Toml.TomlReader;
 
 import Minilib.Common.Common;
-//import Minilib.Encoding.Toml;
+import Minilib.Encoding.Toml;
 import Minilib.Text.SimpleParser;
 import Minilib.Text.Unicode;
 import Minilib.Text.StringEx;
@@ -32,52 +32,222 @@ namespace SimpleParserEx {
             continue_m $ (arr, count + 1)
         )
     );
+
+    lift_result: Result ErrMsg a -> Parser a;
+    lift_result = |res| parser $ |s| res;
 }
 
-get_matched_content_and_value: Parser a -> Parser (Array TomlChar, a);
-get_matched_content_and_value = |parser| (
+get_matched_string_and_value: Parser a -> Parser (String, a);
+get_matched_string_and_value = |parser| (
     let start = *get_stream;
     let a = *parser;
     let end = *get_stream;
     let content = start.read_string_between(end);
-    pure $ (content.get_bytes.pop_back, a)
+    pure $ (content, a)
 );
 
-get_matched_content: Parser a -> Parser (Array TomlChar);
-get_matched_content = |parser| (
-    get_matched_content_and_value(parser).map(Tuple2::@0)
+get_matched_string: Parser a -> Parser String;
+get_matched_string = |parser| (
+    get_matched_string_and_value(parser).map(Tuple2::@0)
 );
 
-// TomlToken is a value with its span.
-type TomlToken a = unbox struct {
-    value: a,
-    new_value: Option a,
-    span: Option (I64, I64),
-};
+get_matched_chars: Parser a -> Parser (Array TomlChar);
+get_matched_chars = |parser| (
+    get_matched_string(parser).map(StringEx::to_array)
+);
 
-namespace TomlToken {
-    make: a -> Option a -> Option (I64, I64) -> TomlToken a;
-    make = |value, new_value, span| TomlToken {
-        value: value,
-        new_value: new_value,
-        span: span
-    };
-}
+//-----------------------------------------------------
+// TOML
 
-impl TomlToken: Functor {
-    map = |f, tok| TomlToken::make(f(tok.@value), tok.@new_value.map(f), tok.@span);
-}
+/*
+parse_toml: Parser TomlTable;
+parse_toml = (
+    let table = TomlTable::empty;
+    let table = *parse_table_keyvals(table);
+    let table = *parse_child_tables(table);
+    match_end_of_stream;;
+    pure $ table
+);
 
-with_span: Parser a -> Parser (TomlToken a);
-with_span = |p| (
-    let begin = *get_stream;
-    let a = *p;
+parse_toml_newline: TomlTable -> Parser ();
+parse_toml_newline = |table| (
+    if table.is_empty && table.get_records.is_empty { pure() };
+    parse_newline.forget
+).debug("parse_toml_newline");
+
+parse_table_keyvals: TomlTable -> Parser TomlTable;
+parse_table_keyvals = |table| (
+    let opt = *do {
+        parse_toml_newline(table);;
+        parse_keyval_record.or_elseF $
+        parse_comment_record
+    }.if_exists;
+    if opt.is_none { pure $ table };
+    let record = opt.as_some;
+    let table = table.add_record(record);
+    parse_table_keyvals $ table     // tail recursion
+).debug("parse_table_keyvals");
+
+parse_child_tables: TomlTable -> Parser TomlTable;
+parse_child_tables = |table| (
+    eval debug_eprintln("parse_child_tables 1");
+    let opt = *do {
+        eval debug_eprintln("parse_child_tables 2");
+        parse_toml_newline(table);;
+        eval debug_eprintln("parse_child_tables 3");
+        parse_table.debug("parse_table")
+    }.if_exists;
+    eval debug_eprintln("parse_child_tables 4");
+    if opt.is_none { pure $ table };
+    eval debug_eprintln("parse_child_tables 5");
+    let (dotted_key, is_array_table) = opt.as_some;
+    let child = TomlTable::empty;
+    let child = *parse_table_keyvals(child);
+    if is_array_table {
+        undefined("array table not supported yet")
+    } else {
+        pure $ table.insert_recursive(dotted_key, 0, v_table(child))
+    }
+).debug("parse_child_tables");
+
+parse_comment_record: Parser TomlRecord;
+parse_comment_record = (
+    let original = *get_matched_string(do {
+        parse_ws;;
+        parse_comment.if_exists
+    });
+    pure $ r_comment $ TomlCommentRecord {
+        original: original,
+    }
+).debug("parse_comment_record");
+
+parse_keyval_record: Parser TomlRecord;
+parse_keyval_record = (
+    let start = *get_stream;
+    let prefix = *get_matched_string(do {
+        parse_ws
+    });
+    let (dotted_key, val) = *parse_keyval;
+    let suffix = *get_matched_string(do {
+        parse_ws;;
+        parse_comment.if_exists
+    });
     let end = *get_stream;
-    let span = some $ (begin.@position, end.@position);
-    pure $ TomlToken::make(a, none(), span)
+    let original = start.read_string_between(end);
+    pure $ r_original_keyval $ TomlOriginalKeyValRecord {
+        dotted_key: dotted_key, val: val,
+        prefix: prefix, suffix: suffix, original: original
+    }
+).debug("parse_keyval_record");
+*/
+
+parse_toml: Parser TomlTable;
+parse_toml = (
+    let expressions = *parse_expressions;
+    let root = TomlTable::empty;
+    let (root, index) = *root.convert_table_keyvals(expressions, index).lift_result;
+    let (root, index) = *root.convert_child_tables(expressions, index).lift_result;
+    pure $ root
 );
 
-//parse_toml: Parser Toml;
+convert_table_keyvals: Array TomlExpression -> I64 -> TomlTable -> Result ErrMsg (TomlTable, I64);
+convert_table_keyvals = |expressions, index, table| (
+    loop_m(
+        (table, index), |(table, index)|
+        if index >= expressions.get_size {
+            break_m $ (table, index)
+        };
+        let expression = expressions.@(index);
+        if expression.is_ex_table {
+            break_m $ (table, index)
+        };
+        let table = table.add_expression(expression);
+        continue_m $ (table, index + 1)
+    )
+);
+
+convert_child_tables: Array TomlExpression -> I64 -> TomlTable -> Result ErrMsg (TomlTable, I64);
+convert_child_tables = |expressions, index, root| (
+    loop_m(
+        (root, index), |(root, index)|
+        if index >= expressions.get_size {
+            break_m $ (root, index)
+        };
+        let expression = expressions.@(index);
+        match expression {
+            ex_table(ex) => (
+                let child = TomlTable::empty;
+                let (child, index) = child.convert_table_keyvals(expressions, index);
+                let root = root.insert_child_table(child, ex);
+                continue_m $ (root, index + 1)
+            ),
+            _ => err $ ("not a ex_table"),
+        }
+    )
+);
+
+
+parse_expressions: Parser (Array TomlExpression);
+parse_expressions = (
+    let ex = *parse_expression;
+    let expressions = [ex];
+    let expressions = expressions + *repeat(do {
+        parse_newline;;
+        parse_expression
+    });
+    match_end_of_stream;;
+    pure $ expressions
+);
+
+parse_expression: Parser TomlExpression;
+parse_expression = (
+    parse_table_expression.or_elseF $
+    parse_keyval_expression.or_elseF $
+    parse_empty_expression
+);
+
+parse_empty_expression: Parser TomlExpression;
+parse_empty_expression = (
+    let text = *get_matched_string(do {
+        parse_ws;;
+        parse_comment.if_exists
+    });
+    pure $ ex_empty $ TomlEmptyExpression {
+        text: text,
+    }
+).debug("parse_empty_expression");
+
+parse_keyval_expression: Parser TomlExpression;
+parse_keyval_expression = (
+    let (text, keyval) = *get_matched_string_and_value(do {
+        parse_ws;;
+        let keyval = *parse_keyval;
+        parse_ws;;
+        parse_comment.if_exists;;
+        pure $ keyval
+    });
+    pure $ ex_keyval $ TomlKeyValExpression {
+        text: text,
+        dotted_key: keyval.@0,
+        val: keyval.@1
+    }
+).debug("parse_keyval_expression");
+
+parse_table_expression: Parser TomlExpression;
+parse_table_expression = (
+    let (text, (dotted_key, is_array_table)) = *get_matched_string_and_value(do {
+        parse_ws;;
+        let (dotted_key, is_array_table) = *parse_table;
+        parse_ws;;
+        parse_comment.if_exists;;
+        pure $ (dotted_key, is_array_table)
+    });
+    pure $ ex_table $ TomlTableExpression {
+        text: text,
+        dotted_key: dotted_key,
+        is_array_table: is_array_table,
+    }
+).debug("parse_table_expression");
 
 parse_ws: Parser (Array TomlChar);
 parse_ws = (
@@ -91,7 +261,7 @@ is_wschar = |c| c == 0x20_U8 || c == 0x09_U8;
 
 parse_newline: Parser (Array TomlChar);
 parse_newline = (
-    get_matched_content $ do {
+    get_matched_chars $ do {
         match_char(0x0a_U8)
         .or_else(
             match_char(0x0d_U8);;
@@ -112,7 +282,7 @@ is_non_eol = |c| (
 
 parse_comment: Parser (Array TomlChar);
 parse_comment = (
-    get_matched_content $ do {
+    get_matched_chars $ do {
         match_char(0x23_U8);;   // '#'
         repeat(
             match_any_char.filter(is_non_eol)
@@ -120,17 +290,25 @@ parse_comment = (
     }
 );
 
-parse_keyval: Parser ();
-parse_keyval = undefined("");
+parse_keyval: Parser (Array TomlKey, TomlVal);
+parse_keyval = (
+    let dotted_key = *parse_key;
+    parse_keyval_sep;;
+    let val = *parse_val.or_error("Missing Value");
+    pure $ (dotted_key, val)
+);
 
-parse_key: Parser ();
-parse_key = undefined("");
+parse_key: Parser (Array TomlKey);
+parse_key = parse_dotted_key([]);
 
-parse_simple_key: Parser ();
-parse_simple_key = undefined("");
+parse_simple_key: Parser TomlKey;
+parse_simple_key = (
+    parse_quoted_key.or_elseF $
+    parse_unquoted_key
+);
 
-parse_unquoted_key: Parser (Array TomlChar);
-parse_unquoted_key = (
+parse_unquoted_key: Parser TomlKey;
+parse_unquoted_key = do {
     one_or_more(
         match_any_char.filter(|c|
             ('A' <= c && c <= 'Z') ||
@@ -140,20 +318,31 @@ parse_unquoted_key = (
             c == 0x5f_U8                // '_'
         )
     )
+}.map(StringEx::from_array);
+
+parse_quoted_key: Parser TomlKey;
+parse_quoted_key = do {
+    parse_basic_string.or_elseF $
+    parse_literal_string
+}.map(StringEx::from_array);
+
+parse_dotted_key: Array TomlKey -> Parser (Array TomlKey);
+parse_dotted_key = |keys| (
+    let key = *parse_simple_key;
+    let keys = keys.push_back(key);
+    do {
+        parse_dot_sep;;
+        parse_dotted_key(keys)
+    }.or_elseF $ pure $ keys
 );
-
-parse_quoted_key: Parser ();
-parse_quoted_key = undefined("");
-
-parse_dotted_key: Parser ();
-parse_dotted_key = undefined("");
 
 // Matches a dot separator(`'.'`).
 parse_dot_sep: Parser ();
 parse_dot_sep = (
     parse_ws;;
     match_char(0x2E_U8);;   //'.' (period)
-    parse_ws
+    parse_ws;;
+    pure()
 );
 
 // Matches a key-value separator(`'='`).
@@ -161,11 +350,23 @@ parse_keyval_sep: Parser ();
 parse_keyval_sep = (
     parse_ws;;
     match_char(0x3D_U8);;   // '='
-    parse_ws
+    parse_ws;;
+    pure()
 );
 
-parse_val: Parser ();
-parse_val = undefined("");
+//-----------------------------------------------------
+// Val
+
+parse_val: Parser TomlVal;
+parse_val = do {
+    parse_string.map(v_string).or_elseF $
+    parse_boolean.map(v_bool).or_elseF $
+    parse_array.map(v_array).or_elseF $
+    parse_inline_table.map(v_table).or_elseF $
+    parse_float.map(v_float).or_elseF $
+    parse_integer.map(v_int)
+    // string / boolean / array / inline-table / date-time / float / integer
+};
 
 //-----------------------------------------------------
 // String
@@ -245,25 +446,11 @@ parse_hexdig = (
     )
 );
 
-decode_hexchars: Array TomlChar -> U32;
-decode_hexchars = |input| (
-    input.to_iter.fold(
-        0_U32, |c, output|
-        let h = (
-            if '0' <= c && c <= '9' { c - '0' };
-            if 'A' <= c && c <= 'F' { c - 'A' + 10_U8 };
-            if 'a' <= c && c <= 'f' { c - 'a' + 10_U8 };
-            0_U8
-        );
-        output.shift_left(4_U32).bit_or(h.to_U32)
-    )
-);
-
 parse_hex_escape_seq_char: U8 -> I64 -> Parser (Array TomlChar);
 parse_hex_escape_seq_char = |c, n| (
     match_char(c);;
     let hexchars = *Array::fill(n, parse_hexdig).sequence;
-    let code_point = decode_hexchars(hexchars);
+    let code_point = decode_digits_with_base(16_U64, hexchars).to_U32;
     pure $ encode_code_point_to_utf8(code_point, [])
 );
 
@@ -398,7 +585,10 @@ parse_mll_quotes = (
 
 parse_integer: Parser I64;
 parse_integer = (
-    undefined("")
+    parse_hex_int.or_elseF $
+    parse_oct_int.or_elseF $
+    parse_bin_int.or_elseF $
+    parse_dec_int               // including "0"
 );
 
 parse_digit: Parser TomlChar;
@@ -426,32 +616,228 @@ parse_underscore = (
     match_char_class(|c| c == 0x5F_U8)  // '_'
 );
 
-parse_dec_int: Parser (Array TomlChar);
-parse_dec_int = get_matched_content $ do {
-    match_char_class(|c| c == '+' || c == '-').if_exists;;
-    parse_unsigned_dec_int
-};
+parse_dec_int: Parser I64;
+parse_dec_int = (
+    let str = *get_matched_string(do {
+        match_char_class(|c| c == '+' || c == '-').if_exists;;
+        parse_unsigned_dec_int
+    });
+    str.from_string.lift_result
+);
 
-parse_unsigned_dec_int: Parser (Array TomlChar);
-parse_unsigned_dec_int = get_matched_content $ do {
-    match_char(0x30_U8).or_elseF $      // '0'
+parse_unsigned_dec_int: Parser ();
+parse_unsigned_dec_int = (
     do {
         parse_digit1_9;;
         one_or_more $ do {
             let opt = *parse_underscore.if_exists;
             parse_digit
         }
-    }.forget
-};
+    }.forget.or_elseF $
+    parse_digit.forget
+);
 
-parse_hex_int: Parser (Array TomlChar);
-parse_hex_int = get_matched_content $ do {
-    match_str("0x");;
-    do {
-        parse_hexdig;;
-        one_or_more $ do {
+parse_hex_int: Parser I64;
+parse_hex_int = parse_int_with_base(16, "0x", parse_hexdig);
+
+parse_oct_int: Parser I64;
+parse_oct_int = parse_int_with_base(8, "0o", parse_digit0_7);
+
+parse_bin_int: Parser I64;
+parse_bin_int = parse_int_with_base(2, "0b", parse_digit0_1);
+
+parse_int_with_base: I64 -> String -> Parser TomlChar -> Parser I64;
+parse_int_with_base = |base, prefix, parse_digit| (
+    match_str(prefix);;
+    let chars = *get_matched_chars(do {
+        parse_digit;;
+        repeat $ do {
             let opt = *parse_underscore.if_exists;
-            parse_hexdig
+            parse_digit
         }
-    }.forget
-};
+    });
+    pure $ decode_digits_with_base(base.to_U64, chars).to_I64
+);
+
+decode_digits_with_base: U64 -> Array TomlChar -> U64;
+decode_digits_with_base = |base, input| (
+    input.to_iter.fold(
+        0_U64, |c, output|
+        let h = (
+            if '0' <= c && c <= '9' { (c - '0').to_U64 };
+            if 'A' <= c && c <= 'Z' { (c - 'A').to_U64 + 10_U64 };
+            if 'a' <= c && c <= 'z' { (c - 'a').to_U64 + 10_U64 };
+            0_U64
+        );
+        output * base + h
+    )
+);
+
+//-----------------------------------------------------
+// Float
+
+parse_float: Parser F64;
+parse_float = (
+    let str = *get_matched_string(
+        do {
+            parse_float_int_part;;
+            parse_exp.forget.or_else(do {
+                parse_frac;;
+                parse_exp.if_exists.forget
+            })
+        }.or_elseF $ parse_special_float
+    );
+    str.from_string.lift_result
+);
+
+parse_float_int_part: Parser ();
+parse_float_int_part = parse_dec_int.forget;
+
+parse_frac: Parser ();
+parse_frac = (
+    match_char(0x2E_U8);;    // '.'
+    parse_zero_prefixable_int
+);
+
+parse_zero_prefixable_int: Parser ();
+parse_zero_prefixable_int = (
+    parse_digit;;
+    repeat $ do {
+        parse_underscore.if_exists;;
+        parse_digit
+    };;
+    pure()
+);
+
+parse_exp: Parser ();
+parse_exp = (
+    match_char('e');;
+    parse_float_exp_part
+);
+
+parse_float_exp_part: Parser ();
+parse_float_exp_part = (
+    match_char_class(|c| c == '+' || c == '-').if_exists;;
+    parse_zero_prefixable_int
+);
+
+parse_special_float: Parser ();
+parse_special_float = (
+    match_char_class(|c| c == '+' || c == '-').if_exists;;
+    match_str("inf").or_elseF $ match_str("nan")
+);
+
+//-----------------------------------------------------
+// Boolean
+
+parse_boolean: Parser Bool;
+parse_boolean = (
+    match_str("true").map(|_| true).or_elseF $
+    match_str("false").map(|_| false)
+);
+
+//-----------------------------------------------------
+// Date and Time
+
+//-----------------------------------------------------
+// Array
+
+parse_array: Parser TomlArray;
+parse_array = (
+    match_char(0x5B_U8);;   // '['
+    let array = *parse_array_values;
+    parse_ws_comment_newline;;
+    match_char(0x5D_U8).or_error("Missing ']'");;   // ']'
+    pure $ array
+);
+
+parse_array_values: Parser TomlArray;
+parse_array_values = (
+    loop_m(
+        TomlArray::empty, |array|
+        parse_ws_comment_newline;;
+        let opt = *parse_val.if_exists;
+        if opt.is_none { break_m $ array };
+        let val = opt.as_some;
+        let array = array.push_back(val);
+        parse_ws_comment_newline;;
+        let opt = *match_char(0x2C_U8).if_exists;   // ','
+        if opt.is_none { break_m $ array };
+        continue_m $ array
+    )
+);
+
+parse_ws_comment_newline: Parser ();
+parse_ws_comment_newline = (
+    repeat(
+        match_char_class(is_wschar).forget.or_elseF $ do {
+            parse_comment.if_exists;;
+            parse_newline;;
+            pure()
+        }
+    ).forget
+);
+
+//-----------------------------------------------------
+// Table
+
+parse_table: Parser (Array TomlKey, /*is_array_table*/ Bool);
+parse_table = (
+    parse_array_table.or_elseF $
+    parse_std_table
+);
+
+// Standard Table
+
+parse_std_table: Parser (Array TomlKey, Bool);
+parse_std_table = (
+    match_char(0x5B_U8);;   // [ Left square bracket
+    parse_ws;;
+    let dotted_key = *parse_key;
+    parse_ws;;
+    match_char(0x5D_U8).or_error("Missing ']'");;   // ] Right square bracket
+    pure $ (dotted_key, false)
+);
+
+parse_inline_table: Parser TomlTable;
+parse_inline_table = (
+    match_char(0x7B_U8);;   // {
+    parse_ws;;
+    let table = TomlTable::empty.set_inline(true);
+    let table = *loop_m(
+        (table, 0), |(table, count)|
+        let opt = *do {
+            parse_inline_table_sep.when(count > 0);;
+            parse_keyval
+        }.if_exists;
+        if opt.is_none { break_m $ table };
+        let (dotted_key, val) = opt.as_some;
+        let table = table.insert_recursive(dotted_key, 0, val);
+        continue_m $ (table, count + 1)
+    );
+    parse_ws;;
+    match_char(0x7D_U8).or_error("Missing '}'");;   // }
+    pure $ table
+);
+
+parse_inline_table_sep: Parser ();
+parse_inline_table_sep = (
+    parse_ws;;
+    match_char(0x2C_U8);;    //  , Comma
+    parse_ws;;
+    pure()
+);
+
+// Array Table
+
+parse_array_table: Parser (Array TomlKey, Bool);
+parse_array_table = (
+    match_char(0x5B_U8);;   // [ Left square bracket
+    match_char(0x5B_U8);;   // [ Left square bracket
+    parse_ws;;
+    let dotted_key = *parse_key;
+    parse_ws;;
+    match_char(0x5D_U8).or_error("Missing ']'");;   // ] Right square bracket
+    match_char(0x5D_U8).or_error("Missing ']'");;   // ] Right square bracket
+    pure $ (dotted_key, true)
+);

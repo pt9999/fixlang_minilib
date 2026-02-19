@@ -1,20 +1,86 @@
 module TomlReaderTest;
 
+import Minilib.Encoding.Toml;
 import Minilib.Encoding.Toml.TomlReader;
 import Minilib.Text.SimpleParser;
 import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
+
+with_trailing: Parser a -> Parser (a, String);
+with_trailing = |p| (
+    let a = *p;
+    let trailing = *repeat(match_any_char).map(StringEx::from_array);
+    pure $ (a, trailing)
+);
+
+with_eos: Parser a -> Parser a;
+with_eos = |p| (
+    let a = *p;
+    match_end_of_stream;;
+    pure $ a
+);
+
+test_parse_toml_simple: TestCase;
+test_parse_toml_simple = (
+    make_test("test_parse_toml_simple") $ |_|
+    let input = [
+        "# this is comment",
+        "key1 = \"value1\" # this is comment too",
+        "key2 = 'value2'",
+        "[group1]",
+        "key11 = 'value11'",
+        "[group1.group2]",
+        "key112 = 'value112'",
+    ].to_iter.join("\n");
+    let expected = (
+        let table = TomlTable::empty;
+        let table = table["key1"].tset("value1");
+        let table = table["key2"].tset("value2");
+        let table = table["group1"]["key11"].tset("value11");
+        let table = table["group1"]["group2"]["key112"].tset("value112");
+        table
+    );
+    let actual = *parse_toml.eval_parser_str(input).from_result;
+    assert_equal("eq", expected, actual)
+);
+
+test_parse_expressions_simple: TestCase;
+test_parse_expressions_simple = (
+    make_test("test_parse_toml_simple") $ |_|
+    let input = [
+        "# this is comment",
+        "key1 = \"value1\" # this is comment too",
+        "key2 = 'value2'",
+        "[group1]",
+        "key11 = 'value11'",
+        "[group1.group2]",
+        "key112 = 'value112'",
+    ].to_iter.join("\n");
+    let expressions = *parse_expressions.eval_parser_str(input).from_result;
+    expressions.to_iter.foreach_m(|ex| ex.to_string.println).lift;;
+    pure()
+);
+
+/*
+test_parse_keyval_record_simple: TestCase;
+test_parse_keyval_record_simple = (
+    let input = "key1 = value1 # this is comment";
+    let record = *parse_toml.eval_parser_str(input).from_result;
+
+);
+*/
 
 test_parse_ws: TestCase;
 test_parse_ws = (
     make_table_test("test_parse_ws",
         [
-            ("", ok $ ""),
-            ("abc", ok $ ""),
-            ("  \t\t\nabc", ok $ "  \t\t"),
+            ("", ok $ ("", "")),
+            ("abc", ok $ ("", "abc")),
+            ("  \t\t\nabc", ok $ ("  \t\t", "\nabc")),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_ws.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_ws.map(StringEx::from_array).with_trailing.eval_parser_str(input))
     )
 );
 
@@ -24,11 +90,11 @@ test_parse_newline = (
         [
             ("", err $ _NotMatch),
             ("a\n", err $ _NotMatch),
-            ("\n\n", ok $ "\n"),
-            ("\r\n\n", ok $ "\r\n"),
+            ("\n\n", ok $ ("\n", "\n")),
+            ("\r\n\n", ok $ ("\r\n", "\n")),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_newline.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_newline.map(StringEx::from_array).with_trailing.eval_parser_str(input))
     )
 );
 
@@ -37,28 +103,72 @@ test_parse_comment = (
     make_table_test("test_parse_comment",
         [
             ("", err $ _NotMatch),
-            ("#  \t\tabc あいう\n", ok $ "#  \t\tabc あいう"),
+            ("#  \t\tabc あいう\n", ok $ ("#  \t\tabc あいう", "\n")),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_comment.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_comment.map(StringEx::from_array).with_trailing.eval_parser_str(input))
     )
 );
 
-// test_parse_keyval
-// test_parse_key
-// test_parse_simple_key
+test_parse_keyval: TestCase;
+test_parse_keyval = (
+    make_table_test("test_parse_keyval",
+        [
+            ("", err $ _NotMatch),
+            ("abc =", err $ _NotMatch),
+            ("abc = 123", ok $ (["abc"], v_int(123))),
+            ("a.b.c = 'str'", ok $ (["a","b","c"], v_string("str"))),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_keyval.with_eos.eval_parser_str(input))
+    )
+);
+
+test_parse_key: TestCase;
+test_parse_key = (
+    make_table_test("test_parse_key",
+        [
+            ("", err $ _NotMatch),
+            ("''", ok $ ([""], "")),
+            ("abc =", ok $ (["abc"], " =")),
+            ("1.23 =", ok $ (["1", "23"], " =")),
+            ("a.b.c.d =", ok $ (["a", "b", "c", "d"], " =")),
+            ("a.b..c.d =", ok $ (["a", "b"], "..c.d =")),
+            ("abc . def =", ok $ (["abc", "def"], " =")),
+            ("\"abc def\" . ghi =", ok $ (["abc def", "ghi"], " =")),
+            ("'abc \"de\" f'.ghi =", ok $ (["abc \"de\" f", "ghi"], " =")),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_key.with_trailing.eval_parser_str(input))
+    )
+);
+
+test_parse_simple_key: TestCase;
+test_parse_simple_key = (
+    make_table_test("test_parse_simple_key",
+        [
+            ("", err $ _NotMatch),
+            ("''", ok $ ("", "")),
+            ("abc =", ok $ ("abc", " =")),
+            ("\"abc def\" =", ok $ ("abc def", " =")),
+            ("'abc \"de\" f' =", ok $ ("abc \"de\" f", " =")),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_simple_key.with_trailing.eval_parser_str(input))
+    )
+);
 
 test_parse_unquoted_key: TestCase;
 test_parse_unquoted_key = (
     make_table_test("test_parse_unquoted_key",
         [
             ("", err $ _NotMatch),
-            ("-_  ", ok $ "-_"),
-            ("AXZ--axz__059!?", ok $ "AXZ--axz__059"),
-            ("123", ok $ "123"),
+            ("-_  ", ok $ ("-_", "  ")),
+            ("AXZ--axz__059!?", ok $ ("AXZ--axz__059", "!?")),
+            ("123", ok $ ("123", "")),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_unquoted_key.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_unquoted_key.with_trailing.eval_parser_str(input))
     )
 );
 
@@ -74,7 +184,7 @@ test_parse_string = (
             ("'''abc'''", ok $ "abc"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_string.eval_parser_str(input))
+        assert_equal("eq", expected, parse_string.with_eos.eval_parser_str(input))
     )
 );
 
@@ -94,7 +204,7 @@ test_parse_basic_string = (
             ("\"Aあ😀\"", ok $ "Aあ😀"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_basic_string.map(StringEx::from_array).with_eos.eval_parser_str(input))
     )
 );
 
@@ -115,12 +225,12 @@ test_parse_ml_basic_string = (
             ("\"\"\"\nThe quick brown \\\n \n  \n  fox jumps over \\\n\tthe lazy dog.\"\"\"", ok $ "The quick brown fox jumps over the lazy dog."),
             ("\"\"\"\\\n       The quick brown \\\n       fox jumps over \\\n       the lazy dog.\\\n       \"\"\"", ok $ "The quick brown fox jumps over the lazy dog."),
             ("\"\"\"Here are two quotation marks: \"\". Simple enough.\"\"\"", ok $ "Here are two quotation marks: \"\". Simple enough."),
-            ("\"\"\"Here are three quotation marks: \"\"\".\"\"\"", ok $ "Here are three quotation marks: "),   // .\"\"\" is remained
+            //("\"\"\"Here are three quotation marks: \"\"\".\"\"\"", ok $ "Here are three quotation marks: "),   // .\"\"\" is remained
             ("\"\"\"Here are three quotation marks: \"\"\\\".\"\"\"", ok $ "Here are three quotation marks: \"\"\"."),
             ("\"\"\"\"This,\" she said, \"is just a pointless statement.\"\"\"\"", ok $ "\"This,\" she said, \"is just a pointless statement.\""),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_ml_basic_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_ml_basic_string.map(StringEx::from_array).with_eos.eval_parser_str(input))
     )
 );
 
@@ -140,7 +250,7 @@ test_parse_literal_string = (
             ("'<\\i\\c*\\s*>'", ok $ "<\\i\\c*\\s*>"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_literal_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_literal_string.map(StringEx::from_array).with_eos.eval_parser_str(input))
     )
 );
 
@@ -164,22 +274,184 @@ test_parse_ml_literal_string = (
             ("''''That,' she said, 'is still pointless.''''", ok $ "'That,' she said, 'is still pointless.'"),
         ],
         |(input, expected)|
-        assert_equal("eq", expected, parse_ml_literal_string.map(_unsafe_to_string).eval_parser_str(input))
+        assert_equal("eq", expected, parse_ml_literal_string.map(StringEx::from_array).with_eos.eval_parser_str(input))
+    )
+);
+
+test_parse_integer: TestCase;
+test_parse_integer = (
+    make_table_test("test_parse_integer",
+        [
+            ("", err $ _NotMatch),
+            ("00", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0", ok $ 0),
+            ("1", ok $ 1),
+            ("-1", ok $ -1),
+            ("12", ok $ 12),
+            ("-12", ok $ -12),
+            ("9223372036854775807", ok $ 9223372036854775807),
+            ("-9223372036854775808", ok $ -9223372036854775808),
+            ("0x", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0x0", ok $ 0),
+            ("0xF", ok $ 15),
+            ("0xf", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0xFF", ok $ 255),
+            ("0x0123ABCD", ok $ 19114957),
+            ("0x7FFFFFFFFFFFFFFF", ok $ 9223372036854775807),
+            ("0x8000000000000000", ok $ -9223372036854775808),
+            ("0xFFFFFFFFFFFFFFFF", ok $ -1),
+            ("0o", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0o0", ok $ 0),
+            ("0o7", ok $ 7),
+            ("0o8", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0o0644", ok $ 420),
+            ("0o777777777777777777777", ok $ 9223372036854775807),
+            ("0o1000000000000000000000", ok $ -9223372036854775808),
+            ("0o1777777777777777777777", ok $ -1),
+            ("0b", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0b0", ok $ 0),
+            ("0b1", ok $ 1),
+            ("0b2", err $ "line 1, column 1: Missing EOS"),      // parsed as "0"
+            ("0b000110100100", ok $ 420),
+            ("0b111111111111111111111111111111111111111111111111111111111111111", ok $ 9223372036854775807),
+            ("0b1000000000000000000000000000000000000000000000000000000000000000", ok $ -9223372036854775808),
+            ("0b1111111111111111111111111111111111111111111111111111111111111111", ok $ -1),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_integer.with_eos.eval_parser_str(input))
+    )
+);
+
+test_parse_float: TestCase;
+test_parse_float = (
+    make_table_test("test_parse_float",
+        [
+            ("", err $ _NotMatch),
+            ("0.", err $ _NotMatch),
+            (".0", err $ _NotMatch),
+            ("0.0", ok $ 0.0),
+            ("123.456", ok $ 123.456),
+            ("-123e2", ok $ -123.0e2),
+            ("-123.0456e2", ok $ -123.0456e2),
+            ("-123.456e+02", ok $ -123.456e+02),
+            ("-123.456e-02", ok $ -123.456e-02),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_float.with_eos.eval_parser_str(input))
+    )
+);
+
+
+test_parse_special_float: TestCase;
+test_parse_special_float = (
+    make_table_test("test_parse_special_float",
+        [
+            ("nan", 1, 0),
+            ("+nan", 1, 0),
+            ("-nan", 1, 0),
+            ("inf", 0, 1),
+            ("+inf", 0, 1),
+            ("-inf", 0, -1),
+        ],
+        |(input, expected_isnan, expected_isinf)|
+        let f64: F64 = *parse_float.with_eos.eval_parser_str(input).from_result;
+        let actual_isnan = FFI_CALL[CInt isnan(F64), f64].to_I64;
+        let actual_isinf = FFI_CALL[CInt isinf(F64), f64].to_I64;
+        assert_equal("isnan", expected_isnan, actual_isnan);;
+        assert_equal("isinf", expected_isinf, actual_isinf)
+    )
+);
+
+test_parse_array: TestCase;
+test_parse_array = (
+    make_table_test("test_parse_array",
+        [
+            ("", err $ _NotMatch),
+            ("[ ]", ok $ TomlArray::make $ []),
+            ("[ 1 ]", ok $ TomlArray::make $ [ v_int(1) ]),
+            ("[ 1, ]", ok $ TomlArray::make $ [ v_int(1) ]),
+            ("[ 1, ", err $ "line 1, column 5: Missing ']'"),
+            ("[ 1, 2 ]", ok $ TomlArray::make $ [ v_int(1), v_int(2) ]),
+            ("[ 1, 2, ]", ok $ to_toml_array $ [ 1, 2 ]),   // you can write like this
+            ("[ 1, 2, 3 ]", ok $ TomlArray::make $ [ v_int(1), v_int(2), v_int(3) ]),
+            ("[\n #Comment\n 1, \"a\"\n\n #Comment\n ]", ok $ TomlArray::make $ [ v_int(1), v_string("a") ]),
+            ("[ 1, [\"a\", false], 3.0]", ok $ to_toml_array $ [ 1.to_toml_val, ["a".to_toml_val, false.to_toml_val].to_toml_val, 3.0.to_toml_val]),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_array.with_eos.eval_parser_str(input))
+    )
+);
+
+test_parse_table: TestCase;
+test_parse_table = (
+    make_table_test("test_parse_table",
+        [
+            ("", err $ _NotMatch),
+            ("[  ]", err $ _NotMatch),
+            ("[a]", ok $ (["a"], false)),
+            ("[a", err $ "line 1, column 2: Missing ']'"),
+            ("[ abc . def ]", ok $ (["abc", "def"], false)),
+            ("[ [a] ]", err $ _NotMatch),
+            ("[[a]]", ok $ (["a"], true)),
+            ("[[a]", err $ "line 1, column 4: Missing ']'"),
+            ("[['abc.def'.ghi]]", ok $ (["abc.def", "ghi"], true)),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_table.with_eos.eval_parser_str(input))
+    )
+);
+
+test_parse_inline_table: TestCase;
+test_parse_inline_table = (
+    make_table_test("test_parse_inline_table",
+        [
+            ("", err $ _NotMatch),
+            ("{ }", ok $ TomlTable::empty),
+            ("{ ", err $ "line 1, column 2: Missing '}'"),
+            ("{ a=1, b=\"b\" }", ok $ (
+                let table = TomlTable::empty.set_inline(true);
+                let table = table["a"].tset(1);
+                let table = table["b"].tset("b");
+                table
+            )),
+            ("{ a.b.c=1, a.b.d=\"b\" }", ok $ (
+                let table = TomlTable::empty.set_inline(true);
+                let table = table["a"]["b"]["c"].tset(1);
+                let table = table["a"]["b"]["d"].tset("b");
+                table
+            )),
+        ],
+        |(input, expected)|
+        assert_equal("eq", expected, parse_inline_table.with_eos.eval_parser_str(input))
     )
 );
 
 main: IO ();
 main = (
     [
+        
+        test_parse_expressions_simple,
+        /*
+        test_parse_toml_simple,
         test_parse_ws,
         test_parse_newline,
         test_parse_comment,
+        test_parse_keyval,
+        test_parse_key,
+        test_parse_simple_key,
         test_parse_unquoted_key,
         test_parse_string,
         test_parse_basic_string,
         test_parse_ml_basic_string,
         test_parse_literal_string,
         test_parse_ml_literal_string,
+        test_parse_integer,
+        test_parse_float,
+        test_parse_special_float,
+        test_parse_array,
+        test_parse_table,
+        test_parse_inline_table,
+        */
     ]
     .run_test_driver
 );

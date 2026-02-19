@@ -1,41 +1,151 @@
 module Minilib.Encoding.Toml;
 
+import HashMap;
 import Minilib.Common.Common;
-import Minilib.Collection.OrderedMap;
 import Minilib.Encoding.Toml.TomlWriter;
 import Minilib.Monad.Error;
 import Minilib.Text.StringEx;
+
 
 //-------------------------------------------------------------
 //  TomlTable
 //-------------------------------------------------------------
 
 type TomlTable = unbox struct {
-    map: OrderedMap TomlKey TomlVal,
+    expressions: Array TomlExpression,
+    map: HashMap TomlKey I64,
+    inline: Bool,
 };
 
 namespace TomlTable {
     empty: TomlTable;
     empty = TomlTable {
-        map: OrderedMap::empty(10),
+        expressions: [],
+        map: HashMap::empty(10),
+        inline: false,
     };
+
+    is_empty: TomlTable -> Bool;
+    is_empty = |table| table.get_size == 0;
 
     get_size: TomlTable -> I64;
     get_size = |table| table.@map.get_size;
 
+    get_expressions: TomlTable -> Array TomlExpression;
+    get_expressions = @expressions;
+
+    add_expression: TomlExpression -> TomlTable -> TomlTable;
+    add_expression = |expression, table| (
+        match expression {
+            ex_keyval(ex) => (
+                let dotted_key = ex.@dotted_key;
+                if dotted_key.get_size != 1 {
+                    undefined("dotted key is not impl yet")
+                };
+                let key = dotted_key.@(0);
+                let index = table.@expressions.get_size;
+                table.mod_map(HashMap::insert(key, index))
+                .mod_expressions(push_back(expressions))
+            ),
+            _ => table.mod_expressions(push_back(expression))
+        }
+    );
+
     find: TomlKey -> TomlTable -> Option TomlVal;
     find = |key, table| (
-        table.@map.find(key)
+        match table.@map.find(key) {
+            none() => none(),
+            some(index) => match table.@records.@(index) {
+                r_original_keyval(record) => some(record.@val),
+                r_keyval(record) => some(record.@val),
+                _ => none(),
+            }
+        }
+    );
+
+    find_recursive: Array TomlKey -> I64 -> TomlTable -> TomlTable;
+    find_recursive = |dotted_key, key_index, table| (
+        if key_index == dotted_key.get_size - 1 {
+            table.find(dotted_key.@(key_index))
+        };
+        let key = dotted_key.@(key_index);
+        let find_from_child = |child| child.find_recursive(dotted_key, key_index + 1);
+        let child_val = table[key].iget;
+        match child_val {
+            v_table(child) => find_from_child $ child,
+            v_array_table(array) => (
+                let size = array.get_size;
+                if size == 0 { none() };
+                match array.@(size - 1) {
+                    v_table(child) => find_from_child $ child,
+                    _ => none(),
+                }
+            ),
+            _ => none(),
+        }
+    );
+
+    insert_child_table: TomlTable -> TomlTableExpression -> TomlTable -> TomlTable;
+    insert_child_table = |child, ex, root| (
+        if !ex.@is_array_table {
+            root.insert_recursive(ex.@dotted_key, 0, v_table(child))
+        };
+
+    );
+
+    insert_recursive: Array TomlKey -> I64 -> TomlVal -> TomlTable -> TomlTable;
+    insert_recursive = |dotted_key, key_index, val, table| (
+        if key_index == dotted_key.get_size - 1 {
+            table.insert(dotted_key.@(key_index), val)
+        };
+        let key = dotted_key.@(key_index);
+        let insert_to_child = |child| child.insert_recursive(dotted_key, key_index + 1, val);
+        table[key].imod(|child_val|
+            match child_val {
+                v_table(child) => v_table $ insert_to_child $ child,
+                v_array_table(array) => v_array_table $ (
+                    let array = array.ensure_last_table;
+                    let size = array.get_size;
+                    array[size - 1].imod(mod_v_table(insert_to_child))
+                ),
+                _ => v_table $ insert_to_child $ TomlTable::empty,
+            }
+        )
     );
 
     insert: TomlKey -> TomlVal -> TomlTable -> TomlTable;
     insert = |key, val, table| (
-        table.mod_map(OrderedMap::insert(key, val))
+        match table.@map.find(key) {
+            none() => (
+                let new_record = TomlRecord::make_keyval_record(key, val, none());
+                let index = table.@records.get_size;
+                table.mod_map(HashMap::insert(key, index))
+                .mod_records(|records|
+                    records.push_back(new_record)
+                )
+            ),
+            some(index) => (
+                let old_record = table.@records.@(index);
+                let new_record = TomlRecord::make_keyval_record(key, val, some $ old_record);
+                table.mod_records(|records|
+                    records.set(index, new_record)
+                )
+            )
+        }
     );
 
     erase: TomlKey -> TomlTable -> TomlTable;
     erase = |key, table| (
-        table.mod_map(OrderedMap::erase(key))
+        match table.@map.find(key) {
+            none() => table,
+            some(index) => (
+                table.mod_map(HashMap::erase(key))
+                .mod_records(|records|
+                    if index == records.get_size - 1 { records.pop_back };
+                    records.set(index, r_none())
+                )
+            )
+        }
     );
 
     act: [f: Functor] TomlKey -> (TomlVal -> f TomlVal) -> TomlTable -> f TomlTable;
@@ -54,13 +164,21 @@ namespace TomlTable {
         )
     );
 
-    to_iter: TomlTable -> OrderedMapIterator TomlKey TomlVal;
-    to_iter = |table| table.@map.to_iter;
+    type TomlMapIterator k v = FilterMapIterator (ArrayIterator TomlRecord) TomlRecord (k, v);
+    to_iter: TomlTable -> TomlMapIterator TomlKey TomlVal;
+    to_iter = |table| table.@records.to_iter.filter_map(|record|
+        match record {
+            r_keyval(record) => some $ (record.@key, record.@val),
+            r_original_keyval(record) => some $ (record.@dotted_key.@(0), record.@val),     // TODO ok?
+            _ => none(),
+        }
+    );
 }
 
 impl TomlTable: Eq {
     eq = |table1, table2| (
         if table1.get_size != table2.get_size { false };
+        if table1.@inline != table2.@inline { false };
         table1.to_iter.check_all(|(k, v)|
             table2.find(k) == some(v)
         )
@@ -68,13 +186,123 @@ impl TomlTable: Eq {
 }
 
 impl TomlTable: ToString {
-    to_string = |table| "".toml_write_inline_table(table);
+    to_string = |table| "".toml_write_table(table);
 }
 
 impl TomlTable: Indexable {
     type Elem TomlTable = TomlVal;
     type Index TomlTable = TomlKey;
     act_at_index = TomlTable::act;
+}
+
+//-------------------------------------------------------------
+//  TomlExpression
+//-------------------------------------------------------------
+
+type TomlExpression = unbox union {
+    ex_empty: TomlEmptyExpression,
+    ex_keyval: TomlKeyValExpression,
+    ex_table: TomlTableExpression,
+};
+
+impl TomlExpression: ToString {
+    to_string = |ex| match ex {
+        ex_empty(ex) => "ex_empty(" + ex.to_string + ")",
+        ex_keyval(ex) => "ex_keyval(" + ex.to_string + ")",
+        ex_table(ex) => "ex_table(" + ex.to_string + ")",
+    };
+}
+
+type TomlEmptyExpression = unbox struct {
+    text: TomlRawText,
+};
+
+impl TomlEmptyExpression: ToString {
+    to_string = |ex| ex.@text;
+}
+
+type TomlKeyValExpression = unbox struct {
+    text: TomlRawText,
+    dotted_key: Array TomlKey,
+    val: TomlVal,
+};
+
+impl TomlKeyValExpression: ToString {
+    to_string = |ex| ex.@text;
+}
+
+type TomlTableExpression = unbox struct {
+    text: TomlRawText,
+    dotted_key: Array TomlKey,
+    is_array_table: Bool,
+};
+
+impl TomlTableExpression: ToString {
+    to_string = |ex| ex.@text;
+}
+
+//-------------------------------------------------------------
+//  TomlRecord
+//-------------------------------------------------------------
+
+type TomlRecord = unbox union {
+    r_none: (),
+    r_comment: TomlCommentRecord,
+    r_original_keyval: TomlOriginalKeyValRecord,
+    r_keyval: TomlKeyValRecord,
+};
+
+impl TomlRecord: ToString {
+    to_string = |record| match record {
+        r_none() => "r_none()",
+        r_comment(rec) => "r_comment(" + rec.to_string + ")",
+        r_original_keyval(rec) => "r_original_keyval(" + rec.to_string + ")",
+        r_keyval(rec) => "r_keyval(" + rec.to_string + ")",
+    };
+}
+
+namespace TomlRecord {
+    make_keyval_record: TomlKey -> TomlVal -> Option TomlRecord -> TomlRecord;
+    make_keyval_record = |key, val, old_record| (
+        let (prefix, suffix) = match old_record.as_some_or(r_none()) {
+            r_keyval(record) => (record.@prefix, record.@suffix),
+            r_original_keyval(record) => (record.@prefix, record.@suffix),
+            _ => ("", "")
+        };
+        r_keyval $ TomlKeyValRecord { key: key, val: val, prefix: prefix, suffix: suffix }
+    );
+}
+
+type TomlCommentRecord = unbox struct {
+    original: TomlRawText,
+};
+
+impl TomlCommentRecord: ToString {
+    to_string = |record| record.@original;
+}
+
+
+type TomlOriginalKeyValRecord = unbox struct {
+    dotted_key: Array TomlKey,
+    val: TomlVal,
+    prefix: TomlRawText,
+    suffix: TomlRawText,
+    original: TomlRawText,
+};
+
+impl TomlOriginalKeyValRecord: ToString {
+    to_string = |record| record.@original;
+}
+
+type TomlKeyValRecord = unbox struct {
+    key: TomlKey,
+    val: TomlVal,
+    prefix: TomlRawText,
+    suffix: TomlRawText,
+};
+
+impl TomlKeyValRecord: ToString {
+    to_string = |record| (record.@key, record.@val).format("{} = {}");
 }
 
 //-------------------------------------------------------------
@@ -92,12 +320,15 @@ namespace TomlArray {
     make: Array TomlVal -> TomlArray;
     make = |arr| TomlArray { arr: arr };
 
+    to_toml_array: [a: ToTomlVal] Array a -> TomlArray;
+    to_toml_array = |arr| TomlArray::make $ arr.map(to_toml_val);
+
     get_size: TomlArray -> I64;
     get_size = |array| array.@arr.get_size;
 
-    push_back: TomlVal -> TomlArray -> TomlArray;
-    push_back = |val, array| (
-        array.mod_arr(push_back(val))
+    push_back: [a: ToTomlVal] a -> TomlArray -> TomlArray;
+    push_back = |a, array| (
+        array.mod_arr(push_back(a.to_toml_val))
     );
 
     to_iter: TomlArray -> ArrayIterator TomlVal;
@@ -123,6 +354,14 @@ namespace TomlArray {
     set = |index, val, array| (
         array[index].iset(val)
     );
+
+    // array の最後の要素が table でなければ table を追加する。
+    ensure_last_table: TomlArray -> TomlArray;
+    ensure_last_table = |array| (
+        let size = array.get_size;
+        if size > 0 && array.@(size - 1).is_v_table { array };
+        array.push_back(v_table(TomlTable::empty))
+    );
 }
 
 impl TomlArray: Eq {
@@ -140,30 +379,16 @@ impl TomlArray: Indexable {
 }
 
 //-------------------------------------------------------------
+//  TomlRawText
+//-------------------------------------------------------------
+
+type TomlRawText = String;
+
+//-------------------------------------------------------------
 //  TomlKey
 //-------------------------------------------------------------
 
 type TomlKey = String;
-
-//-------------------------------------------------------------
-//  TomlDottedKey
-//-------------------------------------------------------------
-
-type TomlDottedKey = box union {
-    k_single: TomlKey,
-    k_dotted: (TomlKey, TomlDottedKey),
-};
-
-namespace TomlDottedKey {
-    cons: TomlKey -> TomlDottedKey -> TomlDottedKey;
-    cons = |head, tail| k_dotted $ (head, tail);
-
-    uncons: TomlDottedKey -> (TomlKey, Option TomlDottedKey);
-    uncons = |key| match key {
-        k_single(name) => (name, none()),
-        k_dotted((name, tail)) => (name, some(tail)),
-    };
-}
 
 //-------------------------------------------------------------
 //  TomlVal
@@ -214,10 +439,10 @@ namespace TomlVal {
         if res.is_ok && res.as_ok >= 0 {
             let index = res.as_ok;
             let array = match outer {
-                v_array(arr) => arr,
+                v_array_table(arr) => arr,
                 _ => TomlArray::empty
             };
-            array.act(index, action).map(v_array)
+            array.act(index, action).map(v_array_table)
         };
         let table = match outer {
             v_table(table) => table,
@@ -242,7 +467,7 @@ trait a: ToTomlVal {
 }
 
 trait a: FromTomlVal {
-    from_toml_val: TomlVal -> Result ErrMsg a;
+    from_toml_val: [m: MonadError] TomlVal -> m a;
 }
 
 impl TomlVal: ToTomlVal {
@@ -259,8 +484,8 @@ impl String: ToTomlVal {
 
 impl String: FromTomlVal {
     from_toml_val = |val| match val {
-        v_string(str) => ok $ str,
-        _ => err $ "not a string",
+        v_string(str) => pure $ str,
+        _ => error $ "not a string",
     };
 }
 
@@ -270,8 +495,8 @@ impl I64: ToTomlVal {
 
 impl I64: FromTomlVal {
     from_toml_val = |val| match val {
-        v_int(i64) => ok $ i64,
-        _ => err $ "not an integer",
+        v_int(i64) => pure $ i64,
+        _ => error $ "not an integer",
     };
 }
 
@@ -281,8 +506,8 @@ impl F64: ToTomlVal {
 
 impl F64: FromTomlVal {
     from_toml_val = |val| match val {
-        v_float(f64) => ok $ f64,
-        _ => err $ "not a floating point",
+        v_float(f64) => pure $ f64,
+        _ => error $ "not a floating point",
     };
 }
 
@@ -292,15 +517,14 @@ impl Bool: ToTomlVal {
 
 impl Bool: FromTomlVal {
     from_toml_val = |val| match val {
-        v_bool(bool) => ok $ bool,
-        _ => err $ "not a boolean",
+        v_bool(bool) => pure $ bool,
+        _ => error $ "not a boolean",
     };
 }
 
 impl [a: ToTomlVal] Array a: ToTomlVal {
     to_toml_val = |arr| (
-        let arr = arr.map(to_toml_val);
-        v_array $ TomlArray::make $ arr
+        v_array $ arr.to_toml_array
     );
 }
 
@@ -312,16 +536,68 @@ impl [a: FromTomlVal] Array a: FromTomlVal {
                 pure $ arr.push_back(*val.from_toml_val)
             )
         ),
-        _ => err $ "not an array",
+        _ => error $ "not an array",
+    };
+}
+
+impl TomlTable: ToTomlVal {
+    to_toml_val = v_table;
+}
+
+impl TomlTable: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_table(table) => table,
+        _ => error $ "not a table",
+    };
+}
+
+impl TomlArray: ToTomlVal {
+    to_toml_val = v_array;
+}
+
+impl TomlArray: FromTomlVal {
+    from_toml_val = |val| match val {
+        v_array(array) => array,
+        _ => error $ "not an array",
     };
 }
 
 //-------------------------------------------------------------
-//  Index operations
+//  Index helper functions
 //-------------------------------------------------------------
 
-tset: [a: ToTomlVal] a -> ((TomlVal -> Identity TomlVal) -> Identity c) -> c;
+// Sets a value in a store that can be converted to `TomlVal`.
+//
+// `store.tset(val)` is equal to `store.iset(val.to_toml_val)`.
+//
+// Example:
+// ```
+//  let table = TomlTable::empty;
+//  let table = table["general"]["name"].tset("test");
+//  let table = table["general"]["size"].tset(12345);
+//  let table = table["build"]["files"].tset(["a.fix", "b.fix"]);
+// ```
+//
+// # Parameters
+// - `val`: a value which can be converted to `TomlVal`
+// - `store`: a store of `TomlVal`
+tset: [a: ToTomlVal] a -> ((TomlVal -> Identity TomlVal) -> Identity b) -> b;
 tset = |val, store| store.iset(val.to_toml_val);
 
-tget: [m: MonadError, a:FromTomlVal] ((TomlVal -> Const TomlVal TomlVal) -> Const TomlVal c) -> m a;
-tget = |store| store.iget.from_toml_val.lift_result;
+// Gets a value from a store that can be converted from `TomlVal`.
+//
+// If the conversion fails, this function reports a conversion error.
+//
+// `store.tget` is equal to `store.iget.from_toml_val`.
+//
+// Example:
+// ```
+//  let table = TomlTable::parse(...);
+//  let name: String = *table["general"]["name"].tget;
+//  let size: I64 = *table["general"]["size"].tget;
+// ```
+//
+// # Parameters
+// - `store`: a store of `TomlVal`
+tget: [m: MonadError, a: FromTomlVal] ((TomlVal -> Const TomlVal TomlVal) -> Const TomlVal b) -> m a;
+tget = |store| store.iget.from_toml_val;

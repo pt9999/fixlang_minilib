@@ -30,6 +30,96 @@ test_tomltable_indexable_simple = (
     assert_equal("eq", err $ "not an integer", res)
 );
 
+test_tomltable_indexable_multi: TestCase;
+test_tomltable_indexable_multi = (
+    make_test("test_tomltable_indexable_multi") $ |_|
+    let table = TomlTable::empty;
+    let table = table["key1"].tset("value1");
+    let table = table["key2"]["key21"].tset("value21");
+    let table = table["key2"]["key22"]["key221"].tset("value221");
+    let table = table["key2"]["key23"]["0"]["key2301"].tset("value2301");
+    let table = table["key2"]["key23"]["1"]["key2311"].tset("value2311");
+    assert_equal("eq", "value1", *table["key1"].tget);;
+    assert_equal("eq", "value21", *table["key2"]["key21"].tget);;
+    assert_equal("eq", "value221", *table["key2"]["key22"]["key221"].tget);;
+    let expected = [
+        "key1 = \"value1\"",
+        "[key2]",
+        "key21 = \"value21\"",
+        "[key2.key22]",
+        "key221 = \"value221\"",
+        "[[key2.key23]]",
+        "key2301 = \"value2301\"",
+        "[[key2.key23]]",
+        "key2311 = \"value2311\"",
+    ].to_iter.join("\n") + "\n";
+    let actual = table.to_string;
+    assert_equal("eq", expected, actual);;
+    pure()
+);
+
+test_tomltable_indexable_multi2: TestCase;
+test_tomltable_indexable_multi2 = (
+    make_test("test_tomltable_indexable_multi2") $ |_|
+    let table = TomlTable::empty;
+    //let table = table["general"].tset(TomlTable::empty);
+    let table = table["general"]["name"].tset("test");
+    let name: String = *table["general"]["name"].tget;
+    assert_equal("name", "test", name);;
+    let table = table["general"]["version"].tset("0.0.0");
+    //let table = table["build"].tset(TomlTable::empty);
+    let table = table["build"]["files"].tset(["a", "b"]);
+    let table = table["build"]["static_links"].tset([]: Array String);
+    //let table = table["dependencies"].tset(v_array_table(TomlArray::empty));
+    let table = table["dependencies"]["0"]["name"].tset("certain-project");
+    let expected = [
+        "[general]",
+        "name = \"test\"",
+        "version = \"0.0.0\"",
+        "[build]",
+        "files = [\"a\", \"b\"]",
+        "static_links = []",
+        "[[dependencies]]",
+        "name = \"certain-project\"",
+    ].to_iter.join("\n") + "\n";
+    let actual = table.to_string;
+    assert_equal("eq", expected, actual);;
+    pure()
+);
+
+test_tomltable_indexable_multi3: TestCase;
+test_tomltable_indexable_multi3 = (
+    make_test("test_tomltable_indexable_multi3") $ |_|
+    let table = TomlTable::empty;
+    let general = TomlTable::empty;
+    let general = general["name"].tset("test");
+    let general = general["version"].tset("0.0.0");
+    let table = table["general"].tset(general);
+    let build = TomlTable::empty;
+    let build = build["files"].tset(["a", "b"]);
+    let build = build["static_links"].tset([]: Array String);
+    let table = table["build"].tset(build);
+    let dependencies = TomlArray::empty;
+    let dep = TomlTable::empty;
+    let dep = dep["name"].tset("certain-project");
+    let dependencies = dependencies.push_back(dep);
+    let table = table["dependencies"].tset(v_array_table(dependencies));    // あまりかっこよくない
+    let expected = [
+        "[general]",
+        "name = \"test\"",
+        "version = \"0.0.0\"",
+        "[build]",
+        "files = [\"a\", \"b\"]",
+        "static_links = []",
+        "[[dependencies]]",
+        "name = \"certain-project\"",
+    ].to_iter.join("\n") + "\n";
+    let actual = table.to_string;
+    assert_equal("eq", expected, actual);;
+    pure()
+);
+
+
 test_tomlarray_simple: TestCase;
 test_tomlarray_simple = (
     make_test("test_tomlarray_simple") $ |_|
@@ -122,6 +212,9 @@ main = (
     [
         test_tomltable_simple,
         test_tomltable_indexable_simple,
+        test_tomltable_indexable_multi,
+        test_tomltable_indexable_multi2,
+        test_tomltable_indexable_multi3,
         test_tomlarray_simple,
         test_tomlval_eq,
         test_tomlval_to_string,

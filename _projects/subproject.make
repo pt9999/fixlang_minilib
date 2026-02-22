@@ -45,9 +45,10 @@ document:
 
 update-deps:
 	fix deps update
-	if ! git diff --quiet HEAD -- fixdeps.lock; then \
-		git add fixdeps.lock; \
-		git commit -m 'update deps' -- fixdeps.lock; \
+	fix deps update --test
+	if ! git diff --quiet HEAD -- fixdeps.lock fixdeps.test.lock; then \
+		git add fixdeps.lock fixdeps.test.lock; \
+		git commit -m 'update deps' -- fixdeps.lock fixdeps.test.lock; \
 	fi
 
 # Publish a subproject.

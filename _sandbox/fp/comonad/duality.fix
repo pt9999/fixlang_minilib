@@ -1,0 +1,148 @@
+module Main;
+
+// --------------------------------------------------------------------------------
+// https://blog.functorial.com/posts/2016-08-07-Comonads-As-Spaces.html
+// https://topos.institute/blog/2023-04-24-spooling-syntax-from-behavior/
+// --------------------------------------------------------------------------------
+
+uncurry: (a -> b -> c) -> (a, b) -> c;
+uncurry = |f, (a, b)| f(a, b);
+
+cocurry: (a, b -> c) -> (a -> b) -> c;
+cocurry = |(a, bc), ab| bc(ab(a));
+
+type [f:*->*, g:*->*] Pairing f g a b = f (a -> b) -> g a -> b;
+
+uncurry_: Pairing (Arrow a) (Tuple2 a) b c;
+uncurry_ = uncurry;
+
+cocurry_: Pairing (Tuple2 a) (Arrow a) b c;
+cocurry_ = cocurry;
+
+test_uncurry_cocurry: IO ();
+test_uncurry_cocurry = (
+    println("=== test_uncurry_cocurry ===");;
+    let push_back1 = uncurry_(push_back);
+    println(to_string $ push_back1 $ (43, [42]));;
+    let push_back2 = cocurry_ $ (42, push_back(43));
+    println(to_string $ push_back2 $ pure);;
+    pure()
+);
+
+type [f:*->*, g:*->*] Product f g a = unbox struct {
+    data: (f a, g a)
+};
+
+namespace Product {
+    make: [f:*->*, g:*->*] (f a, g a) -> Product f g a;
+    make = |(fa, ga)| Product { data: (fa, ga) };
+
+    get: [f:*->*, g:*->*] Product f g a -> (f a, g a);
+    get = @data;
+
+    left: [f:*->*, g:*->*] Product f g a -> f a;
+    left = |prod| prod.@data.@0;
+
+    right: [f:*->*, g:*->*] Product f g a -> g a;
+    right = |prod| prod.@data.@1;
+
+}
+
+impl [f: Functor, g: Functor] Product f g: Functor {
+    map = |h, prod| Product::make $ (prod.left.map(h), prod.right.map(h));
+}
+
+type [f:*->*, g:*->*] Coproduct f g a = unbox union {
+    cop_inl: f a,
+    cop_inr: g a,
+};
+
+impl [f: Functor, g: Functor] Coproduct f g: Functor {
+    map = |h, copro| match copro {
+        cop_inl(fa) => cop_inl(fa.map(h)),
+        cop_inr(ga) => cop_inr(ga.map(h)),
+    };
+}
+
+//type [f:*->*, g:*->*] Pairing f g a b = f (a -> b) -> g a -> b;
+
+pair: [f1:*->*, f2:*->*, g1:*->*, g2:*->*]
+    Pairing f1 f2 a b ->
+    Pairing g1 g2 a b ->
+    Pairing (Product f1 g1) (Coproduct f2 g2) a b;
+pair = | pf: Pairing f1 f2 a b,
+         pg: Pairing g1 g2 a b,
+         prod: Product f1 g1 (a -> b),
+         coprod: Coproduct f2 g2 a| (
+    let f1ab: f1 (a -> b) = prod.left;
+    let g1ab: g1 (a -> b) = prod.right;
+    match coprod {
+        cop_inl(f2a: f2 a) => pf(f1ab, f2a),
+        cop_inr(g2a: g2 a) => pg(g1ab, g2a),
+    }
+);
+
+// --------------------------------------------------------------------------------
+// http://comonad.com/reader/2008/the-cofree-comonad-and-the-expression-problem/
+// --------------------------------------------------------------------------------
+trait [f: *->*] f: Dual {
+    type DualOf f: *->*;
+    zap: (a -> b -> c) -> f a -> DualOf f b -> c;
+}
+
+zapp: [f: Dual] f (a -> b) -> DualOf f a -> b;
+zapp = zap(|a| a);
+
+impl Identity: Dual {
+    type DualOf Identity = Identity;
+    zap = |f, ia, ib| a(ia.@data, ib.@data);
+}
+
+impl Arrow e: Dual {
+    type DualOf (Arrow e) = Tuple2 e;
+    zap = |f, e_a, (e, b)| f(e_a(e), b);
+}
+
+impl Tuple2 e: Dual {
+    type DualOf (Tuple2 e) = Arrow e;
+    zap = |f, (e, a), e_b| f(a, e_b(e));
+}
+
+uncurry2: (a -> b -> c) -> (a, b) -> c;
+uncurry2 = zapp;
+
+cocurry2: (a, b -> c) -> (a -> b) -> c;
+cocurry2 = zapp;
+
+test_uncurry_cocurry2: IO ();
+test_uncurry_cocurry2 = (
+    println("=== test_uncurry_cocurry2 ===");;
+    let push_back1 = uncurry2(push_back);
+    println(to_string $ push_back1 $ (43, [42]));;
+    let push_back2 = cocurry2 $ (42, push_back(43));
+    println(to_string $ push_back2 $ pure);;
+    pure()
+);
+
+impl [f:Dual, g:Dual] Coproduct f g: Dual {
+    type DualOf (Coproduct f g) = Product f g;
+    zap = |op, coprod, prod| match coprod {
+        cop_inl(fa) => zap(op, fa, prod.left),
+        cop_inr(ga) => zap(op, ga, prod.right),
+    };
+}
+
+impl [f:Dual, g:Dual] Product f g: Dual {
+    type DualOf (Product f g) = Coproduct f g;
+    zap = |op, prod, coprod| match coprod {
+        cop_inl(fa) => zap(op, prod.left, fa),
+        cop_inr(ga) => zap(op, prod.right, ga),
+    };
+}
+
+// --------------------------------------------------------------------------------
+main: IO () = (
+    test_uncurry_cocurry;;
+    test_uncurry_cocurry2;;
+    pure()
+);

@@ -1,0 +1,179 @@
+module Main;
+
+import HashMap;
+
+import Minilib.Common.Common;
+import Minilib.Monad.Free;
+import Minilib.Comonad.Cofree;
+import Minilib.Trait.Comonad;
+
+trait [f: *->*] f: Dual {
+    type DualOf f: *->*;
+    zap: (a -> b -> c) -> f a -> DualOf f b -> c;
+}
+
+zapp: [f: Dual] f (a -> b) -> DualOf f a -> b;
+zapp = zap(|a| a);
+
+impl Identity: Dual {
+    type DualOf Identity = Identity;
+    zap = |f, ia, ib| a(ia.@data, ib.@data);
+}
+
+impl Arrow e: Dual {
+    type DualOf (Arrow e) = Tuple2 e;
+    zap = |f, e_a, (e, b)| f(e_a(e), b);
+}
+
+impl Tuple2 e: Dual {
+    type DualOf (Tuple2 e) = Arrow e;
+    zap = |f, (e, a), e_b| f(a, e_b(e));
+}
+
+impl [f:Dual] Free f: Dual {
+    type DualOf (Free f) = Cofree (DualOf f);
+    zap = |op, free, cofree| match free {
+        f_pure(a) => (
+            let (b, gb) = cofree.run_cofree;
+            op(a, b)
+        ),
+        f_functor(fa) => (
+            let (b, gb) = cofree.run_cofree;
+            zap(zap(op), fa, gb)
+        )
+    };
+}
+
+impl [g:Dual] Cofree g: Dual {
+    type DualOf (Cofree g) = Free (DualOf g);
+    zap = |op, cofree, free| zap(op.flip, free, cofree);
+}
+
+//---------------------------------------------------------
+// MonadFileIO definition
+
+trait MonadFileIO = Monad + MonadFileIOIF;
+
+trait [m: *->*] m: MonadFileIOIF {
+    read_file: Path -> m String;
+    write_file: Path -> String -> m ();
+}
+
+namespace MonadFileIOTest {
+    test_monad_file_io: [m: MonadFileIO] m String;
+    test_monad_file_io = (
+        let msg = "";
+        write_file("/home/user1/test1.txt", "Hello world");;
+        write_file("/home/user1/test2.txt", "Foo bar baz");;
+        let data = *read_file("/home/user1/test1.txt");
+        let msg = msg + "reading from test1.txt: " + data + "\n";
+        let data = *read_file("/home/user1/test2.txt");
+        let msg = msg + "reading from test2.txt: " + data + "\n";
+        pure $ msg
+    );
+}
+
+//---------------------------------------------------------
+// MonadFileIO implementation using a Free Monad
+
+type FileIORequest a = unbox union {
+    req_read_file: (Path, String -> a),
+    req_write_file: ((Path, String), () -> a),
+};
+
+impl FileIORequest: Functor {
+    map = |f, req| match req {
+        req_read_file((arg, next)) => req_read_file((arg, next.map(f))),
+        req_write_file((arg, next)) => req_write_file((arg, next.map(f))),
+    };
+}
+
+//type FileIO a = Free FileIORequest a;
+
+impl Free FileIORequest: MonadFileIOIF {
+    read_file = |path| req_read_file((path, id)).lift_f;
+    write_file = |path, data| req_write_file(((path, data), id)).lift_f;
+}
+
+//---------------------------------------------------------
+// Preparing a Cofree Comonad
+
+type FileIOResponse b = unbox struct {
+    res_read_file: Path -> (String, b),
+    res_write_file: Path -> String -> b,
+};
+
+impl FileIOResponse: Functor {
+    map = |f, res| FileIOResponse {
+        res_read_file: res.@res_read_file.map(map(f)),
+        res_write_file: res.@res_write_file.map(map(f)),
+    };
+}
+
+impl FileIORequest: Dual {
+    type DualOf FileIORequest = FileIOResponse;
+    zap = |f, req, res| match req {
+        req_read_file((path, callback)) => (
+            let (data, b) = (res.@res_read_file)(path);
+            let a = callback(data);
+            f(a, b)
+        ),
+        req_write_file(((path, data), callback)) => (
+            let b = (res.@res_write_file)(path, data);
+            let a = callback();
+            f(a, b)
+        ),
+    };
+}
+
+impl FileIOResponse: Dual {
+    type DualOf FileIOResponse = FileIORequest;
+    zap = |f, res, req| zap(f.flip, req, res);
+}
+
+type MockFileIO = unbox struct {
+    files: HashMap Path String,
+};
+
+namespace MockFileIO {
+    empty: MockFileIO;
+    empty = MockFileIO {
+        files: HashMap::empty(10),
+    };
+
+    mock_read_file: MockFileIO -> Path -> (String, MockFileIO);
+    mock_read_file = |mock, path| (
+        match mock.@files.find(path) {
+            none() => ("", mock),
+            some(data) => (data, mock),
+        }
+    );
+
+    mock_write_file: MockFileIO -> Path -> String -> MockFileIO;
+    mock_write_file = |mock, path, data| (
+        mock.mod_files(insert(path, data))
+    );
+
+    to_response: MockFileIO -> FileIOResponse MockFileIO;
+    to_response = |mock| FileIOResponse {
+        res_read_file: mock.mock_read_file,
+        res_write_file: mock.mock_write_file,
+    };
+
+    to_cofree: MockFileIO -> Cofree FileIOResponse MockFileIO;
+    to_cofree = |mock| mock.coiter(to_response);
+}
+
+test_free_cofree_zap: IO ();
+test_free_cofree_zap = (
+    let free: Free FileIORequest String = test_monad_file_io;
+    let cofree: Cofree FileIOResponse MockFileIO = MockFileIO::empty.to_cofree;
+    let op = |a, b| (a, b);
+    let (msg, mock) = zap(op, free, cofree);
+    println(msg)
+);
+
+main: IO ();
+main = (
+    test_free_cofree_zap
+);

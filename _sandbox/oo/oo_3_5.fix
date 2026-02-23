@@ -1,0 +1,160 @@
+// [Haskell's overlooked object system](https://arxiv.org/abs/cs/0509027)
+module Main;
+
+// 3.5 Subtypes as composed record types with overloading
+
+type Shape = unbox struct {
+    x: I64,
+    y: I64,
+};
+
+namespace Shape {
+    make: I64 -> I64 -> Shape;
+    make = |x, y| Shape { x:x, y: y};
+}
+
+trait s: ShapeApi {
+    read_shape: (Shape -> t) -> s -> t;
+    write_shape: (Shape -> Shape) -> s -> s;
+
+    draw: s -> IO ();
+}
+
+impl Shape: ShapeApi {
+    read_shape = |f| f;
+    write_shape = |f| f;
+    draw = println $ "not impl";
+}
+
+namespace ShapeApi {
+    get_x: [s: ShapeApi] s -> I64 = read_shape(@x);
+    get_y: [s: ShapeApi] s -> I64 = read_shape(@y);
+    put_x: [s: ShapeApi] I64 -> s -> s = write_shape << set_x;
+    put_y: [s: ShapeApi] I64 -> s -> s = write_shape << set_y;
+}
+
+type Rectangle = unbox struct {
+    shape: Shape,
+    w: I64,
+    h: I64,
+};
+
+namespace Rectangle {
+    make: I64 -> I64 -> I64 -> I64 -> Rectangle;
+    make = |x, y, w, h| Rectangle {
+        shape: Shape::make(x, y),
+        w: w,
+        h: h,
+    };
+
+    _draw: Rectangle -> IO ();
+    _draw = |s| println $ (
+        "Rectangle: (x, y, w, h)=" + (s.get_x, s.get_y, s.get_w, s.get_h).to_string
+    );
+}
+
+trait s: RectangleApi {
+    read_rectangle: (Rectangle -> t) -> s -> t;
+    write_rectangle: (Rectangle -> Rectangle) -> s -> s;
+}
+
+impl Rectangle: ShapeApi {
+    read_shape = |f| Rectangle::@shape >> f;
+    write_shape = |f| Rectangle::mod_shape(f);
+    draw = Rectangle::_draw;
+}
+
+impl Rectangle: RectangleApi {
+    read_rectangle = |f| f;
+    write_rectangle = |f| f;
+}
+
+namespace RectangleApi {
+    get_w: [s: RectangleApi] s -> I64 = read_rectangle(@w);
+    get_h: [s: RectangleApi] s -> I64 = read_rectangle(@h);
+    put_w: [s: RectangleApi] I64 -> s -> s = write_rectangle << set_w;
+    put_h: [s: RectangleApi] I64 -> s -> s = write_rectangle << set_h;
+}
+
+type Circle = unbox struct {
+    shape: Shape,
+    r: I64,
+};
+
+namespace Circle {
+    make: I64 -> I64 -> I64 -> Circle;
+    make = |x, y, r| Circle {
+        shape: Shape::make(x, y),
+        r: r
+    };
+
+    _draw: Circle -> IO ();
+    _draw = |s| println $ (
+        "Circle: (x, y, r)=" + (s.get_x, s.get_y, s.get_r).to_string
+    );
+}
+
+trait s: CircleApi {
+    read_circle: (Circle -> t) -> s -> t;
+    write_circle: (Circle -> Circle) -> s -> s;
+}
+
+impl Circle: ShapeApi {
+    read_shape = |f| Circle::@shape >> f;
+    write_shape = |f| Circle::mod_shape(f);
+    draw = Circle::_draw;
+}
+
+impl Circle: CircleApi {
+    read_circle = |f| f;
+    write_circle = |f| f;
+}
+
+namespace CircleApi {
+    get_r: [s: CircleApi] s -> I64 = read_circle(@r);
+    put_r: [s: CircleApi] I64 -> s -> s = write_circle << set_r;
+}
+
+//------------------
+// Either type
+//------------------
+
+type Either a b = unbox union {
+    left: a,
+    right: b
+};
+
+either: (a -> c) -> (b -> c) -> Either a b -> c;
+either = |f, g, ei| match ei {
+    left(a) => f(a),
+    right(b) => g(b),
+};
+
+bimap: (a -> c) -> (b -> d) -> Either a b -> Either c d;
+bimap = |f, g, ei| match ei {
+    left(a) => left(f(a)),
+    right(b) => right(g(b)),
+};
+
+impl [a:ShapeApi, b:ShapeApi] Either a b: ShapeApi {
+    read_shape = |f| either(read_shape(f), read_shape(f));
+    write_shape = |f| bimap(write_shape(f), write_shape(f));
+    draw = either(draw, draw);
+}
+
+test_shapes: IO ();
+test_shapes = (
+    println("=== test_shapes ===");;
+    let rect = Rectangle::make(0, 0, 0, 0);
+    let rect = rect.put_x(10).put_y(20).put_w(5).put_h(3);
+    let circle = Circle::make(0, 0, 0);
+    let circle = circle.put_x(40).put_y(20).put_r(5);
+    let shapes = [left $ rect, right $ circle];
+    shapes.to_iter.map(draw).collect_m.forget
+);
+
+main: IO ();
+main = (
+    test_shapes;;
+    pure()
+);

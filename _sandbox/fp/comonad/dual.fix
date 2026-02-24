@@ -1,14 +1,16 @@
 module Minilib.Trait.Dual;
 
 import Minilib.Common.Common;
+import Minilib.Comonad.Cofree;
 import Minilib.Comonad.Env;
 import Minilib.Comonad.IdentityC;
-import Minilib.Comonad.Cofree;
 import Minilib.Comonad.IOStore;
+import Minilib.Comonad.Store;
 import Minilib.Comonad.Traced;
 import Minilib.Monad.IO;
 import Minilib.Monad.Free;
 import Minilib.Monad.Reader;
+import Minilib.Monad.State;
 import Minilib.Monad.Writer;
 import Minilib.Trait.Comonad;
 
@@ -55,6 +57,22 @@ impl [w: Comonad, m: Monad, w: Dual, DualOf w = m] EnvT e w: Dual {
     type DualOf (EnvT e w) = ReaderT e (DualOf w);
     zap = |f, env, reader| (
         zap(zap(f), (env.@env, env.@value), reader.flip(run_reader_t))
+    );
+}
+
+impl [m: Monad, w: Comonad, m: Dual, DualOf m = w] StateT s m: Dual {
+    type DualOf (StateT s m) = StoreT s (DualOf m);
+    zap = |f, state, store| (
+        //let ma: Arrow s (m (Tuple2 s a)) = state.flip(run_state_t);
+        //let wb: Tuple2 s (w (Arrow s b)) = store.run_store_t;
+        zap(zap(zap(f)), state.flip(run_state_t), store.run_store_t)
+    );
+}
+
+impl [w: Comonad, m: Monad, w: Dual, DualOf w = m] StoreT s w: Dual {
+    type DualOf (StoreT s w) = StateT s (DualOf w);
+    zap = |f, store, state| (
+        zap(zap(zap(f)), store.run_store_t, state.flip(run_state_t))
     );
 }
 

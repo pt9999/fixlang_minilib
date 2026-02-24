@@ -1,9 +1,13 @@
 all:
 
-test: test-duality test-duality2
+test: test-duality test-duality2 test-duality3
 
 test-duality:
 	fix run -f duality.fix
 
 test-duality2:
-	fix run -f duality2.fix -f ../free.fix
+	fix run -f duality2.fix -f ../free.fix -o a.out
+
+test-duality3:
+	fix run -f duality3.fix -f ../free.fix -o a.out
+

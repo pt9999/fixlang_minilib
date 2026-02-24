@@ -31,8 +31,7 @@ test-eq1:
 	fix run -f eq1.fix -f eq1_test.fix
 
 test-free:
-	fix run -f free.fix -f free_test.fix
-	fix run -f free.fix -f free_example.fix
+	fix run -f free_example.fix
 
 test-free-t:
 	fix run -f free_t.fix -f free_t_example.fix

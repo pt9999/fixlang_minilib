@@ -4,108 +4,13 @@ module Main;
 import HashMap;
 
 import Minilib.Common.Common;
+import Minilib.Comonad.Cofree;
+import Minilib.Comonad.IOStore;
 import Minilib.Monad.IO;
 import Minilib.Monad.Free;
-import Minilib.Comonad.Cofree;
 import Minilib.Trait.Comonad;
+import Minilib.Trait.Dual;
 
-trait [f: *->*] f: Dual {
-    type DualOf f: *->*;
-    zap: (a -> b -> c) -> f a -> DualOf f b -> c;
-}
-
-zapp: [f: Dual] f (a -> b) -> DualOf f a -> b;
-zapp = zap(|a| a);
-
-impl Identity: Dual {
-    type DualOf Identity = Identity;
-    zap = |f, ia, ib| a(ia.@data, ib.@data);
-}
-
-impl Arrow e: Dual {
-    type DualOf (Arrow e) = Tuple2 e;
-    zap = |f, e_a, (e, b)| f(e_a(e), b);
-}
-
-impl Tuple2 e: Dual {
-    type DualOf (Tuple2 e) = Arrow e;
-    zap = |f, (e, a), e_b| f(a, e_b(e));
-}
-
-impl [f:Dual] Free f: Dual {
-    type DualOf (Free f) = Cofree (DualOf f);
-    zap = |op, free, cofree| match free {
-        f_pure(a) => (
-            let (b, gb) = cofree.run_cofree;
-            op(a, b)
-        ),
-        f_functor(fa) => (
-            let (b, gb) = cofree.run_cofree;
-            zap(zap(op), fa, gb)
-        )
-    };
-}
-
-impl [g:Dual] Cofree g: Dual {
-    type DualOf (Cofree g) = Free (DualOf g);
-    zap = |op, cofree, free| zap(op.flip, free, cofree);
-}
-
-//------------------------------------------------------
-// IOStore comonad
-// (Specialized store comonad whose state is IOState)
-
-type IOStore a = unbox struct {
-    data: (IOState, IOState -> a)
-};
-
-namespace IOStore {
-    make: (IOState, IOState -> a) -> IOStore a;
-    make = |data| IOStore { data: data };
-
-    run_io_store: IOStore a -> (IOState, IOState -> a);
-    run_io_store = @data;
-
-/*
-    with_io_store: (IOStore () -> a) -> IO a;
-    with_io_store = |g| (
-        IO::from_runner(|ios|
-            let io_store = IOStore::make(ios, |_| ());
-            @@@@
-            (ios, c)
-        )
-    );
-*/
-}
-
-impl IOStore: Functor {
-    map = |g, store| (
-        let (ios, f) = store.@data;
-        IOStore::make $ (ios, f.map(g))
-    );
-}
-
-impl IOStore: Comonad {
-    extract = |store| (
-        let (ios, f) = store.run_io_store;
-        f(ios)
-    );
-    extend = |g, store| (
-        let (ios, fb) = store.run_io_store;
-        let fa = |ios| g $ IOStore::make $ (ios, fb);
-        IOStore::make $ (ios, fa)
-    );
-}
-
-impl IO: Dual {
-    type DualOf IO = IOStore;
-    zap = |op, io, io_store| (
-        let (ios, fb) =  io_store.run_io_store;
-        let (ios, a) = (io.@runner)(ios);
-        let b = fb(ios);
-        op(a, b)
-    );
-}
 
 test_io_store: IO ();
 test_io_store = (

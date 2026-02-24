@@ -56,16 +56,18 @@ namespace MonadFileIOTest {
 //---------------------------------------------------------
 // MonadFileIO implementation using a Free Monad
 
+type Req arg ret a = Tuple2 arg (Arrow ret a);
+
 type FileIORequest a = unbox union {
-    req_read_file: (Path, String -> a),         // Tuple2 Path (Arrow String a)
-    req_write_file: ((Path, String), () -> a),  // Tuple2 (Path, String) (Arrow () a)
+    req_read_file: Req Path String a,         // Tuple2 Path (Arrow String a)
+    req_write_file: Req (Path, String) () a,  // Tuple2 (Path, String) (Arrow () a)
     req_io: IO a,
 };
 
 impl FileIORequest: Functor {
     map = |f, req| match req {
-        req_read_file((arg, next)) => req_read_file((arg, next.map(f))),
-        req_write_file((arg, next)) => req_write_file((arg, next.map(f))),
+        req_read_file(req) => req_read_file(req.map(map(f))),
+        req_write_file(req) => req_write_file(req.map(map(f))),
         req_io(io) => req_io(io.map(f)),
     };
 }
@@ -76,17 +78,26 @@ impl FileIORequest: MonadIOIF {
 
 //type FileIO a = Free FileIORequest a;
 
+lift_req: [f: Functor] (Req arg ret ret -> f ret) -> arg -> Free f ret;
+lift_req = |variant, arg| (
+    lift_f $ variant $ (arg, id)
+);
+
 impl Free FileIORequest: MonadFileIOIF {
-    read_file = |path| req_read_file((path, id)).lift_f;
-    write_file = |path, data| req_write_file(((path, data), id)).lift_f;
+    //read_file = |path| req_read_file((path, id)).lift_f;
+    read_file = req_read_file.lift_req;
+    //write_file = |path, data| req_write_file(((path, data), id)).lift_f;
+    write_file = compose2(pair) $ req_write_file.lift_req;
 }
 
 //---------------------------------------------------------
 // Preparing a Cofree Comonad
 
+type CoReq arg ret a = Arrow arg (Tuple2 ret a);
+
 type FileIOResponse b = unbox struct {
-    res_read_file: Path -> (String, b),         // Arrow Path (Tuple2 String b)
-    res_write_file: (Path, String) -> ((), b),  // Arrow (Path, String) (Tuple2 () b)
+    res_read_file: CoReq Path String b,         // Arrow Path (Tuple2 String b)
+    res_write_file: CoReq (Path, String) () b,  // Arrow (Path, String) (Tuple2 () b)
     res_io: IOStore b,
 };
 

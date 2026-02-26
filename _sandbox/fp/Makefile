@@ -21,7 +21,7 @@ test-cont:
 	fix run -f cont_test1.fix
 
 test-effect:
-	fix run -f effect_example1.fix -f either_t.fix -f eq1.fix -f free.fix
+	fix run -f effect_example1.fix -f either_t.fix -f eq1.fix
 
 test-either-t:
 	fix run -f either_t.fix -f either_t_test.fix -f eq1.fix
@@ -68,7 +68,7 @@ test-misc:
 	fix run -f denotation.fix
 	fix run -f fast_iter_bench.fix
 	fix run -f fib6s.fix
-	fix run -f fragment.fix
+	fix run -f fragment.fix -O max
 	fix run -f lens.fix
 	# fix run -f monoid_ex.fix monoid_test1.fix			# requires minilib-math
 	fix run -f newtype.fix

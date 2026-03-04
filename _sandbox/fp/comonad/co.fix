@@ -1,0 +1,128 @@
+// Based on following blog post:
+// [The Comonad.Reader - Monads from Comonads](http://comonad.com/reader/2011/monads-from-comonads/)
+module Main;
+
+import Minilib.Common.Common;
+import Minilib.Comonad.IdentityC;
+import Minilib.Comonad.Store;
+import Minilib.Monad.State;
+import Minilib.Trait.Comonad;
+import Minilib.Testing.UnitTest;
+
+type [w: *->*] Co r w a = unbox struct {
+    data: w (a -> r) -> r
+};
+
+namespace Co {
+    make: [w: *->*] (w (a -> r) -> r) -> Co r w a;
+    make = |cont| Co { data: cont };
+
+    co: [w: *->*] (w (a -> r) -> r) -> Co r w a;
+    co = make;
+
+    run_co: [w: *->*] w (a -> r) -> Co r w a -> r;
+    run_co = |war, Co { data: cont }| cont(war);
+}
+
+impl [w: Functor] Co r w: Functor {
+    map = |f, Co { data: cont }| (
+        Co { data: cont << Functor::map(compose(f)) }
+    );
+}
+
+impl [w: Comonad] Co r w: Monad {
+    pure = |a| Co { data: extract >> apply(a) };
+    bind = |f, Co { data: cont }| (
+        Co { data: cont << extend(|wa, a| f(a).run_co(wa)) }
+    );
+}
+
+// TODO: change the kind of `Store` type alias in minilib-comonad@0.7.0
+type Store0 p = StoreT p IdentityC;
+
+impl Co r (Store0 s): MonadStateIF {
+    type StateType (Co r (Store0 s)) = s;
+    get_state = Co { data: |w| (w.extract)(w.pos) };
+    put_state = |s| Co { data: |w| (w.peek(s))() };
+    mod_state_ = |f| (
+        let s = *get_state;
+        put_state(f(s))
+    );
+}
+
+test_co_run_co: TestCase;
+test_co_run_co = (
+    make_test("test_co_run_co") $ |_|
+    let coa: Co U64 IdentityC I64 = Co::make $ extract >> apply(42);
+    let war: IdentityC (I64 -> U64) = IdentityC::make $ add(1) >> I64::to_U64;
+    let r = coa.run_co(war);
+    assert_equal("eq", 43_U64, r)
+);
+
+test_co_functor: TestCase;
+test_co_functor = (
+    make_test("test_co_functor") $ |_|
+    let coa: Co U64 IdentityC I64 = Co::make $ |war: IdentityC (I64 -> U64)| (
+        (war.extract)(42)
+    );
+    let cob: Co U64 IdentityC I32 = coa.map(I64::to_I32);
+    let wbr: IdentityC (I32 -> U64) = IdentityC::make $ I32::to_U64;
+    let r = cob.run_co(wbr);
+    assert_equal("eq", 42_U64, r)
+);
+
+test_co_pure: TestCase;
+test_co_pure = (
+    make_test("test_co_pure") $ |_|
+    let coa: Co U64 IdentityC I64 = pure(42);
+    let war: IdentityC (I64 -> U64) = IdentityC::make $ I64::to_U64;
+    let r = coa.run_co(war);
+    assert_equal("eq", 42_U64, r)
+);
+
+test_co_bind: TestCase;
+test_co_bind = (
+    make_test("test_co_bind") $ |_|
+    let coa: Co (IOFail ()) IdentityC I64 = pure(42);
+    let cob: Co (IOFail ()) IdentityC I32 = do {
+        let i64: I64 = *coa;
+        pure $ (i64 * 2 + 1).to_I32
+    };
+    let coc: Co (IOFail ()) IdentityC String = cob.bind(|i32|
+        pure $ i32.to_string
+    );
+    let wr: IdentityC (String -> IOFail ()) = IdentityC::make $ |str| (
+        assert_equal("eq", "85", str)
+    );
+    coc.run_co(wr)
+);
+
+test_co_state: TestCase;
+test_co_state = (
+    make_test("test_co_state") $ |_|
+    let n = 5;
+    let coa: Co (IOFail ()) (Store0 I64) (Array I64) = range(0, n).map(|_|
+        let i = *get_state;
+        put_state(i + 1);;
+        State::mod_state(add(2));;
+        pure $ i
+    ).collect_m;
+    let state: I64 = 10;
+    let war: Store0 I64 (Array I64 -> IOFail ()) = Store::store $ (state, |state, ret|
+        assert_equal("state", 25, state);;
+        assert_equal("ret", [10, 13, 16, 19, 22], ret)
+    );
+    coa.run_co(war)
+);
+
+main: IO ();
+main = (
+    [
+        test_co_run_co,
+        test_co_functor,
+        test_co_pure,
+        test_co_bind,
+        test_co_state,
+    ]
+    .run_test_driver
+);

@@ -3,7 +3,7 @@
 Minilib is a small library for [FixLang](https://github.com/tttmmmyyyy/fixlang).
 This library is still in alpha stage.
 
-To use the latest Minilib, we recommend using the latest Fix v1.3.0-prealpha (2026-02-08+). 
+To use the latest Minilib, we recommend using the latest Fix v1.3.0-beta+ (2026-03-09).
 For older Fix versions prior to v1.3.0, see the [Compatibility](#Compatibility) section below.
 
 Currently only Linux (x86_64, aarch64) is supported. MacOS is not supported yet.
@@ -25,13 +25,13 @@ fix deps add minilib-common minilib-binary
 
 | Name   | Description |
 |--------|-------------|
-|[minilib-common](https://github.com/pt9999/fixlang-minilib-common)| Common modules (UnitTest, Assertion, String extension etc.)|
-|[minilib-text](https://github.com/pt9999/fixlang-minilib-text)| Text handling (SimpleParser, Unicode etc.)|
+|[minilib-common](https://github.com/pt9999/fixlang-minilib-common)| Common modules (UnitTest, Extensions of IO/Iterator/String/Time etc.)|
+|[minilib-text](https://github.com/pt9999/fixlang-minilib-text)| Text handling (Parser, Unicode, WideChar, Locale etc.)|
 |[minilib-binary](https://github.com/pt9999/fixlang-minilib-binary)| Binary handling (ByteBuffer, BASE64, Hex string)|
 |[minilib-io](https://github.com/pt9999/fixlang-minilib-io)| IO operations (File System, Platform Info etc.)|
 |[minilib-collection](https://github.com/pt9999/fixlang-minilib-collection)| Collections (TreeSet, TreeMap, OrderedMap, Deque etc.)|
-|[minilib-monad](https://github.com/pt9999/fixlang-minilib-monad)| Monads (State/Reader/Writer monad, Monad transformer etc.)|
-|[minilib-comonad](https://github.com/pt9999/fixlang-minilib-comonad)| Comonads (Env/Traced comonad etc.)|
+|[minilib-monad](https://github.com/pt9999/fixlang-minilib-monad)| Monads (State/Reader/Writer/Free monad, Monad transformer etc.)|
+|[minilib-comonad](https://github.com/pt9999/fixlang-minilib-comonad)| Comonads (Store/Env/Traced/Cofree comonad etc.)|
 |[minilib-random](https://github.com/pt9999/fixlang-minilib-random)| Random monad etc. |
 |[minilib-thread](https://github.com/pt9999/fixlang-minilib-thread)| Multithreading (Task pool, Channel etc.) |
 |[minilib-net](https://github.com/pt9999/fixlang-minilib-net)| Networks (TCP/IP, HTTP etc.) |

@@ -20,6 +20,7 @@ build:
 test: test-fix test-document
 
 test-fix:
+	fix check
 	fix test -O basic
 	fix test -O max
 

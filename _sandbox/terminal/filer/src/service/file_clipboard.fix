@@ -1,0 +1,90 @@
+// work in progress
+@@@
+module Filer.Service.FileClipboard;
+
+import HashSet;
+import Minilib.Common.IORef;
+import Minilib.IO.Path;
+
+import Filer.Common;
+
+type FileClipStatus = unbox union {
+    clip_none: (),
+    clip_copy: (),
+    clip_cut: (),
+}
+
+type FileClipboardServiceApi = unbox struct {
+    clear: IOFail (),
+    // `file_paths`
+    cut: Array Path -> IOFail (),
+    // `file_paths`
+    copy: Array Path -> IOFail (),
+    // `dir_path`
+    paste: Path -> IOFail (),
+    // `file_path`
+    get_file_clip_status: Path -> IOFail FileClipStatus,
+};
+
+
+namespace FileClipboardServiceApi {
+    mock_api: IOFail FileClipboardServiceApi;
+    mock_api = do {
+        pure();;
+        pure $ FileClipboardServiceApi {
+            clear: pure(),
+            add: |path| pure(),
+            remove: |path| pure(),
+            contains: |path| pure(false),
+            set_cut_mode: |b| pure(),
+            is_cut_mode: pure(false),
+        }
+    };
+
+    real_api: IOFail FileClipboardServiceApi;
+    real_api = do {
+        pure();;
+        let service = *FileClipboardService::make;
+        pure $ FileClipboardServiceApi {
+            clear: pure(),
+            add: |path| pure(),
+            remove: |path| pure(),
+            contains: |path| pure(false),
+            set_cut_mode: |b| pure(),
+            is_cut_mode: pure(false),
+        }
+    };
+}
+
+type FileClipboardService = unbox struct {
+    clipboard: IORef FileClipboard,
+};
+
+
+type FileClipboard = unbox struct {
+    files: HashSet Path,
+    mode: FileClipboardMode,
+};
+
+namespace FileClipboard {
+    empty: FileClipboard;
+    empty = FileClipboard {
+        files: HashSet::empty(10),
+        mode: fcm_copy(),
+    };
+
+    clear: [m: MonadIO] IORef FileClipboard -> m ();
+    clear = |ioref| (
+        ioref.mod(mod_files(HashSet::clear))
+    );
+
+    insert: [m: MonadIO] Path -> IORef FileClipboard -> m ();
+    insert = |path, ioref| (
+        ioref.mod(mod_files(HashSet::insert(path)))
+    );
+
+    erase: [m: MonadIO] Path -> IORef FileClipboard -> m ();
+    erase = |path, ioref| (
+        ioref.mod(mod_files(HashSet::erase(path)))
+    );
+}

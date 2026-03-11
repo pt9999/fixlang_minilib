@@ -4,7 +4,7 @@ build:
 	fix build
 
 test:
-	fix test
+	fix test -o a.out
 
 document:
 	fix docs -o docs

@@ -81,6 +81,21 @@ namespace FileListView {
         }
     );
 
+    toggle_file_mark: StateIOF FileListView ();
+    toggle_file_mark = (
+        let file_items = *select_state(@file_items);
+        let selected_index = *with_list_view(select_state(@selected_index));
+        if ! (0 <= selected_index && selected_index < file_items.get_size) {
+            pure()
+        };
+        State::mod_state(mod_file_items(mod(selected_index, |file_item|
+            file_item.mod_mark(|mark| !mark)
+        )));;
+        let file_items = *select_state(@file_items);
+        let list_items = file_items.map(to_list_item);
+        with_list_view(update_items(list_items))
+    );
+
     show: StateIOF FileListView ();
     show =  (
         with_list_view $ ListView::show
@@ -106,6 +121,9 @@ namespace FileListView {
         if key == "." || key == "^" || key == "KEY_BACKSPACE" {
             pure $ action_up_directory()
         };
+        if key == " " {
+            pure $ action_toggle_mark()
+        };
         if key == "" && *has_active_file_items {
             pure $ action_update_file_items()
         };
@@ -118,6 +136,7 @@ namespace FileListView {
         pure $ help + [
             (" Enter        ^J", "開く"),
             ("   .      ^     ", "親ディレクトリ"),
+            (" Space          ", "選択"),
         ]
     };
 
@@ -127,6 +146,7 @@ namespace FileListView {
         match action {
             action_up_directory() => up_directory,
             action_update_file_items() => update_file_items,
+            action_toggle_mark() => toggle_file_mark,
             _ => pure()
         }
     );

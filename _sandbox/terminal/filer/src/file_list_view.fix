@@ -4,6 +4,7 @@ import Minilib.IO.Path;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Terminal.Ncurses;
+import Minilib.Trait.Traversable;
 
 import Filer.Common;
 import Filer.FileItem;
@@ -24,9 +25,9 @@ impl FileListView: WithListView {
 namespace FileListView {
     make: AppEnv -> Window -> String -> IOFail FileListView;
     make = |app_env, window, dir_path| (
-        // TODO: create with empty file items then call update_file_items
+        // TODO: create with empty file items then call reload_file_items
         let file_items = *get_file_items(app_env, dir_path);
-        let list_items = file_items.map(to_list_item);
+        let list_items = *file_items.map_m(to_list_item(app_env));
         let list_view = *ListView::make(window, list_items);
         let list_view = list_view.set_title(dir_path);
         pure $ FileListView {
@@ -45,17 +46,24 @@ namespace FileListView {
         )
     );
 
-    update_file_items: StateIOF FileListView ();
-    update_file_items = (
+    reload_file_items: StateIOF FileListView ();
+    reload_file_items = (
         let FileListView {
             app_env: app_env,
             dir_path: dir_path
         } = *get_state;
         let file_items = *get_file_items(app_env, dir_path);
-        let list_items = file_items.map(to_list_item);
         State::mod_state(set_file_items(file_items));;
-        with_list_view(update_items(list_items));;
-        pure()
+        update_list_items
+    );
+
+    // Updates list items from file items
+    update_list_items: StateIOF FileListView ();
+    update_list_items = (
+        let app_env = *select_state(@app_env);
+        let file_items = *select_state(@file_items);
+        let list_items = *file_items.map_m(to_list_item(app_env));
+        with_list_view(update_items(list_items))
     );
 
     has_focus: StateIOF FileListView Bool;
@@ -91,9 +99,18 @@ namespace FileListView {
         State::mod_state(mod_file_items(mod(selected_index, |file_item|
             file_item.mod_mark(|mark| !mark)
         )));;
+        update_list_items
+    );
+
+    cut_or_copy_files: Bool -> StateIOF FileListView ();
+    cut_or_copy_files = |is_cut| (
         let file_items = *select_state(@file_items);
-        let list_items = file_items.map(to_list_item);
-        with_list_view(update_items(list_items))
+        let file_paths = file_items.to_iter.filter(|item| item.@mark).map(|item| item.@file_path).to_array;
+        let app_env = *select_state(@app_env);
+        lift_iofail $ if is_cut { (app_env.@file_clipboard.@cut)(file_paths) }
+        else { (app_env.@file_clipboard.@copy)(file_paths) };;
+        State::mod_state(mod_file_items(map(set_mark(false))));;
+        update_list_items
     );
 
     show: StateIOF FileListView ();
@@ -124,8 +141,17 @@ namespace FileListView {
         if key == " " {
             pure $ action_toggle_mark()
         };
+        if key == "x" {
+            pure $ action_cut()
+        };
+        if key == "c" {
+            pure $ action_copy()
+        };
+        if key == "v" {
+            pure $ action_paste()
+        };
         if key == "" && *has_active_file_items {
-            pure $ action_update_file_items()
+            pure $ action_reload_file_items()
         };
         pure $ no_action()
     );
@@ -137,6 +163,9 @@ namespace FileListView {
             (" Enter        ^J", "開く"),
             ("   .      ^     ", "親ディレクトリ"),
             (" Space          ", "選択"),
+            ("          x     ", "カット"),
+            ("          c     ", "コピー"),
+            ("          v     ", "ペースト"),
         ]
     };
 
@@ -145,8 +174,10 @@ namespace FileListView {
         with_list_view(ListView::handle_action(action));;
         match action {
             action_up_directory() => up_directory,
-            action_update_file_items() => update_file_items,
+            action_reload_file_items() => reload_file_items,
             action_toggle_mark() => toggle_file_mark,
+            action_cut() => cut_or_copy_files(true),
+            action_copy() => cut_or_copy_files(false),
             _ => pure()
         }
     );

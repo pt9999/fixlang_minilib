@@ -73,20 +73,30 @@ namespace FileItem {
         (size.to_F64 / 1.0e9).short + " GB"
     );
 
-    get_attr: FileItem -> ChType;
-    get_attr = |item| (
-        let stat = item.@stat;
-        if stat.is_dir { color_pair(cp_blue).bit_or(bold) };
-        if stat.is_symbolic_link { color_pair(cp_cyan).bit_or(bold) };
-        if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { color_pair(cp_green).bit_or(bold) };
-        color_pair(cp_white)
+    get_attr: [m: MonadIOFail] AppEnv -> FileItem -> m ChType;
+    get_attr = |app_env, item| (
+        let (cp: ColorPair, attr: Attr) = (
+            let stat = item.@stat;
+            if stat.is_dir { (cp_blue, Attr::bold) };
+            if stat.is_symbolic_link { (cp_cyan, Attr::bold) };
+            if stat.st_mode.bit_and(0o100_U32) == 0o100_U32 { (cp_green, Attr::bold) };
+            (cp_white, Attr::normal)
+        );
+
+        let mode = *(app_env.@file_clipboard.@get_file_clip_status)(item.@file_path).lift_iofail;
+        let attr = match mode {
+            fileclip_none() => attr,
+            fileclip_cut() => Attr::dim,
+            fileclip_copy() => Attr::underline,
+        };
+        pure $ color_pair(cp).bit_or(attr)
     );
 
-    to_list_item: FileItem -> ListItem;
-    to_list_item = |file_item| (
-        ListItem {
+    to_list_item: [m: MonadIOFail] AppEnv -> FileItem -> m ListItem;
+    to_list_item = |app_env, file_item| (
+        pure $ ListItem {
             text: file_item.format_file_item,
-            attr: file_item.get_attr
+            attr: *file_item.get_attr(app_env)
         }
     );
 }

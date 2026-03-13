@@ -1,31 +1,14 @@
-// work in progress
-@@@
 module Filer.Service.FileClipboard;
 
 import HashSet;
+import Subprocess;
+
 import Minilib.Common.IORef;
+import Minilib.IO.FileSystem;
 import Minilib.IO.Path;
+import Minilib.Monad.IO;
 
 import Filer.Common;
-
-type FileClipStatus = unbox union {
-    clip_none: (),
-    clip_copy: (),
-    clip_cut: (),
-}
-
-type FileClipboardServiceApi = unbox struct {
-    clear: IOFail (),
-    // `file_paths`
-    cut: Array Path -> IOFail (),
-    // `file_paths`
-    copy: Array Path -> IOFail (),
-    // `dir_path`
-    paste: Path -> IOFail (),
-    // `file_path`
-    get_file_clip_status: Path -> IOFail FileClipStatus,
-};
-
 
 namespace FileClipboardServiceApi {
     mock_api: IOFail FileClipboardServiceApi;
@@ -33,11 +16,10 @@ namespace FileClipboardServiceApi {
         pure();;
         pure $ FileClipboardServiceApi {
             clear: pure(),
-            add: |path| pure(),
-            remove: |path| pure(),
-            contains: |path| pure(false),
-            set_cut_mode: |b| pure(),
-            is_cut_mode: pure(false),
+            copy: |file_paths| pure(),
+            cut: |file_paths| pure(),
+            paste: |target_dir_path| pure(),
+            get_file_clip_status: |file_path| pure $ fileclip_none(),
         }
     };
 
@@ -46,12 +28,11 @@ namespace FileClipboardServiceApi {
         pure();;
         let service = *FileClipboardService::make;
         pure $ FileClipboardServiceApi {
-            clear: pure(),
-            add: |path| pure(),
-            remove: |path| pure(),
-            contains: |path| pure(false),
-            set_cut_mode: |b| pure(),
-            is_cut_mode: pure(false),
+            clear: service.clear,
+            copy: |file_paths| service.copy(file_paths),
+            cut: |file_paths| service.cut(file_paths),
+            paste: |target_dir_path| service.paste(target_dir_path),
+            get_file_clip_status: |file_path| service.get_file_clip_status(file_path),
         }
     };
 }
@@ -60,31 +41,109 @@ type FileClipboardService = unbox struct {
     clipboard: IORef FileClipboard,
 };
 
+namespace FileClipboardService {
+    make: [m: MonadIO] m FileClipboardService;
+    make = pure $ FileClipboardService {
+        clipboard: *IORef::make(FileClipboard::empty)
+    };
+
+    clear: [m: MonadIO] FileClipboardService -> m ();
+    clear = |service| (
+        service.@clipboard.set(
+            FileClipboard::make([], fileclip_none())
+        )
+    );
+
+    copy: [m: MonadIO] Array Path -> FileClipboardService -> m ();
+    copy = |file_paths, service| (
+        service.@clipboard.set(
+            FileClipboard::make(file_paths, fileclip_copy())
+        )
+    );
+
+    cut: [m: MonadIO] Array Path -> FileClipboardService -> m ();
+    cut = |file_paths, service| (
+        service.@clipboard.set(
+            FileClipboard::make(file_paths, fileclip_cut())
+        )
+    );
+
+    paste: [m: MonadIOFail] Path -> FileClipboardService -> m ();
+    paste = |target_dir_path, service| lift_iofail $ do {
+        let clipboard = *service.@clipboard.get;
+        let file_paths = clipboard.@file_paths.to_iter.to_array.sort;
+        if clipboard.@mode.is_fileclip_none { pure() };
+        if !*directory_exists(target_dir_path) {
+            throw $ "Directory not found: " + target_dir_path
+        };
+        match clipboard.@mode {
+            fileclip_copy() => FileOps::copy_files(file_paths, target_dir_path),
+            fileclip_cut() => FileOps::move_files(file_paths, target_dir_path),
+            _ => undefined("Invalid mode"),
+        };;
+        service.clear
+    };
+
+    get_file_clip_status: [m: MonadIO] Path -> FileClipboardService -> m FileClipMode;
+    get_file_clip_status = |file_path, service| (
+        let clipboard = *service.@clipboard.get;
+        if clipboard.@file_paths.contains(file_path) {
+            pure $ clipboard.@mode
+        };
+        pure $ fileclip_none()
+    );
+}
 
 type FileClipboard = unbox struct {
-    files: HashSet Path,
-    mode: FileClipboardMode,
+    file_paths: HashSet Path,
+    mode: FileClipMode,
 };
 
 namespace FileClipboard {
-    empty: FileClipboard;
-    empty = FileClipboard {
-        files: HashSet::empty(10),
-        mode: fcm_copy(),
+    make: Array Path -> FileClipMode -> FileClipboard;
+    make = |file_paths, mode| FileClipboard {
+        file_paths: file_paths.to_iter.fold(
+            HashSet::empty(10), HashSet::insert
+        ),
+        mode: mode,
     };
 
-    clear: [m: MonadIO] IORef FileClipboard -> m ();
-    clear = |ioref| (
-        ioref.mod(mod_files(HashSet::clear))
+    empty: FileClipboard;
+    empty = FileClipboard::make([], fileclip_none());
+}
+
+namespace FileOps {
+    move_files: Array Path -> Path -> IOFail ();
+    move_files = |file_paths, target_dir_path| (
+        let args = ["/bin/echo", "/bin/mv"] + file_paths + [ target_dir_path ];
+        run_process(args)
     );
 
-    insert: [m: MonadIO] Path -> IORef FileClipboard -> m ();
-    insert = |path, ioref| (
-        ioref.mod(mod_files(HashSet::insert(path)))
+    copy_files: Array Path -> Path -> IOFail ();
+    copy_files = |file_paths, target_dir_path| (
+        let args = ["/bin/echo", "/bin/cp", "-p"] + file_paths + [ target_dir_path ];
+        run_process(args)
     );
 
-    erase: [m: MonadIO] Path -> IORef FileClipboard -> m ();
-    erase = |path, ioref| (
-        ioref.mod(mod_files(HashSet::erase(path)))
+    run_process: Array String -> IOFail ();
+    run_process = |args| (
+        log_debug("run_process: args=" + args.to_string);;
+        let ((stdout, stderr), exit_status) = *Subprocess::run_string(args.@(0), args, "");
+        log_debug(" stdout=" + stdout + " stderr=" + stderr + " exit_status=" + exit_status_to_string(exit_status));;
+        if exit_status.is_exit && exit_status.as_exit == 0_U8 {
+            // TODO: ignore stdout and stderr?
+            pure $ ()
+        } else {
+            throw $ "subprocess failed with " + exit_status_to_string(exit_status)
+        }
+    );
+
+    exit_status_to_string: ExitStatus -> String;
+    exit_status_to_string = |ex| (
+        match ex {
+            exit(u8) => "exit(" + u8.to_string + ")",
+            signaled(u8) => "signaled(" + u8.to_string + ")",
+            wait_failed() => "wait_failed()"
+        }
     );
 }

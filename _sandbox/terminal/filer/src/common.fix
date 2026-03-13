@@ -1,9 +1,17 @@
 module Filer.Common;
 
+import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Terminal.Ncurses;
 import Minilib.Text.StringEx;
 //import Minilib.Text.Unicode;
+
+log_debug: [m: MonadIOFail] String -> m ();
+log_debug = |str| lift_iofail $ do {
+    with_file("/tmp/filer.log", "a+", |handle|
+        write_string(handle, str + "\n")
+    )
+};
 
 type StateIOF s = StateT s IOFail;
 
@@ -92,12 +100,16 @@ type Action = unbox union {
     action_page_down: ListViewId,
     action_open_file: (),
     action_up_directory: (),
-    action_update_file_items: (),
+    action_reload_file_items: (),
     action_toggle_mark: (),
+    action_copy: (),
+    action_cut: (),
+    action_paste: (),
 };
 
 type AppEnv = unbox struct {
     disk_usage: DiskUsageServiceApi,
+    file_clipboard: FileClipboardServiceApi,
     shutdown: IOFail (),
 };
 
@@ -107,4 +119,35 @@ type DiskUsageServiceApi = unbox struct {
     get_dir_size: Path -> IOFail (I64, I64),
     drain_errors: IOFail (Array String),
     shutdown: IOFail (),
+};
+
+type FileClipMode = unbox union {
+    fileclip_none: (),
+    fileclip_copy: (),
+    fileclip_cut: (),
+};
+
+type FileClipboardServiceApi = unbox struct {
+    // Clears the clipboard.
+    clear: IOFail (),
+    // Registers the specified files as "copy" into the clipboard.
+    //
+    // # Parameters
+    // - `file_paths`: file paths
+    copy: Array Path -> IOFail (),
+    // Registers the specified files as "cut" into the clipboard.
+    //
+    // # Parameters
+    // - `file_paths`: file paths
+    cut: Array Path -> IOFail (),
+    // Copies or moves the registered files to the target directory.
+    //
+    // # Parameters
+    // - `target_dir_path`: the target directory path
+    paste: Path -> IOFail (),
+    // Gets the clip status of the specified file.
+    //
+    // # Parameters
+    // - `file_path`: a file path
+    get_file_clip_status: Path -> IOFail FileClipMode,
 };

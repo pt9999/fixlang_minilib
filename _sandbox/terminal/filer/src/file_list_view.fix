@@ -1,6 +1,7 @@
 module Filer.FileListView;
 
 import Minilib.IO.Path;
+import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Terminal.Ncurses;
@@ -113,6 +114,18 @@ namespace FileListView {
         update_list_items
     );
 
+    paste_files: StateIOF FileListView ();
+    paste_files = (
+        let dir_path = *select_state(@dir_path);
+        let app_env = *select_state(@app_env);
+        do {
+            lift_iofail $ (app_env.@file_clipboard.@paste)(dir_path)
+        }
+        .finally(
+            reload_file_items
+        )
+    );
+
     show: StateIOF FileListView ();
     show =  (
         with_list_view $ ListView::show
@@ -178,6 +191,7 @@ namespace FileListView {
             action_toggle_mark() => toggle_file_mark,
             action_cut() => cut_or_copy_files(true),
             action_copy() => cut_or_copy_files(false),
+            action_paste() => paste_files,
             _ => pure()
         }
     );

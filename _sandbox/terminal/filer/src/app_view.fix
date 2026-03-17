@@ -1,6 +1,7 @@
 module Filer.AppView;
 
 import Minilib.IO.FileSystem;
+import Minilib.Monad.Error;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
 import Minilib.Text.Unicode;
@@ -54,11 +55,14 @@ namespace AppView {
             let key = *AppView::get_key;
             let action = *AppView::handle_key(key);
             if action.is_action_quit {
-                let app_env = *select_state(AppView::@app_env);
-                (app_env.@shutdown).lift_iofail;;
                 break_m $ ()
             };
-            AppView::handle_action(action);;
+            do {
+                AppView::handle_action(action)
+            }
+            .catch(|errmsg|
+                AppView::show_errmsg(errmsg).forget
+            );;
             continue_m $ ()
         )
     );
@@ -195,5 +199,36 @@ namespace AppView {
         );;
         let key = *window.get_key;
         pure()
+    );
+
+    show_errmsg: ErrMsg -> StateIOF AppView KeyName;
+    show_errmsg = |errmsg| (
+        show_message("ERROR", errmsg)
+    );
+
+    show_message: String -> String -> StateIOF AppView KeyName;
+    show_message = |title, message| (
+        let app_win = *select_state(AppView::@window);
+        let (app_w, app_h) = *app_win.get_window_size;
+        let msgs = message.split("\n").to_array;
+        let msgs = msgs.map(to_utf32_string);
+        let msg_w = msgs.to_iter.map(|msg| msg.get_width).fold(0, max);
+        let msg_h = msgs.get_size;
+        let dlg_w = max(2, min(app_w - 2, msg_w + 2));
+        let dlg_h = max(2, min(app_h - 2, msg_h + 2));
+        let window = *app_win.make_sub_window((app_w - dlg_w) / 2, (app_h - dlg_h) / 2, dlg_w, dlg_h);
+        window.clear;;
+        window.draw_border;;
+        window.move_add_wstr(2, 0, " " + ellipsis(dlg_w - 6, title) + " ").when(title != "");;
+        range(1, dlg_h-1).foreach_m(|y|
+            let i = y - 1;
+            if 0 <= i && i < msgs.get_size {
+                let wstr = msgs.@(i);
+                //let wstr = wstr.ellipsis(dlg_w - 5) // TODO: implement ellipsis for UTF32String 
+                window.move_add_wstr(1, y, wstr)
+            } else { pure() }
+        );;
+        let key = *window.get_key;
+        pure $ key
     );
 }

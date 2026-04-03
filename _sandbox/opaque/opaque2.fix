@@ -1,12 +1,24 @@
 module Main;
 
+trait [f: *->*] f: Extract {
+    extract: f a -> a;
+}
+
+impl Array: Extract {
+    extract = |arr| arr.@(0);
+}
+
+impl Option: Extract {
+    extract = |opt| opt.as_some;
+}
 
 //-------------------------------------------
 // Definition of Foo, FooTrait
 //-------------------------------------------
 
 trait a: FooTrait {
-    foo: a -> I64;
+    //foo: [?v: ToString, ?v: Add, ?v: Zero] a -> ?v;     // こちらはOK
+    foo: [?v: ToString, ?v: Additive] a -> ?v;        // こちらはNG
 }
 
 type Foo = unbox struct {
@@ -22,39 +34,25 @@ impl Foo: FooTrait {
 //-------------------------------------------
 
 trait b: BarTrait {
-    bar: b -> U64;
+    bar: [?a1: FooTrait, ?a2: FooTrait, ?f1: Extract, ?f2: Extract] b -> (?f1 ?a1, ?f2 ?a2);
 }
 
 type Bar = unbox struct {
-    val: U64
+    foo1: Foo,
+    foo2: Foo,
 };
 
 impl Bar: BarTrait {
-    bar = |b| b.@val;
-}
-
-//-------------------------------------------
-// Definition of Baz, BazTrait
-//-------------------------------------------
-
-trait c: BazTrait {
-    baz: [?a: FooTrait, ?b: BarTrait] c -> (Array ?a, Option ?b);
-}
-
-type Baz = unbox struct {
-    foo: Foo,
-    bar: Bar
-};
-
-impl Baz: BazTrait {
-    baz = |c| ([c.@foo], some $ c.@bar);
+    bar = |b| ([b.@foo1], some $ b.@foo2);
 }
 
 main: IO ();
 main = (
-    let a = Foo { val: 42 };
-    let b = Bar { val: 123_U64 };
-    let c = Baz { foo: a, bar: b };
-    let (arr, opt) = c.baz;
-    (arr.@(0).foo, opt.as_some.bar).to_string.println
+    let a1 = Foo { val: 42 };
+    let a2 = Foo { val: 123 };
+    let b = Bar { foo1: a1, foo2: a2 };
+    let (fa1, fa2) = b.bar;
+    let v1 = fa1.extract.foo;
+    let v2 = fa2.extract.foo;
+    (zero + v1 + v1, zero + v2 + v2).to_string.println
 );

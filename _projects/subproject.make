@@ -2,6 +2,8 @@
 
 .PHONY: all build test test-fix test-document clean document update-deps
 
+TEST_OPTS = $(if $(CIENV), --allow-preliminary-commands, )
+
 ### Options for `_verup.py` and `_publisher`
 CONFIRM = --confirm
 CONFIRM_OPTS = $(if $(CONFIRM), $(CONFIRM), --no-confirm)
@@ -21,8 +23,8 @@ test: test-fix test-document
 
 test-fix:
 	fix check
-	fix test -O basic
-	fix test -O max
+	fix test -O basic $(TEST_OPTS)
+	fix test -O max $(TEST_OPTS)
 
 test-document:
 	fix deps update

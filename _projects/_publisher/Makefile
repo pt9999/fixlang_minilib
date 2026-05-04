@@ -3,7 +3,7 @@ fix=fix
 all: build
 
 build:
-	$(fix) build -o publisher.out
+	$(fix) build -o publisher.out --deny-deprecated
 
 document:
 	$(fix) docs -o docs

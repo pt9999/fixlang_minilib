@@ -1,7 +1,7 @@
 all: build
 
 build:
-	fix build
+	fix build --deny-deprecated
 
 test:
 	fix test -o a.out

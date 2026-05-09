@@ -11,6 +11,8 @@ RELEASE =
 RELEASE_OPTS = $(if $(RELEASE), --release, --no-release)
 VERUP_OPTS = --update-document --commit --tag --push $(CONFIRM_OPTS)
 # VERUP_OPTS = $(CONFIRM_OPTS)
+PUBLISHER = publisher
+# PUBLISHER = ../_publisher/publisher.out
 PUBLISHER_OPTS = $(CONFIRM_OPTS) $(RELEASE_OPTS)
 # PUBLISHER_OPTS = --no-update-document --no-test --no-commit --no-tag --no-push
 
@@ -54,6 +56,12 @@ update-deps:
 		git commit -m 'update deps' -- fixdeps.lock fixdeps.test.lock; \
 	fi
 
+explicit-import:
+	fix edit explicit-import
+
+delete-trailing-spaces:
+	find -name .fixlang -prune -o -name "*.fix" -print0 | xargs -0 perl -i -lpe 's/\s+$$//'
+
 # Publish a subproject.
 # - Clean
 # - Update deps
@@ -61,7 +69,7 @@ update-deps:
 # - Commit fixdeps.lock if needed
 # - Version up and push if needed
 publish:
-	../_publisher/publisher.out publish . $(PUBLISHER_OPTS)
+	$(PUBLISHER) publish . $(PUBLISHER_OPTS)
 
 
 publish_old:

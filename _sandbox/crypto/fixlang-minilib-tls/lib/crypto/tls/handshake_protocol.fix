@@ -109,11 +109,11 @@ impl Handshake: Marshal {
     marshal = |h, buf| (
         let buf = buf.marshal(h.get_msg_type);
         let length_pos = buf.get_position;
-        let buf = buf.marshal(0_U32.to_U24);
+        let buf = buf.marshal(0_U32.u24);
         let buf = buf._marshal_body(h);
         let last_pos = buf.get_position;
         let buf = buf.set_position(length_pos);
-        let buf = buf.marshal((last_pos - (length_pos + 3)).to_U32.to_U24);
+        let buf = buf.marshal((last_pos - (length_pos + 3)).u32.u24);
         let buf = buf.set_position(last_pos);
         buf
     );
@@ -128,7 +128,7 @@ impl Handshake: Unmarshal {
         let (handshake: Handshake, buf) = *buf._unmarshal_body(msg_type);
         let last_pos = buf.get_position;
         let expected_length = last_pos - (length_pos + 3);
-        if expected_length.to_U32 != length.to_U32 {
+        if expected_length.u32 != length.u32 {
             err $ "unexpected length"
         };
         ok $ (handshake, buf)
@@ -168,7 +168,7 @@ namespace ClientHello {
 
     init_random: Array U8 -> ClientHello -> ClientHello;
     init_random = |random, hello| (
-        assert_lazy(|_| "random size mismatch", random.get_size == 32) $ |_|
+        assert_lazy(|_| "random size mismatch", random.@size == 32) $ |_|
         hello.set_random(random)
     );
 
@@ -193,13 +193,13 @@ impl ClientHello: ToString {
 
 impl ClientHello: Marshal {
     marshal = |msg, buf| (
-        assert_lazy(|_| "invalid random size", msg.@random.get_size == 32) $ |_|
+        assert_lazy(|_| "invalid random size", msg.@random.@size == 32) $ |_|
         let buf = buf.marshal(msg.@legacy_version);
         let buf = buf.marshal_fixed(msg.@random);
-        let buf = buf.marshal_var_size(msg.@legacy_session_id, to_U8);
-        let buf = buf.marshal_var_size(msg.@cipher_suites, to_U16);
-        let buf = buf.marshal_var_size(msg.@legacy_compression_method, to_U8);
-        let buf = buf.marshal_var_size(msg.@extensions, to_U16);
+        let buf = buf.marshal_var_size(msg.@legacy_session_id, u8);
+        let buf = buf.marshal_var_size(msg.@cipher_suites, u16);
+        let buf = buf.marshal_var_size(msg.@legacy_compression_method, u8);
+        let buf = buf.marshal_var_size(msg.@extensions, u16);
         buf
     );
 }
@@ -208,10 +208,10 @@ impl ClientHello: Unmarshal {
     unmarshal = |buf| (
         let (legacy_version:U16, buf) = *buf.unmarshal;
         let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
-        let (legacy_session_id:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
-        let (cipher_suites:Array CipherSuite, buf) = *buf.unmarshal_var_size(U16::to_I64);
-        let (legacy_compression_method, buf) = *buf.unmarshal_var_size(U8::to_I64);
-        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (legacy_session_id:Array U8, buf) = *buf.unmarshal_var_size_U8;
+        let (cipher_suites:Array CipherSuite, buf) = *buf.unmarshal_var_size_U16;
+        let (legacy_compression_method, buf) = *buf.unmarshal_var_size_U8;
+        let (extensions, buf) = *buf.unmarshal_var_size_U16;
         let msg = ClientHello {
             legacy_version: legacy_version,
             random: random,
@@ -254,10 +254,10 @@ impl ServerHello: Unmarshal {
     unmarshal = |buf| (
         let (legacy_version:U16, buf) = *buf.unmarshal;
         let (random:Array U8, buf) = *buf.unmarshal_fixed(32);
-        let (legacy_session_id_echo:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
+        let (legacy_session_id_echo:Array U8, buf) = *buf.unmarshal_var_size_U8;
         let (cipher_suite:CipherSuite, buf) = *buf.unmarshal;
         let (legacy_compression_method, buf) = *buf.unmarshal;
-        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (extensions, buf) = *buf.unmarshal_var_size_U16;
         let msg = ServerHello {
             legacy_version: legacy_version,
             random: random,
@@ -300,7 +300,7 @@ impl EncryptedExtensions: ToString {
 impl EncryptedExtensions: Unmarshal {
     unmarshal = |buf| (
         //eval log_debug("EncryptedExtensions unmarshal " + buf.@array.to_string_hex);
-        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size_U16;
         let extensions = EncryptedExtensions { extensions: extensions };
         pure $ (extensions, buf)
     );
@@ -324,8 +324,8 @@ impl CertificateRequest: ToString {
 
 impl CertificateRequest: Unmarshal {
     unmarshal = |buf| (
-        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
-        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (context:Array U8, buf) = *buf.unmarshal_var_size_U8;
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size_U16;
         let cerreq = CertificateRequest {
             certificate_request_context: context,
             extensions: extensions
@@ -358,8 +358,8 @@ impl CertificateEntry: ToString {
 
 impl CertificateEntry: Unmarshal {
     unmarshal = |buf| (
-        let (cert_data:Array U8, buf) = *buf.unmarshal_var_size(U24::to_I64);
-        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (cert_data:Array U8, buf) = *buf.unmarshal_var_size_U24;
+        let (extensions:Array Extension, buf) = *buf.unmarshal_var_size_U16;
         let entry = CertificateEntry {
             cert_data: cert_data,
             extensions: extensions
@@ -385,8 +385,8 @@ impl Certificate: ToString {
 
 impl Certificate: Unmarshal {
     unmarshal = |buf| (
-        let (context:Array U8, buf) = *buf.unmarshal_var_size(U8::to_I64);
-        let (certificate_list:Array CertificateEntry, buf) = *buf.unmarshal_var_size(U24::to_I64);
+        let (context:Array U8, buf) = *buf.unmarshal_var_size_U8;
+        let (certificate_list:Array CertificateEntry, buf) = *buf.unmarshal_var_size_U24;
         let entry = Certificate {
             certificate_request_context: context,
             certificate_list: certificate_list
@@ -414,7 +414,7 @@ impl CertificateVerify: ToString {
 impl CertificateVerify: Unmarshal {
     unmarshal = |buf| (
         let (algorithm, buf) = *buf.unmarshal;
-        let (signature, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (signature, buf) = *buf.unmarshal_var_size_U16;
         let cv = CertificateVerify {
             algorithm: algorithm,
             signature: signature
@@ -448,7 +448,7 @@ impl Finished: Marshal {
 impl Finished: Unmarshal {
     unmarshal = |buf| (
         // TODO: use Hash.length
-        let (verify_data, buf) = *buf.unmarshal_fixed(buf.get_size - buf.get_position);
+        let (verify_data, buf) = *buf.unmarshal_fixed(buf.@size - buf.get_position);
         let fi = Finished {
             verify_data: verify_data,
         };
@@ -482,9 +482,9 @@ impl NewSessionTicket: Unmarshal {
     unmarshal = |buf| (
         let (ticket_lifetime, buf) = *buf.unmarshal;
         let (ticket_age_add, buf) = *buf.unmarshal;
-        let (ticket_nonce, buf) = *buf.unmarshal_var_size(U8::to_I64);
-        let (ticket, buf) = *buf.unmarshal_var_size(U16::to_I64);
-        let (extensions, buf) = *buf.unmarshal_var_size(U16::to_I64);
+        let (ticket_nonce, buf) = *buf.unmarshal_var_size_U8;
+        let (ticket, buf) = *buf.unmarshal_var_size_U16;
+        let (extensions, buf) = *buf.unmarshal_var_size_U16;
         let nst = NewSessionTicket {
             ticket_lifetime: ticket_lifetime,
             ticket_age_add: ticket_age_add,
@@ -513,21 +513,21 @@ impl KeyUpdate: ToString {
 
 impl KeyUpdate: Marshal {
     marshal = |ku, buf| (
-        let u8 = (
+        let byte = (
             if ku.is_update_not_requested { 0_U8 };
             if ku.is_update_requested { 1_U8 };
             0_U8
         );
-        buf.marshal(u8)
+        buf.marshal(byte)
     );
 }
 
 impl KeyUpdate: Unmarshal {
     unmarshal = |buf| (
-        let (u8: U8, buf) = *buf.unmarshal;
+        let (byte: U8, buf) = *buf.unmarshal;
         let ku = *(
-            if u8 == 0_U8 { pure $ update_not_requested() };
-            if u8 == 1_U8 { pure $ update_requested() };
+            if byte == 0_U8 { pure $ update_not_requested() };
+            if byte == 1_U8 { pure $ update_requested() };
             err $ "unexpected_message"
         );
         pure $ (ku, buf)

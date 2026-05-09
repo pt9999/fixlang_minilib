@@ -27,8 +27,8 @@ type ContentType = unbox union {
 };
 
 namespace ContentType {
-    to_U8: ContentType -> U8;
-    to_U8 = |obj| (
+    u8: ContentType -> U8;
+    u8 = |obj| (
         if obj.is_invalid { obj.as_invalid };
         if obj.is_application_data { 23_U8 };
         if obj.is_handshake { 22_U8 };
@@ -39,7 +39,7 @@ namespace ContentType {
 }
 
 impl ContentType: Eq {
-    eq = |a, b| a.to_U8 == b.to_U8;
+    eq = |a, b| a.u8 == b.u8;
 }
 
 impl ContentType: ToString {
@@ -55,7 +55,7 @@ impl ContentType: ToString {
 
 impl ContentType: Marshal {
     marshal = |obj, buf| (
-        buf.marshal(obj.to_U8)
+        buf.marshal(obj.u8)
     );
 }
 
@@ -105,8 +105,8 @@ impl TLSPlaintext: Marshal {
     marshal = |obj, buf| (
         let buf = buf.marshal(obj.@content_type);
         let buf = buf.marshal(obj.@legacy_record_version);
-        assert_lazy(|_| "length overflow", obj.@fragment.get_size <= 16384) $ |_|    // = 2**14
-        let length: U16 = obj.@fragment.get_size.to_U16;
+        assert_lazy(|_| "length overflow", obj.@fragment.@size <= 16384) $ |_|    // = 2**14
+        let length: U16 = obj.@fragment.@size.u16;
         let buf = buf.marshal(length);
         let buf = buf.marshal_fixed(obj.@fragment);
         buf
@@ -119,11 +119,11 @@ impl TLSPlaintext: Unmarshal {
         let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
         let (length: U16, buf) = *buf.unmarshal;
         // Because we define TLSRecord = TLSPlaintext, allow 16384 + 256 bytes
-        //if length.to_I64 > 16384 {
-        if length.to_I64 > 16384 + 256 {
+        //if length.i64 > 16384 {
+        if length.i64 > 16384 + 256 {
             err $ "TLSPlaintext: unmarshal: alert_record_overflow: length=" + length.to_string
         };
-        let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let (fragment: Array U8, buf) = *buf.unmarshal_fixed(length.i64);
         let obj = TLSPlaintext {
             content_type: content_type,
             legacy_record_version: legacy_record_version,
@@ -163,7 +163,7 @@ impl TLSInnerPlaintext: Marshal {
 impl TLSInnerPlaintext: Unmarshal {
     unmarshal = |buf| (
         let start = buf.get_position;
-        let end = buf.get_size;
+        let end = buf.@size;
         // find non-zero byte from end
         let content_type_pos = loop(
             end - 1, |i|
@@ -216,7 +216,7 @@ namespace TLSCiphertext {
 
     get_additional_data: TLSCiphertext -> Array U8;
     get_additional_data = |ciphertext| (
-        ciphertext.get_additional_data_with_length(ciphertext.@encrypted_record.get_size)
+        ciphertext.get_additional_data_with_length(ciphertext.@encrypted_record.@size)
     );
 
     get_additional_data_with_length: I64 -> TLSCiphertext -> Array U8;
@@ -224,12 +224,12 @@ namespace TLSCiphertext {
         // additional_data = TLSCiphertext.opaque_type ||
         //                    TLSCiphertext.legacy_record_version ||
         //                    TLSCiphertext.length
-        // TLSCiphertext.length = TLSInnerPlaintext.@content.get_size + 1(=content_type) + 16(=tag_len)
+        // TLSCiphertext.length = TLSInnerPlaintext.@content.@size + 1(=content_type) + 16(=tag_len)
         let buf =  ByteBuffer::empty(5, big_endian());
         let buf = buf.marshal(ciphertext.@opaque_type);
         let buf = buf.marshal(ciphertext.@legacy_record_version);
         assert_lazy(|_| "length overflow", length <= 16384 + 256) $ |_|    // = 2**14 + 256
-        let buf = buf.marshal(length.to_U16);
+        let buf = buf.marshal(length.u16);
         buf.@array
     );
 }
@@ -238,8 +238,8 @@ impl TLSCiphertext: Marshal {
     marshal = |obj, buf| (
         let buf = buf.marshal(obj.@opaque_type);
         let buf = buf.marshal(obj.@legacy_record_version);
-        assert_lazy(|_| "length overflow", obj.@encrypted_record.get_size <= 16384 + 256) $ |_|    // = 2**14 + 256
-        let length: U16 = obj.@encrypted_record.get_size.to_U16;
+        assert_lazy(|_| "length overflow", obj.@encrypted_record.@size <= 16384 + 256) $ |_|    // = 2**14 + 256
+        let length: U16 = obj.@encrypted_record.@size.u16;
         let buf = buf.marshal(length);
         let buf = buf.marshal_fixed(obj.@encrypted_record);
         buf
@@ -251,10 +251,10 @@ impl TLSCiphertext: Unmarshal {
         let (opaque_type: ContentType, buf) = *buf.unmarshal;
         let (legacy_record_version: ProtocolVersion, buf) = *buf.unmarshal;
         let (length: U16, buf) = *buf.unmarshal;
-        if length.to_I64 > 16384 + 256 {
+        if length.i64 > 16384 + 256 {
             err $ "TLSCiphertext: unmarshal: alert_record_overflow: length=" + length.to_string
         };
-        let (encrypted_record: Array U8, buf) = *buf.unmarshal_fixed(length.to_I64);
+        let (encrypted_record: Array U8, buf) = *buf.unmarshal_fixed(length.i64);
         let obj = TLSCiphertext {
             opaque_type: opaque_type,
             legacy_record_version: legacy_record_version,
@@ -272,10 +272,10 @@ namespace TLSRecord {
     split_fragments: ContentType -> Array U8 -> Array TLSRecord;
     split_fragments = |content_type, data| (
         let max_fragment_size = 16384;
-        let number_of_fragments = (data.get_size + max_fragment_size - 1) / max_fragment_size;
+        let number_of_fragments = (data.@size + max_fragment_size - 1) / max_fragment_size;
         Iterator::range(0, number_of_fragments).map(|i|
             let start = max_fragment_size * i;
-            let end  = min(max_fragment_size * (i + 1), data.get_size);
+            let end  = min(max_fragment_size * (i + 1), data.@size);
             let fragment = data.get_sub(start, end);
             TLSPlaintext::empty.set_content_type(content_type).set_fragment(fragment)
         ).to_array
@@ -311,7 +311,7 @@ namespace TLSRecord {
     recv_record = do {
         let header = *recv_n_bytes_full(5);
         let length = get_u16_be(3, header);
-        let body = *recv_n_bytes_full(length.to_I64);
+        let body = *recv_n_bytes_full(length.i64);
         let bytes = header.append(body);
         unmarshal_from_bytes(bytes).from_result_t
     };

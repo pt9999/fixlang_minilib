@@ -53,19 +53,20 @@ namespace X509Time {
     // Converts a X.509 GeneralizedTime string (YYYYMMDDHHMMSSZ) to a X509Time.
     from_generalized_time_string: String -> Result ErrMsg X509Time;
     from_generalized_time_string = |str| (
-        if str.get_size != 15 {
+        if str.@size != 15 {
             err $ "from_generalized_time_string: length mismatch: " + str
         };
         if str.get_bytes.@(14) != 'Z' {
             err $ "from_generalized_time_string: invalid format: " + str
         };
+        let i64_from_string: String -> Result ErrMsg I64 = from_string;
         let datetime = Time::DateTime {
-            year: *from_string(str.get_sub(0, 4)).map(I64::to_I32),
-            month: *from_string(str.get_sub(4, 6)).map(I64::to_U8),
-            day_in_month: *from_string(str.get_sub(6, 8)).map(I64::to_U8),
-            hour: *from_string(str.get_sub(8, 10)).map(I64::to_U8),
-            min: *from_string(str.get_sub(10, 12)).map(I64::to_U8),
-            sec: *from_string(str.get_sub(12, 14)).map(I64::to_U8),
+            year: *i64_from_string(str.get_sub(0, 4)).map(i32),
+            month: *i64_from_string(str.get_sub(4, 6)).map(u8),
+            day_in_month: *i64_from_string(str.get_sub(6, 8)).map(u8),
+            hour: *i64_from_string(str.get_sub(8, 10)).map(u8),
+            min: *i64_from_string(str.get_sub(10, 12)).map(u8),
+            sec: *i64_from_string(str.get_sub(12, 14)).map(u8),
             nanosec: 0_U32,
             day_in_week: 0_U8,
             day_in_year: 0_U32,
@@ -86,24 +87,25 @@ namespace X509Time {
     // Converts a X.509 UTCTime string (YYMMDDHHMMSSZ) to a X509Time.
     from_utc_time_string: String -> Result ErrMsg X509Time;
     from_utc_time_string = |str| (
-        if str.get_size != 13 {
+        if str.@size != 13 {
             err $ "from_utc_time_string: length mismatch: " + str
         };
         if str.get_bytes.@(12) != 'Z' {
             err $ "from_utc_time_string: invalid format: " + str
         };
+        let i64_from_string: String -> Result ErrMsg I64 = from_string;
         let datetime = Time::DateTime {
-            year: *from_string(str.get_sub(0, 2)).map(
+            year: *i64_from_string(str.get_sub(0, 2)).map(
                         // RFC5280 4.1.2.5.1. UTCTime
                         // Where YY is greater than or equal to 50, the year SHALL be interpreted as 19YY; and
                         // Where YY is less than 50, the year SHALL be interpreted as 20YY.
                         |yy| if yy >= 50 { yy + 1900 } else { yy + 2000 }
-                    ).map(I64::to_I32),
-            month: *from_string(str.get_sub(2, 4)).map(I64::to_U8),
-            day_in_month: *from_string(str.get_sub(4, 6)).map(I64::to_U8),
-            hour: *from_string(str.get_sub(6, 8)).map(I64::to_U8),
-            min: *from_string(str.get_sub(8, 10)).map(I64::to_U8),
-            sec: *from_string(str.get_sub(10, 12)).map(I64::to_U8),
+                    ).map(i32),
+            month: *i64_from_string(str.get_sub(2, 4)).map(u8),
+            day_in_month: *i64_from_string(str.get_sub(4, 6)).map(u8),
+            hour: *i64_from_string(str.get_sub(6, 8)).map(u8),
+            min: *i64_from_string(str.get_sub(8, 10)).map(u8),
+            sec: *i64_from_string(str.get_sub(10, 12)).map(u8),
             nanosec: 0_U32,
             day_in_week: 0_U8,
             day_in_year: 0_U32,
@@ -137,17 +139,17 @@ namespace DateTimeFormat {
 
     format: Time::DateTime -> FormatFunc -> String;
     format = |datetime, formatter| (
-        let zero_padding = |i64, prec| (
-            let str = Array::fill(prec - 1, '0')._unsafe_to_string + i64.to_string;
-            str.get_sub(str.get_size - prec, str.get_size)
+        let zero_padding = |i64val, prec| (
+            let str = Array::fill(prec - 1, '0').from_array + i64val.to_string;
+            str.get_sub(str.@size - prec, str.@size)
         );
-        let year = zero_padding(datetime.@year.to_I64, 4);
-        let month = zero_padding(datetime.@month.to_I64, 2);
-        let day = zero_padding(datetime.@day_in_month.to_I64, 2);
-        let hour = zero_padding(datetime.@hour.to_I64, 2);
-        let minute = zero_padding(datetime.@min.to_I64, 2);
-        let second = zero_padding(datetime.@sec.to_I64, 2);
-        let nanosec = zero_padding(datetime.@nanosec.to_I64, 9);
+        let year = zero_padding(datetime.@year.i64, 4);
+        let month = zero_padding(datetime.@month.i64, 2);
+        let day = zero_padding(datetime.@day_in_month.i64, 2);
+        let hour = zero_padding(datetime.@hour.i64, 2);
+        let minute = zero_padding(datetime.@min.i64, 2);
+        let second = zero_padding(datetime.@sec.i64, 2);
+        let nanosec = zero_padding(datetime.@nanosec.i64, 9);
         formatter $ (year, month, day, hour, minute, second, nanosec)
     );
 }
@@ -181,7 +183,7 @@ decode_generalized_time: [m: MonadDerDecoder] m X509Time;
 decode_generalized_time = (
     let (identifier, contents) = *decode_primitive;
     assert_tag(tag_generalized_time, identifier);;
-    let str = contents._unsafe_to_string;
+    let str: String = contents.from_array;
     from_generalized_time_string(str).from_result_t
 );
 
@@ -189,7 +191,7 @@ decode_utc_time: [m: MonadDerDecoder] m X509Time;
 decode_utc_time = (
     let (identifier, contents) = *decode_primitive;
     assert_tag(tag_utc_time, identifier);;
-    let str = contents._unsafe_to_string;
+    let str: String = contents.from_array;
     from_utc_time_string(str).from_result_t
 );
 

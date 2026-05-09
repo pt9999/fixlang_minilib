@@ -21,7 +21,7 @@ type CertificatePath = unbox struct {
 namespace CertificatePath {
     make: [m: MonadError] Array Certificate -> CACertificates -> m CertificatePath;
     make = |certs, ca_certs| (
-        if certs.get_size == 0 { error $ "certificate list is empty" };
+        if certs.@size == 0 { error $ "certificate list is empty" };
         _check_certs_order(certs);;
         let ca = *_find_ca_cert(certs, ca_certs);
         pure $ CertificatePath {
@@ -31,7 +31,7 @@ namespace CertificatePath {
 
     _check_certs_order: [m: MonadError] Array Certificate -> m ();
     _check_certs_order = |certs| (
-        Iterator::range(0, certs.get_size - 1).foreach_m(|i|
+        Iterator::range(0, certs.@size - 1).foreach_m(|i|
             let prev_issuer = certs.@(i).@tbs_certificate.@issuer;
             let next_subject = certs.@(i + 1).@tbs_certificate.@subject;
             if prev_issuer != next_subject {
@@ -62,7 +62,7 @@ namespace CertificatePath {
     validate_certificate_signatures_mt: CipherApi -> CertificatePath -> Array (Lazy (Result ErrMsg ()));
     validate_certificate_signatures_mt = |cipher_api, cert_path| (
         let certs = cert_path.@data;
-        assert_lazy(|_| "empty cert path", certs.get_size > 0) $ |_|
+        assert_lazy(|_| "empty cert path", certs.@size > 0) $ |_|
 
         let validate_ith_cert: I64 -> Lazy (Result ErrMsg ()) = |i, _| (
             let prev_cert = certs.@(i);
@@ -81,7 +81,7 @@ namespace CertificatePath {
             eval log_debug([ca_cert.get_subject].format("finished: validate {} using own public key"));
             pure()
         );
-        Iterator::range(0, certs.get_size - 1).to_array.map(validate_ith_cert)
+        Iterator::range(0, certs.@size - 1).to_array.map(validate_ith_cert)
         .push_back(validate_ca_cert)
     );
 

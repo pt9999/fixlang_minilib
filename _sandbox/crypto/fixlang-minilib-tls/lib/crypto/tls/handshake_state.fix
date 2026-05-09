@@ -31,7 +31,7 @@ namespace TLSRecordHelper {
         let buf = ByteBuffer::make(inner_plaintext.@content, big_endian());
         loop_m(
             ([], buf), |(handshakes, buf)|
-            if buf.get_position >= buf.get_size { break_m $ handshakes };
+            if buf.get_position >= buf.@size { break_m $ handshakes };
             let start = buf.get_position;
             let (handshake: Handshake, buf) = *buf.unmarshal;
             let end = buf.get_position;
@@ -328,7 +328,7 @@ namespace AfterServerHello {
         // check finished
         _check_handshakes_order(handshakes.map(@0));;
         _verify_server_finished(handshakes, protection);;
-        let protection = _update_handshake_context(handshakes, (0, handshakes.get_size), protection);
+        let protection = _update_handshake_context(handshakes, (0, handshakes.@size), protection);
         //let protection = protection.mod_server_tk(increment_sequence_number);
         let server_params = ServerParams::make(after_server_hello.@server_hello, handshakes.map(@0));
         let asf: AfterFinished = *AfterFinished::make(init_param, protection, server_params, worker);
@@ -337,7 +337,7 @@ namespace AfterServerHello {
 
     _check_handshakes_order: [m: MonadError] Array Handshake -> m ();
     _check_handshakes_order = |handshakes| (
-        let size = handshakes.get_size;
+        let size = handshakes.@size;
         let get_count: (Handshake -> Bool) -> I64 = |f| handshakes.to_iter.filter(f).fold(0, |_, i| i + 1);
         let get_order: (Handshake -> Bool) -> I64 = |f| handshakes.find_by(f).as_some_or(-1);
         let or_error = |bool| if !bool { error $ "invalid handshakes order" } else { pure() };
@@ -372,7 +372,7 @@ namespace AfterServerHello {
         };
         let certificate = handshakes.@(opt_certificate.as_some).@0.as_certificate;
         let cert_data_array: Array (Array U8) = certificate.@certificate_list.map(@cert_data);
-        if cert_data_array.get_size == 0 {
+        if cert_data_array.@size == 0 {
             error $ "cert_data_array is empty"
         };
 
@@ -405,7 +405,7 @@ namespace AfterServerHello {
         };;
 
         let cerficate_api_array = @get_certificates(cert_path_api, ());
-        if cerficate_api_array.get_size == 0 { error $ "cert_path is empty" };
+        if cerficate_api_array.@size == 0 { error $ "cert_path is empty" };
         let cerficate_api = cerficate_api_array.@(0);
 
         eval log_debug("verifying signature of certificate_verify");
@@ -426,7 +426,7 @@ namespace AfterServerHello {
     _verify_server_finished:  [m: MonadError] Array (Handshake, Array U8) -> Protection -> m ();
     _verify_server_finished = |handshakes, protection| (
         eval log_debug("_verify_server_finished");
-        let size = handshakes.get_size;
+        let size = handshakes.@size;
         let protection = _update_handshake_context(handshakes, (0, size - 1), protection);
         let finished = handshakes.@(size - 1).@0.as_finished;
         let verify_data = *protection.calc_finished_verify_data(TrafficKeyType::server_tk()).from_result_t;

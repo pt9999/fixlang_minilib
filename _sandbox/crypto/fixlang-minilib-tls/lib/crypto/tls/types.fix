@@ -36,8 +36,8 @@ unmarshal_from_bytes: [a: Unmarshal] Array U8 -> Result ErrMsg a;
 unmarshal_from_bytes = |bytes| (
     let buf = ByteBuffer::make(bytes, big_endian());
     let (a, buf) = *buf.unmarshal;
-    if buf.get_position != buf.get_size {
-        eval log_warn $ [buf.get_position, buf.get_size].format("unmarshal_from_bytes: position mismatch: {}, {}");
+    if buf.get_position != buf.@size {
+        eval log_warn $ [buf.get_position, buf.@size].format("unmarshal_from_bytes: position mismatch: {}, {}");
         ok $ a
     };
     ok $ a
@@ -45,7 +45,7 @@ unmarshal_from_bytes = |bytes| (
 
 to_string_hex_limit: I64 -> Array U8 -> String;
 to_string_hex_limit = |max_size, bytes| (
-    if bytes.get_size > max_size { bytes.get_sub(0, max_size).to_string_hex + "..." }
+    if bytes.@size > max_size { bytes.get_sub(0, max_size).to_string_hex + "..." }
     else { bytes.to_string_hex }
 );
 
@@ -57,35 +57,43 @@ type U24 = unbox struct {
     v: U32
 };
 
+trait a: ToU24 {
+    u24: a -> U24;
+}
+
+impl U32: ToU24 {
+    u24 = |v| U24 { v: v.bit_and(0xFFFFFF_U32) };
+}
+
+impl U24: ToU32 {
+    u32 = |u24val| u24val.@v.bit_and(0xFFFFFF_U32);
+}
+
+impl U24: ToI64 {
+    i64 = |u24val| u24val.u32.i64;
+}
+
 namespace U24 {
-    to_U24: U32 -> U24;
-    to_U24 = |v| U24 { v: v.bit_and(0xFFFFFF_U32) };
-
-    to_U32: U24 -> U32;
-    to_U32 = |u24| u24.@v.bit_and(0xFFFFFF_U32);
-
-    to_I64: U24 -> I64;
-    to_I64 = |u24| u24.to_U32.to_I64;
 
     // Gets U24 from the byte buffer at position `i`.
     get_u24: I64 -> ByteBuffer -> U24;
     get_u24 = |i, buf| (
         assert_lazy(|_| "only big endian is supported", buf.@byte_order.is_big_endian) $ |_|
         let array = buf.@array;
-        array.get_u8_be(i).to_U32.shift_left(16_U32).bit_or(
-            array.get_u16_be(i + 1).to_U32
+        array.get_u8_be(i).u32.shift_left(16_U32).bit_or(
+            array.get_u16_be(i + 1).u32
         )
-        .to_U24
+        .u24
     );
 
     // Sets U24 into the byte buffer at position `i`.
     set_u24: I64 -> U24 -> ByteBuffer -> ByteBuffer;
-    set_u24 = |i, val, buf| (
+    set_u24 = |i, val: U24, buf| (
         assert_lazy(|_| "only big endian is supported", buf.@byte_order.is_big_endian) $ |_|
         buf.mod_array(|array|
-            let val = val.to_U32;
-            array.set_u8_be(i, val.shift_right(16_U32).to_U8)
-                .set_u16_be(i + 1, val.to_U16)
+            let val: U32 = val.u32;
+            array.set_u8_be(i, val.shift_right(16_U32).u8)
+                .set_u16_be(i + 1, val.u16)
         )
     );
 }
@@ -129,7 +137,7 @@ impl [a: GetByteSize] Array a: GetByteSize {
 namespace Vector {
     marshal_fixed: [a: Marshal] Array a -> ByteBuffer -> ByteBuffer;
     marshal_fixed = |vector, buf| (
-        let n = vector.get_size;
+        let n = vector.@size;
         loop(
             (buf, 0), |(buf, i)|
             if i >= n { break $ buf };
@@ -175,6 +183,15 @@ namespace Vector {
         let byte_size = size.from_size;
         buf.unmarshal_fixed(byte_size)
     );
+
+    unmarshal_var_size_U8: [a: Unmarshal] ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
+    unmarshal_var_size_U8 = unmarshal_var_size(|u:U8| u.i64);
+
+    unmarshal_var_size_U16: [a: Unmarshal] ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
+    unmarshal_var_size_U16 = unmarshal_var_size(|u:U16| u.i64);
+
+    unmarshal_var_size_U24: [a: Unmarshal] ByteBuffer -> Result ErrMsg (Array a, ByteBuffer);
+    unmarshal_var_size_U24 = unmarshal_var_size(|u:U24| u.i64);
 }
 
 // 4.1.2 ClientHello

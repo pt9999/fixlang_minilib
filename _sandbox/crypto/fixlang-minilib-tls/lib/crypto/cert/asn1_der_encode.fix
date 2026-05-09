@@ -42,7 +42,7 @@ trait [m: * -> *] m: MonadWriteByteIF {
 }
 
 impl [m: MonadError] StateT ByteBuffer m: MonadWriteByteIF {
-    write_byte = |u8| mod_state(marshal(u8));
+    write_byte = |byte| mod_state(marshal(byte));
     get_pos = get_state.map(get_position);
     set_pos = |pos| mod_state(set_position(pos));
     extract_inner = |inner| (
@@ -80,26 +80,26 @@ encode_identifier = |identifier| (
     let constructed = identifier.@constructed;
     let tag = identifier.@tag;
 
-    let u8 = tag_class.bit_and(3_U8).shift_left(6_U8)
+    let byte = tag_class.bit_and(3_U8).shift_left(6_U8)
             .bit_or(if constructed { 0x20_U8 } else { 0_U8 });
 
     if tag < 31_U8 {
-        let u8 = u8.bit_or(tag);
-        write_byte(u8);;
+        let byte = byte.bit_or(tag);
+        write_byte(byte);;
         pure()
     } else if tag <= 0x7f_U8 {
-        let u8 = u8.bit_or(31_U8);  // long form
-        write_byte(u8);;
-        let u8 = tag;
-        write_byte(u8);;
+        let byte = byte.bit_or(31_U8);  // long form
+        write_byte(byte);;
+        let byte = tag;
+        write_byte(byte);;
         pure()
     } else if tag <= 0xff_U8 {
-        let u8 = u8.bit_or(31_U8);  // long form
-        write_byte(u8);;
-        let u8 = tag.shift_left(7_U8).bit_and(0x7f_U8).bit_or(0x80_U8);
-        write_byte(u8);;
-        let u8 = tag.bit_and(0x7f_U8); // currently only tag <= 255 is supported
-        write_byte(u8);;
+        let byte = byte.bit_or(31_U8);  // long form
+        write_byte(byte);;
+        let byte = tag.shift_left(7_U8).bit_and(0x7f_U8).bit_or(0x80_U8);
+        write_byte(byte);;
+        let byte = tag.bit_and(0x7f_U8); // currently only tag <= 255 is supported
+        write_byte(byte);;
         pure()
     } else {
         error $ "invalid tag: " + tag.to_string
@@ -110,13 +110,13 @@ encode_identifier = |identifier| (
 encode_length: [m: MonadWriteByte] I64 -> m ();
 encode_length = |length| (
     if length <= 127 {
-        write_byte(length.to_U8)
+        write_byte(length.u8)
     };
     let n = 8;  // sizeof(U64)
     let len_buf = Array::fill(n, 0_U8);
-    let len_buf = len_buf.set_u64_be(0, length.to_U64);
-    let i = len_buf.find_by(|u8| u8 != 0_U8).as_some_or(n - 1);
-    write_byte(0x80_U8.bit_or((n - i).to_U8));;    // first octet
+    let len_buf = len_buf.set_u64_be(0, length.u64);
+    let i = len_buf.find_by(|byte| byte != 0_U8).as_some_or(n - 1);
+    write_byte(0x80_U8.bit_or((n - i).u8));;    // first octet
     Iterator::range(i, n).foreach_m(|i|
         write_byte(len_buf.@(i))
     )
@@ -135,7 +135,7 @@ encode_triplet: [m: MonadWriteByte] TagClass -> Bool -> Tag -> m () -> m ();
 encode_triplet = |tag_class, constructed, tag, inner_monad| (
     encode_identifier(Identifier::make(tag_class, constructed, tag));;
     let contents = *extract_inner(inner_monad);
-    encode_length(contents.get_size);;
+    encode_length(contents.@size);;
     encode_contents(contents);;
     pure()
 );
@@ -170,11 +170,11 @@ encode_set_of = |inner_monad| (
 // ----------------------
 
 impl I64: EncodeDer {
-    encode_obj = |i64| (
+    encode_obj = |i64val| (
         let n = 8;  // sizeof(U64)
-        let contents = Array::fill(n, 0_U8).set_u64_be(0, i64.to_U64);
-        let pad = if i64 >= 0 { 0x00_U8 } else { 0xff_U8 };
-        let start = contents.find_by(|u8| u8 != pad).as_some_or(n - 1);
+        let contents = Array::fill(n, 0_U8).set_u64_be(0, i64val.u64);
+        let pad = if i64val >= 0 { 0x00_U8 } else { 0xff_U8 };
+        let start = contents.find_by(|byte| byte != pad).as_some_or(n - 1);
         let contents = contents.get_sub(start, n);
         encode_triplet(tc_universal, false, tag_integer, encode_contents(contents))
     );
@@ -188,8 +188,8 @@ impl BigInt: EncodeDer {
         let contents: Array U8 = if x.is_positive {
             // Case 1: Positive integer
             let contents = x.to_bytes;
-            let n = contents.get_size;
-            let start = contents.find_by(|u8| u8 != 0x00_U8).as_some_or(n - 1);
+            let n = contents.@size;
+            let start = contents.find_by(|byte| byte != 0x00_U8).as_some_or(n - 1);
             let contents = contents.get_sub(start, n);
             // If MSB is set, it is interpreted as a negative integer.
             // To prevent this, insert zero byte(0x00) into the head.
@@ -200,12 +200,12 @@ impl BigInt: EncodeDer {
             }
         } else {
             // Case 2: Negative integer
-            let bit_length = x.@nat._bit_length.to_I64;
+            let bit_length = x.@nat._bit_length.i64;
             let n = (bit_length + 7) / 8;
             // convert to two's complement representation
-            let x = x + (one.shift_left((n * 8).to_U64));
+            let x = x + (one.shift_left((n * 8).u64));
             let contents = x.to_bytes;
-            let contents = contents.get_sub(contents.get_size - n, contents.get_size);
+            let contents = contents.get_sub(contents.@size - n, contents.@size);
             assert_lazy(|_| "MSB is not set", contents.msb_is_set) $ |_|
             contents
         };

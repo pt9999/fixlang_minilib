@@ -45,7 +45,7 @@ impl HttpClientResponse: ToString {
         " status=" + obj.@status.to_string +
         " reason=" + obj.@reason.to_string +
         " headers=" + obj.@headers.to_string +
-        " body=(" + obj.@body.get_size.to_string + " bytes)" +
+        " body=(" + obj.@body.@size.to_string + " bytes)" +
         " }"
     );
 }
@@ -88,7 +88,7 @@ impl ResponseParser: ToString {
     to_string = |obj| (
         "ResponseParser {" +
         " state=" + obj.@state.to_string +
-        " array=(" + obj.@array.get_size.to_string + " bytes)" +
+        " array=(" + obj.@array.@size.to_string + " bytes)" +
         " position=" + obj.@position.to_string +
         " response=" + obj.@response.to_string +
         " }"
@@ -120,7 +120,7 @@ namespace ResponseParser {
             err $ "unexpected EOF: not parsing body"
         };
         let (start, end) = state.as_parsing_body;
-        let array_size = parser.@array.get_size;
+        let array_size = parser.@array.@size;
         if array_size < end && end != I64::maximum {
             err $ (array_size, end).format("unexpected EOF: array_size={} end={}")
         };
@@ -219,7 +219,7 @@ namespace ResponseParser {
     _parse_body: (I64, I64) -> ResponseParser -> Result ErrMsg ResponseParser;
     _parse_body = |(start, end), parser| (
         eval log_debug("_parse_body: " + (start, end).to_string);
-        if end > parser.@array.get_size {
+        if end > parser.@array.@size {
             pure $ parser   // wait for data
         };
         let body = parser.@array.get_sub(start, end);
@@ -245,7 +245,7 @@ namespace ResponseParser {
             parser._parse_trailer_section   // run next state
         };
         let start = parser.@position;
-        let end = start + chunk_size.to_I64;
+        let end = start + chunk_size.i64;
         if end < start { err $ "invalid chunk size: " + chunk_size_hex };
         let parser = parser.set_state(parsing_chunk_data $ (start, end));
         parser._parse_chunk_data((start, end))     // run next state
@@ -253,7 +253,7 @@ namespace ResponseParser {
 
     _parse_chunk_data: (I64, I64) -> ResponseParser -> Result ErrMsg ResponseParser;
     _parse_chunk_data = |(start, end), parser| (
-        if end > parser.@array.get_size {
+        if end > parser.@array.@size {
             pure $ parser   // wait for data
         };
         eval log_debug("chunk_data: " + (start, end).to_string);
@@ -300,7 +300,7 @@ namespace ResponseParser {
     _read_line: ResponseParser -> Option (String, ResponseParser);
     _read_line = |parser| (
         let array = parser.@array;
-        let array_size = array.get_size;
+        let array_size = array.@size;
         let start = parser.@position;
         let end = loop(
             start, |i|
@@ -309,7 +309,7 @@ namespace ResponseParser {
             continue $ i + 1
         );
         if start >= end { none() };
-        let line = array.get_sub(start, end)._unsafe_to_string;
+        let line: String = array.get_sub(start, end).from_array;
         let line = line.strip_last_newlines;
         let parser = parser.set_position(end);
         some $ (line, parser)

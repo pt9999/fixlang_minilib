@@ -77,15 +77,15 @@ namespace DecodeDerBuffer {
     make = |array| DecodeDerBuffer {
         array: array,
         position: 0,
-        end: array.get_size,
+        end: array.@size,
     };
 
     // Creates a sub-buffer of the specifie range.
     subbuffer: I64 -> I64 -> DecodeDerBuffer -> DecodeDerBuffer;
     subbuffer = |begin, end, buf| (
         let array = buf.@array;
-        assert_lazy(|_| "begin out of range", 0 <= begin && begin <= array.get_size) $ |_|
-        assert_lazy(|_| "end out of range", begin <= end && end <= array.get_size) $ |_|
+        assert_lazy(|_| "begin out of range", 0 <= begin && begin <= array.@size) $ |_|
+        assert_lazy(|_| "end out of range", begin <= end && end <= array.@size) $ |_|
         DecodeDerBuffer {
             array: array,
             position: begin,
@@ -106,9 +106,9 @@ impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
         if position >= end {
             error $ __Err_EndOfStream
         };
-        let u8 = array.@(position);
+        let byte = array.@(position);
         let buf = buf.set_position(position + 1);
-        pure $ (buf, u8)
+        pure $ (buf, byte)
     );
 
     read_bytes = |length| make_state_t_monad $ |buf| (
@@ -154,8 +154,8 @@ impl StateT DecodeDerBuffer (Result ErrMsg): MonadDerDecoderIF {
             let (buf, a) = res.as_ok;
             let arr = arr.Array::push_back(a);
             /*
-            eval if arr.get_size % 100 == 0 {
-                debug_eprintln("repeat: " + arr.get_size.to_string +
+            eval if arr.@size % 100 == 0 {
+                debug_eprintln("repeat: " + arr.@size.to_string +
                     " pos=" + buf.@position.to_string +
                     " end=" + buf.@end.to_string
                 )
@@ -283,17 +283,17 @@ impl Identifier: ToString {
 decode_identifier: [m: MonadDerDecoder] m Identifier;
 decode_identifier = (
     let pos = *get_pos;
-    let u8 = *read_byte;
-    let tag_class = u8.shift_right(6_U8).bit_and(3_U8);
-    let constructed = (u8.bit_and(0x20_U8) != 0_U8);
-    let tag_type = u8.bit_and(31_U8);
+    let byte = *read_byte;
+    let tag_class = byte.shift_right(6_U8).bit_and(3_U8);
+    let constructed = (byte.bit_and(0x20_U8) != 0_U8);
+    let tag_type = byte.bit_and(31_U8);
     let tag_type = *(
         if tag_type < 31_U8 { pure $ tag_type };
         loop_m(
             0_U8, |tag_type|
-            let u8 = *read_byte;
-            let tag_type = tag_type.shift_left(7_U8).bit_or(u8.bit_and(0x7F_U8));
-            if u8.bit_and(0x80_U8) == 0_U8 { break_m $ tag_type };
+            let byte = *read_byte;
+            let tag_type = tag_type.shift_left(7_U8).bit_or(byte.bit_and(0x7F_U8));
+            if byte.bit_and(0x80_U8) == 0_U8 { break_m $ tag_type };
             continue_m $ tag_type
         )
     );
@@ -310,11 +310,11 @@ decode_identifier = (
 // 10.1 Length forms
 decode_length: [m: MonadDerDecoder] m I64;
 decode_length = (
-    let u8 = *read_byte;
-    if u8.bit_and(0x80_U8) == 0_U8 {
-        pure $ u8.to_I64
+    let byte = *read_byte;
+    if byte.bit_and(0x80_U8) == 0_U8 {
+        pure $ byte.i64
     };
-    let n = u8.bit_and(0x7F_U8).to_I64;
+    let n = byte.bit_and(0x7F_U8).i64;
     if n == 0 {
         error $ "der does not allow indefinite length"
     };
@@ -324,8 +324,8 @@ decode_length = (
     loop_m(
         (0, 0), |(length, i)|
         if i >= n { break_m $ length };
-        let u8 = *read_byte;
-        let length = length.shift_left(8).bit_or(u8.to_I64);
+        let byte = *read_byte;
+        let length = length.shift_left(8).bit_or(byte.i64);
         continue_m $ (length, i + 1)
     )
 );
@@ -358,7 +358,7 @@ dump_der_triplets = |bytes| (
                 " length=" + length.to_string +
                 " contents=" + contents.to_string_hex +
                 if identifier.@tag == tag_printable_string {
-                    " (" + contents._unsafe_to_string + ")"
+                    " (" + contents.from_array + ")"
                 } else { "" } +
                 "\n"
             );
@@ -433,7 +433,7 @@ decode_set_of = |inner_monad| (
 // then runs `inner_monad` in the inner contents.
 with_context: [m: MonadDerDecoder] I64 -> m a -> m a;
 with_context = |tag, inner_monad| (
-    decode_constructed(tc_context_specific, tag.to_U8, inner_monad)
+    decode_constructed(tc_context_specific, tag.u8, inner_monad)
 );
 
 // `choice(inner_monads)` attempts to execute each inner monad in turn,
@@ -442,7 +442,7 @@ with_context = |tag, inner_monad| (
 choice: [m: MonadError] Array (m a) -> m a;
 choice = |monads| (
     let inner = fix $ |inner, i| (
-        if i >= monads.get_size - 1 { monads.@(i) };
+        if i >= monads.@size - 1 { monads.@(i) };
         monads.@(i).catch(|err| inner(i + 1))
     );
     inner(0)
@@ -470,7 +470,7 @@ impl Asn1::Boolean: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
         assert_tag(tag_boolean, identifier);;
-        if contents.get_size != 1 { error $ "InvalidLength" };
+        if contents.@size != 1 { error $ "InvalidLength" };
         pure $ contents.@(0) != 0_U8
     );
 }
@@ -480,26 +480,26 @@ impl I64: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
         assert_tag(tag_integer, identifier);;
-        if contents.get_size == 0 {
+        if contents.@size == 0 {
             pure $ 0
         };
-        if contents.get_size > 8 {
+        if contents.@size > 8 {
             error $ "OutOfRange"
         };
         let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
         let bytes = if sign >= 0 { contents }
         else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
-        let u64: U64 = bytes.to_iter.fold(
-            0_U64, |u8, u64|
-            u64.shift_left(8_U64).bit_or(u8.to_U64)
+        let u64val: U64 = bytes.to_iter.fold(
+            0_U64, |byte, u64val|
+            u64val.shift_left(8_U64).bit_or(byte.u64)
         );
-        if u64 >= I64::maximum.to_U64 { error $ "OutOfRange" };
-        let i64: I64 = if sign >= 0 {
-            u64.to_I64
+        if u64val >= I64::maximum.u64 { error $ "OutOfRange" };
+        let i64val: I64 = if sign >= 0 {
+            u64val.i64
         } else {
-            -((u64 + 1_U64).to_I64)
+            -((u64val + 1_U64).i64)
         };
-        pure $ i64
+        pure $ i64val
     );
 }
 
@@ -507,7 +507,7 @@ impl BigInt: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
         assert_tag(tag_integer, identifier);;
-        if contents.get_size == 0 {
+        if contents.@size == 0 {
             pure $ Zero::zero
         };
         let sign = if contents.@(0).bit_and(0x80_U8) != 0_U8 { -1 } else { 1 };
@@ -515,7 +515,7 @@ impl BigInt: DecodeDer {
         else { contents.map(bit_xor(0xff_U8)) };    // reverse bits
 
         let bigint_positive: BigInt = (
-            let u8_len = bytes.get_size;
+            let u8_len = bytes.@size;
             if u8_len == 0 { zero };
             let u32_len = (u8_len + 3) / 4;
             let bytes = if 4 * u32_len == u8_len { bytes }
@@ -541,42 +541,42 @@ impl String: DecodeDer {
         let tag = identifier.@tag;
         if tag == tag_utf8_string
         {
-            pure $ contents._unsafe_to_string
+            pure $ contents.from_array
         };
         if tag == tag_ia5_string
         {
             // ISO 646 (IA5) characters are almost identical to ASCII character set.
-            pure $ contents._unsafe_to_string
+            pure $ contents.from_array
         };
         if tag == tag_printable_string
         {
             // PrintableString is restricted subset of ASCII character set.
-            pure $ contents._unsafe_to_string
+            pure $ contents.from_array
         };
         if tag == tag_t61_string
         {
             let _8bit_chars = contents.to_iter.filter(|c| c >= 0x80_U8).to_array;
-            eval if _8bit_chars.get_size > 0 {
+            eval if _8bit_chars.@size > 0 {
                 log_warn("Warning: Found T61String that contain 8bit chars: hex=" + _8bit_chars.to_string_hex)
             } else { () };
-            pure $ contents._unsafe_to_string // OK?
+            pure $ contents.from_array // OK?
         };
         if tag == tag_universal_string
         {
             eval log_warn("Warning: Found tag_universal_string: contents=" + contents.to_string_hex);
             // implemented but not tested
-            let u32array = Array::from_map(contents.get_size / 4, |i| contents.get_u32_be(i * 4));
-            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-            pure $ u8array._unsafe_to_string
+            let u32array = Array::from_map(contents.@size / 4, |i| contents.get_u32_be(i * 4));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.@size * 4));
+            pure $ u8array.from_array
         };
         if tag == tag_bmp_string
         {
             eval log_warn("Warning: Found tag_bmp_string: contents=" + contents.to_string_hex);
             // implemented but not tested
-            let u16array = Array::from_map(contents.get_size / 2, |i| contents.get_u16_be(i * 2));
-            let u32array = utf16_to_utf32(u16array, Array::empty(u16array.get_size / 2));
-            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.get_size * 4));
-            pure $ u8array._unsafe_to_string
+            let u16array = Array::from_map(contents.@size / 2, |i| contents.get_u16_be(i * 2));
+            let u32array = utf16_to_utf32(u16array, Array::empty(u16array.@size / 2));
+            let u8array = utf32_to_utf8(u32array, Array::empty(u32array.@size * 4));
+            pure $ u8array.from_array
         };
         error $ [tag].format("tag mismatch: expected=(string) actual={}")
     );
@@ -589,10 +589,10 @@ impl Asn1::BitString: DecodeDer {
         // the constructed form of encoding shall not be used for bitstring.
         let (identifier, contents) = *decode_primitive;
         assert_tag(tag_bit_string, identifier);;
-        if contents.get_size <= 0 { error $ "invalid bitstring" };
+        if contents.@size <= 0 { error $ "invalid bitstring" };
         let number_of_unused_bits = contents.@(0);
         if number_of_unused_bits >= 8_U8 { error $ "invalid bitstring" };
-        let data = contents.get_sub(1, contents.get_size);
+        let data = contents.get_sub(1, contents.@size);
         pure $ BitString {
             number_of_unused_bits: number_of_unused_bits,
             data: data
@@ -618,21 +618,21 @@ impl Asn1::ObjectIdentifier: DecodeDer {
     decode_obj = (
         let (identifier, contents) = *decode_primitive;
         assert_tag(tag_object_identifier, identifier);;
-        if contents.get_size <= 0 { error $ "invalid object identifier" };
-        let n = contents.get_size;
+        if contents.@size <= 0 { error $ "invalid object identifier" };
+        let n = contents.@size;
         let subidentifiers: Array I64 = loop(
             ([], 0, 0), |(subidentifiers, value, i)|
             if i >= n { break $ subidentifiers };
-            let u8: U8 = contents.@(i);
-            let value: I64 = value.shift_left(7).bit_or(u8.bit_and(0x7F_U8).to_I64);
-            if u8.bit_and(0x80_U8) == 0_U8 {
+            let byte: U8 = contents.@(i);
+            let value: I64 = value.shift_left(7).bit_or(byte.bit_and(0x7F_U8).i64);
+            if byte.bit_and(0x80_U8) == 0_U8 {
                 continue $ (subidentifiers.push_back(value), 0, i + 1)
             };
             continue $ (subidentifiers, value, i + 1)
         );
         let first = max(0, min(2, subidentifiers.@(0) / 40));
         let second = subidentifiers.@(0) - first * 40;
-        let components = [first, second].append(subidentifiers.get_sub(1, subidentifiers.get_size));
+        let components = [first, second].append(subidentifiers.get_sub(1, subidentifiers.@size));
         let data = components.to_iter.map(to_string).join(".");
         pure $ ObjectIdentifier { data: data }
     );

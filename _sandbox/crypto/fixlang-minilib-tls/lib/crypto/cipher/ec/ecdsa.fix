@@ -49,7 +49,7 @@ namespace ECInt {
     to_n_bytes: I64 -> ECInt -> Array U8;
     to_n_bytes = |mlen, a| (
         let bytes = a.ToBytes::to_bytes;    // use ToBytes::to_bytes
-        let n = bytes.get_size;
+        let n = bytes.@size;
         if n < mlen {
             Array::fill(mlen - n, 0_U8).append(bytes)
         } else if n > mlen {
@@ -68,7 +68,7 @@ namespace ECInt {
     // Gets an octet string length.
     get_mlen: ECInt -> I64;
     get_mlen = |q| (
-        let k = q.@nat._bit_length.to_I64;      // 2^(k-1) <= q < 2^k
+        let k = q.@nat._bit_length.i64;      // 2^(k-1) <= q < 2^k
         let mlen = (k + 7) / 8;
         mlen
     );
@@ -86,10 +86,10 @@ namespace ECInt {
         };
         let n = end - begin;
         assert_lazy(|_| "invalid range", n > zero) $ |_|
-        let num_bits = n.@nat.get_size * BigNat::_log2_base.to_I64;
+        let num_bits = n.@nat.@size * BigNat::_log2_base.i64;
         let bytes = *random_bytes(num_bits / 8);
         let r = from_bytes(bytes).as_ok;
-        if r >= ((one: ECInt).shift_left(num_bits.to_U64) / n) * n {
+        if r >= ((one: ECInt).shift_left(num_bits.u64) / n) * n {
             generate_ECInt_range(begin, end)      // try again
         };
         let r = r % n;
@@ -120,8 +120,8 @@ namespace ECField {
     );
 
     from_I64: I64 -> ECField;
-    from_I64 = |i64| (
-        Montgomery::from_I64(i64)
+    from_I64 = |i64val| (
+        Montgomery::from_I64(i64val)
     );
 
     // 2.3.5 FieldElement-to-OctetString Conversion
@@ -227,7 +227,7 @@ namespace ECPoint {
     from_bytes_ec = |ec, bytes| (
         if bytes == [ 0_U8 ] { ok $ zero };
         let mlen = ec.@ps.@n.get_mlen;
-        if bytes.get_size == mlen + 1 {     // compressed
+        if bytes.@size == mlen + 1 {     // compressed
             let y_bytes = bytes.get_sub(0, 1);
             let x_bytes = bytes.get_sub(1, mlen + 1);
             let x = ECField::make(*from_bytes(x_bytes), ec.@ps);
@@ -246,7 +246,7 @@ namespace ECPoint {
             p.check_on_curve;;
             ok $ p
         };
-        if bytes.get_size == 2 * mlen + 1 {     // uncompressed
+        if bytes.@size == 2 * mlen + 1 {     // uncompressed
             let w = bytes.get_sub(0, 1);
             let x_bytes = bytes.get_sub(1, mlen + 1);
             let y_bytes = bytes.get_sub(mlen + 1, 2 * mlen + 1);
@@ -259,7 +259,7 @@ namespace ECPoint {
             p.check_on_curve;;
             ok $ p
         };
-        err $ (bytes.get_size, mlen).format("from_bytes_ec: invalid size: bytes_size={} mlen={}")
+        err $ (bytes.@size, mlen).format("from_bytes_ec: invalid size: bytes_size={} mlen={}")
     );
 }
 
@@ -620,12 +620,12 @@ namespace ECDSAScheme {
     _derive_e = |_H, scheme| (
         let ec = scheme.@ec;
         let hashlen = scheme.@hash.@hashlen;
-        assert_eq_lazy(|_| "invalid hashlen: " + [_H.get_size, hashlen].format("{}, {}"), _H.get_size, hashlen) $ |_|
+        assert_eq_lazy(|_| "invalid hashlen: " + [_H.@size, hashlen].format("{}, {}"), _H.@size, hashlen) $ |_|
         // 5. Derive an integer e from H as follows:
         // 5.1. Convert the octet string H to a bit string H using the conversion routine specified in Section 2.3.2.
         // ...does nothing
         // 5.2. Set E = H if ceil(log2 n) ≥ 8(hashlen), and set E equal to the leftmost ceil(log2 n) bits of H if ceil(log2 n) < 8(hashlen).
-        let ceil_log2_n = ec.@ns.@n.@nat._bit_length.to_I64;
+        let ceil_log2_n = ec.@ns.@n.@nat._bit_length.i64;
         assert_lazy(|_| "unsupported ceil_log2_n: " + ceil_log2_n.to_string, ceil_log2_n % 8 == 0) $ |_|
         let _E: Array U8 = if ceil_log2_n >= 8 * hashlen { _H }
         else { _H.get_sub(0, ceil_log2_n / 8) };

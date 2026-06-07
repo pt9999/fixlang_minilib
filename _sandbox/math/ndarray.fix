@@ -105,7 +105,7 @@ impl [a: ToRange, b: ToRange, c: ToRange] (a, b, c): ToNdRange {
 }
 
 impl [a: ToRange, b: ToRange, c: ToRange, d: ToRange] (a, b, c, d): ToNdRange {
-    to_nd_range = |(a, b, c)| [a.to_range, b.to_range, c.to_range, d.to_range];
+    to_nd_range = |(a, b, c, d)| [a.to_range, b.to_range, c.to_range, d.to_range];
 }
 
 // N-dimensional array.
@@ -138,13 +138,13 @@ namespace NdArray {
         offset: 0
     };
 
-    // `NdArray::make(shape, data)` creates an n-dimensional array with 
+    // `NdArray::make(shape, data)` creates an n-dimensional array with
     // specified shape and data.
     make: Array I64 -> Array a -> NdArray a;
     make = |shape, data| (
         let ndarray = NdArray {
             data: data,
-            shape: [data.get_size],
+            shape: [data.@size],
             strides: [1],
             offset: 0
         };
@@ -166,7 +166,7 @@ namespace NdArray {
     // `Ndarray::from_array(array)` creates one-dimensional ndarray from `array`.
     from_array: Array a -> NdArray a;
     from_array = |array| (
-        make([array.get_size], array)
+        make([array.@size], array)
     );
 
     // `Ndarray::from_iter(iter)` creates one-dimensional ndarray from `iter`.
@@ -205,14 +205,14 @@ namespace NdArray {
         NdArray::from_iter(iter)
     );
 
-    // `NdArray::get_size` returns total count of elements in ndarray, which equals to
+    // `NdArray::@size` returns total count of elements in ndarray, which equals to
     // the product of `@shape`.
-    get_size: NdArray a -> I64;
-    get_size = |ndarray| ndarray.@shape.to_iter.fold(1, mul);
+    @size: NdArray a -> I64;
+    @size = |ndarray| ndarray.@shape.to_iter.fold(1, mul);
 
     // `NdArray::get_dim` returns the dimension of ndarray.
     get_dim: NdArray a -> I64;
-    get_dim = |ndarray| ndarray.@shape.get_size;
+    get_dim = |ndarray| ndarray.@shape.@size;
 
     // Checks whether the dimension matches
     _assert_dim_equals_lazy: I64 -> NdArray a -> Lazy b -> b;
@@ -237,17 +237,17 @@ namespace NdArray {
 
     _calc_offset: Array I64 -> NdArray a -> I64;
     _calc_offset = |idx, ndarray| (
-        ndarray._assert_dim_equals_lazy(idx.get_size) $ |_|
+        ndarray._assert_dim_equals_lazy(idx.@size) $ |_|
         loop(
             (0, ndarray.@offset), |(d, offset)|
-            if d >= ndarray.@strides.get_size {
+            if d >= ndarray.@strides.@size {
                 break $ offset
             };
             let i = idx.@(d);
             let n = ndarray.@shape.@(d);
             let i = modulo(i, n);
             let offset = offset + ndarray.@strides.@(d) * i;
-            continue $ (d + 1, offset)  
+            continue $ (d + 1, offset)
         )
     );
 
@@ -293,7 +293,7 @@ namespace NdArray {
     get_sub: [r: ToNdRange] r -> NdArray a -> NdArray a;
     get_sub = |range, ndarray| (
         let range: Array (I64, I64) = range.to_nd_range;
-        ndarray._assert_dim_equals_lazy(range.get_size) $ |_|
+        ndarray._assert_dim_equals_lazy(range.@size) $ |_|
         let range = ndarray.clamp_range(range);
         let shape = range.map(|(begin, end)| end - begin);
         let index = range.map(|(begin, end)| begin);
@@ -308,8 +308,8 @@ namespace NdArray {
         let src = sub;
         let dest = ndarray;
         let range = range.to_nd_range;
-        src._assert_dim_equals_lazy(range.get_size) $ |_|
-        dest._assert_dim_equals_lazy(range.get_size) $ |_|
+        src._assert_dim_equals_lazy(range.@size) $ |_|
+        dest._assert_dim_equals_lazy(range.@size) $ |_|
         let range = dest.clamp_range(range);
         let dest_shape: Array I64 = range.map(|(begin, end)| end - begin);
         let dest_offset: I64 = dest._calc_offset(range.map(|(begin, end)| begin));
@@ -319,14 +319,14 @@ namespace NdArray {
     ravel: NdArray a -> NdArray a;
     ravel = |src| (
         let data = src.to_array;
-        NdArray::make([data.get_size], data)
+        NdArray::make([data.@size], data)
     );
 
     _copy_new: NdArray a -> NdArray a;
     _copy_new = |src| (
         let (size, strides) = _calc_size_and_stride(src.@shape);
         let dest = NdArray {
-            data: if size == 0 { 
+            data: if size == 0 {
                 Array::empty(0)
             } else {
                 Array::fill(size, src.@data.@(src.@offset))
@@ -381,7 +381,7 @@ namespace NdArray {
     // as if `src` is broadcasted to `dest_shape`.
     get_positions: Array I64 -> NdArray a -> Array I64;
     get_positions = |dest_shape, src| (
-        let positions: Array I64 = Array::empty(src.get_size);
+        let positions: Array I64 = Array::empty(src.@size);
         _get_positions_loop(src, positions, src.@shape, dest_shape, src.@offset, 0)
     );
 
@@ -429,7 +429,7 @@ namespace NdArray {
     );
 
     // `ndarray.to_iter` converts n-dimensitional ndarray to an iterator.
-    to_iter: NdArray a -> ArrayIterator a;
+    to_iter: [?o: Iterator, Item ?o = a] NdArray a -> ?o;
     to_iter = |src| (
         // TODO: implement a faster iterator
         src.to_array.to_iter
@@ -437,7 +437,7 @@ namespace NdArray {
 
     _map: (a -> b) -> NdArray a -> NdArray b;
     _map = |f, a| (
-        if a.get_size == a.@data.get_size {     // optimization
+        if a.@size == a.@data.@size {     // optimization
             NdArray {
                 data: a.@data.map(f),
                 shape: a.@shape,
@@ -450,13 +450,13 @@ namespace NdArray {
 
     _map2: ((a, b) -> c) -> NdArray a -> NdArray b -> NdArray c;
     _map2 = |f, a, b| (
-        if  a.@data.get_size == b.@data.get_size &&
+        if  a.@data.@size == b.@data.@size &&
             a.@shape == b.@shape &&
             a.@strides == b.@strides &&
             a.@offset == b.@offset &&
-            a.get_size == a.@data.get_size
+            a.@size == a.@data.@size
         {     // optimization
-            let n = a.@data.get_size;
+            let n = a.@data.@size;
             let data = a.@data.to_iter.zip(b.@data.to_iter).map(f).to_array;
             NdArray {
                 data: data,
@@ -491,7 +491,7 @@ namespace NdArray {
         if ndarray.@offset != 0 {
             ndarray.ravel.reshape(shape)
         };
-        assert_lazy(|_|"shape is empty", shape.get_size > 0) $ |_|
+        assert_lazy(|_|"shape is empty", shape.@size > 0) $ |_|
         // check that shape.@(i) >= 0 except for i == 0
         // TODO: compose multiple assert_lazy() to one
         eval shape.set(0, 0).to_iter.fold (
@@ -501,13 +501,13 @@ namespace NdArray {
         );
         // if first element of shape is negative, calculate it automatically
         let shape = if shape.@(0) >= 0 { shape } else {
-            let (size1, _) = _calc_size_and_stride(shape.get_sub(1, shape.get_size));
-            let n = ndarray.get_size / size1;
+            let (size1, _) = _calc_size_and_stride(shape.get_sub(1, shape.@size));
+            let n = ndarray.@size / size1;
             shape.set(0, n)
         };
         let (size, strides) = _calc_size_and_stride(shape);
-        let old_size = ndarray.@data.get_size;
-        assert_lazy(|_| "reshape failed: size overflow: " + 
+        let old_size = ndarray.@data.@size;
+        assert_lazy(|_| "reshape failed: size overflow: " +
                     old_size.to_string + " < " + size.to_string,
                     old_size >= size) $ |_|
         let offset = 0;
@@ -522,14 +522,14 @@ namespace NdArray {
     // `array._array_insert(i, v)` inserts `v` into `array` at position `i`.
     _array_insert: I64 -> a -> Array a -> Array a;
     _array_insert = |i, v, array| (
-        let n = array.get_size;
+        let n = array.@size;
         assert_lazy(|_| "_array_insert: index out of range", 0 <= i && i <= n) $ |_|
         let output = Array::empty(n + 1);
         loop(
             (output, 0), |(output, j)|
             if j >= n {
                 break $ if i == n { output.push_back(v) } else { output }
-            }; 
+            };
             let output = if i == j { output.push_back(v) } else { output };
             let output = output.push_back(array.@(j));
             continue $ (output, j + 1)
@@ -539,15 +539,15 @@ namespace NdArray {
     // `array._array_remove(i)` removes an element at position `i` from `array`.
     _array_remove: I64 -> Array a -> Array a;
     _array_remove = |i, array| (
-        let n = array.get_size;
+        let n = array.@size;
         assert_lazy(|_| "_array_remove: index out of range", 0 <= i && i < n) $ |_|
         let output = Array::empty(n - 1);
         loop(
             (output, 0), |(output, j)|
             if j >= n {
                 break $ output
-            }; 
-            let output = if i != j { output.push_back(v) } else { output };
+            };
+            let output = if i != j { output.push_back(array.@(j)) } else { output };
             continue $ (output, j + 1)
         )
     );
@@ -556,7 +556,7 @@ namespace NdArray {
     // Same as `a.to_iter.zip(b.to_iter).to_array`, but runs 50 times faster.
     _array_zip: Array a -> Array b -> Array (a, b);
     _array_zip = |a, b| (
-        let n = min(a.get_size, b.get_size);
+        let n = min(a.@size, b.@size);
         let c = Array::empty(n);
         loop(
             (c, 0), |(c, i)|
@@ -570,7 +570,7 @@ namespace NdArray {
     // Inserts a new axis to an NdArray.
     expand_dims: I64 -> NdArray a -> NdArray a;
     expand_dims = |axis, ndarray| (
-        let size = ndarray.get_size;
+        let size = ndarray.@size;
         let shape = ndarray.@shape._array_insert(axis, 1);
         let strides = ndarray.@strides._array_insert(axis, size);
         ndarray.set_shape(shape).set_strides(strides)
@@ -613,7 +613,7 @@ namespace NdArray {
     stack: [a: ToString] I64 -> Array (NdArray a) -> NdArray a;
     stack = |axis, children| (
         //eval debug_println("stack children="+children.to_string);
-        let child_count = children.get_size;
+        let child_count = children.@size;
         if (child_count == 0) { NdArray::empty };
         let first_child = children.@(0);
         let child_shape = first_child.@shape;
@@ -623,7 +623,7 @@ namespace NdArray {
             assert_lazy (|_| "stack: shapes of children must be same", child_shape == child.@shape) $ |_|
             ()
         );
-        assert_lazy(|_| "axis out of range", 0 <= axis && axis <= child_shape.get_size) $ |_|
+        assert_lazy(|_| "axis out of range", 0 <= axis && axis <= child_shape.@size) $ |_|
         let parent_shape = child_shape._array_insert(axis, child_count);
         let (parent_size, parent_stride) = _calc_size_and_stride(parent_shape);
         if parent_size == 0 {
@@ -650,26 +650,28 @@ namespace NdArray {
         parent
     );
 
+    /*
     _next_index: Array I64 -> Array I64 -> Array I64;
     _next_index = |shape, idx| (
-        let ndim = shape.get_size;
+        let ndim = shape.@size;
         loop(
             (idx, ndim - 1), |(idx, dim)|
             if dim < 0 {
-                idx
+                break $ idx
             };
             let idx = idx.mod(dim, |i| i + 1);
             if idx.@(dim) < shape.@(dim) {
-                idx
+                break $ idx
             };
             let idx = idx.set(dim, 0);
-            (idx, dim - 1)
+            continue $ (idx, dim - 1)
         )
     );
+    */
 
     _to_string: [a: ToString] NdArray a -> String;
     _to_string = |ndarray| (
-        let output: Array String = Array::empty(ndarray.get_size * 3);
+        let output: Array String = Array::empty(ndarray.@size * 3);
         let idx: Array I64 = Array::fill(ndarray.get_dim, 0);
         let (output, idx) = ndarray._to_string_loop((output, idx), 0);
         output.to_iter.concat_iter
@@ -678,7 +680,7 @@ namespace NdArray {
     _to_string_loop: [a: ToString] (Array String, Array I64) -> I64 -> NdArray a -> (Array String, Array I64);
     _to_string_loop = |(output, idx), dim, ndarray| (
         let count = ndarray.@shape.@(dim);
-        let is_last_dim =  (dim == ndarray.@shape.get_size - 1);
+        let is_last_dim =  (dim == ndarray.@shape.@size - 1);
         let output = output.push_back("[");
         let (output, idx) = loop(
             (output, idx, 0), |(output, idx, i)|
@@ -774,7 +776,7 @@ range_map = |begin, end, f| (
 
 index_fold: Array I64 -> I64 -> Array I64 -> a -> (a -> Array I64 -> a) -> a;
 index_fold = |shape, dim, index, output, f| (
-    if dim >= shape.get_size {
+    if dim >= shape.@size {
         f(output, index)
     };
     range_fold(0, shape.@(dim),
@@ -802,24 +804,25 @@ dot = |b, a| (
     // TODO: implement when a and b are vectors
     let a_shape = a.@shape;
     let b_shape = b.@shape;
-    let a_dim = a_shape.get_size;
-    let b_dim = b_shape.get_size;
+    let a_dim = a_shape.@size;
+    let b_dim = b_shape.@size;
     assert_lazy(|_| "invalid a_shape", a_dim > 0) $ |_|
     assert_lazy(|_| "invalid b_shape", b_dim > 0) $ |_|
     let b = if b_dim == 1 {
-        b 
-    } else { 
+        b
+    } else {
         b.swapaxes(b_dim - 2, b_dim - 1)
     };
     let b_shape = b.@shape;
     assert_lazy(|_| "vec_len mismatch",  a_shape.get_last == b_shape.get_last) $ |_|
     let vec_len = a_shape.get_last.as_some;
+    eval debug_eprintln("(a_shape, b_shape)=" + (a_shape, b_shape).to_string);
     let a_shape1 = a_shape.pop_back;
     let b_shape1 = b_shape.pop_back;
     let c_shape = a_shape1.append(b_shape1);
-    //let c_shape = if c_shape.get_size == 0 { [1] } else { c_shape };
-    let a_dim1 = a_shape1.get_size;
-    let b_dim1 = b_shape1.get_size;
+    //let c_shape = if c_shape.@size == 0 { [1] } else { c_shape };
+    let a_dim1 = a_shape1.@size;
+    let b_dim1 = b_shape1.@size;
     let a_index1 = Array::fill(a_dim1 + 1, 0).pop_back;
     let b_index1 = Array::fill(b_dim1 + 1, 0).pop_back;
     let c_index = a_index1.append(b_index1);
@@ -836,7 +839,7 @@ dot = |b, a| (
             let b_stride = b.@strides.get_last.as_some;
             //eval debug_eprintln("a_index="+a_index.to_string+" b_index="+b_index.to_string);
             let c_sum = zero;
-            let c_sum = range_fold(0, vec_len, 
+            let c_sum = range_fold(0, vec_len,
                 c_sum, |c_sum, i|
                 let a_val = a.@data.@(a_offset + a_stride * i);
                 let b_val = b.@data.@(b_offset + b_stride * i);

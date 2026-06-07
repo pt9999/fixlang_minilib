@@ -27,7 +27,7 @@ namespace Karatsuba {
     _get_sub_or_zero: I64 -> I64 -> Array U32 -> Array U32;
     _get_sub_or_zero = |begin, end, a| (
         assert_lazy(|_| "invalid range", begin < end) $ |_|
-        let n = a.get_size;
+        let n = a.@size;
         if begin >= n { BigNat::_zero };
         let end = min(end, n);
         if begin == 0 && end == n { a };
@@ -38,10 +38,10 @@ namespace Karatsuba {
     _mul_karatsuba: Array U32 -> Array U32 -> Array U32;
     _mul_karatsuba = |a, b| (
         let thresh = 64;
-        if a.get_size <= thresh && b.get_size <= thresh {
+        if a.@size <= thresh && b.@size <= thresh {
             _mul(a,b)
         };
-        let n = max(a.get_size, b.get_size);
+        let n = max(a.@size, b.@size);
         let m = (n + 1) / 2;
         let a0 = a._get_sub_or_zero(0, m);
         let a1 = a._get_sub_or_zero(m, n);
@@ -70,13 +70,13 @@ namespace BigNatEx {
     _bit_length: Array U32 -> U64;
     _bit_length = |a| (
         let a = a._remove_last_zeros;
-        let n = a.get_size;
-        let bit_length = n.to_U64 * _log2_base;
-        let d = a.@(n-1).to_U64;
+        let n = a.@size;
+        let bit_length = n.u64 * _log2_base;
+        let d = a.@(n-1).u64;
         loop(
-            (bit_length, _log2_base.to_I64 - 1), |(bit_length, i)|
+            (bit_length, _log2_base.i64 - 1), |(bit_length, i)|
             if i < 0 { break $ bit_length };
-            if d.bit_and(1_U64.shift_left(i.to_U64)) != 0_U64 {
+            if d.bit_and(1_U64.shift_left(i.u64)) != 0_U64 {
                 break $ bit_length
             };
             continue $ (bit_length - 1_U64, i - 1)
@@ -102,19 +102,19 @@ namespace BigNatEx {
     _shift_left = |shift, a| (
         if shift == 0_U64 { a };
         let (off, shift) = _divmod_log2_base(shift);
-        let n = a.get_size;
+        let n = a.@size;
         let a = loop(
             (a, 0_U64, 0), |(a, carry, i)|
             if i >= n {
-                break $ if carry != 0_U64 { a.push_back(carry.to_U32) } else { a }
+                break $ if carry != 0_U64 { a.push_back(carry.u32) } else { a }
             };
-            let d = a.@(i).to_U64;
+            let d = a.@(i).u64;
             let carry2 = d.shift_right(_log2_base - shift);
             let d = d.shift_left(shift).bit_or(carry);
-            let a = a.set(i, d.to_U32);
+            let a = a.set(i, d.u32);
             continue $ (a, carry2, i + 1)
         );
-        if off != 0_U64 { Array::fill(off.to_I64, 0_U32).append(a) } else { a }
+        if off != 0_U64 { Array::fill(off.i64, 0_U32).append(a) } else { a }
     );
 
     _shift_right: U64 -> Array U32 -> Array U32;
@@ -122,18 +122,18 @@ namespace BigNatEx {
         if shift == 0_U64 { a };
         let (off, shift) = _divmod_log2_base(shift);
         let a = if off == 0_U64 { a }
-        else if off.to_I64 < a.get_size { a.get_sub(off.to_I64, a.get_size) }
+        else if off.i64 < a.@size { a.get_sub(off.i64, a.@size) }
         else { [0_U32] };
-        let n = a.get_size;
+        let n = a.@size;
         let a = loop(
             (a, 0_U64, n-1), |(a, carry, i)|
             if i < 0 {
                 break $ a
             };
-            let d = a.@(i).to_U64;
+            let d = a.@(i).u64;
             let carry2 = d.shift_left(_log2_base - shift);
             let d = d.shift_right(shift).bit_or(carry);
-            let a = a.set(i, d.to_U32);
+            let a = a.set(i, d.u32);
             continue $ (a, carry2, i - 1)
         );
         a._remove_last_zeros
@@ -146,10 +146,10 @@ namespace Goldschmidt {
     _add_exp: Array U32 -> I64 -> Array U32 -> I64 -> (Array U32, I64);
     _add_exp = |a0, exp0, a1, exp1| (
         if exp1 < exp0 { _add_exp(a1, exp1, a0, exp0) };
-        let dexp1 = (exp1 - exp0).to_U64;
+        let dexp1 = (exp1 - exp0).u64;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
-        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);
-        let a2 = _add_with_offset1(a0, (a1, off1.to_I64));
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).u32, a1);
+        let a2 = _add_with_offset1(a0, (a1, off1.i64));
         let exp2 = exp0;
         (a2, exp2)
     );
@@ -157,18 +157,18 @@ namespace Goldschmidt {
     _sub_exp: Array U32 -> I64 -> Array U32 -> I64 -> Result ErrMsg (Array U32, I64);
     _sub_exp = |a0, exp0, a1, exp1| (
         if exp1 < exp0 {
-            let dexp0 = (exp0 - exp1).to_U64;
+            let dexp0 = (exp0 - exp1).u64;
             let (off0, dexp0) = _divmod_log2_base(dexp0);
-            let a0 = _mul_u32(1_U64.shift_left(dexp0).to_U32, a0);      // TODO: is it ok to use just _shift_left?
-            let (a2, off2) = *_sub_with_offset((a0, off0.to_I64), (a1, 0));     // TODO: use _signed_sub_with_offset
-            let exp2 = exp1 + off2 * _log2_base.to_I64;
+            let a0 = _mul_u32(1_U64.shift_left(dexp0).u32, a0);      // TODO: is it ok to use just _shift_left?
+            let (a2, off2) = *_sub_with_offset((a0, off0.i64), (a1, 0));     // TODO: use _signed_sub_with_offset
+            let exp2 = exp1 + off2 * _log2_base.i64;
             pure $ (a2, exp2)
         };
-        let dexp1 = (exp1 - exp0).to_U64;
+        let dexp1 = (exp1 - exp0).u64;
         let (off1, dexp1) = _divmod_log2_base(dexp1);
-        let a1 = _mul_u32(1_U64.shift_left(dexp1).to_U32, a1);          // TODO: is it ok to use just _shift_left?
-        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.to_I64));
-        let exp2 = exp0 + off2 * _log2_base.to_I64;
+        let a1 = _mul_u32(1_U64.shift_left(dexp1).u32, a1);          // TODO: is it ok to use just _shift_left?
+        let (a2, off2) = *_sub_with_offset((a0, 0), (a1, off1.i64));
+        let exp2 = exp0 + off2 * _log2_base.i64;
         pure $ (a2, exp2)
     );
 
@@ -184,7 +184,7 @@ namespace Goldschmidt {
         if a0_bit_length <= bit_length { (a0, exp0) };
         let shift = a0_bit_length - bit_length;
         let a0 = a0._shift_right(shift);
-        let exp0 = exp0 + shift.to_I64;
+        let exp0 = exp0 + shift.i64;
         (a0, exp0)
     );
 
@@ -194,7 +194,7 @@ namespace Goldschmidt {
         let a_bit_length = a._bit_length;
         let b_bit_length = b._bit_length;
         // scale a and b such that 0.5 <= b < 1
-        let b_exp = -b._bit_length.to_I64;         // exponent of 2
+        let b_exp = -b._bit_length.i64;         // exponent of 2
         let a_exp = b_exp;
         let (a, a_exp, b, b_exp) = *loop_m(
             (a, a_exp, b, b_exp, 0), |(a, a_exp, b, b_exp, i)|
@@ -214,8 +214,8 @@ namespace Goldschmidt {
             };
             continue_m $ (a1, a1_exp, b1, b1_exp, i + 1)
         );
-        let a = if a_exp >= 0 { a._shift_left(a_exp.to_U64) }
-        else { a._shift_right((-a_exp).to_U64) };
+        let a = if a_exp >= 0 { a._shift_left(a_exp.u64) }
+        else { a._shift_right((-a_exp).u64) };
         //eval debug_eprintln((a).format("_goldschmidt: result a={}"));
         pure $ a._remove_last_zeros
     );
@@ -274,8 +274,8 @@ namespace DivMod3 {
         if _cmp((a0, offset0), (a1, offset1)) < 0 {
             err $ "underflow"
         };
-        let n0 = a0.get_size + offset0;
-        let n1 = a1.get_size + offset1;
+        let n0 = a0.@size + offset0;
+        let n1 = a1.@size + offset1;
         let n2 = max(n0, n1);
         let offset2 = min(offset0, offset1);
         let a2 = Array::empty(n2 - offset2);
@@ -286,14 +286,14 @@ namespace DivMod3 {
             };
             let d0: U32 = if offset0 <= i && i < n0 { a0.@(i - offset0) } else { 0_U32 };
             let d1: U32 = if offset1 <= i && i < n1 { a1.@(i - offset1) } else { 0_U32 };
-            let d0: U64 = d0.to_U64;
-            let d1: U64 = d1.to_U64 + borrow;
+            let d0: U64 = d0.u64;
+            let d1: U64 = d1.u64 + borrow;
             let (borrow, d2) = if d0 >= d1 {
                 (0_U64, d0 - d1)
             } else {
                 (1_U64, _base + d0 - d1)
             };
-            let a2 = a2.push_back(d2.to_U32);
+            let a2 = a2.push_back(d2.u32);
             continue $ (a2, i + 1, borrow)
         );
         if borrow > 0_U64 {
@@ -306,9 +306,9 @@ namespace DivMod3 {
     // Makes a shift table `[a, 2*a, 4*a, ..., 2^(_log2_base-1)*a]`.
     _make_shift_table: Array U32 -> Array (Array U32);
     _make_shift_table = |a| (
-        Iterator::range(0, _log2_base.to_I64).map(|shift|
-            let u32 = 1_U32.shift_left(shift.to_U32);
-            _mul_u32(u32, a)
+        Iterator::range(0, _log2_base.i64).map(|shift|
+            let u32val = 1_U32.shift_left(shift.u32);
+            _mul_u32(u32val, a)
         ).to_array
     );
 
@@ -322,13 +322,13 @@ namespace DivMod3 {
         let a0 = a0._remove_last_zeros;
         let a1 = a1._remove_last_zeros;
         assert_lazy(|_| "Divide by zero", a1 != [ 0_U32 ]) $ |_|
-        if a1.get_size == 1 {
+        if a1.@size == 1 {
             let (quo, rem) = _divmod_u32(a0, a1.@(0));
             (quo, [rem])
         };
         let a1_shift_table = _make_shift_table(a1);
-        let n0 = a0.get_size;
-        let n1 = a1.get_size;
+        let n0 = a0.@size;
+        let n1 = a1.@size;
         assert_lazy(|_| "Invalid array size", n0 > 0 && n1 > 0) $ |_|
         if n0 < n1 {
             ([0_U32], a0)
@@ -350,11 +350,11 @@ namespace DivMod3 {
             eval _debug(|_| "(a1, offset1)="+(a1, offset1).to_string);
             eval _debug(|_| "(a2)="+(a2).to_string);
             let (a0, a2) = loop(
-                (a0, a2, _log2_base.to_I64 - 1), |(a0, a2, shift)|
+                (a0, a2, _log2_base.i64 - 1), |(a0, a2, shift)|
                 if shift < 0 {
                     break $ (a0, a2)
                 };
-                let d2 = 1_U32.shift_left(shift.to_U32);
+                let d2 = 1_U32.shift_left(shift.u32);
                 //let d2_mul_a1 = _mul_u32(d2, a1);
                 let d2_mul_a1 = a1_shift_table.@(shift);
                 let (a3, offset3) = (d2_mul_a1, offset1);
@@ -384,7 +384,7 @@ namespace DivMod4 {
     _append_last_zeros = |n, a| (
         loop (
             a, |a|
-            if a.get_size >= n { break $ a };
+            if a.@size >= n { break $ a };
             continue $ a.push_back(0_U32)
         )
     );
@@ -392,7 +392,7 @@ namespace DivMod4 {
     // Calculates `a0 + a1 * _base ^ offset1`.
     _add_u32_with_offset1: Array U32 -> U32 -> I64 -> Array U32;
     _add_u32_with_offset1 = |a0, a1, offset1| (
-        let n0 = a0.get_size;
+        let n0 = a0.@size;
         let n1 = 1 + offset1;
         let n2 = max(n0, n1);
         let a0 = a0._append_last_zeros(n2);
@@ -400,7 +400,7 @@ namespace DivMod4 {
             (a0, offset1, 0_U64), |(a0, i, carry)|
             if i >= n2 {
                 let a0 = if carry == 0_U64 { a0 }
-                else { a0.push_back(carry.to_U32) };
+                else { a0.push_back(carry.u32) };
                 break $ a0
             };
             if i >= n1 && carry == 0_U64 {
@@ -408,9 +408,9 @@ namespace DivMod4 {
             };
             let d0: U32 = a0.@(i);
             let d1: U32 = if i == offset1 { a1 } else { 0_U32 };
-            let d2: U64 = d0.to_U64 + d1.to_U64 + carry;
+            let d2: U64 = d0.u64 + d1.u64 + carry;
             let (carry, d2) = _divmod_base(d2);
-            let a0 = a0.set(i, d2.to_U32);
+            let a0 = a0.set(i, d2.u32);
             continue $ (a0, i + 1, carry)
         )._remove_last_zeros
     );
@@ -419,7 +419,7 @@ namespace DivMod4 {
     // returns the result and the sign.
     _signed_sub_u32_with_offset: Array U32 -> U32 -> I64 -> (Array U32, I64);
     _signed_sub_u32_with_offset = |a, b, b_offset| (
-        let na = a.get_size;
+        let na = a.@size;
         let nb = 1 + b_offset;
         let na = max(na, nb);
         let a = a._append_last_zeros(na);
@@ -433,14 +433,14 @@ namespace DivMod4 {
             };
             let a_u32: U32 = a.@(i);
             let b_u32: U32 = if i == b_offset { b } else { 0_U32 };
-            let sub_u64: U64 = b_u32.to_U64 + borrow;
+            let sub_u64: U64 = b_u32.u64 + borrow;
             let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
-            let sub_lo: U32 = sub_lo.to_U32;
+            let sub_lo: U32 = sub_lo.u32;
 
             let (borrow, a_u32) = if a_u32 >= sub_lo {
                 (sub_hi, a_u32 - sub_lo)
             } else {
-                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+                (sub_hi + 1_U64, (_base + a_u32.u64 - sub_lo.u64).u32)
             };
             let a = a.set(i, a_u32);
             continue $ (a, i + 1, borrow)
@@ -459,8 +459,8 @@ namespace DivMod4 {
     // returns the result and the sign.
     _signed_sub_with_offset_mul: Array U32 -> Array U32 -> U32 -> I64 -> (Array U32, I64);
     _signed_sub_with_offset_mul = |a, b, q, b_offset| (
-        let na = a.get_size;
-        let nb = b.get_size + b_offset;
+        let na = a.@size;
+        let nb = b.@size + b_offset;
         let na = max(na, nb + 1 /*for q*/);
         let a = a._append_last_zeros(na);
         let (a, borrow) = loop(
@@ -473,14 +473,14 @@ namespace DivMod4 {
             };
             let a_u32: U32 = a.@(i);
             let b_u32: U32 = if b_offset <= i && i < nb { b.@(i - b_offset) } else { 0_U32 };
-            let sub_u64: U64 = b_u32.to_U64 * q.to_U64 + borrow;
+            let sub_u64: U64 = b_u32.u64 * q.u64 + borrow;
             let (sub_hi: U64, sub_lo: U64) = _divmod_base(sub_u64);
-            let sub_lo: U32 = sub_lo.to_U32;
+            let sub_lo: U32 = sub_lo.u32;
 
             let (borrow, a_u32) = if a_u32 >= sub_lo {
                 (sub_hi, a_u32 - sub_lo)
             } else {
-                (sub_hi + 1_U64, (_base + a_u32.to_U64 - sub_lo.to_U64).to_U32)
+                (sub_hi + 1_U64, (_base + a_u32.u64 - sub_lo.u64).u32)
             };
             let a = a.set(i, a_u32);
             continue $ (a, i + 1, borrow)
@@ -501,14 +501,14 @@ namespace DivMod4 {
         let a = a._remove_last_zeros;
         let b = b._remove_last_zeros;
         assert_lazy(|_| "Divide by zero", b != BigNat::_zero) $ |_|
-        if b.get_size == 1 {
+        if b.@size == 1 {
             let (quo, rem) = _divmod_u32(a, b.@(0));
             (quo, [rem])
         };
         let (quo, rem, rem_sign) = loop(
             (BigNat::_zero, a, 1), |(quo, a, a_sign)|
-            let an = a.get_size;
-            let bn = b.get_size;
+            let an = a.@size;
+            let bn = b.@size;
             if an < bn {
                 break $ (quo, a, a_sign)
             };
@@ -519,8 +519,8 @@ namespace DivMod4 {
                 let qoff = (an - 1) - (bn - 1);
                 (q, qoff)
             } else {    // an > bn
-                let b_u64 = b.@(bn - 1).to_U64;
-                let a_u64 = a.@(an - 1).to_U64 * _base + a.@(an - 2).to_U64;
+                let b_u64 = b.@(bn - 1).u64;
+                let a_u64 = a.@(an - 1).u64 * _base + a.@(an - 2).u64;
 
                 // Vibrates significantly when a = 2^128 - 1, b = 2^65 - 1
                 // since a_u64 = 2^32-1, b_u64 = 1
@@ -533,9 +533,9 @@ namespace DivMod4 {
                 let q: U64 = max(1_U64, a_u64 / b_u64);
                 if q >= _base {
                     let q = q / _base;
-                    (q.to_U32, qoff + 1)
+                    (q.u32, qoff + 1)
                 } else {
-                    (q.to_U32, qoff)
+                    (q.u32, qoff)
                 }
             };
             //eval debug_eprintln("(an,bn)="+(an,bn).to_string + " (q,qoff)=" + (q,qoff).to_string);
@@ -572,7 +572,7 @@ type DivModFunc = (Array U32 -> Array U32 -> (Array U32, Array U32));
 measure_time_graph: String -> F64 -> Lazy a -> IO a;
 measure_time_graph = |label, unit, f| (
     let (result, time) = *measure_time(0.1, f);
-    let stars = Array::fill((time / unit).to_I64, '*')._unsafe_to_string;
+    let stars = Array::fill((time / unit).i64, '*').StringEx::from_array;
     println(label + ": " + stars + " " + time.to_string + " sec");;
     pure $ result
 );
@@ -581,7 +581,7 @@ test_karatsuba: IO ();
 test_karatsuba = (
     println("test_karatsuba");;
     let time = *FFI_CALL_IO[I32 time(Ptr), nullptr];
-    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let random = Random::init_by_seed(123_U64); // time.u64);
     let bits = 8192;   //1024;
     let (random, a) = generate_bigint(bits).run_state(random);
     let (random, b) = generate_bigint(bits).run_state(random);
@@ -596,9 +596,9 @@ test_perf_karatsuba = (
     println("=== test_perf_karatsuba ===");;
     Iterator::range(0, 50).to_dyn.foreach_m(|i|
         //let prec10 = (i+1) * 10;
-        //let bits = (prec10.to_F64 / 0.3010).to_I64;
+        //let bits = (prec10.f64 / 0.3010).i64;
         let bits = 32 * (i + 1) * 10;
-        let random = Random::init_by_seed((321 + i * 13).to_U64); // time.to_U64);
+        let random = Random::init_by_seed((321 + i * 13).u64); // time.u64);
         let (random, a) = generate_bigint(bits).run_state(random);
         let (random, b) = generate_bigint(bits).run_state(random);
         let unit = 1.0e-3;
@@ -627,7 +627,7 @@ test_exp = (
 test_shift_right: IO ();
 test_shift_right = (
     println("=== test_shift_right ===");;
-    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let random = Random::init_by_seed(123_U64); // time.u64);
     let bits = 128;
     do {
         let sm: I64 -> U64 -> StateT Random IOFail () = |i, shift| (
@@ -647,7 +647,7 @@ test_shift_right = (
         );
         let arr: Array (StateT Random IOFail ()) = do {
             let i = *Iterator::range(0, 3).to_array;
-            let shift = *[1, 3, 31, 32, 33].map(to_U64);
+            let shift = *[1, 3, 31, 32, 33].map(u64);
             pure $ sm(i, shift)
         };
         arr.sequence.eval_state_t(random).forget
@@ -672,8 +672,8 @@ test_divmod_spec = |divmod| (
         let arr: Array (IOFail ()) = do {
             let a = *[-1, 0, 1];
             let b = *[-1, 0, 1];
-            let a: BigInt = One::one.shift_left((2*n).to_U64) + BigInt::from_I64(a);
-            let b: BigInt = One::one.shift_left((n+1).to_U64) + BigInt::from_I64(b);
+            let a: BigInt = One::one.shift_left((2*n).u64) + BigInt::from_I64(a);
+            let b: BigInt = One::one.shift_left((n+1).u64) + BigInt::from_I64(b);
             pure $ test(a,b)
         };
         arr.sequence.forget
@@ -684,7 +684,7 @@ test_divmod_spec = |divmod| (
 compare_divmod_results: DivModFunc -> DivModFunc -> IO ();
 compare_divmod_results = |divmod1, divmod2| (
     println("=== compare_divmod_results ===");;
-    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let random = Random::init_by_seed(123_U64); // time.u64);
     let bits = 256;
     Iterator::range(0, 10).to_dyn.foreach_m(|i|
         let a = *generate_bigint(2*bits);
@@ -706,7 +706,7 @@ compare_divmod_performances = (
     println("=== compare_divmod_performances ===");;
     Iterator::range(0, 50).to_dyn.foreach_m(|i|
         //let prec10 = (i+1) * 10;
-        //let bits = (prec10.to_F64 / 0.3010).to_I64;
+        //let bits = (prec10.f64 / 0.3010).i64;
         let bits = 32 * (i + 1) * 10;
         let random = Random::init_by_seed(12345_U64);
         let (random, a) = generate_bigint(2*bits).run_state(random);
@@ -731,7 +731,7 @@ compare_divmod_performances = (
 repeat_divmod: DivModFunc -> IO ();
 repeat_divmod = |divmod| (
     println("=== repeat_divmod ===");;
-    let random = Random::init_by_seed(123_U64); // time.to_U64);
+    let random = Random::init_by_seed(123_U64); // time.u64);
     let bits = 256;
     let (random, a) = generate_bigint(2*bits).run_state(random);
     let (random, b) = generate_bigint(bits).run_state(random);

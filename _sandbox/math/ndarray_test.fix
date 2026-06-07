@@ -5,6 +5,7 @@ import Random;
 import Sandbox.NdArray;
 import Sandbox.NdArray.Random;
 
+import Minilib.Common.Assert;
 import Minilib.Testing.UnitTest;
 
 test_empty: TestCase;
@@ -76,11 +77,11 @@ test_zeros = (
 test_arange: TestCase;
 test_arange = (
     make_test("test_arange") $ |_|
-    let ndarray = NdArray::arange(3, 6).map(to_F64);
+    let ndarray = NdArray::arange(3, 6).map(f64);
     assert_equal("shape", [3], ndarray.@shape);;
     assert_equal("(0)", 3.0, ndarray.get(0));;
     assert_equal("(2)", 5.0, ndarray.get(2));;
-    let ndarray = NdArray::arange(6, 3).map(to_F64);
+    let ndarray = NdArray::arange(6, 3).map(f64);
     assert_equal("shape", [0], ndarray.@shape);;
     pure()
 );
@@ -89,7 +90,7 @@ test_get_size: TestCase;
 test_get_size = (
     make_test("test_get_size") $ |_|
     let ndarray = NdArray::fill([1,2,3,4,5], 11);
-    assert_equal("size", 120, ndarray.get_size);;
+    assert_equal("size", 120, ndarray.@size);;
     pure()
 );
 
@@ -135,7 +136,7 @@ test_map: TestCase;
 test_map = (
     make_test("test_map") $ |_|
     let ndarray_I64 = NdArray::from_array([1, 2, 3]);
-    let ndarray_F64 = ndarray_I64.map(to_F64);
+    let ndarray_F64 = ndarray_I64.map(f64);
     assert_equal("ndarray_F64", [1.0, 2.0, 3.0], ndarray_F64.to_array);;
     let ndarray_String = ndarray_I64.map(to_string);
     assert_equal("ndarray_String", ["1", "2", "3"], ndarray_String.to_array);;
@@ -213,7 +214,7 @@ unittest = (
 
 perf: String -> I64 -> (a -> b) -> a -> b;
 perf = |message, count,  f, a| (
-    let (res, consumed_time) = ().consumed_time_while(|_|
+    let (res, consumed_time) = consumed_time_while_lazy(|_|
         Iterator::count_up(0).take(count - 1).fold(
             f(a), |_,_|
             f(a)
@@ -221,7 +222,7 @@ perf = |message, count,  f, a| (
     );
     eval debug_eprintln("=== " + message + " ===");
     eval debug_eprintln("Total time: " + (1000.0 * consumed_time).to_string + " msec");
-    eval debug_eprintln("Time per loop: " + (1000.0 * consumed_time / count.to_F64).to_string + " msec");
+    eval debug_eprintln("Time per loop: " + (1000.0 * consumed_time / count.f64).to_string + " msec");
     res
 );
 
@@ -248,7 +249,7 @@ test1 = (
         println("base + (-base)=" + (base + (-base)).to_string).lift;;
         println("base * scalar(3)=" + (base * scalar(3)).to_string).lift;;
         println("base % scalar(3)=" + (base % scalar(3)).to_string).lift;;
-        println("base.map(to_F64)=" + (base.map(to_F64)).to_string).lift;;
+        println("base.map(f64)=" + (base.map(f64)).to_string).lift;;
         println("base + base == base * scalar(2)=" + (base + base == base * scalar(2)).to_string).lift;;
         println("base.transpose=" + base.transpose.to_string).lift;;
         println("base.get((2, 1))=" + base.get((2, 1)).to_string).lift;;
@@ -273,28 +274,26 @@ test1 = (
         let parent = stack(2, [base, base, base.transpose]);
         println("stack(2, [base, base, base.transpose])="+parent.to_string).lift;;
         println("stack(2, [base, base, base.transpose]).to_array="+parent.to_array.to_string).lift;;
-        /*
+
         let count = 10000;
         eval perf("base + base", count, |_| base + base, ());
         eval perf("base + scalar(3)", count, |_| base + scalar(3), ());
         eval perf("stack(2, [base, base, base.transpose])", count, |_| stack(2, [base, base, base.transpose]), ());
-        */
-        /*
+
         let count = 10;
         let size = 1000;
-        let a = NdArray::arange(0, size*size).map(to_F64);
+        let a = NdArray::arange(0, size*size).map(f64);
         let a = a.reshape([size, size]);
         let a = a.get_sub([(size/2,size), (size/2,size)]);
-        
-        eval perf("large", count, |_| 
+
+        eval perf("large", count, |_|
             let b = a.ravel;
             let a = b.reshape([size/4, size]);
             let a = a.ravel;
-            eval assert(|_| "differ", a == b);
-            //a * scalar(3.0), 
+            assert_lazy(|_| "a == b", a == b) $ |_|
+            //a * scalar(3.0),
             a,
             ());
-        */
         pure()
     }.try(eprintln)
 );
@@ -329,4 +328,12 @@ test_random = (
 );
 
 main: IO ();
-main = unittest;
+main = (
+    unittest;;
+    // TODO: change IO () to TestCase for these tests
+    test_vector;;
+    test1;;
+    //test_dot;; -- not working yet
+    test_random;;
+    pure()
+);

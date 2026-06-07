@@ -33,7 +33,7 @@ readline = |prompt| (
         throw $ _EOF
     };
     let str = *String::unsafe_from_c_str_ptr_io(ptr).lift;
-    if str.get_size > 0 {
+    if str.@size > 0 {
         FFI_CALL_IO[() add_history(Ptr), ptr].lift
     } else {
         pure()
@@ -88,7 +88,7 @@ impl Expr: ToString {
         };
         if ex.is_ex_unary {
             let (op, b) = ex.as_ex_unary;
-            "(" + op + a.to_string + ")"
+            "(" + op + b.to_string + ")"
         };
         if ex.is_ex_infix {
             let (a, op, b) = ex.as_ex_infix;
@@ -281,7 +281,7 @@ namespace Expr {
     _parse_ident = do {
         let c = *match_char_class(|c| is_alpha(c) || c == '_');
         let rest = *repeat(match_char_class(is_alnum));
-        let str = [c].append(rest)._unsafe_to_string;
+        let str = [c].append(rest).StringEx::from_array;
         pure $ ex_ident(str)
     };
 
@@ -524,15 +524,15 @@ namespace Evaluator
         if lhs.is_v_array {
             let array = lhs.as_v_array;
             let idx = rhs;
-            if idx.get_size != 1 {
+            if idx.@size != 1 {
                 error $ "invalid subsc (idx size)"
             };
             let idx = idx.@(0);
             if !idx.is_v_float {
                 error $ "invalid subsc (idx type)"
             };
-            let i = idx.as_v_float.to_I64;
-            if !(0 <= i && i <= array.get_size) {
+            let i = idx.as_v_float.i64;
+            if !(0 <= i && i <= array.@size) {
                 error $ "invalid subsc (idx out of range)"
             };
             pure $ array.@(i)
@@ -540,12 +540,12 @@ namespace Evaluator
         if lhs.is_v_ndarray {
             let ndarray = lhs.as_v_ndarray;
             let idx = rhs;
-            if idx.get_size != ndarray.get_dim {
+            if idx.@size != ndarray.get_dim {
                 error $ "invalid subsc (idx size)"
             };
             let tuple2_array = *idx.map_m(|i|
                 if i.is_v_float {
-                    let i = i.as_v_float.to_I64;
+                    let i = i.as_v_float.i64;
                     pure $ (i, i + 1)
                 };
                 if i.is_v_range {
@@ -572,7 +572,7 @@ namespace Evaluator
             if !v.is_v_float {
                 error $ "invalid range type: " + v.to_string
             };
-            pure $ some(v.as_v_float.to_I64)
+            pure $ some(v.as_v_float.i64)
         );
         let lhs = *inner(lhs);
         let rhs = *inner(rhs);
@@ -621,7 +621,7 @@ namespace Builtin {
             error $ "invalid arg type"
         };
         let array = arg.as_v_array;
-        if array.get_size == 0 {
+        if array.@size == 0 {
             error $ "invalid arg count"
         };
         if !array.is_all(is_v_ndarray) {

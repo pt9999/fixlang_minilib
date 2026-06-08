@@ -7,6 +7,7 @@ import Minilib.Monad.IO;
 import Minilib.Monad.State;
 //import Minilib.Monad.Trans;
 import Minilib.Testing.UnitTest;
+import Minilib.Trait.Traversable;
 
 /*
 ### `borrow_boxed : [a : Std::Boxed] (Std::Ptr -> b) -> a -> b`
@@ -91,7 +92,18 @@ impl IOFail: MonadMutateIF {
         }
     );
     //mutate_boxed_m = |f| mutate_boxed_io(f >> to_result) >> map(|(a, res)| res.map(|b| (a, b))) >> from_io_result;
-    mutate_unique_m = |ctor, action| mutate_unique_io(ctor, action >> to_result) >> from_io_result;
+    mutate_unique_m = |ctor, action| (
+        mutate_unique_io(ctor, action >> to_result)
+        >> map(sequence) // traverse `IO (Tuple2 (Destructor a) (Result ErrMsg b))` to `IO (Result ErrMsg (Tuple2 (Destructor a) b))`
+        >> from_io_result
+    );
+    /*
+    mutate_unique_m = |ctor, action, dtor| (
+        let (dtor, res) = *dtor.mutate_unique_io(ctor, action >> to_result).lift;
+        let b = *res.from_result;
+        pure $ (dtor, b)
+    );
+    */
 }
 
 impl [m: Monad, m: MonadMutateIF] ReaderT e m: MonadMutateIF {
@@ -115,13 +127,13 @@ test_mutate_boxed_m_reader = (
     make_test("test_mutate_boxed_m_reader") $ |_|
     let r: ReaderT String IOFail () = do {
         let src: Array I64 = [ 1, 2, 3 ];
-        let n = src.get_size;
+        let n = src.@size;
         let dest: Array I64 = Array::fill(n, 0);
         let (dest, ret) = *dest.mutate_boxed_m(|p_dest|
             src.borrow_boxed_m(|p_src|
                 let env = *ask;
                 eval debug_eprintln("env="+env);
-                FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, (n * 8).to_CSizeT].lift_io
+                FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, (n * 8).c_size_t].lift_io
             )
         );
         assert_equal("eq", src, dest).lift_iofail
@@ -134,7 +146,7 @@ test1 = (
     let bufsize = 100;
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
     let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
-        FFI_CALL_IO[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
+        FFI_CALL_IO[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.c_size_t]
     );
     let str = arr.push_back(0_U8)._unsafe_from_c_str;
     println("gethostname()=" + str + " ret=" + ret.to_string)
@@ -148,7 +160,7 @@ test2 = do {
     let num = 123;
     let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
         format.borrow_c_str_m(|p_format|
-            FFI_CALL_IO[CInt sprintf(Ptr, Ptr, CInt), p_arr, p_format, num.to_CInt].lift
+            FFI_CALL_IO[CInt sprintf(Ptr, Ptr, CInt), p_arr, p_format, num.c_int].lift
         )
     );
     let str = arr.push_back(0_U8)._unsafe_from_c_str;
@@ -161,7 +173,7 @@ test3 = (
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
     let (arr, ret) = arr.mutate_boxed_m(|p_arr|
         // NOTE: gethostname() might have side effects, but I want to demonstrate `mutate_boxed_m` for Iden monad
-        Iden::make $ FFI_CALL[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.to_CSizeT]
+        Iden::make $ FFI_CALL[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.c_size_t]
     ).get;
     let str = arr.push_back(0_U8)._unsafe_from_c_str;
     println("gethostname()=" + str + " ret=" + ret.to_string)

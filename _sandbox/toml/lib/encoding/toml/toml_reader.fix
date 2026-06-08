@@ -34,7 +34,7 @@ namespace SimpleParserEx {
     );
 
     lift_result: Result ErrMsg a -> Parser a;
-    lift_result = |res| parser $ |s| res;
+    lift_result = |res| parser $ |s| (res, s);
 }
 
 get_matched_string_and_value: Parser a -> Parser (String, a);
@@ -154,7 +154,7 @@ convert_table_keyvals: Array TomlExpression -> I64 -> TomlTable -> Result ErrMsg
 convert_table_keyvals = |expressions, index, table| (
     loop_m(
         (table, index), |(table, index)|
-        if index >= expressions.get_size {
+        if index >= expressions.@size {
             break_m $ (table, index)
         };
         let expression = expressions.@(index);
@@ -170,7 +170,7 @@ convert_child_tables: Array TomlExpression -> I64 -> TomlTable -> Result ErrMsg 
 convert_child_tables = |expressions, index, root| (
     loop_m(
         (root, index), |(root, index)|
-        if index >= expressions.get_size {
+        if index >= expressions.@size {
             break_m $ (root, index)
         };
         let expression = expressions.@(index);
@@ -450,7 +450,7 @@ parse_hex_escape_seq_char: U8 -> I64 -> Parser (Array TomlChar);
 parse_hex_escape_seq_char = |c, n| (
     match_char(c);;
     let hexchars = *Array::fill(n, parse_hexdig).sequence;
-    let code_point = decode_digits_with_base(16_U64, hexchars).to_U32;
+    let code_point = decode_digits_with_base(16_U64, hexchars).u32;
     pure $ encode_code_point_to_utf8(code_point, [])
 );
 
@@ -474,7 +474,7 @@ parse_ml_basic_body = (
     let tail = *zero_or_more(do {
         let quotes = *parse_mlb_quotes;
         let body = *parse_mlb_contents;
-        if body.get_size < 1 { not_match };
+        if body.@size < 1 { not_match };
         pure $ quotes + body
     });
     pure $ body + tail.flatten
@@ -550,7 +550,7 @@ parse_ml_literal_body = (
     let tail = *zero_or_more(do {
         let quotes = *parse_mll_quotes;
         let body = *parse_mll_contents;
-        if body.get_size < 1 { not_match };
+        if body.@size < 1 { not_match };
         pure $ quotes + body
     });
     pure $ body + tail.flatten
@@ -656,7 +656,7 @@ parse_int_with_base = |base, prefix, parse_digit| (
             parse_digit
         }
     });
-    pure $ decode_digits_with_base(base.to_U64, chars).to_I64
+    pure $ decode_digits_with_base(base.u64, chars).i64
 );
 
 decode_digits_with_base: U64 -> Array TomlChar -> U64;
@@ -664,9 +664,9 @@ decode_digits_with_base = |base, input| (
     input.to_iter.fold(
         0_U64, |c, output|
         let h = (
-            if '0' <= c && c <= '9' { (c - '0').to_U64 };
-            if 'A' <= c && c <= 'Z' { (c - 'A').to_U64 + 10_U64 };
-            if 'a' <= c && c <= 'z' { (c - 'a').to_U64 + 10_U64 };
+            if '0' <= c && c <= '9' { (c - '0').u64 };
+            if 'A' <= c && c <= 'Z' { (c - 'A').u64 + 10_U64 };
+            if 'a' <= c && c <= 'z' { (c - 'a').u64 + 10_U64 };
             0_U64
         );
         output * base + h

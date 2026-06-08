@@ -68,7 +68,7 @@ Finds the value which is associated with the key.
 * `key` - The key to find.
 * `tree` - A Patricia Tree.
 
-#### get_size
+#### @size
 
 Type: `Minilib.Collection.PatTree3::PTree a -> Std::I64`
 

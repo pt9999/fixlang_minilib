@@ -38,7 +38,7 @@ namespace TestFsEnv {
         pure $ TestFsEnv {
             msg: *Var::make("").lift,
             loop: *UvLoop::make,
-            file: *Var::make(-1.to_CInt).lift,
+            file: *Var::make(-1.c_int).lift,
             read_contents: *Var::make("").lift,
         }
     };
@@ -73,7 +73,7 @@ namespace TestFsEnv {
     open_file_as_read: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
     open_file_as_read = |path, cb| (
         let flags = UvFsFlags::_O_RDONLY;
-        let mode = 0o666.to_CInt;
+        let mode = 0o666.c_int;
         let cb = make_open_cb(*ask, cb);
         let fs = *UvFs::open(*ask_loop, path, flags, mode, cb).lift_iofail;
         pure()
@@ -82,7 +82,7 @@ namespace TestFsEnv {
     open_file_as_write: String -> RIO TestFsEnv () -> RIO TestFsEnv ();
     open_file_as_write = |path, cb| (
         let flags = UvFsFlags::_O_CREAT.bit_or(UvFsFlags::_O_WRONLY).bit_or(UvFsFlags::_O_TRUNC);
-        let mode = 0o666.to_CInt;
+        let mode = 0o666.c_int;
         let cb = make_open_cb(*ask, cb);
         unlink(path).catch(|errmsg| pure()).lift_iofail;;
         let fs = *UvFs::open(*ask_loop, path, flags, mode, cb).lift_iofail;
@@ -92,7 +92,7 @@ namespace TestFsEnv {
     make_open_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsOpenCallback;
     make_open_cb = |env, cb| |req: UvFs, file: UvFile| (
         log_test("on_open begin: file=" + file.to_string);;
-        if file < 0.to_CInt {
+        if file < 0.c_int {
             error $ "open error: " + Uv::strerror(file)
         };
         tell_file(file);;
@@ -103,7 +103,7 @@ namespace TestFsEnv {
     read_from_file: I64 -> (I64 -> Array U8 -> RIO TestFsEnv ()) -> RIO TestFsEnv ();
     read_from_file = |bufsize, cb| (
         let cb = make_read_cb(*ask, cb);
-        let fs = *UvFs::read(*ask_loop, *ask_file, bufsize.to_CSizeT, cb).lift_iofail;
+        let fs = *UvFs::read(*ask_loop, *ask_file, bufsize.c_size_t, cb).lift_iofail;
         pure()
     );
 
@@ -111,7 +111,7 @@ namespace TestFsEnv {
     make_read_cb = |env, cb| |req: UvFs, nread: I64, bytes: Array U8| (
         log_test("on_read begin: nread=" + nread.to_string);;
         if nread < 0 {
-            error $ "read error: " + Uv::strerror(nread.to_CInt)
+            error $ "read error: " + Uv::strerror(nread.c_int)
         };
         cb(nread, bytes);;
         log_test("on_read end")
@@ -129,7 +129,7 @@ namespace TestFsEnv {
     make_write_cb = |env, cb| |req: UvFs, nwrite: I64, buf: Array U8| (
         log_test("on_write begin");;
         if nwrite < 0 {
-            error $ "write error: " + Uv::strerror(nwrite.to_CInt)
+            error $ "write error: " + Uv::strerror(nwrite.c_int)
         };
         cb;;
         log_test("on_write end")
@@ -145,8 +145,8 @@ namespace TestFsEnv {
     make_close_cb: TestFsEnv -> RIO TestFsEnv () -> UvFsCloseCallback;
     make_close_cb = |env, cb| |req: UvFs, result: CInt| (
         log_test("on_close begin");;
-        if result < 0.to_CInt {
-            error $ "close error: " + Uv::strerror(result.to_CInt)
+        if result < 0.c_int {
+            error $ "close error: " + Uv::strerror(result.c_int)
         };
         cb;;
         log_test("on_close end")

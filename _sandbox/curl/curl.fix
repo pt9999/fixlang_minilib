@@ -29,7 +29,7 @@ make = (
 _check_error: IO CInt -> Ptr -> IOFail ();
 _check_error = |io_code, glue| (
     let code = *io_code.lift;
-    if code != 0.to_CInt {
+    if code != 0.c_int {
         let p_errmsg = *FFI_CALL_IO[Ptr curl_glue_get_error_message(Ptr), glue].lift;
         let errmsg = *String::unsafe_from_c_str_ptr_io(p_errmsg).lift;
         throw $ "curl: " + errmsg
@@ -74,7 +74,7 @@ _set_boxed_value = |index, boxed, curl| (
         let retained_ptr = *FFI::boxed_to_retained_ptr(boxed).lift;
         let retain = FFI::get_funptr_retain(|_| boxed);
         let release = FFI::get_funptr_release(|_| boxed);
-        FFI_CALL_IO[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.to_CInt, retained_ptr, retain, release].lift
+        FFI_CALL_IO[() curl_glue_set_boxed_value(Ptr, CInt, Ptr, Ptr, Ptr), glue, index.c_int, retained_ptr, retain, release].lift
     )
 );
 
@@ -90,7 +90,7 @@ _get_boxed_value = |index, curl| (
 // `glue.__get_boxed_value(index)` gets the element of the internal array of boxed objects.
 __get_boxed_value: I64 -> Ptr -> IO (Box a);
 __get_boxed_value = |index, glue| (
-    let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.to_CInt];
+    let retained_ptr = *FFI_CALL_IO[Ptr curl_glue_get_boxed_value(Ptr, CInt), glue, index.c_int];
     FFI::boxed_from_retained_ptr(retained_ptr)
 );
 
@@ -101,20 +101,20 @@ _callback_write_function = |ptr, size, nmemb, userdata| (
     do {
         let glue = userdata;
         //eval debug_eprintln("_callback_write_function: nmemb=" + nmemb.to_string);
-        assert(|_| "invalid size", size == 1.to_CSizeT).lift;;
-        assert(|_| "invalid nmemb", nmemb >= 0.to_CSizeT).lift;;
+        assert(|_| "invalid size", size == 1.c_size_t).lift;;
+        assert(|_| "invalid nmemb", nmemb >= 0.c_size_t).lift;;
 
-        let bytes: Array U8 = Array::fill(nmemb.to_I64, 0_U8);
+        let bytes: Array U8 = Array::fill(nmemb.i64, 0_U8);
         bytes.borrow_boxed_io(|p_bytes|
             FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_bytes, ptr, nmemb]
         ).lift;;
 
         let boxed: Box (Destructor WriteFunc) = *glue.__get_boxed_value(0).lift;
         boxed.@value.borrow_io(|write_func|
-            write_func(bytes).map(to_CSizeT).to_result
+            write_func(bytes).map(c_size_t).to_result
         ).from_io_result
     }
-    .try(|errmes| eprintln(errmes);; pure $ 0.to_CSizeT)
+    .try(|errmes| eprintln(errmes);; pure $ 0.c_size_t)
     .unsafe_perform
 );
 FFI_EXPORT[_callback_write_function, _callback_write_function];

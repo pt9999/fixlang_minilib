@@ -4,7 +4,7 @@ build:
 	fix build --deny-deprecated
 
 test:
-	fix test -o a.out
+	fix test --deny-deprecated -o a.out
 
 document:
 	fix docs -o docs

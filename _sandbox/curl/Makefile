@@ -18,4 +18,4 @@ clean:
 	gcc -Wall -o $@ -c $<
 
 %.out: %.fix
-	fix build -f $< -o $@
+	fix build --deny-deprecated -f $< -o $@

@@ -63,7 +63,7 @@ empty = IntMap { root: TrieNode::empty() };
 
 find: IntKey -> IntMap a -> Option a;
 find = |key, map| (
-    let ukey = key.to_U64 + _ukey_offset;
+    let ukey = key.u64 + _ukey_offset;
     map.@root._lookup(_bits * (_num_levels - 1_U64), ukey)
 );
 
@@ -74,20 +74,20 @@ _lookup = |shift, ukey, node| (
         leaf(value) => some(value),
         branch(children) => (
             let i = ukey.shift_right(shift).bit_and(_branch_size - 1_U64);
-            children.@(i.to_I64)._lookup(shift - _bits, ukey)
+            children.@(i.i64)._lookup(shift - _bits, ukey)
         )
     }
 );
 
 insert: Combine a -> IntKey -> a -> IntMap a -> IntMap a;
 insert = |combine, key, new_value, map| (
-    let ukey = key.to_U64 + _ukey_offset;
+    let ukey = key.u64 + _ukey_offset;
     map.mod_root(_ins(_bits * (_num_levels - 1_U64), combine, ukey, new_value))
 );
 
 _ins: U64 -> Combine a -> UKey -> a -> TrieNode a -> TrieNode a;
 _ins = |shift, combine, ukey, new_value, node| (
-    if shift.to_I64 < 0 {
+    if shift.i64 < 0 {
         match node {
             empty() => leaf(new_value),
             leaf(old_value) => leaf(combine(old_value, new_value)),
@@ -95,12 +95,12 @@ _ins = |shift, combine, ukey, new_value, node| (
         }
     } else {
         let node = match node {
-            empty() => branch(Array::fill(_branch_size.to_I64, empty())),
+            empty() => branch(Array::fill(_branch_size.i64, empty())),
             leaf(_) => undefined("leaf found in level non-0"),
             branch(_) => node,
         };
         let i = ukey.shift_right(shift).bit_and(_branch_size - 1_U64);
-        node.mod_branch(mod(i.to_I64, _ins(shift - _bits, combine, ukey, new_value)))
+        node.mod_branch(mod(i.i64, _ins(shift - _bits, combine, ukey, new_value)))
     }
 );
 
@@ -115,15 +115,15 @@ _to_iter = |ukey, shift, node| (
     match node {
         empty() => Iterator::empty.to_dyn,
         leaf(value) => (
-            let key = (ukey - _ukey_offset).to_I64;
+            let key = (ukey - _ukey_offset).i64;
             pure((key, value))
         ),
         branch(children) => (
-            range(0, children.get_size)
+            range(0, children.@size)
             .filter(|i| !children.@(i).is_empty)
             .map(|i|
                 let shift1 = shift - _bits;
-                let ukey1 = ukey + i.to_U64.shift_left(shift);
+                let ukey1 = ukey + i.u64.shift_left(shift);
                 children.@(i)._to_iter(ukey1, shift1)
             )
             .flatten.to_dyn

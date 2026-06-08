@@ -100,7 +100,7 @@ namespace Window {
     make_sub_window: [m: MonadIOFail] I64 -> I64 -> I64 -> I64 -> Window -> m Window;
     make_sub_window = |x, y, w, h, parent| lift_iofail $ do {
         let p_win = *parent.@dtor.borrow_io(|p_parent|
-            FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.to_CInt, w.to_CInt, y.to_CInt, x.to_CInt]
+            FFI_CALL_IO[Ptr subwin(Ptr, CInt, CInt, CInt, CInt), p_parent, h.c_int, w.c_int, y.c_int, x.c_int]
         ).lift;
         if p_win == nullptr {
             throw $ "subwin failed! (x,y,w,h)=" + (x,y,w,h).to_string
@@ -113,7 +113,7 @@ namespace Window {
         };
         do {
             win._check_err("keypad") $ |p_win|
-            FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.to_CInt]
+            FFI_CALL_IO[CInt keypad(Ptr, CInt), p_win, 1.c_int]
         };;
         pure $ win
     };
@@ -127,8 +127,8 @@ namespace Window {
         let ret = *win.@dtor.borrow_io(|p_win|
             FFI_CALL_IO[CInt minilib_ncurses_get_window_size(Ptr), p_win]
         ).lift;
-        let w = ret.to_I64.shift_right(16).bit_and(0xffff);
-        let h = ret.to_I64.bit_and(0xffff);
+        let w = ret.i64.shift_right(16).bit_and(0xffff);
+        let h = ret.i64.bit_and(0xffff);
         pure $ (w, h)
     };
 
@@ -190,7 +190,7 @@ namespace Window {
     set_color_pair: [m: MonadIOFail] ColorPair -> Attr -> Window -> m ();
     set_color_pair = |color_pair, attr, win| (
         win._check_err("set_color_pair") $ |p_win|
-        FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.to_U16, nullptr]
+        FFI_CALL_IO[CInt wattr_set(Ptr, U32, U16, Ptr), p_win, attr, color_pair.u16, nullptr]
     );
 
     // Moves the cursor to `(x,y)`.
@@ -202,7 +202,7 @@ namespace Window {
     move_to: [m: MonadIOFail] I64 -> I64 -> Window -> m ();
     move_to = |x, y, win| (
         win._check_err("move_to") $ |p_win|
-        FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.to_CInt, x.to_CInt]
+        FFI_CALL_IO[CInt wmove(Ptr, CInt, CInt), p_win, y.c_int, x.c_int]
     );
 
     // Writes an ASCII string.
@@ -229,7 +229,7 @@ namespace Window {
     move_add_str = |x, y, str, win| (
         win._check_err((x,y,str).format("move_add_str({},{},{})")) $ |p_win|
         str.borrow_c_str_io(|p_str|
-            FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_str]
+            FFI_CALL_IO[CInt mvwaddstr(Ptr, CInt, CInt, Ptr), p_win, y.c_int, x.c_int, p_str]
         )
     );
 
@@ -246,7 +246,7 @@ namespace Window {
         let wstr = str.to_utf32_string;
         let wchars = wstr.@data.push_back(0_U32);
         wchars.borrow_boxed_io(|p_wstr|
-            FFI_CALL_IO[CInt mvwaddwstr(Ptr, CInt, CInt, Ptr), p_win, y.to_CInt, x.to_CInt, p_wstr]
+            FFI_CALL_IO[CInt mvwaddwstr(Ptr, CInt, CInt, Ptr), p_win, y.c_int, x.c_int, p_wstr]
         )
     );
 
@@ -259,7 +259,7 @@ namespace Window {
             FFI_CALL_IO[CInt wgetch(Ptr), p_win]
         );
         if ch == Ncurses::_error { pure $ none() };
-        pure $ some $ ch.to_I64
+        pure $ some $ ch.i64
     };
 
     // Reads a character from the window, then convert it to a keyname.
@@ -283,7 +283,7 @@ namespace Window {
     timeout: [m: MonadIO] I64 -> Window -> m ();
     timeout = |delay, win| lift_io $ do {
         win.@dtor.borrow_io(|p_win|
-            FFI_CALL_IO[() wtimeout(Ptr, CInt), p_win, delay.to_CInt]
+            FFI_CALL_IO[() wtimeout(Ptr, CInt), p_win, delay.c_int]
         )
     };
 
@@ -335,19 +335,19 @@ namespace ColorFuncs {
     has_colors: [m: MonadIO] m Bool;
     has_colors = lift_io $ do {
         FFI_CALL_IO[CChar has_colors()]
-    }.map(|c| c.to_I64 != 0);
+    }.map(|c| c.i64 != 0);
 
     // Returns whether the programmer can change the colors.
     can_change_color: [m: MonadIO] m Bool;
     can_change_color = lift_io $ do {
         FFI_CALL_IO[CChar can_change_color()]
-    }.map(|c| c.to_I64 != 0);
+    }.map(|c| c.i64 != 0);
 
     // Returns the maximum number of colors which the terminal supports.
     get_max_colors: [m: MonadIO] m I64;
     get_max_colors = lift_io $ do {
         FFI_CALL_IO[CInt minilib_ncurses_get_max_colors()]
-    }.map(to_I64);
+    }.map(i64);
 
     // Changes the definition of a color.
     //
@@ -358,8 +358,8 @@ namespace ColorFuncs {
     // * `b`: blue components (in range 0 through 1000).
     init_color: [m: MonadIOFail] Color -> I64 -> I64 -> I64 -> m ();
     init_color = |color, r, g, b| lift_iofail $ do {
-        let err = *FFI_CALL_IO[CInt init_color(I16, I16, I16, I16), color.to_I16, r.to_I16, g.to_I16, b.to_I16].lift;
-        if err != 0.to_CInt { throw $ "init_color failed! " + (color, r, g, b, *has_colors, *can_change_color, *get_max_colors).to_string};
+        let err = *FFI_CALL_IO[CInt init_color(I16, I16, I16, I16), color.i16, r.i16, g.i16, b.i16].lift;
+        if err != 0.c_int { throw $ "init_color failed! " + (color, r, g, b, *has_colors, *can_change_color, *get_max_colors).to_string};
         pure()
     };
 }
@@ -398,7 +398,7 @@ namespace ColorPairFuncs {
     get_max_color_pairs: [m: MonadIO] m I64;
     get_max_color_pairs = lift_io $ do {
         FFI_CALL_IO[CInt minilib_ncurses_get_max_color_pairs()]
-    }.map(to_I64);
+    }.map(i64);
 
     // Changes the definition of a color-pair.
     //
@@ -408,8 +408,8 @@ namespace ColorPairFuncs {
     // - `back_color`: a background color
     init_color_pair: [m: MonadIOFail] ColorPair -> Color -> Color -> m ();
     init_color_pair = |color_pair, fore_color, back_color| lift_iofail $ do {
-        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.to_I16, fore_color.to_I16, back_color.to_I16].lift;
-        if err != 0.to_CInt { throw $ "init_color_pair failed! " + (color_pair, fore_color, back_color, *get_max_color_pairs).to_string };
+        let err = *FFI_CALL_IO[CInt init_pair(I16, I16, I16), color_pair.i16, fore_color.i16, back_color.i16].lift;
+        if err != 0.c_int { throw $ "init_color_pair failed! " + (color_pair, fore_color, back_color, *get_max_color_pairs).to_string };
         pure()
     };
 
@@ -418,7 +418,7 @@ namespace ColorPairFuncs {
     // # Parameters
     // - `color_pair`: A color-pair number. It should be in the range: `0 <= color_pair && color_pair <= 255`.
     color_pair: ColorPair -> ChType;
-    color_pair = |pair| (pair.bit_and(255)).to_U32.shift_left(8_U32);
+    color_pair = |pair| (pair.bit_and(255)).u32.shift_left(8_U32);
 }
 
 // Character text & color pair & attributes.
@@ -499,7 +499,7 @@ namespace KeyFuncs {
     // If any error occurs, this function returns `""`.
     keyname: [m: MonadIO] Key -> m KeyName;
     keyname = |key| lift_io $ do {
-        let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.to_CInt];
+        let ptr = *FFI_CALL_IO[Ptr keyname(CInt), key.c_int];
         if ptr == nullptr {
             pure $ ""
         };

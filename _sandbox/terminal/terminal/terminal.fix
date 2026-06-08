@@ -24,7 +24,7 @@ namespace Terminal {
     input_keyboard = |term| (
         pure();; // make it lazy
         let ch = *read_n_bytes(term.@input, 1).lift_iofail;
-        if ch.get_size == 0 {
+        if ch.@size == 0 {
             pure $ none()
         };
         let ch = ch.@(0);
@@ -112,30 +112,30 @@ namespace RawMode {
         eval debug_eprintln("fileno="+fileno.to_string);
         let old_termios = Array::fill(120, 0_U8);
         let res = *old_termios.borrow_boxed(|p_old_termios|
-            FFI_CALL_IO[CInt tcgetattr(CInt, Ptr), 0.to_CInt, p_old_termios]
+            FFI_CALL_IO[CInt tcgetattr(CInt, Ptr), 0.c_int, p_old_termios]
         ).lift;
-        if res.to_I64 != 0 {
+        if res.i64 != 0 {
             throw $ "tcgetattr failed: " + *get_last_error.lift
         };
         let termios = Array::fill(120, 0_U8);
         let res = *termios.borrow_boxed(|p_termios|
             FFI_CALL_IO[() cfmakeraw(Ptr), p_termios];;
-            FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_termios]
+            FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.c_int, 2.c_int, p_termios]
         ).lift;
-        if res.to_I64 != 0 {
+        if res.i64 != 0 {
             throw $ "tcsetattr failed: " + *get_last_error.lift
         };
 
-        let dtor = Destructor::make((), |_|
+        let dtor = *Destructor::make((), |_|
             // eval debug_eprintln ("destructor is called");
             let res = *old_termios.borrow_boxed(|p_old_termios|
-                FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.to_CInt, 2.to_CInt, p_old_termios]
+                FFI_CALL_IO[CInt tcsetattr(CInt, CInt, Ptr), 0.c_int, 2.c_int, p_old_termios]
             );
-            if res.to_I64 != 0 {
+            if res.i64 != 0 {
                 undefined("tcsetattr failed: res="+res.to_string)
             };
             pure()
-        );
+        ).lift;
         pure $ RawMode { dtor: dtor }
     ).lift_iofail;
 }

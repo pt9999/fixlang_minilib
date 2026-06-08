@@ -25,7 +25,7 @@ namespace AES {
     // 256 bits (= 32 bytes).
     make: Array U8 -> AES;
     make = |key| (
-        let aes = AES::_empty(key.get_size * 8);
+        let aes = AES::_empty(key.@size * 8);
         let w = aes._key_expansion(key);
         aes.set_key(key).set_w(w)
     );
@@ -70,7 +70,7 @@ namespace AES {
     _cipher: Array U8 -> Array U32 -> AES -> Array U8;
     _cipher = |input, w, aes| (
         let nr = aes._get_number_of_rounds;
-        assert_lazy(|_| "invalid input size", input.get_size == 16) $ |_|
+        assert_lazy(|_| "invalid input size", input.@size == 16) $ |_|
         let aes = aes.set_s(input);
         let aes = aes._add_round_key(w, 0);
         let aes = loop(
@@ -92,7 +92,7 @@ namespace AES {
     _inv_cipher: Array U8 -> Array U32 -> AES -> Array U8;
     _inv_cipher = |input, w, aes| (
         let nr = aes._get_number_of_rounds;
-        assert_lazy(|_| "invalid input size", input.get_size == 16) $ |_|
+        assert_lazy(|_| "invalid input size", input.@size == 16) $ |_|
         let aes = aes.set_s(input);
         let aes = aes._add_round_key(w, nr);
         let aes = loop(
@@ -113,27 +113,27 @@ namespace AES {
     // 5.1.1 SUBBYTES() 
     _sub_bytes: AES -> AES;
     _sub_bytes = |aes| (
-        aes.mod_s(map(|b| _sbox_table.@(b.to_I64)))
+        aes.mod_s(map(|b| _sbox_table.@(b.i64)))
     );
 
     _sbox_table: Array U8;
     _sbox_table = (
-        Array::from_map(256, I64::to_U8 >> _sbox)
+        Array::from_map(256, I64::u8 >> _sbox)
     );
 
     // 5.3.2 INVSUBBYTES()
     _inv_sub_bytes: AES -> AES;
     _inv_sub_bytes = |aes| (
-        aes.mod_s(map(|b| _inv_sbox_table.@(b.to_I64)))
+        aes.mod_s(map(|b| _inv_sbox_table.@(b.i64)))
     );
 
     _inv_sbox_table: Array U8;
     _inv_sbox_table = (
         Iterator::range(0, 256).fold(
             Array::fill(256, 0_U8), |arr, i|
-            let x = i.to_U8;
+            let x = i.u8;
             let y = _sbox_table.@(i);
-            arr.set(y.to_I64, x)
+            arr.set(y.i64, x)
         )
     );
 
@@ -240,7 +240,7 @@ namespace AES {
     // 5.2 KEYEXPANSION()
     _key_expansion: Array U8 -> AES -> Array U32;
     _key_expansion = |key, aes| (
-        assert_lazy(|_| "key length mismatch", key.get_size * 8 == aes.@key_length) $ |_|
+        assert_lazy(|_| "key length mismatch", key.@size * 8 == aes.@key_length) $ |_|
         let nk = aes.@key_length / (4 * 8);
         let nb = 4;
         let nr = aes._get_number_of_rounds;
@@ -270,10 +270,10 @@ namespace AES {
         loop(
             (0_U32, 0), |(out, i)|
             if i >= 4 { break $ out };
-            let shift = (8 * i).to_U32;
-            let b = w.shift_right(shift).bit_and(0xFF_U32).to_U8;
-            let b = _sbox_table.@(b.to_I64);
-            let out = out.bit_or(b.to_U32.shift_left(shift));
+            let shift = (8 * i).u32;
+            let b = w.shift_right(shift).bit_and(0xFF_U32).u8;
+            let b = _sbox_table.@(b.i64);
+            let out = out.bit_or(b.u32.shift_left(shift));
             continue $ (out, i + 1)
         )
     );
@@ -287,14 +287,14 @@ namespace AES {
 
     _rcon: I64 -> U32;
     _rcon = |j| (
-        _rcon_table.@(j - 1).to_U32.shift_left(24_U32)
+        _rcon_table.@(j - 1).u32.shift_left(24_U32)
     );
 
     _rcon_table: Array U8;
     _rcon_table = [
         0x01, 0x02, 0x04, 0x08, 0x10,
         0x20, 0x40, 0x80, 0x1b, 0x36
-    ].map(to_U8);
+    ].map(u8);
 
 }
 
@@ -308,14 +308,14 @@ namespace GF8 {
     // 4.2 Multiplication in GF(2^8) 
     _mul_gf8: U8 -> U8 -> U8;
     _mul_gf8 = |a, b| (
-        _mul_gf8_table.@(a.to_I64.shift_left(8).bit_or(b.to_I64))
+        _mul_gf8_table.@(a.i64.shift_left(8).bit_or(b.i64))
     );
 
     _mul_gf8_table: Array U8;
     _mul_gf8_table = (
         Array::from_map(256 * 256, |i|
-            let a = i.shift_right(8).bit_and(255).to_U8;
-            let b = i.shift_right(0).bit_and(255).to_U8;
+            let a = i.shift_right(8).bit_and(255).u8;
+            let b = i.shift_right(0).bit_and(255).u8;
             a._mul_gf8_slow(b)
         )
     );

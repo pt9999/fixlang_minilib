@@ -1,7 +1,7 @@
 all:
 
 test:
-	fix test
+	fix test --deny-deprecated
 
 document:
 	fix docs -o docs
@@ -16,7 +16,7 @@ clean:
 	gcc -Wall -o $@ -c $<
 
 %.out: %.fix ncurses.fix lib.c
-	fix build -o $@ -f $<
+	fix build --deny-deprecated -o $@ -f $<
 
 EXAMPLES = \
 	examples/demo_attributes.out \

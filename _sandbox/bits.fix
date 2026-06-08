@@ -7,36 +7,36 @@ clz_table = Array::from_map(256, |val|
         if i >= 8 { break $ i };
         if val.bit_and(1.shift_left(7-i)) != 0 { break $ i };
         continue $ i + 1
-    ).to_U8
+    ).u8
 );
 
 count_leading_zeros_U8: U8 -> I64;
-count_leading_zeros_U8 = |u8| (
-    clz_table.@(u8.to_I64).to_I64
+count_leading_zeros_U8 = |u8val| (
+    clz_table.@(u8val.i64).i64
 );
 
 count_leading_zeros_U16: U16 -> I64;
-count_leading_zeros_U16 = |u16| (
-    if u16.bit_and(0xff00_U16) != 0_U16 {
-        count_leading_zeros_U8 $ u16.shift_right(8_U16).to_U8
+count_leading_zeros_U16 = |u16val| (
+    if u16val.bit_and(0xff00_U16) != 0_U16 {
+        count_leading_zeros_U8 $ u16val.shift_right(8_U16).u8
     };
-    8 + count_leading_zeros_U8(u16.to_U8)
+    8 + count_leading_zeros_U8(u16val.u8)
 );
 
 count_leading_zeros_U32: U32 -> I64;
-count_leading_zeros_U32 = |u32| (
-    if u32.bit_and(0xffff0000_U32) != 0_U32 {
-        count_leading_zeros_U16 $ u32.shift_right(16_U32).to_U16
+count_leading_zeros_U32 = |u32val| (
+    if u32val.bit_and(0xffff0000_U32) != 0_U32 {
+        count_leading_zeros_U16 $ u32val.shift_right(16_U32).u16
     };
-    16 + count_leading_zeros_U16(u32.to_U16)
+    16 + count_leading_zeros_U16(u32val.u16)
 );
 
 count_leading_zeros_U64: U64 -> I64;
-count_leading_zeros_U64 = |u64| (
-    if u64.bit_and(0xffffffff00000000_U64) != 0_U64 {
-        count_leading_zeros_U32 $ u64.shift_right(32_U64).to_U32
+count_leading_zeros_U64 = |u64val| (
+    if u64val.bit_and(0xffffffff00000000_U64) != 0_U64 {
+        count_leading_zeros_U32 $ u64val.shift_right(32_U64).u32
     };
-    32 + count_leading_zeros_U32(u64.to_U32)
+    32 + count_leading_zeros_U32(u64val.u32)
 );
 
 //----------------------------------------------------------------
@@ -48,24 +48,24 @@ _multiply_de_bruijn_bit_position: Array I64 = [
 ];
 
 alt_count_leading_zeros_U32: U32 -> I64;
-alt_count_leading_zeros_U32 = |u32| (
-    if u32 == 0_U32 { 32 };
-    let v = u32;
+alt_count_leading_zeros_U32 = |u32val| (
+    if u32val == 0_U32 { 32 };
+    let v = u32val;
     let v = v.shift_right(1_U32).bit_or(v);
     let v = v.shift_right(2_U32).bit_or(v);
     let v = v.shift_right(4_U32).bit_or(v);
     let v = v.shift_right(8_U32).bit_or(v);
     let v = v.shift_right(16_U32).bit_or(v);
-    let r = _multiply_de_bruijn_bit_position.@((v * 0x07C4ACDD_U32).shift_right(27_U32).to_I64);
+    let r = _multiply_de_bruijn_bit_position.@((v * 0x07C4ACDD_U32).shift_right(27_U32).i64);
     31 - r
 );
 
 alt_count_leading_zeros_U64: U64 -> I64;
-alt_count_leading_zeros_U64 = |u64| (
-    if u64.bit_and(0xffffffff00000000_U64) != 0_U64 {
-        alt_count_leading_zeros_U32 $ u64.shift_right(32_U64).to_U32
+alt_count_leading_zeros_U64 = |u64val| (
+    if u64val.bit_and(0xffffffff00000000_U64) != 0_U64 {
+        alt_count_leading_zeros_U32 $ u64val.shift_right(32_U64).u32
     };
-    32 + alt_count_leading_zeros_U32(u64.to_U32)
+    32 + alt_count_leading_zeros_U32(u64val.u32)
 );
 //----------------------------------------------------------------
 
@@ -74,22 +74,22 @@ test_clz = |base| (
     loop_m(
         0, |i|
         if i > 64 { break_m $ () };
-        let u64 = if i < 64 { base.shift_right(i.to_U64) } else { 0_U64 };
-        let n = count_leading_zeros_U64(u64);
-        let n2 = alt_count_leading_zeros_U64(u64);
-        eval debug_eprintln("(u64,i,n,n2)="+(u64,i,n,n2).to_string);
-        assert_eq(|_| "clz:(u64,i,n)="+(u64,i,n).to_string, i, n);;
-        assert_eq(|_| "clz:(u64,i,n2)="+(u64,i,n2).to_string, i, n2);;
+        let u64val = if i < 64 { base.shift_right(i.u64) } else { 0_U64 };
+        let n = count_leading_zeros_U64(u64val);
+        let n2 = alt_count_leading_zeros_U64(u64val);
+        eval debug_eprintln("(u64val,i,n,n2)="+(u64val,i,n,n2).to_string);
+        assert_eq(|_| "clz:(u64val,i,n)="+(u64val,i,n).to_string, i, n);;
+        assert_eq(|_| "clz:(u64val,i,n2)="+(u64val,i,n2).to_string, i, n2);;
         continue_m $ i + 1
     )
 );
 
 main: IO ();
 main = (
-    test_clz(-1.to_U64);;
-    test_clz(1.to_U64.shift_left(63_U64));;
-    test_clz((-1.to_U64 / 3_U64).shift_left(1_U64));;
-    test_clz((-1.to_U64 / 5_U64).shift_left(2_U64));;
+    test_clz(-1.u64);;
+    test_clz(1.u64.shift_left(63_U64));;
+    test_clz((-1.u64 / 3_U64).shift_left(1_U64));;
+    test_clz((-1.u64 / 5_U64).shift_left(2_U64));;
     pure()
 );
 

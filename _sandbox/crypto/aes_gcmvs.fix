@@ -1,16 +1,17 @@
+// We need to build with `--opt-level max`,
+// since we need to read "gcmEncryptExtIV128.rsp" (66,156 lines) in `parse_file`.
 module Main;
 
-//import HashSet;
-
-import Minilib.Encoding.Binary;
+import Minilib.Common.RandomEx;
+import Minilib.Common.TimeEx;
 import Minilib.Crypto.AES;
 import Minilib.Crypto.AES.GCM;
-import Minilib.Common.RandomEx;
-import Minilib.Trait.Traversable;
-import Minilib.Text.Hex;
-import Minilib.Common.TimeEx;
-import Minilib.Text.StringEx;
+import Minilib.Encoding.Binary;
+import Minilib.Monad.IO;
 import Minilib.Testing.UnitTest;
+import Minilib.Text.Hex;
+import Minilib.Text.StringEx;
+import Minilib.Trait.Traversable;
 
 // AES-GCM test vectors from NIST
 // https://csrc.nist.gov/groups/STM/cavp/documents/mac/gcmtestvectors.zip
@@ -74,10 +75,10 @@ namespace TestVector {
     from_test_data: String -> Result ErrMsg TestVector;
     from_test_data = |str| (
         let tv = TestVector::empty;
-        let bytes_iter: Iterator (Array U8) = *str.split(",").map_m(from_string_hex);
-        let setters = [TestVector::set_key, set_iv, set_pt, set_aad, set_ct, set_tag].to_iter.zip(bytes_iter)
+        let bytes_array: Array (Array U8) = *str.split(",").map(from_string_hex).collect_m;
+        let setters = [TestVector::set_key, set_iv, set_pt, set_aad, set_ct, set_tag].to_iter.zip(bytes_array.to_iter)
         .map(|(setter, bytes)| setter(bytes));
-        pure $ setters.fold(tv, |tv, setter| tv.setter)
+        pure $ setters.fold(tv, |setter, tv| tv.setter)
     );
 
     test: TestVector -> TestCase;
@@ -155,6 +156,7 @@ namespace TestVectorParser {
 
     parse_file: Path -> TestVectorParser -> IOFail TestVectorParser;
     parse_file = |filepath, tvp| (
+        mprintln("Reading test vector: " + filepath);;
         let fh = *open_file(filepath, "r");
         let tvp = *loop_m(
             (tvp, 1), |(tvp, lineno)|
@@ -162,18 +164,18 @@ namespace TestVectorParser {
             let line = *read_line(fh);
             if line == "" { break_m $ tvp };
             let line = line.strip_spaces;
-            //println(line).lift;;
+            //println(lineno.to_string + ": " + line).lift;;
             let tvp = *tvp.process_line(line);
             continue_m $ (tvp, lineno + 1)
         );
         close_file(fh).lift;;
+        mprintln("Reading test vector done: # of test vectors=" + tvp.@tvs.@size.to_string);;
         pure $ tvp
     );
 
     dump_vectors: TestVectorParser -> IOFail ();
     dump_vectors = |tvp| (
-        tvp.@tvs.to_iter.fold_m(
-            (), |_, tv|
+        tvp.@tvs.to_iter.foreach_m(|tv|
             println(tv.to_string).lift
         )
     );
@@ -181,8 +183,7 @@ namespace TestVectorParser {
     dump_vectors2: TestVectorParser -> IOFail ();
     dump_vectors2 = |tvp| (
         println("key_len,iv_len,pt_len,aad_len,tag_len,count").lift;;
-        tvp.@tvs.to_iter.fold_m(
-            (), |_, tv|
+        tvp.@tvs.to_iter.foreach_m(|tv|
             println(tv.get_id).lift
         )
     );
@@ -197,8 +198,7 @@ namespace TestVectorParser {
 
     write_selected_test_cases: Array String -> TestVectorParser -> IOFail ();
     write_selected_test_cases = |selected_test_ids, tvp| (
-        tvp.@tvs.to_iter.fold_m(
-            (), |_, tv|
+        tvp.@tvs.to_iter.foreach_m(|tv|
             if selected_test_ids.find_by(eq(tv.get_id)).is_none { pure () };
             let str = tv.get_test_data;
             //let tv2 = *TestVector::from_test_data(str).from_result;

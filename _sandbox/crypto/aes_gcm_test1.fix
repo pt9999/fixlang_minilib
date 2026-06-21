@@ -9,6 +9,7 @@ import Minilib.Crypto.AES.GCM;
 import Minilib.Common.RandomEx;
 import Minilib.Text.Hex;
 import Minilib.Common.TimeEx;
+import Minilib.Trait.Traversable;
 
 test_mul_bitwise: IO ();
 test_mul_bitwise = (
@@ -22,8 +23,8 @@ test_mul_bitwise = (
         //(two, zero, zero, 1_U64),
         (zero, 1_U64, two, zero)
     ]
-    .to_iter.fold_m(
-        (), |_, (x0, x1, y0, y1)|
+    .to_iter.foreach_m(
+        |(x0, x1, y0, y1)|
         let x = Block::make(x0, x1);
         let y = Block::make(y0, y1);
         let z = _mul_bitwise(x, y);
@@ -39,7 +40,7 @@ test_ghash = (
         Block::make(0x123123_U64, 0x234234_U64),
         Block::make(0x123124_U64, 0x234235_U64)
     ].to_iter;
-    let hash = _GHASH(h, xs);
+    let hash = _GHASH(h, xs.to_dyn);
     println(hash.to_string_hex)
 );
 
@@ -112,23 +113,19 @@ test_gcm_ae_ad2 = (
 test_clmul_u8_u8: IO ();
 test_clmul_u8_u8 = (
     println("=== test_clmul_u8_u8 ===");;
-    let print_row = |a:I64| println $ do {
-        let b = *Iterator::range(0, 16);
+    let print_row = |a:I64| println $ range(0, 16).map(|b|
         let c = _clmul_u8_u8(a.u8, b.u8);
-        pure $ c.to_string_hex
-    }.join(" ");
-    Iterator::range(0, 16).fold_m(
-        (), |_, a|
-        print_row(a)
-    )
+        c.to_string_hex
+    ).join(" ");
+    range(0, 16).foreach_m(print_row)
 );
 
 test_clmul_u32_u32: IO ();
 test_clmul_u32_u32 = (
     println("=== test_clmul_u32_u32 ===");;
     let random = Random::init_by_seed(123_U64);
-    let random = *Iterator::range(0, 16).fold_m(
-        random, |random, _|
+    let random = *range(0, 16).fold_m(
+        random, |_, random|
         let trace_mul = |a, b| (
             let c = _clmul_u32_u32(a, b);
             println(a.to_string_hex + " * " + b.to_string_hex + " = " + c.to_string_hex);;
@@ -156,8 +153,8 @@ test_clmul_u128_u128_reduce: IO ();
 test_clmul_u128_u128_reduce = (
     println("=== test_clmul_u128_u128_reduce ===");;
     let random = Random::init_by_seed(1234_U64);
-    let random = *Iterator::range(0, 16).fold_m(
-        random, |random, i|
+    let random = *range(0, 16).fold_m(
+        random, |i, random|
         let (random, a0) = random.generate_U64;
         let (random, b0) = random.generate_U64;
         let (random, a1) = random.generate_U64;

@@ -1,0 +1,108 @@
+module Main;
+
+import Character;
+import Minilib.Text.SimpleParser;
+
+type TestInput = unbox struct {
+    name: String,
+    text: String,
+};
+
+namespace TestInput {
+    empty: TestInput;
+    empty = TestInput {
+        name: "",
+        text: "",
+    };
+}
+
+debugprint: String -> ();
+//debugprint = debug_eprintln;
+debugprint = |_| ();
+
+match_wc: Parser String;
+match_wc = (
+    match_str_class(Character::is_space)
+);
+
+parse_text: Parser String;
+parse_text = (
+    match_str_class(|c|
+        c != '<'
+    )
+);
+
+parse_any_tag: Parser String;
+parse_any_tag = (
+    match_str("<");;
+    let tag = *match_str_class(|c| c != '>');
+    match_str(">");;
+    pure $ "<" + tag + ">"
+);
+
+parse_h3: Parser String;
+parse_h3 = (
+    match_str("<h3>");;
+    match_wc;;
+    match_str("入力例");;
+    match_wc;;
+    let num = *match_integer;
+    match_wc;;
+    match_str("</h3>");;
+    let name = "input" + num.to_string + ".txt";
+    pure $ name
+);
+
+parse_pre: Parser String;
+parse_pre = (
+    match_str("<pre>");;
+    let text = *parse_text;
+    match_str("</pre>");;
+    pure $ text
+);
+
+parse_div: Parser (Option TestInput);
+parse_div = (
+    match_str("<div class=\"part\">");;
+    eval debugprint("div");
+    let input = TestInput::empty;
+    loop_m(
+        input, |input|
+        match_wc;;
+        if (*match_str("</div>").if_exists).is_some {
+        eval debugprint("/div");
+            if input.@name == "" || input.@text == "" {
+                break_m $ none()
+            };
+            break_m $ some(input)
+        };
+        let input = *(
+            parse_h3.map(|name| eval debugprint("h3="+name); input.set_name(name)).or_elseF $
+            parse_pre.map(|text| eval debugprint("pre="+text); input.set_text(text)).or_elseF $
+            parse_any_tag.map(|tag| eval debugprint("tag="+tag); input).or_elseF $
+            parse_text.map(|text| eval debugprint("text="+text); input)
+        );
+        continue_m $ input
+    )
+);
+
+parse_html: Parser (Array TestInput);
+parse_html = (
+    let inputs = *repeat(
+        parse_div.or_elseF $
+        parse_any_tag.map(|tag| eval debugprint("tag="+tag); none()).or_elseF $
+        parse_text.map(|text| eval debugprint("text="+text); none())
+    );
+    pure $ inputs.to_iter.filter_map(|opt| opt).to_array
+);
+
+
+main: IO ();
+main = do {
+    let html = *read_file_string("problem.html");
+    let (inputs, _) = *parse_html.run_parser_str(html).from_result;
+    inputs.to_iter.fold_m(
+        (), |input, _|
+        println("name="+input.@name+" text="+input.@text).lift
+    )
+}.try(eprintln);

@@ -6,24 +6,50 @@ add_i64 = |a, b| a + b;
 
 FFI_EXPORT[add_string, add_string];
 add_string: Ptr -> Ptr -> Ptr;
-add_string = |a, b| (
+add_string = |a, b| do {
     eval debug_println("add_string: a=" + a.to_string + " b="+b.to_string);
-    let a: Box String = FFI::boxed_from_retained_ptr(a);
-    let b: Box String = FFI::boxed_from_retained_ptr(b);
+    let a: Box String = *FFI::boxed_from_retained_ptr(a);
+    let b: Box String = *FFI::boxed_from_retained_ptr(b);
     let c: Box String = Box::make $ a.@value + b.@value;
-    let c: Ptr = FFI::boxed_to_retained_ptr(c);
+    let c: Ptr = *FFI::boxed_to_retained_ptr(c);
     eval debug_println("add_string: c=" + c.to_string);
-    c
-);
+    pure $ c
+}.unsafe_perform;
 
 // Pushes back a (wrapped) string to a Fix array.
 // `rp_str_array` is a retained pointer to a Fix array.
 // Returns a retained pointer to a push-backed Fix array.
 push_back_string: Ptr -> Ptr -> Ptr;
-push_back_string = |rp_str_array, str| (
+push_back_string = |rp_str_array, str| do {
     let str: String = unsafe_from_c_str_ptr(str);
-    let str_array: Array String = FFI::boxed_from_retained_ptr(rp_str_array);
+    let box: Box (Array String) = *FFI::boxed_from_retained_ptr(rp_str_array);
+    let str_array = box.@value;
     let str_array = str_array.push_back(str);
-    FFI::boxed_to_retained_ptr(str_array)
-);
+    let box = Box::make(str_array);
+    FFI::boxed_to_retained_ptr(box)
+}.unsafe_perform;
 FFI_EXPORT[push_back_string, push_back_string];
+
+//-----------------------------------------------------
+
+add_string_func: String -> String -> String;
+add_string_func = |a, b| a + b;
+
+unboxed_to_retained_ptr: a -> IO Ptr;
+unboxed_to_retained_ptr = |a| (
+    FFI::boxed_to_retained_ptr(Box::make(a))
+);
+
+// Gets the retained pointer of the api function specified by `api_id`.
+FFI_EXPORT[get_api_ptr, get_api_ptr];
+get_api_ptr: CInt -> Ptr;
+get_api_ptr = |api_id| (
+    do {
+        let api_id = api_id.i64;
+        if api_id == 1 {
+            unboxed_to_retained_ptr(add_string_func)
+        };
+        undefined("invalid api id: " + api_id.to_string)
+    }.unsafe_perform
+);
+

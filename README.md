@@ -44,7 +44,7 @@ fix deps add minilib-common minilib-binary
 
 ### Project dependency diagram
 
-NOTE: Redundant dependencies and test-only dependencies are not displayed.
+NOTE: Nested dependencies and test-only dependencies are not displayed.
 
 ![Project dependencies](_projects/dependencies.png)
 

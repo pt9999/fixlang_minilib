@@ -3,21 +3,21 @@
 # The subprojects in dependency order
 SUBPROJECTS = \
 	fixlang-minilib-common \
+	fixlang-minilib-monad \
 	fixlang-minilib-binary \
 	fixlang-minilib-text \
-	fixlang-minilib-monad \
+	fixlang-minilib-collection \
+	fixlang-minilib-app \
 	fixlang-minilib-comonad \
 	fixlang-minilib-random \
-	fixlang-minilib-collection \
 	fixlang-minilib-crypto \
-	fixlang-minilib-io \
-	fixlang-minilib-math \
-	fixlang-minilib-thread \
-	fixlang-minilib-app \
-	fixlang-minilib-media \
-	fixlang-minilib-json \
 	fixlang-minilib-xml \
-	fixlang-minilib-net 
+	fixlang-minilib-io \
+	fixlang-minilib-json \
+	fixlang-minilib-math \
+	fixlang-minilib-media \
+	fixlang-minilib-net \
+	fixlang-minilib-thread
 
 EXAMPLES = \
 	fixlang-minilib-examples

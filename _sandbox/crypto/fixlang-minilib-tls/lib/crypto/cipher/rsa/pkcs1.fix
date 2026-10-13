@@ -98,10 +98,10 @@ rsassa_pss_sign = |(n, d), _M, salt, options| (
     //     EM of length \ceil ((modBits - 1)/8) octets such that the bit length of the integer OS2IP (EM) (see Section 4.2) is at most
     //     modBits - 1, where modBits is the length in bits of the RSA modulus n:
     let modBits = n.bit_length.i64;
-    let _EM = *emsa_pss_encode(_M, modBits - 1, salt, options);
+    let __EM = *emsa_pss_encode(_M, modBits - 1, salt, options);
     // 2.  RSA signature:
     //     a.  Convert the encoded message EM to an integer message representative m (see Section 4.2):
-    let m: BigInt = *os2ip(_EM);
+    let m: BigInt = *os2ip(__EM);
     //     b.  Apply the RSASP1 signature primitive (Section 5.2.1) to the RSA private key K and
     //         the message representative m to produce an integer signature representative s:
     let s = *rsasp1((n, d), m);
@@ -135,12 +135,12 @@ rsassa_pss_verify = |(n, e), _M, _S, options| (
     //        the RSA modulus n (see Section 4.1):
     let modBits = n.bit_length.i64;
     let emLen = ((modBits - 1) + 7) / 8;
-    let _EM = *i2osp(m, emLen);
+    let __EM = *i2osp(m, emLen);
     assert_lazy(|_| "unexpected: (emLen, k, modBits)=" + (emLen, k, modBits).to_string,
             if (modBits - 1) % 8 == 0 { emLen == k - 1 } else { emLen == k }) $ |_|
     // 3.  EMSA-PSS verification: Apply the EMSA-PSS verification operation (Section 9.1.2)
     //     to the message M and the encoded message EM to determine whether they are consistent:
-    emsa_pss_verify(_M, _EM, modBits - 1, options)
+    emsa_pss_verify(_M, __EM, modBits - 1, options)
 );
 
 // 8.2.1. Signature Generation Operation
@@ -154,10 +154,10 @@ rsassa_pkcs1_v1_5_sign: (BigInt, BigInt) -> Array U8 -> EmsaPkcs1Options -> Resu
 rsassa_pkcs1_v1_5_sign = |(n, d), _M, options| (
     // 1.  EMSA-PKCS1-v1_5 encoding
     let k = (n.bit_length.i64 + 7) / 8;
-    let _EM = *emsa_pkcs1_v1_5_encode(_M, k, options);
+    let __EM = *emsa_pkcs1_v1_5_encode(_M, k, options);
     // 2.  RSA signature:
     // a.  Convert the encoded message EM to an integer message representative m (see Section 4.2):
-    let m: BigInt = *os2ip(_EM);
+    let m: BigInt = *os2ip(__EM);
     // b.  Apply the RSASP1 signature primitive (Section 5.2.1) to the RSA private key K and the message representative m to
     //     produce an integer signature representative s:
     let s = *rsasp1((n, d), m);
@@ -188,14 +188,14 @@ rsassa_pkcs1_v1_5_verify = |(n, e), _M, _S, options| (
     //       and the signature representative s to produce an integer message representative m:
     let m = *rsavp1((n, e), s);
     //    c. Convert the message representative m to an encoded message EM of length k octets (see Section 4.1):
-    let _EM = *i2osp(m, k);
+    let __EM = *i2osp(m, k);
     // 3. EMSA-PKCS1-v1_5 encoding:
     //    Apply the EMSA-PKCS1-v1_5 encoding operation (Section 9.2)
     //    to the message M to produce a second encoded message EM' of length k octets:
-    let _EM_dash = *emsa_pkcs1_v1_5_encode(_M, k, options);
+    let __EM_dash = *emsa_pkcs1_v1_5_encode(_M, k, options);
     // 4. Compare the encoded message EM and the second encoded message EM'.
     //    If they are the same, output "valid signature"; otherwise, output "invalid signature".
-    if _EM != _EM_dash { err $ "invalid signature" };
+    if __EM != __EM_dash { err $ "invalid signature" };
     ok()
 );
 
@@ -238,26 +238,26 @@ emsa_pss_encode = |_M, emBits, salt, options| (
     // (NOTE: we use salt which is passed as an argument of this function)
     if salt.@size != sLen { err $ "salt length mismatch" };
     // 5.   Let M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt;
-    let _M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
+    let __M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
     // 6.   Let H = Hash(M'), an octet string of length hLen.
-    let _H = hash(_M_dash);
+    let _H = hash(__M_dash);
     // 7.   Generate an octet string PS consisting of emLen - sLen - hLen - 2 zero octets.  The length of PS may be 0.
-    let _PS = Array::fill(emLen - sLen - hLen - 2, 0_U8);
+    let __PS = Array::fill(emLen - sLen - hLen - 2, 0_U8);
     // 8.   Let DB = PS || 0x01 || salt; DB is an octet string of length emLen - hLen - 1.
-    let _DB = _PS.append([0x01_U8]).append(salt);
+    let __DB = __PS.append([0x01_U8]).append(salt);
     // 9.   Let dbMask = MGF(H, emLen - hLen - 1).
     let dbMask = *mgf(_H, emLen - hLen - 1, hash, hLen);
     // 10.  Let maskedDB = DB \xor dbMask.
-    let maskedDB = Array::from_map(_DB.@size, |i| _DB.@(i).bit_xor(dbMask.@(i)));
+    let maskedDB = Array::from_map(__DB.@size, |i| __DB.@(i).bit_xor(dbMask.@(i)));
     // 11.  Set the leftmost 8emLen - emBits bits of the leftmost octet in maskedDB to zero.
     let k = 8 * emLen - emBits;
     assert_lazy(|_| "k out of range", 0 <= k && k < 8) $ |_|
     let kmask = 0xFF_U8.shift_left((8-k).u8);
     let maskedDB = maskedDB.mod(0, bit_and(kmask.bit_xor(0xFF_U8)));
     // 12.  Let EM = maskedDB || H || 0xbc.
-    let _EM = maskedDB.append(_H).append([0xbc_U8]);
+    let __EM = maskedDB.append(_H).append([0xbc_U8]);
     // 13.  Output EM.
-    ok $ _EM
+    ok $ __EM
 );
 
 // 9.1.2. Verification Operation
@@ -273,7 +273,7 @@ emsa_pss_encode = |_M, emBits, salt, options| (
 // Output:
 //  "consistent" or "inconsistent"
 emsa_pss_verify: Array U8 -> Array U8 -> I64 -> EmsaPssOptions -> Result ErrMsg ();
-emsa_pss_verify = |_M, _EM, emBits, options| (
+emsa_pss_verify = |_M, __EM, emBits, options| (
     let inconsistent_error = "emsa_pss_verify: inconsistent: ";
     let EmsaPssOptions {
         hash: hash,
@@ -290,42 +290,42 @@ emsa_pss_verify = |_M, _EM, emBits, options| (
     if emLen < hLen + sLen + 2 {
         err $ inconsistent_error + "emLen too small: " + (emLen, hLen + sLen + 2).to_string
     };
-    if _EM.@size == 0 {
+    if __EM.@size == 0 {
         err $ inconsistent_error + "EM is empty"
     };
 
-    if _EM.@(_EM.@size - 1) != 0xbc_U8 {
-        err $ inconsistent_error + "the last byte of EM is not 0xbc: " + _EM.@(_EM.@size - 1).to_string_hex
+    if __EM.@(__EM.@size - 1) != 0xbc_U8 {
+        err $ inconsistent_error + "the last byte of EM is not 0xbc: " + __EM.@(__EM.@size - 1).to_string_hex
     };
-    let maskedDB = _EM.get_sub(0, emLen - hLen - 1);
-    let _H = _EM.get_sub(emLen - hLen - 1, emLen - 1);
+    let maskedDB = __EM.get_sub(0, emLen - hLen - 1);
+    let _H = __EM.get_sub(emLen - hLen - 1, emLen - 1);
     let k = 8 * emLen - emBits;
     assert_lazy(|_| "k out of range", 0 <= k && k < 8) $ |_|
     let kmask = 0xFF_U8.shift_left((8-k).u8);
-    if _EM.@(0).bit_and(kmask) != 0_U8 {
-        err $ inconsistent_error + "the masked first byte is not zero: @(0)=" + _EM.@(0).to_string_hex + " k=" + k.to_string
+    if __EM.@(0).bit_and(kmask) != 0_U8 {
+        err $ inconsistent_error + "the masked first byte is not zero: @(0)=" + __EM.@(0).to_string_hex + " k=" + k.to_string
     };
     let dbMask = *mgf(_H, emLen - hLen - 1, hash, hLen);
     assert_lazy(|_| "maskedDB and dbMask size unmatch", maskedDB.@size == dbMask.@size) $ |_|
-    let _DB = Array::from_map(maskedDB.@size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
-    let _DB = _DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
+    let __DB = Array::from_map(maskedDB.@size, |i| maskedDB.@(i).bit_xor(dbMask.@(i)));
+    let __DB = __DB.mod(0, bit_and(0xFF_U8.bit_xor(kmask)));
 
-    let _DB_left = _DB.get_sub(0, emLen - hLen - sLen - 2);
-    let is_all_zeros = _DB_left.find_by(|byte| byte != 0_U8).is_none;
+    let __DB_left = __DB.get_sub(0, emLen - hLen - sLen - 2);
+    let is_all_zeros = __DB_left.find_by(|byte| byte != 0_U8).is_none;
     if !is_all_zeros {
-        err $ inconsistent_error + "DB_left is not all zero: " + _DB_left.to_string_hex
+        err $ inconsistent_error + "DB_left is not all zero: " + __DB_left.to_string_hex
     };
     // NOTE: The leftmost position is "position 1",
     //       so "position emLen - hLen - sLen - 1" is `@(emLen - hLen - sLen - 2)`.
-    let _DB_middle = _DB.@(emLen - hLen - sLen - 2);
-    if _DB_middle != 0x01_U8 {
-        err $ inconsistent_error + "DB_middle is not one: " + _DB_middle.to_string_hex + " DB=" + _DB.to_string_hex
+    let __DB_middle = __DB.@(emLen - hLen - sLen - 2);
+    if __DB_middle != 0x01_U8 {
+        err $ inconsistent_error + "DB_middle is not one: " + __DB_middle.to_string_hex + " DB=" + __DB.to_string_hex
     };
-    let salt = _DB.get_sub(_DB.@size - sLen, _DB.@size);
-    let _M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
-    let _H_dash = hash(_M_dash);
-    if _H != _H_dash {
-        err $ inconsistent_error + "H and H_dash does not match: H=" + _H.to_string_hex + " H_dash=" + _H_dash.to_string_hex
+    let salt = __DB.get_sub(__DB.@size - sLen, __DB.@size);
+    let __M_dash = Array::fill(8, 0_U8).append(mHash).append(salt);
+    let __H_dash = hash(__M_dash);
+    if _H != __H_dash {
+        err $ inconsistent_error + "H and H_dash does not match: H=" + _H.to_string_hex + " H_dash=" + __H_dash.to_string_hex
     };
     ok()    // consistent
 );
@@ -391,11 +391,11 @@ emsa_pkcs1_v1_5_encode = |_M, emlen, options| (
     // 4.  Generate an octet string PS consisting of emLen - tLen - 3
     //     octets with hexadecimal value 0xff.  The length of PS will be
     //     at least 8 octets.
-    let _PS = Array::fill(emlen - tlen - 3, 0xFF_U8);
+    let __PS = Array::fill(emlen - tlen - 3, 0xFF_U8);
     // 5.  Concatenate PS, the DER encoding T, and other padding to form
     //     the encoded message EM as
-    let _EM = [0x00_U8, 0x01_U8].append(_PS).append([0x00_U8]).append(_T);
-    pure $ _EM
+    let __EM = [0x00_U8, 0x01_U8].append(__PS).append([0x00_U8]).append(_T);
+    pure $ __EM
 );
 
 

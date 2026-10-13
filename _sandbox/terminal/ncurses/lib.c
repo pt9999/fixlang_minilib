@@ -1,4 +1,4 @@
-#define _XOPEN_SOURCE_EXTENDED
+#define __XOPEN_SOURCE_EXTENDED
 #include <locale.h>
 #include <wchar.h>
 #include <ncursesw/ncurses.h>

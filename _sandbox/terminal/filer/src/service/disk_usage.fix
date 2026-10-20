@@ -83,12 +83,7 @@ namespace DiskUsageService {
 
     shutdown: [m: MonadIOFail] DiskUsageService -> m ();
     shutdown = |service| lift_iofail $ do {
-        let DiskUsageService {
-            task_pool: task_pool,
-            req_chan: req_chan,
-            error_chan: error_chan,
-            manager_task: manager_task
-        } = service;
+        let DiskUsageService { task_pool, req_chan, manager_task, _ } = service;
         req_chan.send(req_shutdown());;
         let res: Result ErrMsg DuManager = *manager_task.get.lift_io;
         task_pool.shutdown;;
@@ -346,7 +341,7 @@ namespace DuManager {
     on_req_worker_result: DuWorkerResult -> StateT DuManager IOFail ();
     on_req_worker_result = |res| (
         let env = *gets(DuManager::@env);
-        let DuWorkerResult { dir_path: dir_path, dir_size: dir_size, subdirs: subdirs } = res;
+        let DuWorkerResult { dir_path, dir_size, subdirs } = res;
         //log_debug("end_worker: path=" + dir_path);;
         subdirs.to_iter.foreach_m(|subdir_path|
             start_worker_if_unchecked(subdir_path)

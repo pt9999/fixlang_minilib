@@ -1,5 +1,5 @@
-TEST_OPTS = $(if $(CIENV), --allow-preliminary-commands, )
-BUILD_OPTS = $(if $(CIENV), --allow-preliminary-commands, )
+TEST_OPTS =
+BUILD_OPTS =
 
 .PHONY: all test examples clean
 

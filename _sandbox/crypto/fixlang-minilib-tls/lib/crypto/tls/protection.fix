@@ -194,14 +194,13 @@ namespace Protection {
     make = |cipher_suite| (
         let hkdf = *HKDF::from_cipher_suite(cipher_suite);
         let aead = *AEAD::from_cipher_suite(cipher_suite);
-        let secrets = Secrets::empty;
-        let secrets = *secrets.calc_early_secret(hkdf);
+        let secrets = *Secrets::empty.calc_early_secret(hkdf);
 
         pure $ Protection {
-            hkdf: hkdf,
-            aead: aead,
+            hkdf,
+            aead,
             handshake_context: [],
-            secrets: secrets,
+            secrets,
             server_tk: TrafficKey::empty,
             client_tk: TrafficKey::empty,
         }
@@ -234,14 +233,7 @@ namespace Protection {
     // and the shared secret is calculated.
     init_handshake: Array U8 -> Protection -> Result ErrMsg Protection;
     init_handshake = |dhe, protection| (
-        let Protection {
-            hkdf: hkdf,
-            aead: aead,
-            handshake_context: handshake_context,
-            secrets: secrets,
-            server_tk: server_tk,
-            client_tk: client_tk
-        } = protection;
+        let Protection { hkdf, aead, handshake_context, secrets, server_tk, client_tk } = protection;
         let secrets = *secrets.calc_handshake_secret(dhe, hkdf);
         let secrets = *secrets.calc_master_secret(hkdf);
         let server_handshake_traffic_secret = *hkdf.calc_server_handshake_traffic_secret(secrets.@handshake_secret, handshake_context);
@@ -255,15 +247,8 @@ namespace Protection {
     // This function must be called after the server Finished message is appended to the handshake context.
     init_appdata: Protection -> Result ErrMsg Protection;
     init_appdata = |protection| (
-        let Protection {
-            hkdf: hkdf,
-            aead: aead,
-            handshake_context: handshake_context,   // ClientHello...server Finished
-            secrets: secrets,
-            server_tk: server_tk,
-            client_tk: client_tk
-        } = protection;
-
+        // handshake_context: ClientHello...server Finished
+        let Protection { hkdf, aead, handshake_context, secrets, server_tk, client_tk } = protection;
         let server_application_traffic_secret_0 = *hkdf.calc_server_application_traffic_secret_0(secrets.@master_secret, handshake_context);
         let server_tk = *server_tk.update_keys(server_application_traffic_secret_0, aead, hkdf);
         let client_application_traffic_secret_0 = *hkdf.calc_client_application_traffic_secret_0(secrets.@master_secret, handshake_context);
@@ -275,11 +260,9 @@ namespace Protection {
     // This function must be called after the client Finished message is appended to the handshake context.
     init_after_client_finished: Protection -> Result ErrMsg Protection;
     init_after_client_finished = |protection| (
-        let Protection {
-            hkdf: hkdf,
-            handshake_context: handshake_context,   // ClientHello...client Finished
-            secrets: secrets
-        } = protection;
+        // handshake_context: ClientHello...client Finished
+        let Protection { hkdf, handshake_context, secrets, _ } = protection;
+
         let secrets = *secrets.calc_resumption_master_secret(handshake_context, hkdf);
         pure $ protection.set_secrets(secrets)
     );
@@ -288,10 +271,7 @@ namespace Protection {
     // cf. RFC8446 "4.6.3. Key and Initialization Vector Update", "7.2. Updating Traffic Secrets"
     handle_key_update: TrafficKeyType -> Protection -> Result ErrMsg Protection;
     handle_key_update = |traffic_key_type, protection| (
-        let Protection {
-            hkdf: hkdf,
-            aead: aead
-        } = protection;
+        let Protection { hkdf, aead, _ } = protection;
         let traffic_key = protection.get_traffic_key(traffic_key_type);
         let traffic_key = *traffic_key.increment_generation(aead, hkdf);
         let protection = protection.mod_traffic_key(traffic_key_type, |_| traffic_key);
@@ -337,11 +317,8 @@ namespace Protection {
     // cf. RFC8446 "4.4.3. Certificate Verify"
     calc_certificate_verify_content: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_certificate_verify_content = |traffic_key_type, protection| (
-        let Protection {
-            hkdf: hkdf,
-            handshake_context: handshake_context,   // ClientHello...Certificate
-            secrets: secrets
-        } = protection;
+        // handshake_context: ClientHello...Certificate
+        let Protection { hkdf, handshake_context, secrets, _ } = protection;
         let context_string = if traffic_key_type.is_server_tk { "TLS 1.3, server CertificateVerify" } else { "TLS 1.3, client CertificateVerify" };
         let concatenation = (
             Array::fill(64, 0x20_U8)
@@ -357,11 +334,8 @@ namespace Protection {
     // cf. RFC8446 "4.4.4. Finished"
     calc_finished_verify_data: TrafficKeyType -> Protection -> Result ErrMsg (Array U8);
     calc_finished_verify_data = |traffic_key_type, protection| (
-        let Protection {
-            hkdf: hkdf,
-            handshake_context: handshake_context,   // ClientHello...server Finished
-            secrets: secrets
-        } = protection;
+        // handshake_context: ClientHello...server Finished
+        let Protection { hkdf, handshake_context, secrets, _ } = protection;
         let traffic_key = protection.get_traffic_key(traffic_key_type);
         let base_key = traffic_key.@traffic_secret;
         let finished_key = *hkdf.expand_label(base_key, "finished", [], hkdf.hash_length);

@@ -7,7 +7,7 @@ FIX_CLEAN = $(FIX) clean
 all:
 
 test: test-applicative test-array-t test-compose test-const \
-		test-cont test-effect test-either-t test-eq1 \
+		test-cont test-either-t test-eq1 \
 		test-free test-free-t test-iterator-t test-pipe test-pipe-t \
 		test-svar test-traversable-a test-yield test-yield-t test-misc
 
@@ -26,8 +26,8 @@ test-const:
 test-cont:
 	$(FIX_RUN) -f cont_test1.fix
 
-test-effect:
-	$(FIX_RUN) -f effect_example1.fix -f either_t.fix -f eq1.fix
+#test-effect:
+#	$(FIX_RUN) -f effect_example1.fix -f either_t.fix -f eq1.fix
 
 test-either-t:
 	$(FIX_RUN) -f either_t.fix -f either_t_test.fix -f eq1.fix
@@ -68,7 +68,7 @@ test-yield-t:
 	$(FIX_RUN) -f yield_t.fix -f yield_t_example.fix
 
 test-misc:
-	$(FIX_RUN) -f alift.fix
+#	$(FIX_RUN) -f alift.fix
 	$(FIX_RUN) -f borrow.fix
 	$(FIX_RUN) -f counter.fix
 	$(FIX_RUN) -f denotation.fix

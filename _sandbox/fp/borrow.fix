@@ -6,12 +6,16 @@ import Minilib.Monad.Reader;
 import Minilib.Monad.IO;
 import Minilib.Monad.State;
 //import Minilib.Monad.Trans;
+import Minilib.Text.StringEx;
 import Minilib.Testing.UnitTest;
 import Minilib.Trait.Traversable;
 
 /*
 ### `borrow_boxed : [a : Std::Boxed] (Std::Ptr -> b) -> a -> b`
 ### `borrow_boxed_io : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO b`
+
+### `borrow_elements : (Ptr -> b) -> Array a -> b`
+### `borrow_elements_io : (Ptr -> IO b) -> Array a -> IO b`
 
 ### `borrow : (a -> b) -> Std::FFI::Destructor a -> b`
 ### `borrow_io : (a -> Std::IO b) -> Std::FFI::Destructor a -> Std::IO b`
@@ -25,36 +29,44 @@ import Minilib.Trait.Traversable;
 ### `mutate_boxed_io : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO (a, b)`
 ### `mutate_boxed_ios : [a : Std::Boxed] (Std::Ptr -> Std::IO b) -> a -> Std::IO::IOState -> (Std::IO::IOState, (a, b))`
 
+### `mutate_elements : (Ptr -> IO b) -> Array a -> (Array a, b)`
+### `mutate_elements_io : (Ptr -> IO b) -> Array a -> IO (Array a, b)`
+
 ### `mutate_unique : (a -> Std::IO a) -> (a -> Std::IO b) -> Std::FFI::Destructor a -> (Std::FFI::Destructor a, b)`
 ### `mutate_unique_io : (a -> Std::IO a) -> (a -> Std::IO b) -> Std::FFI::Destructor a -> Std::IO (Std::FFI::Destructor a, b)`
 */
 
 trait [m: * -> *] m: MonadBorrowIF {
     borrow_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m b;
+    borrow_elements_m : (Ptr -> m b) -> Array a -> m b;
     borrow_m: (a -> m b) -> Destructor a -> m b;
     borrow_c_str_m: (Ptr -> m b) -> String -> m b;
 }
 
 impl Iden: MonadBorrowIF {
     borrow_boxed_m = |f| borrow_boxed(f >> Iden::get) >> Iden::make;
+    borrow_elements_m = |f| borrow_elements(f >> Iden::get) >> Iden::make;
     borrow_m = |f| borrow(f >> Iden::get) >> Iden::make;
     borrow_c_str_m = |f| borrow_c_str(f >> Iden::get) >> Iden::make;
 }
 
 impl IO: MonadBorrowIF {
     borrow_boxed_m = borrow_boxed_io;
+    borrow_elements_m = borrow_elements_io;
     borrow_m = borrow_io;
     borrow_c_str_m = borrow_c_str_io;
 }
 
 impl IOFail: MonadBorrowIF {
     borrow_boxed_m = |f| borrow_boxed_io(f >> to_result) >> from_io_result;
+    borrow_elements_m = |f| borrow_elements_io(f >> to_result) >> from_io_result;
     borrow_m = |f| borrow_io(f >> to_result) >> from_io_result;
     borrow_c_str_m =  |f| borrow_c_str_io(f >> to_result) >> from_io_result;
 }
 
 impl [m: Monad, m: MonadBorrowIF] ReaderT e m: MonadBorrowIF {
     borrow_boxed_m = |f, a| reader_t $ |e| a.borrow_boxed_m(f >> run_reader_t(e));
+    borrow_elements_m = |f, a| reader_t $ |e| a.borrow_elements_m(f >> run_reader_t(e));
     borrow_m = |f, a| reader_t $ |e| a.borrow_m(f >> run_reader_t(e));
     borrow_c_str_m = |f, a| reader_t $ |e| a.borrow_c_str_m(f >> run_reader_t(e));
 }
@@ -68,6 +80,7 @@ impl [m: MonadBorrowIF] StateT s m: MonadBorrowIF {
 
 trait [m: * -> *] m: MonadMutateIF {
     mutate_boxed_m: [a: Boxed] (Ptr -> m b) -> a -> m (a, b);
+    mutate_elements_m : (Ptr -> m b) -> Array a -> m (Array a, b);
     // dtor.mutate_unique_m(ctor, action) applies action to dtor if dtor is unique. If dtor is shared, it creates a new Destructor value using ctor and applies action to the new value.
     // `ctor` should return an IO monad.
     mutate_unique_m: (a -> IO a) -> (a -> m b) -> Destructor a -> m (Destructor a, b);
@@ -75,11 +88,13 @@ trait [m: * -> *] m: MonadMutateIF {
 
 impl Iden: MonadMutateIF {
     mutate_boxed_m = |f| mutate_boxed(f >> Iden::get >> pure) >> Iden::make;
+    mutate_elements_m = |f| mutate_elements(f >> Iden::get >> pure) >> Iden::make;
     mutate_unique_m = |ctor, action| mutate_unique(ctor, action >> Iden::get >> pure) >> Iden::make;
 }
 
 impl IO: MonadMutateIF {
     mutate_boxed_m = mutate_boxed_io;
+    mutate_elements_m = mutate_elements_io;
     mutate_unique_m = mutate_unique_io;
 }
 
@@ -92,6 +107,13 @@ impl IOFail: MonadMutateIF {
         }
     );
     //mutate_boxed_m = |f| mutate_boxed_io(f >> to_result) >> map(|(a, res)| res.map(|b| (a, b))) >> from_io_result;
+    mutate_elements_m = |f, arr| (
+        let (arr, res) = *arr.mutate_elements_io(f >> to_result).lift;
+        match res {
+            ok(b) => pure((arr, b)),
+            err(e) => throw(e)
+        }
+    );
     mutate_unique_m = |ctor, action| (
         mutate_unique_io(ctor, action >> to_result)
         >> map(sequence) // traverse `IO (Tuple2 (Destructor a) (Result ErrMsg b))` to `IO (Result ErrMsg (Tuple2 (Destructor a) b))`
@@ -110,6 +132,9 @@ impl [m: Monad, m: MonadMutateIF] ReaderT e m: MonadMutateIF {
     mutate_boxed_m = |f, boxed| (
         reader_t $ |e| boxed.mutate_boxed_m(f >> run_reader_t(e))
     );
+    mutate_elements_m = |f, arr| (
+        reader_t $ |e| arr.mutate_elements_m(f >> run_reader_t(e))
+    );
     mutate_unique_m = |ctor, action, dtor| (
         reader_t $ |e| dtor.mutate_unique_m(ctor, action >> run_reader_t(e))
     );
@@ -122,18 +147,43 @@ impl [m: MonadMutateIF] StateT s m: MonadMutateIF {
 }
 */
 
+type T = box struct {
+    a: I64,
+    b: I64,
+};
+
 test_mutate_boxed_m_reader: TestCase;
 test_mutate_boxed_m_reader = (
     make_test("test_mutate_boxed_m_reader") $ |_|
+    let r: ReaderT I64 IOFail () = do {
+        let src: T = T { a:42, b:123 };
+        let dest: T = T { a:0, b:0 };
+        let (dest, ret) = *dest.mutate_boxed_m(|p_dest|
+            src.borrow_boxed_m(|p_src|
+                let size = *ask;
+                emprintln("size="+size.to_string);;
+                FFI_CALL_IO[Ptr memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, size.c_size_t].lift_io
+            )
+        );
+        assert_equal("eq a", src.@a, dest.@a);;
+        assert_equal("eq b", src.@b, dest.@b)
+    };
+    let size = 64 / 8 * 2;
+    r.run_reader_t(size)
+);
+
+test_mutate_elements_m_reader: TestCase;
+test_mutate_elements_m_reader = (
+    make_test("test_mutate_elements_m_reader") $ |_|
     let r: ReaderT String IOFail () = do {
         let src: Array I64 = [ 1, 2, 3 ];
         let n = src.@size;
         let dest: Array I64 = Array::fill(n, 0);
-        let (dest, ret) = *dest.mutate_boxed_m(|p_dest|
-            src.borrow_boxed_m(|p_src|
+        let (dest, ret) = *dest.mutate_elements_m(|p_dest|
+            src.borrow_elements_m(|p_src|
                 let env = *ask;
                 eval debug_eprintln("env="+env);
-                FFI_CALL_IO[() memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, (n * 8).c_size_t].lift_io
+                FFI_CALL_IO[Ptr memcpy(Ptr, Ptr, CSizeT), p_dest, p_src, (n * 8).c_size_t].lift_io
             )
         );
         assert_equal("eq", src, dest).lift_iofail
@@ -145,10 +195,10 @@ test1: IO ();
 test1 = (
     let bufsize = 100;
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
-    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
+    let (arr, ret) = *arr.mutate_elements_m(|p_arr|
         FFI_CALL_IO[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.c_size_t]
     );
-    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    let str: String = arr.from_array;
     println("gethostname()=" + str + " ret=" + ret.to_string)
 );
 
@@ -158,12 +208,12 @@ test2 = do {
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
     let format = "%d";
     let num = 123;
-    let (arr, ret) = *arr.mutate_boxed_m(|p_arr|
+    let (arr, ret) = *arr.mutate_elements_m(|p_arr|
         format.borrow_c_str_m(|p_format|
             FFI_CALL_IO[CInt sprintf(Ptr, Ptr, CInt), p_arr, p_format, num.c_int].lift
         )
     );
-    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    let str: String = arr.from_array;
     println("sprintf(\"%d\", 123)=" + str + " ret=" + ret.to_string).lift
 }.try(eprintln);
 
@@ -171,11 +221,11 @@ test3: IO ();
 test3 = (
     let bufsize = 100;
     let arr: Array U8 = Array::fill(bufsize, 0_U8);
-    let (arr, ret) = arr.mutate_boxed_m(|p_arr|
-        // NOTE: gethostname() might have side effects, but I want to demonstrate `mutate_boxed_m` for Iden monad
+    let (arr, ret) = arr.mutate_elements_m(|p_arr|
+        // NOTE: gethostname() might have side effects, but I want to demonstrate `mutate_elements_m` for Iden monad
         Iden::make $ FFI_CALL[CInt gethostname(Ptr, CSizeT), p_arr, bufsize.c_size_t]
     ).get;
-    let str = arr.push_back(0_U8)._unsafe_from_c_str;
+    let str: String = arr.from_array;
     println("gethostname()=" + str + " ret=" + ret.to_string)
 );
 
@@ -186,6 +236,7 @@ main = (
     test3;;
     [
         test_mutate_boxed_m_reader,
+        test_mutate_elements_m_reader,
     ].run_test_driver;;
     pure()
 );
